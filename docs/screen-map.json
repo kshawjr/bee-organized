@@ -1,0 +1,3137 @@
+{
+  "$schema": "./screen-map.schema.md",
+  "generated_for": "issue 248 step 1",
+  "purpose": "Map what a user can SEE to where it lives in the code. A bug report says 'the notes box on a client record is broken'; this file turns that into a file and a line range instead of a 37,000-line guess.",
+  "how_to_use": [
+    "Match the report's wording against `says` (the words an owner actually uses) or `surface`.",
+    "Open `file`. If `lines` is present, START THERE — for components/BeeHub.jsx that is the difference between a region and a haystack.",
+    "`routes` and `tables` are where to look next when the UI is fine but the data is wrong.",
+    "An entry is a STARTING POINT, not a conclusion. It says where to begin reading, not what is broken."
+  ],
+  "fields": {
+    "id": "stable handle for the entry",
+    "surface": "what the user sees, named the way a user would name it",
+    "nav": "which nav destination it lives under",
+    "file": "repo-relative path",
+    "symbol": "the top-level declaration in that file (verified by the guard)",
+    "exported": "default | named | internal — how `symbol` is declared (verified)",
+    "anchor": "optional literal source string that narrows to a sub-region inside `symbol` (verified unique)",
+    "lines": "DERIVED, never hand-written. Run `node scripts/screen-map-sync.mjs` after moving code.",
+    "routes": "API routes this surface calls, as 'METHOD /api/path' (verified to exist and export that method)",
+    "tables": "Supabase tables the surface reads or writes, via those routes (verified to be queried somewhere)",
+    "says": "how a non-technical person refers to this surface",
+    "note": "optional caveat worth knowing before you start reading"
+  },
+  "guard": "lib/beta-screen-map-248.test.ts — fails when a referenced file, symbol, export kind, anchor, route, method, table, or line range no longer matches the code.",
+  "entries": [
+    {
+      "id": "shell.hub-page",
+      "surface": "The server load behind every logged-in page — who you are, which location you are scoped to, and the first batch of clients/engagements/partners",
+      "nav": "Home",
+      "file": "app/_hub-page.tsx",
+      "symbol": "HubPage",
+      "exported": "default",
+      "routes": [],
+      "tables": [
+        "hub_users",
+        "locations",
+        "leads",
+        "engagements",
+        "partners",
+        "companies",
+        "lookups"
+      ],
+      "says": [
+        "nothing loads",
+        "spinner forever",
+        "I see the wrong location's data",
+        "logged out for no reason",
+        "empty after login"
+      ],
+      "note": "Every top-level route (/, /clients, /settings, ...) renders this same server component, which then mounts BeeHub. If a surface is empty for everyone, suspect the scoping here before the component.",
+      "lines": [
+        327,
+        1864
+      ]
+    },
+    {
+      "id": "shell.app",
+      "surface": "The whole logged-in app shell — sidebar, bottom nav, which screen is showing",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "App",
+      "exported": "default",
+      "routes": [
+        "GET /api/auth/signout"
+      ],
+      "tables": [],
+      "says": [
+        "the app",
+        "the whole thing",
+        "everything is broken",
+        "the menu"
+      ],
+      "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
+      "lines": [
+        35457,
+        36496
+      ]
+    },
+    {
+      "id": "shell.sidebar-nav",
+      "surface": "The left sidebar nav list (Home, Clients, Network, Reports, Back Office, Settings, Admin)",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "App",
+      "anchor": "  const navItems = [",
+      "routes": [],
+      "tables": [],
+      "exported": "default",
+      "says": [
+        "the menu",
+        "the sidebar",
+        "the tabs down the side",
+        "I can't see the X tab",
+        "a tab is missing"
+      ],
+      "note": "Role gating for which nav items appear is inline here. \"What you've told us\" only appears for franchise owner/manager; Admin only for elevated users.",
+      "lines": [
+        36249,
+        36496
+      ]
+    },
+    {
+      "id": "shell.global-search",
+      "surface": "The global search box (Cmd-K / Ctrl-K)",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "GlobalSearch",
+      "exported": "internal",
+      "routes": [
+        "GET /api/search"
+      ],
+      "tables": [
+        "leads",
+        "partners",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "search",
+        "the search bar",
+        "I can't find a client",
+        "command K",
+        "search doesn't find anyone"
+      ],
+      "lines": [
+        28701,
+        28863
+      ]
+    },
+    {
+      "id": "shell.identity-scope",
+      "surface": "The sidebar footer control — who you're signed in as, location picker, View-as, sign out",
+      "nav": "Home",
+      "file": "components/hive/IdentityScopeControl.jsx",
+      "symbol": "IdentityScopeControl",
+      "exported": "default",
+      "routes": [
+        "POST /api/auth/signout"
+      ],
+      "tables": [],
+      "says": [
+        "my name at the bottom",
+        "switching locations",
+        "log out button",
+        "view as"
+      ],
+      "lines": [
+        78,
+        218
+      ]
+    },
+    {
+      "id": "shell.view-as",
+      "surface": "The View-as-user sheet an admin uses to see the app as a specific owner",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ViewAsUserSheet",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "view as",
+        "impersonate",
+        "look at it as the owner",
+        "seeing someone else's account"
+      ],
+      "lines": [
+        28864,
+        28971
+      ]
+    },
+    {
+      "id": "shell.ask-bee-hub",
+      "surface": "The Ask Bee Hub help panel (and the footer links to the Guide and the Manual)",
+      "nav": "Home",
+      "file": "components/hive/AskBeeHubPanel.jsx",
+      "symbol": "AskBeeHubPanel",
+      "exported": "default",
+      "routes": [
+        "POST /api/help-chat"
+      ],
+      "tables": [],
+      "says": [
+        "the help thing",
+        "ask bee hub",
+        "the chat bubble",
+        "the question mark button"
+      ],
+      "lines": [
+        90,
+        601
+      ]
+    },
+    {
+      "id": "shell.guide",
+      "surface": "The How-To Guide slideshow",
+      "nav": "Home",
+      "file": "components/guide/HowToGuideModal.jsx",
+      "symbol": "HowToGuideModal",
+      "exported": "default",
+      "routes": [
+        "GET /api/guide-slides"
+      ],
+      "tables": [
+        "guide_slides"
+      ],
+      "says": [
+        "the guide",
+        "the how-to",
+        "the walkthrough",
+        "the tutorial slides"
+      ],
+      "lines": [
+        34,
+        149
+      ]
+    },
+    {
+      "id": "shell.manual",
+      "surface": "The Manual modal",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ManualModal",
+      "exported": "internal",
+      "routes": [
+        "GET /api/manual-slides"
+      ],
+      "tables": [
+        "manual_slides"
+      ],
+      "says": [
+        "the manual",
+        "the handbook",
+        "the documentation"
+      ],
+      "lines": [
+        30878,
+        30955
+      ]
+    },
+    {
+      "id": "shell.past-due-banner",
+      "surface": "The red past-due bar across the top when a subscription hasn't been paid",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PastDueBanner",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the red bar",
+        "it says I'm past due",
+        "the payment warning",
+        "the banner won't go away"
+      ],
+      "lines": [
+        14339,
+        14368
+      ]
+    },
+    {
+      "id": "shell.past-due-pay",
+      "surface": "The Pay Now card that clears a past-due subscription",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PastDuePaymentCard",
+      "exported": "internal",
+      "routes": [
+        "POST /api/locations/[id]/checkout"
+      ],
+      "tables": [
+        "tier_prices",
+        "hub_users"
+      ],
+      "says": [
+        "pay now",
+        "I can't pay my bill",
+        "the payment button does nothing"
+      ],
+      "lines": [
+        14392,
+        14499
+      ]
+    },
+    {
+      "id": "shell.lockout",
+      "surface": "The full-screen lockout after the past-due grace period runs out",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "LockoutScreen",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "locked out",
+        "I can't get in",
+        "it won't let me do anything"
+      ],
+      "lines": [
+        14369,
+        14391
+      ]
+    },
+    {
+      "id": "home.dashboard",
+      "surface": "The Home screen — greeting, what needs attention, the number tiles, upcoming, recent activity",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "DashboardScreen",
+      "exported": "internal",
+      "routes": [
+        "GET /api/lookups"
+      ],
+      "tables": [
+        "lookups"
+      ],
+      "says": [
+        "the home page",
+        "the dashboard",
+        "the first screen",
+        "when I log in",
+        "the front page"
+      ],
+      "lines": [
+        23574,
+        24354
+      ]
+    },
+    {
+      "id": "home.alert-cards",
+      "surface": "The \"needs attention\" cards on Home (uncontacted leads, estimate follow-ups, aging invoices)",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "HomeAlertCard",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the alerts on the home page",
+        "needs attention",
+        "the red boxes",
+        "it says I have leads waiting but I don't"
+      ],
+      "note": "The counts are computed in DashboardScreen (or server-side in lib/hub-all-overview.ts on 'All locations'); this component only paints them. Wrong NUMBER is upstream of here.",
+      "lines": [
+        10779,
+        10803
+      ]
+    },
+    {
+      "id": "home.metric-tiles",
+      "surface": "The row of number tiles on Home (open engagements, active clients, new this week, outstanding)",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "HomeMetricTile",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the numbers at the top",
+        "the stats",
+        "my totals are wrong",
+        "the count is off"
+      ],
+      "lines": [
+        10818,
+        10831
+      ]
+    },
+    {
+      "id": "home.system-health",
+      "surface": "The system-health strip on Home (admin only)",
+      "nav": "Home",
+      "file": "components/hive/HomeSystemHealth.jsx",
+      "symbol": "HomeSystemHealth",
+      "exported": "default",
+      "routes": [
+        "GET /api/admin/system-health"
+      ],
+      "tables": [
+        "engagements",
+        "feedback_items",
+        "import_jobs",
+        "leads",
+        "locations",
+        "notification_log",
+        "pending_invites",
+        "sync_log"
+      ],
+      "says": [
+        "the health thing on home",
+        "the green/red status",
+        "is everything running"
+      ],
+      "lines": [
+        122,
+        362
+      ]
+    },
+    {
+      "id": "home.follow-ups",
+      "surface": "The follow-up reminders block on Home",
+      "nav": "Home",
+      "file": "components/BeeHub.jsx",
+      "symbol": "FollowUpReminders",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "my reminders",
+        "follow ups",
+        "the things I set to come back to"
+      ],
+      "lines": [
+        23369,
+        23431
+      ]
+    },
+    {
+      "id": "clients.shell",
+      "surface": "The Clients screen frame and its three tabs — Inbox (New), Engagements, Client List",
+      "nav": "Clients",
+      "file": "components/hive/HiveShell.jsx",
+      "symbol": "HiveShell",
+      "exported": "default",
+      "routes": [
+        "GET /api/engagements",
+        "GET /api/lookups"
+      ],
+      "tables": [
+        "engagements",
+        "leads",
+        "hub_users",
+        "lookups"
+      ],
+      "says": [
+        "the clients tab",
+        "the bee tab",
+        "the three tabs",
+        "my client screen",
+        "the tab won't switch"
+      ],
+      "note": "The current Clients surface. HiveScreen in BeeHub.jsx is the older board that still renders for roles without beta access — check components/hive/shared/betaGate.js before assuming which one a reporter is looking at.",
+      "lines": [
+        139,
+        1052
+      ]
+    },
+    {
+      "id": "clients.inbox",
+      "surface": "The Inbox tab — new leads that haven't been dealt with yet, with Route / No coverage / Log call actions",
+      "nav": "Inbox",
+      "file": "components/hive/InboxScreen.jsx",
+      "symbol": "InboxScreen",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/leads/[id]",
+        "POST /api/touchpoints"
+      ],
+      "tables": [
+        "leads",
+        "touchpoints",
+        "hub_users"
+      ],
+      "says": [
+        "the inbox",
+        "new leads",
+        "the leads waiting for me",
+        "the badge number is wrong",
+        "a lead won't go away",
+        "the inbox is empty"
+      ],
+      "lines": [
+        343,
+        1452
+      ]
+    },
+    {
+      "id": "clients.engagement-board",
+      "surface": "The Engagements kanban board — cards in stage columns you drag between",
+      "nav": "Clients",
+      "file": "components/hive/EngagementBoard.jsx",
+      "symbol": "EngagementBoard",
+      "exported": "default",
+      "routes": [
+        "GET /api/engagements"
+      ],
+      "tables": [
+        "engagements",
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the board",
+        "the columns",
+        "the kanban",
+        "dragging cards",
+        "a card is in the wrong column",
+        "the deal disappeared"
+      ],
+      "lines": [
+        125,
+        510
+      ]
+    },
+    {
+      "id": "clients.engagement-list",
+      "surface": "The Engagements list view (the non-board lens, including Closed / Won / Lost)",
+      "nav": "Clients",
+      "file": "components/hive/EngagementGroupedList.jsx",
+      "symbol": "EngagementGroupedList",
+      "exported": "default",
+      "routes": [
+        "GET /api/engagements"
+      ],
+      "tables": [
+        "engagements",
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the list view",
+        "closed jobs",
+        "won and lost",
+        "the list instead of the board"
+      ],
+      "lines": [
+        151,
+        283
+      ]
+    },
+    {
+      "id": "clients.client-list",
+      "surface": "The Client List tab — every client grouped by status",
+      "nav": "Clients",
+      "file": "components/hive/ClientGroupedList.jsx",
+      "symbol": "ClientGroupedList",
+      "exported": "default",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the client list",
+        "all my clients",
+        "the a-z list",
+        "a client isn't in the list"
+      ],
+      "lines": [
+        72,
+        212
+      ]
+    },
+    {
+      "id": "clients.filters",
+      "surface": "The filter and sort popover on the Engagements / Client List views",
+      "nav": "Clients",
+      "file": "components/hive/EngagementFilters.jsx",
+      "symbol": "EngagementFilters",
+      "exported": "default",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the filters",
+        "sorting",
+        "I filtered and everything vanished",
+        "clear filters"
+      ],
+      "lines": [
+        25,
+        93
+      ]
+    },
+    {
+      "id": "clients.record",
+      "surface": "The client record panel that slides open when you click a client",
+      "nav": "Clients",
+      "file": "components/hive/ClientProfile.jsx",
+      "symbol": "ClientProfile",
+      "exported": "default",
+      "routes": [
+        "GET /api/clients/[id]/profile",
+        "GET /api/leads/[id]/assignees",
+        "GET /api/partners",
+        "PATCH /api/leads/[id]",
+        "POST /api/engagements",
+        "POST /api/engagements/[id]/reopen",
+        "POST /api/lead-notes",
+        "POST /api/touchpoints"
+      ],
+      "tables": [
+        "leads",
+        "engagements",
+        "lead_contacts",
+        "lead_notes",
+        "lead_tags",
+        "touchpoints",
+        "assessments",
+        "quotes",
+        "jobs",
+        "invoices",
+        "lookups",
+        "hub_users"
+      ],
+      "says": [
+        "the client card",
+        "when I open a client",
+        "the client page",
+        "the panel that slides out",
+        "the customer record"
+      ],
+      "lines": [
+        94,
+        937
+      ]
+    },
+    {
+      "id": "clients.record.notes",
+      "surface": "The notes / recent activity box on a client record and on an engagement",
+      "nav": "Clients",
+      "file": "components/hive/NotesStream.jsx",
+      "symbol": "NotesStream",
+      "exported": "default",
+      "routes": [],
+      "tables": [
+        "lead_notes"
+      ],
+      "says": [
+        "notes",
+        "the notes box",
+        "my note didn't save",
+        "the activity feed",
+        "add a note",
+        "the comments"
+      ],
+      "note": "The composer lives here but the POST is the parent's — ClientProfile and EngagementPanel each pass their own onPost that calls POST /api/lead-notes. A note that fails to save is usually the parent's handler.",
+      "lines": [
+        24,
+        81
+      ]
+    },
+    {
+      "id": "clients.record.contacts",
+      "surface": "The people/contacts block on a client record — names, phones, emails",
+      "nav": "Clients",
+      "file": "components/hive/shared/ContactsBlock.jsx",
+      "symbol": "ContactsBlock",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/lead-contacts/[id]",
+        "DELETE /api/lead-contacts/[id]",
+        "POST /api/lead-contacts"
+      ],
+      "tables": [
+        "lead_contacts",
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the contacts",
+        "phone number",
+        "email address",
+        "the second contact",
+        "I can't edit their phone",
+        "the spouse"
+      ],
+      "lines": [
+        65,
+        155
+      ]
+    },
+    {
+      "id": "clients.record.address",
+      "surface": "The address field on a client record",
+      "nav": "Clients",
+      "file": "components/hive/shared/AddressField.jsx",
+      "symbol": "AddressField",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/leads/[id]"
+      ],
+      "tables": [
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the address",
+        "the street",
+        "wrong address",
+        "address won't save",
+        "the moving from / moving to"
+      ],
+      "lines": [
+        96,
+        229
+      ]
+    },
+    {
+      "id": "clients.record.address-autofill",
+      "surface": "The address autocomplete dropdown while typing an address",
+      "nav": "Clients",
+      "file": "components/hive/shared/AddressAutofill.jsx",
+      "symbol": "AddressAutofill",
+      "exported": "default",
+      "routes": [
+        "POST /api/places/autocomplete",
+        "POST /api/places/details"
+      ],
+      "tables": [],
+      "says": [
+        "the address suggestions",
+        "it doesn't suggest addresses",
+        "autocomplete",
+        "the dropdown when I type an address"
+      ],
+      "lines": [
+        39,
+        177
+      ]
+    },
+    {
+      "id": "clients.record.tags",
+      "surface": "The tag chips on a client record",
+      "nav": "Clients",
+      "file": "components/hive/shared/TagsRow.jsx",
+      "symbol": "TagsRow",
+      "exported": "default",
+      "routes": [
+        "POST /api/lead-tags",
+        "DELETE /api/lead-tags"
+      ],
+      "tables": [
+        "lead_tags",
+        "leads",
+        "lookups",
+        "hub_users"
+      ],
+      "says": [
+        "the tags",
+        "the coloured labels",
+        "I can't remove a tag",
+        "the little chips"
+      ],
+      "lines": [
+        27,
+        108
+      ]
+    },
+    {
+      "id": "clients.record.source",
+      "surface": "The \"where did this lead come from\" field",
+      "nav": "Clients",
+      "file": "components/hive/shared/SourceField.jsx",
+      "symbol": "SourceField",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/leads/[id]"
+      ],
+      "tables": [
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the source",
+        "where they came from",
+        "how they found us",
+        "lead source is wrong"
+      ],
+      "lines": [
+        27,
+        89
+      ]
+    },
+    {
+      "id": "clients.record.referrer",
+      "surface": "The \"who referred them\" field on a client record",
+      "nav": "Clients",
+      "file": "components/hive/shared/ReferrerField.jsx",
+      "symbol": "ReferrerField",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/leads/[id]"
+      ],
+      "tables": [
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "who referred them",
+        "the referral",
+        "the referrer",
+        "it's not linking to the partner"
+      ],
+      "lines": [
+        64,
+        208
+      ]
+    },
+    {
+      "id": "clients.record.preferences",
+      "surface": "The email/drip preferences block on a client record — pause, resume, unsubscribed",
+      "nav": "Clients",
+      "file": "components/hive/shared/PreferencesBlock.jsx",
+      "symbol": "PreferencesBlock",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/leads/[id]",
+        "POST /api/leads/[id]/drip-pause",
+        "POST /api/leads/[id]/drip-resume"
+      ],
+      "tables": [
+        "leads",
+        "lead_drip_progress",
+        "hub_users"
+      ],
+      "says": [
+        "stop emailing them",
+        "pause the emails",
+        "they unsubscribed",
+        "turn the emails back on",
+        "the drip"
+      ],
+      "lines": [
+        88,
+        287
+      ]
+    },
+    {
+      "id": "clients.record.timeline",
+      "surface": "The timeline tab on a client record — what has been sent and what happened, in order",
+      "nav": "Clients",
+      "file": "components/hive/shared/Timeline.jsx",
+      "symbol": "Timeline",
+      "exported": "default",
+      "routes": [
+        "GET /api/leads/[id]/outreach-timeline",
+        "PATCH /api/leads/[id]",
+        "PATCH /api/scheduled-stage-emails/[id]"
+      ],
+      "tables": [
+        "leads",
+        "lead_drip_progress",
+        "drip_path_steps",
+        "scheduled_stage_emails",
+        "touchpoints",
+        "hub_users"
+      ],
+      "says": [
+        "the timeline",
+        "the history",
+        "what emails went out",
+        "the log",
+        "it says an email sent that didn't"
+      ],
+      "lines": [
+        365,
+        548
+      ]
+    },
+    {
+      "id": "clients.record.menu",
+      "surface": "The ⋯ menu on a client or engagement record (including \"Report a problem\")",
+      "nav": "Clients",
+      "file": "components/hive/shared/RecordMenu.jsx",
+      "symbol": "RecordMenu",
+      "exported": "default",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the three dots",
+        "the dot menu",
+        "the menu on a client",
+        "report a problem"
+      ],
+      "lines": [
+        93,
+        164
+      ]
+    },
+    {
+      "id": "clients.engagement-panel",
+      "surface": "The engagement/deal panel — stages, quotes, jobs, invoices for one piece of work",
+      "nav": "Clients",
+      "file": "components/hive/EngagementPanel.jsx",
+      "symbol": "EngagementPanel",
+      "exported": "default",
+      "routes": [
+        "GET /api/engagements/[id]",
+        "PATCH /api/engagements/[id]",
+        "POST /api/engagements/[id]/reopen",
+        "POST /api/lead-notes",
+        "POST /api/leads/[id]/drip-pause",
+        "POST /api/leads/[id]/drip-resume"
+      ],
+      "tables": [
+        "engagements",
+        "leads",
+        "quotes",
+        "jobs",
+        "invoices",
+        "assessments",
+        "service_requests",
+        "touchpoints",
+        "lead_notes",
+        "hub_users"
+      ],
+      "says": [
+        "the job",
+        "the deal",
+        "the quote screen",
+        "when I open a job",
+        "the estimate",
+        "the invoice section"
+      ],
+      "lines": [
+        191,
+        1064
+      ]
+    },
+    {
+      "id": "clients.engagement-assignees",
+      "surface": "Who is assigned to an engagement",
+      "nav": "Clients",
+      "file": "components/hive/shared/EngagementAssignees.jsx",
+      "symbol": "EngagementAssignees",
+      "exported": "default",
+      "routes": [
+        "POST /api/engagements/[id]/assignees",
+        "DELETE /api/engagements/[id]/assignees"
+      ],
+      "tables": [
+        "engagement_assignees",
+        "engagements",
+        "hub_users"
+      ],
+      "says": [
+        "who's assigned",
+        "assign it to someone",
+        "the person's initials on the card",
+        "it assigned the wrong person"
+      ],
+      "lines": [
+        55,
+        171
+      ]
+    },
+    {
+      "id": "clients.close-won",
+      "surface": "The Close as Won wizard",
+      "nav": "Clients",
+      "file": "components/hive/shared/CloseWonWizard.jsx",
+      "symbol": "CloseWonWizard",
+      "exported": "default",
+      "routes": [
+        "PATCH /api/engagements/[id]"
+      ],
+      "tables": [
+        "engagements",
+        "hub_users"
+      ],
+      "says": [
+        "mark it won",
+        "close it out",
+        "we got the job",
+        "the won button"
+      ],
+      "lines": [
+        51,
+        231
+      ]
+    },
+    {
+      "id": "clients.close-lost",
+      "surface": "The Close as Lost / Not interested wizard",
+      "nav": "Clients",
+      "file": "components/hive/shared/CloseLostWizard.jsx",
+      "symbol": "CloseLostWizard",
+      "exported": "default",
+      "routes": [
+        "POST /api/engagements",
+        "POST /api/leads/[id]/close-not-interested",
+        "PATCH /api/engagements/[id]"
+      ],
+      "tables": [
+        "engagements",
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "mark it lost",
+        "they went elsewhere",
+        "not interested",
+        "closing a dead lead",
+        "the reason list is wrong"
+      ],
+      "lines": [
+        45,
+        185
+      ]
+    },
+    {
+      "id": "clients.send-to-jobber",
+      "surface": "The Send to Jobber modal",
+      "nav": "Clients",
+      "file": "components/hive/SendToJobberModal.jsx",
+      "symbol": "SendToJobberModal",
+      "exported": "default",
+      "routes": [
+        "POST /api/leads/[id]/send-to-jobber"
+      ],
+      "tables": [
+        "leads",
+        "engagements",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "send to jobber",
+        "push it to jobber",
+        "it didn't reach jobber",
+        "the jobber button spins forever"
+      ],
+      "lines": [
+        117,
+        590
+      ]
+    },
+    {
+      "id": "clients.transfer",
+      "surface": "The Transfer lead modal — moving a lead to another location",
+      "nav": "Clients",
+      "file": "components/hive/TransferLeadModal.jsx",
+      "symbol": "TransferLeadModal",
+      "exported": "default",
+      "routes": [
+        "GET /api/locations/transfer-targets",
+        "POST /api/leads/[id]/transfer"
+      ],
+      "tables": [
+        "leads",
+        "locations",
+        "lead_drip_progress",
+        "touchpoints",
+        "hub_users"
+      ],
+      "says": [
+        "send it to another office",
+        "transfer",
+        "wrong territory",
+        "route it elsewhere",
+        "hand it off"
+      ],
+      "lines": [
+        105,
+        273
+      ]
+    },
+    {
+      "id": "clients.no-coverage",
+      "surface": "The \"we don't cover that area\" modal",
+      "nav": "Inbox",
+      "file": "components/hive/NoCoverageModal.jsx",
+      "symbol": "NoCoverageModal",
+      "exported": "default",
+      "routes": [
+        "POST /api/leads/[id]/no-coverage"
+      ],
+      "tables": [
+        "leads",
+        "touchpoints",
+        "hub_users"
+      ],
+      "says": [
+        "out of area",
+        "we don't service there",
+        "no coverage",
+        "too far away"
+      ],
+      "lines": [
+        68,
+        216
+      ]
+    },
+    {
+      "id": "clients.new-client",
+      "surface": "The Add a client sheet",
+      "nav": "Clients",
+      "file": "components/hive/NewClientSheet.jsx",
+      "symbol": "NewClientSheet",
+      "exported": "default",
+      "routes": [
+        "POST /api/leads",
+        "POST /api/engagements"
+      ],
+      "tables": [
+        "leads",
+        "engagements",
+        "locations",
+        "touchpoints",
+        "hub_users"
+      ],
+      "says": [
+        "add a client",
+        "new lead button",
+        "the plus button",
+        "entering someone manually",
+        "it created a duplicate"
+      ],
+      "lines": [
+        152,
+        726
+      ]
+    },
+    {
+      "id": "clients.log-call",
+      "surface": "The Log a call / touchpoint modal",
+      "nav": "Clients",
+      "file": "components/hive/TouchpointModal.jsx",
+      "symbol": "TouchpointModal",
+      "exported": "default",
+      "routes": [
+        "POST /api/touchpoints"
+      ],
+      "tables": [
+        "touchpoints",
+        "leads",
+        "partners",
+        "hub_users"
+      ],
+      "says": [
+        "log a call",
+        "record that I called",
+        "note that I spoke to them",
+        "the call button"
+      ],
+      "lines": [
+        99,
+        237
+      ]
+    },
+    {
+      "id": "clients.referrer-picker",
+      "surface": "The referrer picker — search or create the partner/company who sent a lead",
+      "nav": "Clients",
+      "file": "components/hive/ReferrerPicker.jsx",
+      "symbol": "ReferrerPicker",
+      "exported": "default",
+      "routes": [
+        "GET /api/partners",
+        "GET /api/companies",
+        "POST /api/partners"
+      ],
+      "tables": [
+        "partners",
+        "companies"
+      ],
+      "says": [
+        "picking who referred them",
+        "search for the partner",
+        "add a new referrer"
+      ],
+      "lines": [
+        53,
+        240
+      ]
+    },
+    {
+      "id": "clients.import-gap-banner",
+      "surface": "The banner on Clients that explains a part-finished Jobber import (\"the rest arrives tonight\")",
+      "nav": "Clients",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ImportGapBanner",
+      "exported": "named",
+      "routes": [
+        "GET /api/import/active"
+      ],
+      "tables": [
+        "import_jobs",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "half my clients are missing",
+        "it says the import is still running",
+        "the yellow bar on clients"
+      ],
+      "lines": [
+        12946,
+        13022
+      ]
+    },
+    {
+      "id": "clients.legacy-screen",
+      "surface": "The older Clients board (still what non-beta roles see)",
+      "nav": "Clients",
+      "file": "components/BeeHub.jsx",
+      "symbol": "HiveScreen",
+      "exported": "internal",
+      "routes": [
+        "PATCH /api/leads/[id]"
+      ],
+      "tables": [
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the clients tab",
+        "my old board",
+        "the stage columns"
+      ],
+      "note": "Which of HiveScreen / HiveShell a user sees is decided by canSeeBetaBoard in components/hive/shared/betaGate.js. Confirm the reporter's role before reading either.",
+      "lines": [
+        9749,
+        10739
+      ]
+    },
+    {
+      "id": "clients.legacy-record",
+      "surface": "The older client record panel (the pre-HiveShell one)",
+      "nav": "Clients",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PersonPanel",
+      "exported": "internal",
+      "routes": [],
+      "tables": [
+        "leads"
+      ],
+      "says": [
+        "the client card",
+        "when I open a client",
+        "the old client page"
+      ],
+      "note": "4,400 lines — the single largest region in the file. Only reached via HiveScreen (legacy board). If the reporter is on the beta board, clients.record is the right entry instead.",
+      "lines": [
+        4660,
+        9098
+      ]
+    },
+    {
+      "id": "clients.drip-status",
+      "surface": "The drip / email-sequence status block on the legacy client record",
+      "nav": "Clients",
+      "file": "components/BeeHub.jsx",
+      "symbol": "DripSection",
+      "exported": "internal",
+      "routes": [
+        "POST /api/leads/[id]/drip-pause",
+        "POST /api/leads/[id]/drip-resume",
+        "POST /api/leads/[id]/drip-restart",
+        "GET /api/leads/[id]/drip"
+      ],
+      "tables": [
+        "leads",
+        "lead_drip_progress",
+        "drip_path_steps",
+        "hub_users"
+      ],
+      "says": [
+        "the emails going out",
+        "pause the sequence",
+        "restart the emails",
+        "it says the drip is running but nothing sent"
+      ],
+      "lines": [
+        4252,
+        4397
+      ]
+    },
+    {
+      "id": "clients.outreach-tab",
+      "surface": "The outreach tab on the legacy client record — what has been sent and when",
+      "nav": "Clients",
+      "file": "components/BeeHub.jsx",
+      "symbol": "OutreachTab",
+      "exported": "internal",
+      "routes": [
+        "GET /api/leads/[id]/outreach-timeline"
+      ],
+      "tables": [
+        "leads",
+        "lead_drip_progress",
+        "drip_path_steps",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "what we sent them",
+        "the email history",
+        "the outreach tab"
+      ],
+      "lines": [
+        4398,
+        4659
+      ]
+    },
+    {
+      "id": "network.screen",
+      "surface": "The Network tab — referral partners and companies, with the referral counts",
+      "nav": "Network",
+      "file": "components/hive/NetworkScreen.jsx",
+      "symbol": "NetworkScreen",
+      "exported": "default",
+      "routes": [
+        "GET /api/network/summary"
+      ],
+      "tables": [
+        "engagements",
+        "leads"
+      ],
+      "says": [
+        "the network tab",
+        "my partners",
+        "referral partners",
+        "contacts tab",
+        "who sends me work"
+      ],
+      "note": "/network is canonical; /contacts is a permanent alias. Both map to the same nav key ('partners') in components/hive/shared/hubUrl.js.",
+      "lines": [
+        91,
+        457
+      ]
+    },
+    {
+      "id": "network.person",
+      "surface": "A person's record in Network — their referrals, touchpoints, next steps",
+      "nav": "Network",
+      "file": "components/hive/NetworkPersonRecord.jsx",
+      "symbol": "NetworkPersonRecord",
+      "exported": "default",
+      "routes": [
+        "GET /api/partners/[id]/referrals",
+        "POST /api/touchpoints",
+        "POST /api/leads"
+      ],
+      "tables": [
+        "partners",
+        "leads",
+        "engagements",
+        "touchpoints",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "a partner's page",
+        "the realtor's record",
+        "their referrals",
+        "the person in my network"
+      ],
+      "lines": [
+        59,
+        359
+      ]
+    },
+    {
+      "id": "network.company",
+      "surface": "A company's record in Network",
+      "nav": "Network",
+      "file": "components/hive/NetworkCompanyRecord.jsx",
+      "symbol": "NetworkCompanyRecord",
+      "exported": "default",
+      "routes": [
+        "GET /api/companies/[id]/referrals",
+        "GET /api/companies/[id]/touchpoints",
+        "PATCH /api/companies/[id]"
+      ],
+      "tables": [
+        "companies",
+        "partners",
+        "leads",
+        "engagements",
+        "touchpoints"
+      ],
+      "says": [
+        "the company page",
+        "the brokerage",
+        "the firm's record",
+        "the office they work at"
+      ],
+      "lines": [
+        34,
+        230
+      ]
+    },
+    {
+      "id": "network.add",
+      "surface": "The Add to network sheet",
+      "nav": "Network",
+      "file": "components/hive/NetworkAddSheet.jsx",
+      "symbol": "NetworkAddSheet",
+      "exported": "default",
+      "routes": [],
+      "tables": [
+        "partners",
+        "companies"
+      ],
+      "says": [
+        "add a partner",
+        "add a company",
+        "the plus button on network"
+      ],
+      "lines": [
+        69,
+        404
+      ]
+    },
+    {
+      "id": "network.convert",
+      "surface": "Turning a network contact into a client (or seeing they already are one)",
+      "nav": "Network",
+      "file": "components/hive/NetworkConvertSheet.jsx",
+      "symbol": "NetworkConvertSheet",
+      "exported": "default",
+      "routes": [
+        "GET /api/leads/[id]/network",
+        "POST /api/leads/[id]/network"
+      ],
+      "tables": [
+        "leads",
+        "partners",
+        "touchpoints"
+      ],
+      "says": [
+        "make them a client",
+        "they hired us too",
+        "convert the partner",
+        "add them to clients"
+      ],
+      "lines": [
+        86,
+        284
+      ]
+    },
+    {
+      "id": "network.legacy-screen",
+      "surface": "The older Network/Partners screen",
+      "nav": "Network",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PartnersScreen",
+      "exported": "named",
+      "routes": [],
+      "tables": [
+        "partners",
+        "companies"
+      ],
+      "says": [
+        "the network tab",
+        "the partners screen",
+        "the old contacts page"
+      ],
+      "lines": [
+        16079,
+        16211
+      ]
+    },
+    {
+      "id": "network.legacy-panel",
+      "surface": "The older partner record panel — stage, specialties, tags, next steps",
+      "nav": "Network",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PartnerPanel",
+      "exported": "internal",
+      "routes": [],
+      "tables": [
+        "partners",
+        "companies",
+        "touchpoints"
+      ],
+      "says": [
+        "the partner card",
+        "their stage",
+        "the specialties",
+        "next steps on a partner"
+      ],
+      "lines": [
+        15413,
+        16078
+      ]
+    },
+    {
+      "id": "settings.shell",
+      "surface": "The Settings screen and its left rail (You / Your business / Client messages / Notifications / Connections)",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "exported": "named",
+      "routes": [
+        "PATCH /api/hub_users/me",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "settings",
+        "the gear",
+        "the settings menu",
+        "a settings section is missing",
+        "the settings sidebar"
+      ],
+      "note": "2,300+ lines. The sub-entries below anchor on each section's render branch — start from those, not from the top of the component. Retired section keys (billing, paths, templates, yourteam) still resolve via SETTINGS_RETIRED_SECTIONS.",
+      "lines": [
+        20964,
+        23300
+      ]
+    },
+    {
+      "id": "settings.profile",
+      "surface": "Settings → Profile — your name, phone, and your own booking link",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='profile'&&(",
+      "exported": "named",
+      "routes": [
+        "PATCH /api/hub_users/me"
+      ],
+      "tables": [
+        "hub_users"
+      ],
+      "says": [
+        "my profile",
+        "my name is wrong",
+        "my phone number",
+        "my booking link",
+        "my calendar link"
+      ],
+      "lines": [
+        22562,
+        22624
+      ]
+    },
+    {
+      "id": "settings.location",
+      "surface": "Settings → Location — address, phone, timezone, send-from email, reviews link",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='location'&&(",
+      "exported": "named",
+      "routes": [
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "my business details",
+        "the address on my emails",
+        "the reply-to address",
+        "my company info",
+        "the review link"
+      ],
+      "lines": [
+        22625,
+        22709
+      ]
+    },
+    {
+      "id": "settings.team",
+      "surface": "Settings → Team and seats — the roster, invites, and the billing footer",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='team'&&(()=>{",
+      "exported": "named",
+      "routes": [
+        "GET /api/seats",
+        "GET /api/pending_invites",
+        "POST /api/hub_users/invite",
+        "DELETE /api/hub_users/[id]"
+      ],
+      "tables": [
+        "hub_users",
+        "subscription_seats",
+        "pending_invites",
+        "locations"
+      ],
+      "says": [
+        "my team",
+        "adding a user",
+        "seats",
+        "the invite didn't arrive",
+        "removing someone",
+        "my bill",
+        "billing"
+      ],
+      "note": "Team and Billing merged in 2026-07; 'billing' survives as a deep-link alias into this same section.",
+      "lines": [
+        22710,
+        22952
+      ]
+    },
+    {
+      "id": "settings.new-leads",
+      "surface": "Settings → New leads — who gets notified when a lead comes in, and how it's routed",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='newleads'&&(",
+      "exported": "named",
+      "routes": [
+        "GET /api/locations/[id]/notification-recipients",
+        "PATCH /api/locations/[id]/notification-recipients",
+        "POST /api/locations/[id]/notification-recipients"
+      ],
+      "tables": [
+        "lead_notification_prefs",
+        "lead_notification_externals",
+        "hub_users"
+      ],
+      "says": [
+        "who gets the new lead email",
+        "I'm not getting notified",
+        "notifications for new leads",
+        "adding an email to the alerts",
+        "lead routing"
+      ],
+      "lines": [
+        22953,
+        22970
+      ]
+    },
+    {
+      "id": "settings.emails",
+      "surface": "Settings → Emails — the sequence a new lead receives, timing, and the sending identity",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='emails'&&(()=>{",
+      "exported": "named",
+      "routes": [
+        "GET /api/locations/[id]/drip-paths",
+        "PATCH /api/locations/[id]/drip-paths",
+        "POST /api/locations/[id]/drip-paths",
+        "GET /api/templates",
+        "PATCH /api/templates/[id]"
+      ],
+      "tables": [
+        "drip_paths",
+        "drip_path_steps",
+        "templates",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "my emails",
+        "the automatic emails",
+        "what a lead gets",
+        "change the wording",
+        "the timing of the emails",
+        "the follow-up sequence"
+      ],
+      "lines": [
+        23030,
+        23142
+      ]
+    },
+    {
+      "id": "settings.texts",
+      "surface": "Settings → Texts and scripts",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='texts'&&(",
+      "exported": "named",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "text messages",
+        "sms",
+        "my phone scripts",
+        "what to say on the call"
+      ],
+      "lines": [
+        23143,
+        23300
+      ]
+    },
+    {
+      "id": "settings.slack",
+      "surface": "Settings → Slack",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='slack'&&(",
+      "exported": "named",
+      "routes": [
+        "GET /api/slack/connect",
+        "POST /api/locations/[id]/slack-disconnect",
+        "POST /api/locations/[id]/slack-invite"
+      ],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "slack",
+        "leads in slack",
+        "the slack channel",
+        "slack stopped posting",
+        "disconnect slack"
+      ],
+      "lines": [
+        22971,
+        22994
+      ]
+    },
+    {
+      "id": "settings.jobber",
+      "surface": "Settings → Jobber",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='jobber'&&(",
+      "exported": "named",
+      "routes": [
+        "GET /api/jobber/connect",
+        "GET /api/locations/[id]/jobber-test",
+        "POST /api/locations/[id]/jobber-disconnect",
+        "POST /api/locations/[id]/jobber/refresh-roster"
+      ],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "jobber",
+        "reconnect jobber",
+        "jobber says disconnected",
+        "my jobber login",
+        "sync with jobber"
+      ],
+      "lines": [
+        22995,
+        23013
+      ]
+    },
+    {
+      "id": "settings.mailchimp",
+      "surface": "Settings → Mailchimp (an honest \"not connected\" card, nothing to press)",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SettingsScreen",
+      "anchor": "{activeSection==='mailchimp'&&(",
+      "exported": "named",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "mailchimp",
+        "my mailing list",
+        "connect mailchimp"
+      ],
+      "lines": [
+        23014,
+        23029
+      ]
+    },
+    {
+      "id": "settings.jobber-card",
+      "surface": "The Jobber connection card itself (used in Settings and in onboarding)",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "JobberCard",
+      "exported": "named",
+      "routes": [
+        "GET /api/jobber/connect",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "locations"
+      ],
+      "says": [
+        "the jobber box",
+        "the connect button",
+        "it says connected but nothing syncs"
+      ],
+      "lines": [
+        17030,
+        17273
+      ]
+    },
+    {
+      "id": "settings.import-card",
+      "surface": "The Import your clients from Jobber card (Settings and onboarding)",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ClientImportCard",
+      "exported": "named",
+      "routes": [
+        "POST /api/import/jobber-clients",
+        "GET /api/import/active",
+        "GET /api/import/status/[jobId]",
+        "POST /api/import/cancel"
+      ],
+      "tables": [
+        "import_jobs",
+        "import_staging",
+        "import_location_fetch",
+        "leads",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "import my clients",
+        "bring in my jobber clients",
+        "the import is stuck",
+        "only some clients came in",
+        "the progress bar"
+      ],
+      "lines": [
+        17274,
+        17802
+      ]
+    },
+    {
+      "id": "settings.emails-list",
+      "surface": "The list of emails in a sequence, with the timing and preview",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "EmailsList",
+      "exported": "named",
+      "routes": [],
+      "tables": [
+        "drip_path_steps",
+        "templates"
+      ],
+      "says": [
+        "my email list",
+        "the sequence steps",
+        "email 3 of 5",
+        "the days between emails"
+      ],
+      "lines": [
+        18886,
+        19022
+      ]
+    },
+    {
+      "id": "settings.project-type-senders",
+      "surface": "Which mailbox sends for which kind of job",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ProjectTypeSenders",
+      "exported": "internal",
+      "routes": [
+        "GET /api/locations/[id]/project-type-senders",
+        "POST /api/locations/[id]/project-type-senders",
+        "DELETE /api/locations/[id]/project-type-senders"
+      ],
+      "tables": [
+        "hub_users"
+      ],
+      "says": [
+        "who the email comes from",
+        "the from name",
+        "moving emails come from the wrong person",
+        "the sender"
+      ],
+      "lines": [
+        17803,
+        18134
+      ]
+    },
+    {
+      "id": "settings.new-leads-section",
+      "surface": "The New leads notification + routing panel that Settings → New leads renders",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "NewLeadsSection",
+      "exported": "named",
+      "routes": [
+        "GET /api/locations/[id]/notification-recipients",
+        "PATCH /api/locations/[id]/notification-recipients",
+        "POST /api/locations/[id]/notification-recipients",
+        "PATCH /api/locations/[id]/notification-recipients/externals/[extId]",
+        "DELETE /api/locations/[id]/notification-recipients/externals/[extId]"
+      ],
+      "tables": [
+        "lead_notification_prefs",
+        "lead_notification_externals",
+        "hub_users"
+      ],
+      "says": [
+        "who gets notified",
+        "add an email to the alerts",
+        "remove someone from the notifications",
+        "the outside email address"
+      ],
+      "lines": [
+        19104,
+        19467
+      ]
+    },
+    {
+      "id": "settings.team-section",
+      "surface": "The team roster block inside Settings → Team and seats",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "TeamSection",
+      "exported": "named",
+      "routes": [
+        "DELETE /api/hub_users/[id]",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "my staff list",
+        "remove a user",
+        "change someone's role",
+        "the person is still showing"
+      ],
+      "lines": [
+        19861,
+        20290
+      ]
+    },
+    {
+      "id": "settings.slack-card",
+      "surface": "The Slack connection card",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SlackCard",
+      "exported": "internal",
+      "routes": [
+        "GET /api/slack/connect",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "locations"
+      ],
+      "says": [
+        "the slack box",
+        "connect slack",
+        "the slack button"
+      ],
+      "lines": [
+        20626,
+        20862
+      ]
+    },
+    {
+      "id": "settings.billing-history",
+      "surface": "The billing history / invoices sheet",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "BillingHistorySheet",
+      "exported": "internal",
+      "routes": [
+        "GET /api/locations/[id]/invoices"
+      ],
+      "tables": [
+        "billing_invoices",
+        "hub_users"
+      ],
+      "says": [
+        "my invoices",
+        "my receipts",
+        "what I've been charged",
+        "billing history"
+      ],
+      "lines": [
+        19490,
+        19598
+      ]
+    },
+    {
+      "id": "settings.invite-teammate",
+      "surface": "The Invite a team member modal (buys the seat and sends the invite)",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "InviteTeamMemberModal",
+      "exported": "named",
+      "routes": [
+        "POST /api/seats/buy-and-invite",
+        "POST /api/hub_users/invite",
+        "GET /api/seats/quote"
+      ],
+      "tables": [
+        "subscription_seats",
+        "pending_invites",
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "invite someone",
+        "add a user",
+        "the invite email never came",
+        "how much is another seat",
+        "the charge for adding a person"
+      ],
+      "lines": [
+        34991,
+        35456
+      ]
+    },
+    {
+      "id": "settings.add-seats",
+      "surface": "The Add seats modal",
+      "nav": "Settings",
+      "file": "components/BeeHub.jsx",
+      "symbol": "AddSeatsModal",
+      "exported": "named",
+      "routes": [
+        "POST /api/seats",
+        "GET /api/seats/quote"
+      ],
+      "tables": [
+        "subscription_seats",
+        "hub_users"
+      ],
+      "says": [
+        "buy more seats",
+        "add a seat",
+        "the price it quoted was wrong"
+      ],
+      "lines": [
+        34738,
+        34990
+      ]
+    },
+    {
+      "id": "reports.screen",
+      "surface": "The Reports tab",
+      "nav": "Reports",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ReportsScreen",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "reports",
+        "my numbers",
+        "the charts",
+        "the reports tab is empty"
+      ],
+      "note": "Currently a coming-soon surface. A report of \"reports don't work\" is expected behaviour, not a bug.",
+      "lines": [
+        34022,
+        34049
+      ]
+    },
+    {
+      "id": "backoffice.screen",
+      "surface": "The Back Office tab as super_admin sees it",
+      "nav": "Back Office",
+      "file": "components/BeeHub.jsx",
+      "symbol": "BackOfficeScreen",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "back office",
+        "the back office tab"
+      ],
+      "lines": [
+        34074,
+        34149
+      ]
+    },
+    {
+      "id": "backoffice.coming-soon",
+      "surface": "The Back Office tab as every non-super_admin sees it",
+      "nav": "Back Office",
+      "file": "components/BeeHub.jsx",
+      "symbol": "BackOfficeComingSoon",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "back office is empty",
+        "back office says coming soon"
+      ],
+      "lines": [
+        34050,
+        34073
+      ]
+    },
+    {
+      "id": "admin.shell",
+      "surface": "The Admin area frame and its section rail",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SuperAdminLayout",
+      "exported": "internal",
+      "routes": [
+        "GET /api/guide-slides",
+        "GET /api/manual-slides"
+      ],
+      "tables": [
+        "guide_slides",
+        "manual_slides",
+        "hub_users"
+      ],
+      "says": [
+        "the admin area",
+        "corp",
+        "the admin menu",
+        "an admin section is missing"
+      ],
+      "lines": [
+        33096,
+        33631
+      ]
+    },
+    {
+      "id": "admin.dashboard",
+      "surface": "Admin → Dashboard",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "AdminDashboard",
+      "exported": "internal",
+      "routes": [
+        "GET /api/admin/conversions-due",
+        "GET /api/admin/scheduled-removals"
+      ],
+      "tables": [
+        "hub_users",
+        "locations",
+        "subscription_seats"
+      ],
+      "says": [
+        "the admin home",
+        "the admin dashboard",
+        "the overview at the top of admin"
+      ],
+      "lines": [
+        32729,
+        32936
+      ]
+    },
+    {
+      "id": "admin.locations",
+      "surface": "Admin → Locations — the table of every franchise location",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "LocationsTable",
+      "exported": "named",
+      "routes": [],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "the location list",
+        "all the franchises",
+        "the locations table",
+        "a location is missing"
+      ],
+      "note": "GET /api/admin/locations does not exist — the list arrives server-rendered via app/_hub-page.tsx. The route only exports POST (create), which AddLocationModal uses.",
+      "lines": [
+        25682,
+        25937
+      ]
+    },
+    {
+      "id": "admin.location-detail",
+      "surface": "The location detail sheet in Admin — status, billing, owner, seats",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "LocationDetailSheet",
+      "exported": "named",
+      "routes": [
+        "PATCH /api/locations/[id]",
+        "GET /api/locations/[id]/subscription",
+        "PATCH /api/locations/[id]/subscription",
+        "DELETE /api/pending_invites/[id]"
+      ],
+      "tables": [
+        "locations",
+        "hub_users",
+        "pending_invites",
+        "subscription_seats"
+      ],
+      "says": [
+        "opening a location",
+        "the location's details",
+        "changing a franchise's status",
+        "their subscription"
+      ],
+      "lines": [
+        26506,
+        27391
+      ]
+    },
+    {
+      "id": "admin.users",
+      "surface": "Admin → Users",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "UsersTab",
+      "exported": "internal",
+      "routes": [],
+      "tables": [
+        "hub_users"
+      ],
+      "says": [
+        "all the users",
+        "the user list in admin",
+        "everyone's accounts"
+      ],
+      "lines": [
+        27913,
+        28014
+      ]
+    },
+    {
+      "id": "admin.seat-roster",
+      "surface": "The seat roster block on a location in Admin",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SeatRosterSection",
+      "exported": "named",
+      "routes": [
+        "GET /api/seats",
+        "GET /api/pending_invites",
+        "DELETE /api/pending_invites/[id]"
+      ],
+      "tables": [
+        "subscription_seats",
+        "pending_invites",
+        "hub_users"
+      ],
+      "says": [
+        "their seats",
+        "how many users they're paying for",
+        "the seat list"
+      ],
+      "lines": [
+        25944,
+        26207
+      ]
+    },
+    {
+      "id": "admin.system-health",
+      "surface": "Admin → System Health",
+      "nav": "Admin",
+      "file": "components/admin/SystemHealthScreen.jsx",
+      "symbol": "SystemHealthScreen",
+      "exported": "default",
+      "routes": [
+        "GET /api/admin/system-health",
+        "GET /api/admin/feedback"
+      ],
+      "tables": [
+        "engagements",
+        "feedback_items",
+        "hub_users",
+        "import_jobs",
+        "leads",
+        "locations",
+        "notification_log",
+        "pending_invites",
+        "sync_log"
+      ],
+      "says": [
+        "is anything broken",
+        "the health screen",
+        "system health",
+        "the red numbers in admin"
+      ],
+      "lines": [
+        123,
+        390
+      ]
+    },
+    {
+      "id": "admin.feedback",
+      "surface": "Admin → Feedback — the triage queue for everything reported",
+      "nav": "Feedback",
+      "file": "components/admin/AdminFeedbackScreen.jsx",
+      "symbol": "AdminFeedbackScreen",
+      "exported": "default",
+      "routes": [
+        "GET /api/admin/feedback",
+        "POST /api/admin/feedback",
+        "PATCH /api/admin/feedback/[id]"
+      ],
+      "tables": [
+        "feedback_items",
+        "hub_users",
+        "leads"
+      ],
+      "says": [
+        "the bug list",
+        "reported problems",
+        "the feedback queue",
+        "triage",
+        "what people have told us",
+        "filing a bug myself",
+        "logging an internal issue"
+      ],
+      "lines": [
+        694,
+        1140
+      ],
+      "note": "Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
+    },
+    {
+      "id": "admin.notifications",
+      "surface": "Admin → Notifications — the log of every email the system sent",
+      "nav": "Admin",
+      "file": "components/admin/AdminNotificationsScreen.jsx",
+      "symbol": "AdminNotificationsScreen",
+      "exported": "default",
+      "routes": [
+        "GET /api/admin/notification-log"
+      ],
+      "tables": [
+        "notification_log",
+        "hub_users"
+      ],
+      "says": [
+        "did the email send",
+        "the email log",
+        "the notification history",
+        "proof we emailed them"
+      ],
+      "lines": [
+        91,
+        231
+      ]
+    },
+    {
+      "id": "admin.pricing",
+      "surface": "Admin → Pricing — seat tier prices",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PricingManagementTab",
+      "exported": "internal",
+      "routes": [
+        "GET /api/admin/tier-prices",
+        "PUT /api/admin/tier-prices"
+      ],
+      "tables": [
+        "tier_prices",
+        "hub_users"
+      ],
+      "says": [
+        "the prices",
+        "what we charge per seat",
+        "changing pricing"
+      ],
+      "lines": [
+        30041,
+        30401
+      ]
+    },
+    {
+      "id": "admin.configure",
+      "surface": "Admin → Configure — the dropdown lists used across the app",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ConfigureTab",
+      "exported": "internal",
+      "routes": [
+        "GET /api/lookups"
+      ],
+      "tables": [
+        "lookups"
+      ],
+      "says": [
+        "the dropdown options",
+        "the lists",
+        "lead sources",
+        "project types",
+        "the tags list",
+        "the close reasons"
+      ],
+      "lines": [
+        29745,
+        29887
+      ]
+    },
+    {
+      "id": "admin.lookup-editor",
+      "surface": "The editor for one configurable list (add, rename, reorder, deactivate)",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "LookupEditor",
+      "exported": "internal",
+      "routes": [
+        "GET /api/lookups",
+        "POST /api/lookups",
+        "PATCH /api/lookups/[id]",
+        "DELETE /api/lookups/[id]",
+        "POST /api/lookups/reorder"
+      ],
+      "tables": [
+        "lookups"
+      ],
+      "says": [
+        "adding an option to a dropdown",
+        "reordering the list",
+        "I deleted an option and it's still there"
+      ],
+      "lines": [
+        29548,
+        29744
+      ]
+    },
+    {
+      "id": "admin.webhooks",
+      "surface": "Admin → Webhooks — what Jobber, Stripe and Resend have sent us",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "AdminWebhookLogScreen",
+      "exported": "internal",
+      "routes": [
+        "GET /api/admin/webhook-log"
+      ],
+      "tables": [
+        "hub_users"
+      ],
+      "says": [
+        "the webhook log",
+        "did jobber tell us",
+        "the incoming events"
+      ],
+      "lines": [
+        32233,
+        32493
+      ]
+    },
+    {
+      "id": "admin.jobber-health",
+      "surface": "Admin → Jobber Health — which locations' Jobber tokens are alive",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "JobberHealthAdmin",
+      "exported": "internal",
+      "routes": [
+        "GET /api/admin/jobber-health"
+      ],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "whose jobber is broken",
+        "jobber health",
+        "expired tokens"
+      ],
+      "lines": [
+        32983,
+        33095
+      ]
+    },
+    {
+      "id": "admin.recycle-bin",
+      "surface": "Admin → Recycle Bin — deleted leads",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "RecycleBinTab",
+      "exported": "internal",
+      "routes": [
+        "DELETE /api/leads/[id]",
+        "PATCH /api/leads/[id]"
+      ],
+      "tables": [
+        "leads",
+        "hub_users"
+      ],
+      "says": [
+        "the bin",
+        "deleted clients",
+        "I deleted someone by accident",
+        "restore a lead"
+      ],
+      "lines": [
+        30402,
+        30558
+      ]
+    },
+    {
+      "id": "admin.master-templates",
+      "surface": "Admin → Content → the master email templates every location forks from",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "MasterTemplatesEditor",
+      "exported": "internal",
+      "routes": [
+        "GET /api/templates",
+        "PATCH /api/templates/[id]",
+        "POST /api/templates",
+        "POST /api/templates/[id]/duplicate"
+      ],
+      "tables": [
+        "templates",
+        "drip_path_steps",
+        "drip_paths",
+        "hub_users"
+      ],
+      "says": [
+        "the master emails",
+        "the default wording",
+        "change it for everyone",
+        "the template library"
+      ],
+      "lines": [
+        31405,
+        31693
+      ]
+    },
+    {
+      "id": "admin.master-drip-paths",
+      "surface": "Admin → Content → the master drip paths",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "MasterDripPathsEditor",
+      "exported": "internal",
+      "routes": [
+        "GET /api/drip-paths/masters",
+        "PATCH /api/drip-path-steps/[stepId]"
+      ],
+      "tables": [
+        "drip_paths",
+        "drip_path_steps",
+        "hub_users"
+      ],
+      "says": [
+        "the master sequences",
+        "the default email schedule",
+        "the timing for everyone"
+      ],
+      "lines": [
+        31694,
+        31814
+      ]
+    },
+    {
+      "id": "admin.content",
+      "surface": "Admin → Content — the Guide and Manual slide editors",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ContentEditor",
+      "exported": "internal",
+      "routes": [
+        "GET /api/guide-slides",
+        "POST /api/guide-slides",
+        "GET /api/manual-slides",
+        "POST /api/manual-slides"
+      ],
+      "tables": [
+        "guide_slides",
+        "manual_slides",
+        "hub_users"
+      ],
+      "says": [
+        "editing the guide",
+        "the help content",
+        "the manual pages"
+      ],
+      "lines": [
+        31343,
+        31404
+      ]
+    },
+    {
+      "id": "admin.invite-owner",
+      "surface": "The Invite an owner modal in Admin",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "InviteOwnerModal",
+      "exported": "named",
+      "routes": [
+        "POST /api/admin/invite-owner"
+      ],
+      "tables": [
+        "hub_users",
+        "locations",
+        "pending_invites",
+        "subscription_seats"
+      ],
+      "says": [
+        "invite a new owner",
+        "onboard a franchise",
+        "the owner never got their invite"
+      ],
+      "lines": [
+        28266,
+        28501
+      ]
+    },
+    {
+      "id": "admin.grant-seat",
+      "surface": "The Grant a seat card (super admin comping a seat)",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "GrantSeatCard",
+      "exported": "internal",
+      "routes": [
+        "GET /api/admin/grant-seat",
+        "POST /api/admin/grant-seat"
+      ],
+      "tables": [
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "give them a free seat",
+        "comp a seat",
+        "grant access"
+      ],
+      "lines": [
+        29888,
+        30040
+      ]
+    },
+    {
+      "id": "admin.process-removals",
+      "surface": "The scheduled seat removals card",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ProcessRemovalsCard",
+      "exported": "named",
+      "routes": [
+        "GET /api/admin/scheduled-removals",
+        "POST /api/admin/process-scheduled-removals"
+      ],
+      "tables": [
+        "subscription_seats",
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "seats due to be removed",
+        "cancelling a seat at renewal",
+        "the removal didn't happen"
+      ],
+      "lines": [
+        31968,
+        32211
+      ]
+    },
+    {
+      "id": "admin.record-payment",
+      "surface": "The Record a payment modal (manual/offline payment)",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "RecordPaymentModal",
+      "exported": "internal",
+      "routes": [
+        "POST /api/locations/[id]/record-payment"
+      ],
+      "tables": [
+        "billing_invoices",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "they paid by check",
+        "log a payment",
+        "mark them as paid"
+      ],
+      "lines": [
+        27732,
+        27912
+      ]
+    },
+    {
+      "id": "admin.convert-billing",
+      "surface": "The Convert billing modal (moving a location between billing modes)",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ConvertBillingModal",
+      "exported": "internal",
+      "routes": [
+        "POST /api/locations/[id]/convert-billing"
+      ],
+      "tables": [
+        "billing_invoices",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "switch them to card",
+        "change how they pay",
+        "convert their billing"
+      ],
+      "lines": [
+        27563,
+        27731
+      ]
+    },
+    {
+      "id": "admin.payment-link",
+      "surface": "The Get payment link button in Admin",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "GetPaymentLinkButton",
+      "exported": "internal",
+      "routes": [
+        "POST /api/admin/subscription-checkout-link",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "subscription_seats",
+        "tier_prices",
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "send them a payment link",
+        "the checkout link",
+        "the pay link doesn't work"
+      ],
+      "lines": [
+        27392,
+        27562
+      ]
+    },
+    {
+      "id": "admin.add-location",
+      "surface": "The Add a location modal",
+      "nav": "Admin",
+      "file": "components/BeeHub.jsx",
+      "symbol": "AddLocationModal",
+      "exported": "internal",
+      "routes": [
+        "POST /api/admin/locations"
+      ],
+      "tables": [
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "add a franchise",
+        "create a location",
+        "set up a new office"
+      ],
+      "lines": [
+        32514,
+        32728
+      ]
+    },
+    {
+      "id": "onboarding.screen",
+      "surface": "The onboarding checklist a new owner walks through",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "OnboardingScreen",
+      "exported": "internal",
+      "routes": [
+        "GET /api/onboarding/progress",
+        "POST /api/onboarding/progress",
+        "PATCH /api/hub_users/me",
+        "PATCH /api/locations/[id]",
+        "GET /api/seats"
+      ],
+      "tables": [
+        "onboarding_progress",
+        "locations",
+        "hub_users",
+        "subscription_seats"
+      ],
+      "says": [
+        "the setup steps",
+        "getting started",
+        "the checklist",
+        "a step won't tick off",
+        "it made me start over"
+      ],
+      "note": "Step ids: welcome, pay, profile, location, jobber, import, paths, slack, invite (owner flow) and welcome_employee, profile (employee flow).",
+      "lines": [
+        10951,
+        12401
+      ]
+    },
+    {
+      "id": "onboarding.steps",
+      "surface": "The body of each onboarding step (the forms inside the checklist)",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "StepContent",
+      "exported": "internal",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "the setup form",
+        "the step won't save",
+        "the fields in onboarding"
+      ],
+      "lines": [
+        13023,
+        13263
+      ]
+    },
+    {
+      "id": "onboarding.pay",
+      "surface": "The Activate subscription / payment step of onboarding",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "PaymentConfirmStep",
+      "exported": "internal",
+      "routes": [
+        "POST /api/locations/[id]/checkout",
+        "GET /api/locations/[id]/activation-status"
+      ],
+      "tables": [
+        "tier_prices",
+        "subscription_seats",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "paying to start",
+        "the first payment",
+        "it charged me the wrong amount",
+        "activate my subscription"
+      ],
+      "lines": [
+        34353,
+        34516
+      ]
+    },
+    {
+      "id": "onboarding.jobber",
+      "surface": "The Connect Jobber step of onboarding",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "JobberConnectStep",
+      "exported": "internal",
+      "routes": [
+        "GET /api/jobber/connect"
+      ],
+      "tables": [],
+      "says": [
+        "connecting jobber during setup",
+        "the jobber step",
+        "it bounced me back without connecting"
+      ],
+      "lines": [
+        12411,
+        12499
+      ]
+    },
+    {
+      "id": "onboarding.import",
+      "surface": "The Import your clients step of onboarding",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "ImportStepContent",
+      "exported": "named",
+      "routes": [
+        "POST /api/import/jobber-clients",
+        "GET /api/import/active",
+        "GET /api/import/status/[jobId]",
+        "POST /api/import/cancel"
+      ],
+      "tables": [
+        "import_jobs",
+        "import_staging",
+        "import_location_fetch",
+        "leads",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "importing my clients at setup",
+        "how long will the import take",
+        "the import step is stuck"
+      ],
+      "lines": [
+        12556,
+        12945
+      ]
+    },
+    {
+      "id": "onboarding.paths",
+      "surface": "The New lead emails step — the two questions that pick a starting email sequence",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "OnboardingPathsEditor",
+      "exported": "named",
+      "routes": [
+        "GET /api/drip-paths/masters",
+        "POST /api/locations/[id]/paths"
+      ],
+      "tables": [
+        "drip_paths",
+        "drip_path_steps",
+        "locations",
+        "hub_users"
+      ],
+      "says": [
+        "the email setup questions",
+        "what leads hear first",
+        "the two questions",
+        "it picked the wrong emails"
+      ],
+      "lines": [
+        13500,
+        13785
+      ]
+    },
+    {
+      "id": "onboarding.slack",
+      "surface": "The Get leads in Slack step of onboarding",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SlackOnboardingStep",
+      "exported": "named",
+      "routes": [
+        "GET /api/slack/connect"
+      ],
+      "tables": [],
+      "says": [
+        "slack during setup",
+        "the slack step",
+        "getting leads in slack"
+      ],
+      "lines": [
+        13827,
+        14044
+      ]
+    },
+    {
+      "id": "onboarding.invite",
+      "surface": "The Invite your team step of onboarding",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "OnboardingInviteSheet",
+      "exported": "internal",
+      "routes": [
+        "POST /api/hub_users/invite"
+      ],
+      "tables": [
+        "hub_users",
+        "pending_invites",
+        "subscription_seats",
+        "locations"
+      ],
+      "says": [
+        "inviting my team at setup",
+        "adding staff during onboarding",
+        "the invites didn't send"
+      ],
+      "lines": [
+        14045,
+        14323
+      ]
+    },
+    {
+      "id": "onboarding.co-owner",
+      "surface": "The slimmed onboarding a second/co-owner gets",
+      "nav": "Onboarding",
+      "file": "components/BeeHub.jsx",
+      "symbol": "SlimCoOwnerOnboarding",
+      "exported": "internal",
+      "routes": [
+        "PATCH /api/hub_users/me",
+        "PATCH /api/locations/[id]"
+      ],
+      "tables": [
+        "hub_users",
+        "locations"
+      ],
+      "says": [
+        "my partner's setup is different",
+        "the short onboarding",
+        "the co-owner's checklist"
+      ],
+      "lines": [
+        23432,
+        23549
+      ]
+    },
+    {
+      "id": "feedback.modal",
+      "surface": "The Report a problem / feedback composer",
+      "nav": "Feedback",
+      "file": "components/feedback/FeedbackModal.jsx",
+      "symbol": "FeedbackModal",
+      "exported": "default",
+      "routes": [
+        "POST /api/feedback",
+        "GET /api/feedback",
+        "POST /api/feedback/upload"
+      ],
+      "tables": [
+        "feedback_items",
+        "hub_users"
+      ],
+      "says": [
+        "report a problem",
+        "the bug button",
+        "telling you about an issue",
+        "the screenshot wouldn't attach",
+        "submit feedback"
+      ],
+      "lines": [
+        26,
+        272
+      ]
+    },
+    {
+      "id": "feedback.owner-screen",
+      "surface": "\"What you've told us\" — an owner's read-only history of what they reported",
+      "nav": "Feedback",
+      "file": "components/feedback/OwnerFeedbackScreen.jsx",
+      "symbol": "OwnerFeedbackScreen",
+      "exported": "default",
+      "routes": [
+        "GET /api/admin/feedback",
+        "POST /api/feedback/seen"
+      ],
+      "tables": [
+        "feedback_items",
+        "hub_users",
+        "leads"
+      ],
+      "says": [
+        "what you've told us",
+        "did you fix my bug",
+        "my reports",
+        "you never replied",
+        "the thing I reported"
+      ],
+      "lines": [
+        336,
+        556
+      ]
+    },
+    {
+      "id": "auth.login",
+      "surface": "The sign-in page",
+      "nav": "Auth",
+      "file": "app/auth/login/page.tsx",
+      "symbol": "LoginPage",
+      "exported": "default",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "I can't log in",
+        "the login page",
+        "my password",
+        "the magic link",
+        "it won't let me sign in"
+      ],
+      "lines": [
+        192,
+        211
+      ]
+    },
+    {
+      "id": "auth.invite-accept",
+      "surface": "The page a teammate lands on from an invite email",
+      "nav": "Auth",
+      "file": "app/auth/invite/[token]/AcceptInviteClient.tsx",
+      "symbol": "AcceptInviteClient",
+      "exported": "default",
+      "routes": [
+        "POST /api/hub_users/accept"
+      ],
+      "tables": [
+        "hub_users",
+        "pending_invites",
+        "subscription_seats"
+      ],
+      "says": [
+        "the invite link doesn't work",
+        "accepting my invitation",
+        "the link expired",
+        "it says invalid invite"
+      ],
+      "lines": [
+        21,
+        271
+      ]
+    },
+    {
+      "id": "public.unsubscribe",
+      "surface": "The unsubscribe page a lead reaches from an email footer",
+      "nav": "Public",
+      "file": "app/unsubscribe/[token]/page.tsx",
+      "symbol": "UnsubscribePage",
+      "exported": "default",
+      "routes": [],
+      "tables": [
+        "leads"
+      ],
+      "says": [
+        "the unsubscribe link",
+        "they still got emails after unsubscribing",
+        "opting out"
+      ],
+      "lines": [
+        67,
+        155
+      ]
+    },
+    {
+      "id": "public.mailing-list",
+      "surface": "The mailing-list opt-in page",
+      "nav": "Public",
+      "file": "app/mailing-list/[token]/page.tsx",
+      "symbol": "MailingListOptInPage",
+      "exported": "default",
+      "routes": [],
+      "tables": [
+        "leads"
+      ],
+      "says": [
+        "the sign-up link",
+        "joining the mailing list",
+        "the opt-in page"
+      ],
+      "lines": [
+        62,
+        141
+      ]
+    },
+    {
+      "id": "public.access-removed",
+      "surface": "The page a user sees once their access has been removed",
+      "nav": "Public",
+      "file": "app/access-removed/page.tsx",
+      "symbol": "AccessRemovedPage",
+      "exported": "default",
+      "routes": [],
+      "tables": [],
+      "says": [
+        "it says my access was removed",
+        "I've been locked out",
+        "why can't I get in"
+      ],
+      "lines": [
+        12,
+        62
+      ]
+    }
+  ]
+}
