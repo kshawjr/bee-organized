@@ -18473,7 +18473,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], generalDefault 
 //
 // Read only. No Edit, no fork, no writes — step 8 owns those. The one control
 // per row is Read, and it opens a modal that navigates the group it belongs to.
-function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason }) {
+function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason, blockedReason }) {
   const row = rows[index]
   React.useEffect(() => {
     const onKey = e => {
@@ -18500,6 +18500,14 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
           <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'19px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>✕</button>
         </div>
         <div style={{ padding:'20px 24px 22px' }}>
+          {/* issue 240 step 9a — the pause reason and the reset-disabled reason
+              are independent. A row can be both, and neither suppresses the
+              other, so they render as separate lines. */}
+          {blockedReason && (
+            <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'12px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.55 }}>
+              Not sending — {blockedReason}. It will start again on its own once that's filled in.
+            </div>
+          )}
           {row.wording === 'yours' && (
             <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'15px', fontSize:'13px', color:'#8a6a0e', display:'flex', gap:'9px', alignItems:'center', flexWrap:'wrap' }}>
               <span>You've changed this one.</span>
@@ -18578,16 +18586,21 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
   )
 }
 
-function EmailRow({ row, onRead, onEdit }) {
+function EmailRow({ row, onRead, onEdit, blockedReason }) {
+  // issue 240 step 9a — a paused row is DIMMED, never hidden: the owner still
+  // reads the wording and can still open it. Only the chrome recedes, and the
+  // reason sits on the row so it is impossible to miss.
+  const paused = !!blockedReason
   return (
-    <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start' }}>
+    <div style={{ background: paused ? '#fffdf7' : 'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start', boxShadow: paused ? 'inset 3px 0 0 #8a6a0e' : 'none' }}>
       <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
         {row.when}
         {row.fixedNote && <><br /><span style={{ fontSize:'11px', opacity:0.75 }}>{row.fixedNote}</span></>}
       </div>
-      <div style={{ flex:1, minWidth:0 }}>
+      <div style={{ flex:1, minWidth:0, opacity: paused ? 0.62 : 1 }}>
         <div style={{ display:'flex', alignItems:'baseline', gap:'8px', flexWrap:'wrap', marginBottom:'2px' }}>
           <b style={{ fontSize:'14.5px', fontWeight:600, color:'#1a2e2b' }}>{row.subject || 'No subject'}</b>
+          {paused && <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#fdf6e3', color:'#8a6a0e' }}>Paused</span>}
           <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap',
             background: row.wording === 'yours' ? '#fdf6e3' : '#efede6', color: row.wording === 'yours' ? '#8a6a0e' : '#7a8b87' }}>
             {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
@@ -18596,6 +18609,11 @@ function EmailRow({ row, onRead, onEdit }) {
         <p style={{ fontSize:'13px', color:'#4a5f5b', margin:0, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
           {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
         </p>
+        {paused && (
+          <p style={{ fontSize:'12px', color:'#8a6a0e', margin:'6px 0 0', lineHeight:1.5 }}>
+            Not sending — {blockedReason}.
+          </p>
+        )}
       </div>
       <div style={{ display:'flex', gap:'7px', flexShrink:0 }}>
         <button onClick={onRead} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Read</button>
@@ -18611,6 +18629,64 @@ function EmailRow({ row, onRead, onEdit }) {
 // the first from the lead arriving, the second from the job closing — so a
 // single sorted axis across all six would claim day 90 comes after day 30 on
 // the same timeline, which is false.
+// ─── issue 240 step 9a — what actually stops a row sending ───
+//
+// Enumerated from the send paths, not from the mockup. Of everything that can
+// refuse a send, exactly TWO are per-row, per-location and fixable by an owner:
+//
+//   missing_rate          lib/rate-guard.ts, called by drip-send, welcome-email
+//                         and stage-emails. Blocks when the wording quotes the
+//                         hourly-rate tag and the location has no rate.
+//   missing_booking_link  lib/booking-link.ts, same three callers. TWO separate
+//                         conditions, not one: the per-assignee tag is blocked
+//                         by a missing OWNER link, and the two location aliases
+//                         by a missing LOCATION link. A row can trip either.
+//
+// Both are checked against the TEMPLATE TEXT, never against the path letter —
+// so an owner who edits a body (step 8b) can newly block or unblock a row.
+// That is why this mirrors the guards' `.includes()` rather than guessing from
+// which sequence a row belongs to.
+//
+// Everything else behaves differently and is deliberately NOT shown as paused:
+//   - Every other merge tag renders as an EMPTY STRING (applyVars in
+//     lib/resend.ts returns '' for null/undefined). The email sends with a
+//     hole in it. Nothing is held, so nothing here can warn about it.
+//   - The CAN-SPAM footer fails closed on a missing postal address, but that
+//     is an environment setting, all-or-nothing across every location, and no
+//     owner can fix it from this screen. Showing it per row would blame the
+//     owner for a system problem.
+//   - location_not_active, opted_out, no_email, junk and paused are properties
+//     of a LEAD or of the whole account, not of a row of wording.
+const RATE_TAG = '{{rate_per_hour}}'
+const OWNER_BOOKING_TAG = '{{owner_booking_link}}'
+const LOCATION_BOOKING_TAGS = ['{{book_assessment_link}}', '{{booking_link}}']
+
+const isBlank = v => v == null || String(v).trim() === ''
+
+export function emailRowBlockers(row, cfg = {}) {
+  const source = `${row?.subject ?? ''}\n${row?.body ?? ''}`
+  const out = []
+  // Mirrors blockedOnMissingRate.
+  if (source.includes(RATE_TAG) && isBlank(cfg.ratePerHour)) {
+    out.push('it mentions your hourly rate, and we don’t have that yet')
+  }
+  // Mirrors blockedOnMissingBookingLink — two conditions, checked separately.
+  if (source.includes(OWNER_BOOKING_TAG) && isBlank(cfg.ownerBookingLink)) {
+    out.push('it asks people to book a time with you, and your own booking link is empty')
+  }
+  if (LOCATION_BOOKING_TAGS.some(t => source.includes(t)) && isBlank(cfg.locationCalendarLink)) {
+    out.push('it asks people to book a time, and your booking link is empty')
+  }
+  return out
+}
+
+// One sentence, built the same way wherever a row explains itself.
+export function blockedSentence(reasons) {
+  if (!reasons || !reasons.length) return null
+  if (reasons.length === 1) return reasons[0]
+  return reasons.slice(0, -1).join('; ') + '; and ' + reasons[reasons.length - 1]
+}
+
 // issue 240 step 8b — the shape guard.
 //
 // Rail A reset restores ONE row, but the only anchor between a fork's step and
@@ -18634,7 +18710,7 @@ export function dripShapeMatchesMaster(forkSteps, masterStepsForKey) {
   return JSON.stringify(f) === JSON.stringify(m)
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {} }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
   const { newLead, afterJob } = React.useMemo(
     () => buildEmailList({ pathSteps, templates, generalDefault }),
@@ -18659,6 +18735,9 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
       : null
   const canEdit = !!actions
   const canReset = row => !!actions && row.wording === 'yours'
+  // issue 240 step 9a — computed per row from the row's own wording, because
+  // the guards read the template text and step 8b lets an owner change it.
+  const blockedFor = row => blockedSentence(emailRowBlockers(row, sendConfig))
 
   const Group = ({ id, title, count, note, rows }) => (
     <div style={{ marginBottom:'22px' }}>
@@ -18671,6 +18750,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
         ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
         : rows.map((r, i) => (
             <EmailRow key={r.key} row={r}
+              blockedReason={blockedFor(r)}
               onRead={() => setOpen({ group:id, index:i })}
               onEdit={canEdit ? () => actions.edit(r) : null} />
           ))}
@@ -18695,7 +18775,8 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))}
           onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
           onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
-          resetBlockedReason={resetBlockedFor(openRows[open.index])} />
+          resetBlockedReason={resetBlockedFor(openRows[open.index])}
+          blockedReason={blockedFor(openRows[open.index])} />
       )}
     </div>
   )
@@ -22550,6 +22631,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
               actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset } : null}
+              // issue 240 step 9a — mirrors what the guards read at send time.
+              // The owner link is the signed-in owner's; the send path also
+              // consults the assigned user's, which has no meaning without a
+              // lead, so this is the location-level view of the same rule.
+              sendConfig={{
+                ratePerHour: settings.location.ratePerHour,
+                ownerBookingLink: settings.profile.bookingLink,
+                locationCalendarLink: settings.location.bookingLink,
+              }}
             />
 
             {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
