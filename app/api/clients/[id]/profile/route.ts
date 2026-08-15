@@ -82,7 +82,10 @@ export async function GET(
     // client-WIDE activity slice tags engagement-scoped ones
     // '· re: <title>'.
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at, engagement_id').eq('lead_id', id).eq('kind', 'job').order('created_at', { ascending: false }).limit(50),
-    supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
+    // lifecycle_status + activated_at ride along for the never-enrolled
+    // reason below (#243) — this row was already being fetched for `name`,
+    // so the two extra columns cost nothing.
+    supabaseService.from('locations').select('name, lifecycle_status, activated_at').eq('id', lead.location_uuid).maybeSingle(),
     referrerQuery,
     // Reverse direction — leads THIS client referred (kind='lead' rows
     // pointing back here). Junk exclusion via .not(is,true) — NULL stays.
@@ -119,6 +122,42 @@ export async function GET(
     )[0]
     if (latest.stopped_at) drip_stopped_reason = latest.stopped_reason ?? 'unknown'
     else if (latest.completed_at) drip_completed = true
+  }
+
+  // #243 — NEVER ENROLLED is its own state, not a flavour of "active".
+  // #112 separated terminal stops from the paused/active flag but kept the
+  // zero-rows case folded in with them: `dripRows.length > 0` guards the
+  // block above, so a lead that was never enrolled fell through with a null
+  // reason and false completed, and PreferencesBlock's final else rendered
+  // "Nurture drips active" with a live Pause button. An absent row is not
+  // evidence of a running drip — it is the absence of any drip — and only
+  // the route can tell the two apart (the component sees the same nulls
+  // either way, which is why this is derived HERE and not there).
+  const drip_never_enrolled = dripRows.length === 0
+
+  // WHY, where it is knowable and cheap. startDripForLead's dominant skip is
+  // its interface-active gate (lib/drip-lifecycle.ts) — the location must be
+  // lifecycle_status='active' at the moment the lead arrives, or nothing is
+  // enrolled. That yields two substantiable reasons off the location row we
+  // already have:
+  //   location_not_active     — the location still isn't active today.
+  //   location_activated_later— it is active now, but the lead predates
+  //                             activation, so the gate was closed then.
+  // Anything else stays null: the panel says "not in a drip" without
+  // guessing. Deliberately NOT inferred: no-email / junk / opted-out leads
+  // can also be missing rows, but those have their own causes and their own
+  // rows in this panel — claiming the location gate for them would be a
+  // fabricated reason.
+  let drip_never_enrolled_reason: string | null = null
+  if (drip_never_enrolled) {
+    const locRow = locRes.data
+    const activatedAt = locRow?.activated_at ? new Date(locRow.activated_at).getTime() : null
+    const createdAt = lead.created_at ? new Date(lead.created_at).getTime() : null
+    if (locRow && locRow.lifecycle_status !== 'active') {
+      drip_never_enrolled_reason = 'location_not_active'
+    } else if (locRow && activatedAt !== null && createdAt !== null && createdAt < activatedAt) {
+      drip_never_enrolled_reason = 'location_activated_later'
+    }
   }
 
   // touchpoints carry user_id but no user_label — resolve author names
@@ -201,11 +240,18 @@ export async function GET(
       referred_by_name: referrerRes.data?.name ?? null,
       referred_by_missing: referredByMissing,
       assigned_to_name: lead.assigned_to ? (authorById[lead.assigned_to] ?? null) : null,
-      // #112 — nurture-drip terminal state (see derivation above). null
-      // stopped_reason + false completed → drip is live/paused/never-enrolled,
-      // and PreferencesBlock falls through to its existing paused/active rows.
+      // #112 — nurture-drip terminal state (see derivation above).
+      // #243 — plus the never-enrolled state that used to hide inside the
+      // nulls. The four fields are read in precedence order by
+      // PreferencesBlock: stopped → completed → paused (leads.paused, on the
+      // lead row) → never-enrolled → active. paused outranks never-enrolled
+      // deliberately: an imported lead is BOTH (it lands paused with no
+      // progress rows) and its Activate button is the real, working
+      // first-enrollment path, so it must keep winning.
       drip_stopped_reason,
       drip_completed,
+      drip_never_enrolled,
+      drip_never_enrolled_reason,
     },
     referred_us: referredUsRes.data ?? [],
     referred_us_total: referredUsRes.count ?? (referredUsRes.data?.length ?? 0),

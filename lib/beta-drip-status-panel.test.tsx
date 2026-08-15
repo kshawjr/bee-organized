@@ -161,3 +161,117 @@ describe('#112 PreferencesBlock — nurture-drip state is honest', () => {
     await unmount()
   })
 })
+
+// ── issue 243 — NEVER ENROLLED, the state that used to render as "active" ──
+// #112 fixed the false-active class for terminal stops and left the zero-rows
+// case behind: a lead that was never enrolled reaches the component with the
+// same nulls a healthy live drip carries, so the final else claimed "Nurture
+// drips active" and offered to pause a sequence that never started. The route
+// now says which it is (drip_never_enrolled); this pins what the panel does
+// with that.
+describe('#243 PreferencesBlock — never-enrolled reads honestly', () => {
+  it('NEVER ENROLLED: says it is not receiving emails, never "active"', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: null }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('Not receiving nurture emails')
+    expect(txt).not.toContain('Nurture drips active')
+    await unmount()
+  })
+
+  it('NEVER ENROLLED: NO Pause button — there is nothing to pause', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: null }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    expect(dripButtons(host)).toHaveLength(0)
+    await unmount()
+  })
+
+  it('NEVER ENROLLED: no Activate either — it would re-hit the gate that skipped it', async () => {
+    // Same decision #112 made for stopped drips: a control that silently
+    // no-ops is worse than no control. drip-resume → startDripForLead walks
+    // straight back into the interface-active gate for the dominant reason.
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: 'location_not_active' }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).not.toContain('Activate anyway')
+    expect(dripButtons(host)).toHaveLength(0)
+    await unmount()
+  })
+
+  it('NEVER ENROLLED (location not active): says WHY, in plain English, no raw enum', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: 'location_not_active' }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('this location isn’t live yet')
+    expect(txt).toContain('once the location is activated')
+    expect(txt).not.toContain('location_not_active')
+    await unmount()
+  })
+
+  it('NEVER ENROLLED (arrived pre-activation): its own reason, not the generic one', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: 'location_activated_later' }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('arrived before the location went live')
+    expect(txt).not.toContain('location_activated_later')
+    await unmount()
+  })
+
+  it('NEVER ENROLLED (reason unknown): headline stands alone, no invented cause', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: null }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('Not receiving nurture emails')
+    // no em-dash clause, and none of the knowable reasons asserted
+    expect(txt).not.toContain('this location isn’t live yet')
+    expect(txt).not.toContain('arrived before the location went live')
+    expect(txt).toContain('Contact support to start nurture emails')
+    await unmount()
+  })
+
+  it('PAUSED outranks never-enrolled — an imported lead is BOTH and keeps Activate', async () => {
+    // Imported leads land paused=true with zero progress rows. If
+    // never-enrolled won here, ~14k of them would lose the one control that
+    // actually enrolls them (drip-resume's seed path).
+    const client = { ...baseClient, paused: true, drip_never_enrolled: true, drip_never_enrolled_reason: 'location_not_active' }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('Nurture drips paused')
+    expect(txt).not.toContain('Not receiving nurture emails')
+    const btns = dripButtons(host)
+    expect(btns).toHaveLength(1)
+    expect(btns[0].textContent).toBe('Activate')
+    await unmount()
+  })
+
+  it('STOPPED outranks never-enrolled — the #112 reason still wins', async () => {
+    const client = { ...baseClient, drip_stopped_reason: 'hard_bounce', drip_never_enrolled: true }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('Nurture drips stopped')
+    expect(txt).toContain('email address bounced')
+    expect(txt).not.toContain('Not receiving nurture emails')
+    await unmount()
+  })
+
+  it('a LIVE drip is untouched — "active" with Pause, when the route says not-never-enrolled', async () => {
+    const client = { ...baseClient, drip_never_enrolled: false, drip_never_enrolled_reason: null }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={0} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).toContain('Nurture drips active')
+    expect(txt).not.toContain('Not receiving nurture emails')
+    const btns = dripButtons(host)
+    expect(btns).toHaveLength(1)
+    expect(btns[0].textContent).toBe('Pause')
+    await unmount()
+  })
+
+  it('live business still hides the whole row (v4 rule) even when never-enrolled', async () => {
+    const client = { ...baseClient, drip_never_enrolled: true, drip_never_enrolled_reason: 'location_not_active' }
+    const { host, unmount } = await mount(<PreferencesBlock client={client} openCount={2} onPatched={noop} setToast={noop} />)
+    const txt = host.textContent || ''
+    expect(txt).not.toContain('Not receiving nurture emails')
+    expect(txt).not.toContain('Nurture drips')
+    await unmount()
+  })
+})

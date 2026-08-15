@@ -12,11 +12,19 @@
 //     un-snooze nulls both. The Timeline tab reads snoozed_until on its
 //     own fetch; propagation to Inbox rides onPatched → leadPatchMap's
 //     snoozed_until → snoozeUntil mapping.
-//   nurture drip — row HIDDEN with live business (v4 rule). Otherwise:
-//     active → Pause (POST drip-pause), paused → Activate (POST
-//     drip-resume — its seed path enrolls never-dripped leads too, so
-//     one verb covers resume AND first activation; flag-synced since
-//     13baa26 so leads.paused is trustworthy).
+//   nurture drip — row HIDDEN with live business (v4 rule). Otherwise
+//     five states in precedence order (issue 112 added the first two,
+//     issue 243 the fourth):
+//       stopped        → reason + guidance, no button (dead sequence)
+//       completed      → display only
+//       paused         → Activate (POST drip-resume — its seed path
+//                        enrolls never-dripped leads too, so one verb
+//                        covers resume AND first activation; flag-synced
+//                        since 13baa26 so leads.paused is trustworthy)
+//       never enrolled → reason + guidance, no button (nothing to pause,
+//                        and Activate would re-hit the same gate that
+//                        skipped it — see DRIP_NEVER_COPY)
+//       active         → Pause (POST drip-pause)
 //
 // All writes optimistic-with-revert; failures keep state honest and
 // toast the truth. onPatched(cols) hands confirmed lead-column changes
@@ -26,7 +34,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { IconPlayerPause } from '@/components/ui/icons'
+import { IconPlayerPause, IconMail } from '@/components/ui/icons'
 import { T } from './tokens'
 import { MicroLabel, rowActionBtn } from './cardKit'
 import { fmtShort } from './engagementStatus'
@@ -62,6 +70,21 @@ const DRIP_STOP_COPY = {
 }
 const DRIP_STOP_FALLBACK = { reason: 'nurture emails were stopped', guide: 'Contact support to restart nurture emails.' }
 
+// issue 243 — NEVER STARTED, which is not the same as stopped and is very much
+// not "active". Same two-line shape as DRIP_STOP_COPY (plain-English `reason`,
+// actionable `guide`) rather than a parallel vocabulary. Also NO button, for
+// the same reason 112 gave: the owner-accessible Activate path (drip-resume →
+// resumePausedDripsForLead → startDripForLead) re-enters startDripForLead's
+// interface-active gate, so on the dominant reason here — the location isn't
+// active — it would return having enrolled nothing and toast success. A silent
+// no-op is worse than no control. `reason` may be null when the cause isn't
+// knowable; the headline then stands alone rather than inventing one.
+const DRIP_NEVER_COPY = {
+  location_not_active:      { reason: 'this location isn’t live yet',                  guide: 'Nurture emails start once the location is activated. Leads that arrive before then aren’t enrolled.' },
+  location_activated_later: { reason: 'this client arrived before the location went live', guide: 'Contact support to start nurture emails for this client.' },
+}
+const DRIP_NEVER_FALLBACK = { reason: null, guide: 'Contact support to start nurture emails for this client.' }
+
 export default function PreferencesBlock({ client, openCount = 0, onPatched = () => {}, setToast = () => {}, nowMs = Date.now(), readOnly = false }) {
   const c = client
   const [busy, setBusy] = useState(false)
@@ -82,6 +105,16 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
     ? (DRIP_STOP_COPY[c.drip_stopped_reason] || DRIP_STOP_FALLBACK)
     : null
   const dripCompleted = !dripStopCopy && !!c.drip_completed
+
+  // issue 243 — never-enrolled sits BELOW paused in precedence on purpose. An
+  // imported lead is both (it lands paused = true with zero progress rows) and
+  // its Activate button is the genuine first-enrollment path, so paused must
+  // keep winning or 14k imported leads lose the only control that works for
+  // them. Everything else with no progress rows lands here instead of being
+  // mislabelled "active".
+  const dripNeverCopy = !dripStopCopy && !dripCompleted && !c.paused && c.drip_never_enrolled
+    ? (DRIP_NEVER_COPY[c.drip_never_enrolled_reason] || DRIP_NEVER_FALLBACK)
+    : null
 
   async function patchLead(patch) {
     const res = await fetch(`/api/leads/${c.id}`, {
@@ -226,6 +259,14 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             <p style={{ fontSize: '12px', color: T.ink.secondary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
               <IconPlayerPause size={13} /> Nurture drips completed
             </p>
+          </div>
+        ) : dripNeverCopy ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <p style={{ fontSize: '12px', color: T.state.warning.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+              <IconMail size={13} /> Not receiving nurture emails
+              {dripNeverCopy.reason ? ` — ${dripNeverCopy.reason}` : ''}
+            </p>
+            <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45 }}>{dripNeverCopy.guide}</p>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
