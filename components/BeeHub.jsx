@@ -14114,12 +14114,12 @@ function PathTwoQuestionSelector({ currentPathId, filter, accent, onPick }) {
   }
 
   const Segment = ({ options, value, onChange }) => (
-    <div style={{ display:'flex', gap:'6px' }}>
+    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
       {options.map(o => {
         const sel = value === o.value
         return (
           <button key={o.value} onClick={()=>onChange(o.value)}
-            style={{ flex:1, padding:'9px 10px', borderRadius:'9px', border:`1.5px solid ${sel?accent:'rgba(26,46,43,0.12)'}`, background:sel?accent:'white', color:sel?'white':'#4a5e5a', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor:'pointer', textAlign:'left', lineHeight:1.3 }}>
+            style={{ flex:'0 1 auto', maxWidth:CONTROL_W.select, padding:'9px 12px', borderRadius:'9px', border:`1.5px solid ${sel?accent:'rgba(26,46,43,0.12)'}`, background:sel?accent:'white', color:sel?'white':'#4a5e5a', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor:'pointer', textAlign:'left', lineHeight:1.3 }}>
             {o.label}
           </button>
         )
@@ -18114,7 +18114,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false, embedded=false }) {
                   <div>
                     <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Sender</label>
                     <select value={sel.personId} onChange={e=>setSel(s=>({ ...s, personId:e.target.value }))}
-                      style={{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:600 }}>
+                      style={{ width:'100%', maxWidth:CONTROL_W.select, padding:'8px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:600 }}>
                       <option value="">Choose a team member…</option>
                       {(cfg?.people || []).map(p => (
                         <option key={p.id} value={p.id}>{p.name} — {p.email}</option>
@@ -18514,12 +18514,12 @@ export function NewLeadNotifications({ realLocId, readOnly=false }) {
       {/* Add outside email — available in BASIC state (no toggle needed) */}
       {!readOnly && (adding ? (
         <div style={{ background:'#f7f5f0', padding:'12px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'grid', gap:'8px' }}>
-          <div style={{ display:'flex', gap:'8px' }}>
+          <div style={{ display:'flex', gap:'8px', maxWidth:CONTROL_W.field }}>
             <input value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} placeholder="First name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
             <input value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} placeholder="Last name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
           </div>
-          <input value={form.email} onChange={e=>{ setForm(f=>({...f,email:e.target.value})); setFormErr('') }} placeholder="email@example.com *" type="email" style={{ padding:'9px 12px', border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+          <input value={form.email} onChange={e=>{ setForm(f=>({...f,email:e.target.value})); setFormErr('') }} placeholder="email@example.com *" type="email" style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px', border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+          <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
           {formErr && <p style={{ fontSize:'11px', color:'#c96a6a' }}>{formErr}</p>}
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Outside emails are notify-only — they never send follow-up emails.{advanced ? ' Set which project types they get after adding.' : ''}</p>
           <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
@@ -19574,7 +19574,7 @@ function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', re
               autoFocus type={type} value={val}
               onChange={e=>setVal(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') cancel() }}
-              style={{ width:'100%', padding:'6px 8px', border:`1.5px solid ${errorMsg ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
+              style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'6px 8px', border:`1.5px solid ${errorMsg ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
             />
           ) : (
             <p style={{ fontSize:'14px', color:readOnly?'#8a9e9a':'#1a2e2b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value||<span style={{ color:'#c8d8d4' }}>Not set</span>}</p>
@@ -19853,7 +19853,7 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
 
         {!connected && (
           <button onClick={goConnect} disabled={busy}
-            style={{ width:'100%', padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+            style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
             Add to Slack
           </button>
         )}
@@ -19880,7 +19880,7 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
             </div>
             {/* The card's one confident splash of colour — filled Slack-purple. */}
             <button onClick={copyInvite} disabled={!hasSavedInvite}
-              style={{ marginTop:'8px', width:'100%', padding:'10px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:hasSavedInvite?'pointer':'default', opacity:hasSavedInvite?1:0.4, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
+              style={{ marginTop:'8px', width:'100%', maxWidth:CONTROL_W.action, padding:'10px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:hasSavedInvite?'pointer':'default', opacity:hasSavedInvite?1:0.4, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
               {copied ? 'Copied ✓' : 'Copy team invite'}
             </button>
             <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'7px' }}>
@@ -19945,15 +19945,6 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
     </div>
   )
 }
-
-// Static composition data for the Communication tab's Templates tier. These
-// tiles open a center modal (CommsTemplatesModal) that previews the location's
-// templates of the tapped type — no navigation off the Communications tab.
-const COMMS_TEMPLATE_TILES = [
-  { type:'email', icon:'mail',    label:'Email',        sub:'Subjects & bodies', accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
-  { type:'sms',   icon:'message', label:'SMS',          sub:'Text templates',    accent:'#0a7d5f', tint:'rgba(16,185,129,0.12)' },
-  { type:'call',  icon:'phone',   label:'Call scripts', sub:'Talking points',    accent:'#b45309', tint:'rgba(245,158,11,0.14)' },
-]
 
 // ─── Template Preview Modal ───────────────────────────────────────────────────
 function TemplatePreviewModal({ template, settings, onClose }) {
@@ -20030,106 +20021,27 @@ function TemplatePreviewModal({ template, settings, onClose }) {
   )
 }
 
-// ─── Communications tab — Templates center modal ─────────────────────────────
-// Opened from the Templates tiles on the Communications tab so the user stays
-// on the tab (no redirect). Shows the location's templates of ONE type in a
-// read/preview list; each row previews via the shared TemplatePreviewModal.
-// Full authoring (create/edit/delete/duplicate) still lives on the Templates
-// tab — reachable here through the explicit, labeled "Open full editor" button
-// (a clear path, not a silent redirect). Center overlay: backdrop + X +
-// Escape-to-close + click-backdrop-to-close.
-function CommsTemplatesModal({ type, templates, settings, onPreview, onOpenEditor, onClose }) {
-  React.useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
-  }, [onClose])
-
-  const meta = (COMMS_TEMPLATE_TILES.find(t => t.type === type)) || COMMS_TEMPLATE_TILES[0]
-  const rows = (templates || []).filter(t => t.type === type)
-  const masters = rows.filter(t => t.isMaster)
-  const customs = rows.filter(t => t.isOwnCustom)
-  const isLocked = type === 'sms' && !settings?.location?.smsEnabled
-
-  function Row({ tpl }) {
-    return (
-      <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 13px', borderTop:'0.5px solid rgba(26,46,43,0.06)' }}>
-        <div style={{ width:'28px', height:'28px', borderRadius:'8px', background:meta.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-          <CommsIcon name={meta.icon} size={15} color={meta.accent} />
-        </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-            <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tpl.name}</p>
-            {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'6px', fontWeight:600, flexShrink:0 }}>{tpl.tag}</span>}
-          </div>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
-          </p>
-        </div>
-        <button onClick={()=>onPreview(tpl)}
-          style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'0.5px solid rgba(99,102,241,0.30)', background:'rgba(99,102,241,0.08)', color:'#4f46e5', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Preview</button>
-      </div>
-    )
-  }
-
-  function Group({ label, list }) {
-    if (list.length === 0) return null
-    return (
-      <div style={{ margin:'0 14px 12px' }}>
-        <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.06em', margin:'12px 2px 2px' }}>{label}</p>
-        <div style={{ borderRadius:'10px', overflow:'hidden', border:'0.5px solid rgba(26,46,43,0.10)', background:'white' }}>
-          {list.map((tpl, i) => (
-            <div key={tpl.dbId || tpl.id} style={i === 0 ? { marginTop:'-0.5px' } : undefined}><Row tpl={tpl} /></div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.55)' }} onClick={onClose} />
-      <div style={{ position:'relative', zIndex:1, background:'#fbfcfb', width:'100%', maxWidth:'460px', maxHeight:'86vh', borderRadius:'16px', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 12px 40px rgba(26,46,43,0.22)' }}>
-        {/* Header */}
-        <div style={{ padding:'14px 16px', borderBottom:'0.5px solid rgba(26,46,43,0.08)', display:'flex', alignItems:'center', gap:'11px', flexShrink:0, background:'white' }}>
-          <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:meta.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <CommsIcon name={meta.icon} size={18} color={meta.accent} />
-          </div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{meta.label} templates</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rows.length} template{rows.length === 1 ? '' : 's'} · {meta.sub}</p>
-          </div>
-          <button onClick={onClose} aria-label="Close" style={{ flexShrink:0, background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
-        </div>
-
-        {/* Body — read/preview list */}
-        <div style={{ overflowY:'auto', flex:1, paddingBottom:'6px' }}>
-          {isLocked && (
-            <div style={{ margin:'14px 14px 0', padding:'10px 12px', background:'rgba(212,160,70,0.08)', border:'0.5px solid rgba(212,160,70,0.30)', borderRadius:'10px' }}>
-              <p style={{ fontSize:'11px', color:'#7a5d24', lineHeight:1.5 }}>SMS is an add-on — these templates are locked until it's activated (see My Location).</p>
-            </div>
-          )}
-          {rows.length === 0 ? (
-            <p style={{ fontSize:'12px', color:'#8a9e9a', textAlign:'center', padding:'28px 16px', lineHeight:1.5 }}>No {meta.label.toLowerCase()} templates yet. Open the full editor to create one.</p>
-          ) : (
-            <>
-              <Group label="Master templates · from Bee Organized HQ" list={masters} />
-              <Group label="Your custom templates" list={customs} />
-            </>
-          )}
-        </div>
-
-        {/* Footer — the explicit "clear path" to full authoring */}
-        <div style={{ padding:'11px 16px', borderTop:'0.5px solid rgba(26,46,43,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexShrink:0, background:'white' }}>
-          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Editing lives in the Templates tab.</span>
-          <button onClick={onOpenEditor}
-            style={{ flexShrink:0, padding:'7px 13px', borderRadius:'8px', border:'none', background:'#1a2e2b', color:'white', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>Open full editor →</button>
-        </div>
-      </div>
-    </div>
-  )
+// ─── issue 240 step 4 — control widths ───
+//
+// CONTROLS do not grow with the container; CONTENT may. A pill, chip,
+// button, input or select gets a cap and sits left. Email bodies, template
+// rows and tables are content and can use the width.
+//
+// This needs saying because nothing upstream stops it: SettingsScreen
+// renders into .bee-main (margin-left:220px) with no max-width of its own,
+// so a width:'100%' control spans the whole viewport minus the sidebar —
+// about 1180px on a 1400px screen. globals.css sets max-width:100% on every
+// control, which prevents overflow but does nothing about stretch.
+//
+// Caps, not a layout system — spread them at the call site next to the
+// existing style. Sizes follow the two controls in this file that were
+// already right: the 120px delay input in DripPathStepEditor and the 44px
+// one in EditableDelay.
+const CONTROL_W = {
+  field:  '360px',   // text / email inputs
+  select: '260px',   // dropdowns
+  action: '220px',   // buttons that start something
+  tab:    '132px',   // one nav pill
 }
 
 export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
@@ -20355,10 +20267,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       location: locLocationRef.current,
     })
   }, [selectedLoc?.id, currentLocationCtx?.id])
-  // 'billing' is a legacy alias: the Billing section merged into Team
-  // (Team & Billing), so old deep-links/props land on the merged tab with
-  // the billing details expanded rather than a "no access" notice.
-  const [activeSection, setActiveSection] = useState(initialSection==='billing' ? 'team' : (initialSection||'profile'))
+  // ─── RETIRED SECTION KEYS ───
+  //
+  // Old keys keep arriving: from ?section= deep links, bookmarks, and callers
+  // that were never rewired. Falling through would hit the sectionAllowed
+  // guard and show "you don't have access", which reads as the owner being
+  // locked out rather than the section having moved. Same shape as the admin
+  // dashboard's RETIRED_SECTIONS (issue 226 step 8).
+  //
+  // Each points at where its FUNCTION went, not at a generic landing page:
+  //   billing   → team      the Billing section merged into Team & Billing
+  //   paths     → emails    the new-lead sequences are the bulk of that tab
+  //   templates → emails    the email templates are the bulk of that tab
+  // 'paths' and 'templates' both also fed Your team and Texts & scripts, but
+  // a deep link has to pick one destination, so it picks the larger half.
+  const SETTINGS_RETIRED_SECTIONS = { billing:'team', paths:'emails', templates:'emails' }
+  const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
+  const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
   // Billing footer (seat pool / history / plans) inside Team & Billing —
   // collapsed by default so the roster stays the hero; a billing deep-link
   // opens it. Lifted here because the section renders via an IIFE.
@@ -20459,7 +20384,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const [openSequence, setOpenSequence]       = useState(null)
   // Communication tab — Templates tile opens a center modal previewing that
   // type's templates in-place (null | 'email' | 'sms' | 'call'), no tab change.
-  const [commsTemplateType, setCommsTemplateType] = useState(null)
   // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
   const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
   const [tplTypeHover, setTplTypeHover]       = useState(null)
@@ -21126,6 +21050,178 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // lite_user saw My Location/Communication/Templates/Automation/Alerts. An
   // unknown or future franchiseRole now fails CLOSED to Profile-only.
   const ownerConfig = franchiseRole === 'owner'
+  // ─── issue 240 step 4 — one template renderer, two tabs ───
+  //
+  // The old Templates tab rendered three collapsible type sections from one
+  // body. Emails now owns the email section and Texts & scripts owns sms +
+  // call, so that body became a function taking the sections it should draw.
+  // Everything inside is the previous code verbatim; only the loop input and
+  // the indentation changed.
+  const TEMPLATE_TYPE_SECTIONS = {
+    email: { type:'email', heading:'Email Templates', sub:'Subject lines and bodies for client emails' },
+    sms:   { type:'sms',   heading:'Text Templates',  sub:'SMS message templates' },
+    call:  { type:'call',  heading:'Call Scripts',    sub:'Phone call talking points' },
+  }
+  function renderTemplateTypeSections(TYPE_SECTIONS) {
+    const masters = templates.filter(t => t.isMaster && t.isActive)
+    const myCustoms = templates.filter(t => t.isOwnCustom && t.isActive)
+    const TYPE_META = {
+      email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
+      sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
+      call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
+    }
+    function renderTplRow(tpl, opts) {
+      const { actions } = opts
+      const tc = TYPE_META[tpl.type] || TYPE_META.email
+      return (
+        <div style={{ background:'white', borderBottom:opts.lastInGroup?'none':'1px solid rgba(0,0,0,0.05)' }}>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
+            <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
+                {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{tpl.tag}</span>}
+              </div>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {tpl.type==='email' && tpl.subject ? tpl.subject : tpl.body.slice(0,60)+'…'}
+              </p>
+            </div>
+            <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
+              {actions}
+            </div>
+          </div>
+        </div>
+      )
+    }
+    // Renders a single rounded card of template rows (no type label — the
+    // parent collapsible section already conveys the type).
+    function renderRowsCard(rows, actionsFn) {
+      if (!rows.length) return null
+      return (
+        <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+          {rows.map((tpl, i)=>(
+            <div key={tpl.dbId || tpl.id}>
+              {renderTplRow(tpl, { lastInGroup: i === rows.length - 1, actions: actionsFn(tpl) })}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    // Tag-based grouping for the masters list: surface Welcome and the 6
+    // Opportunity Stage masters as their own labeled sections so owners
+    // can find them quickly (the generic "Other Templates" bucket holds
+    // legacy t1–t9 / ta-td masters). Rows are mapped to camelCase on
+    // fetch, so the key is `legacyId` — reading `legacy_id` here left
+    // both Gen 2 groups permanently empty and dumped every master into
+    // the Other bucket.
+    const welcomeMasters = masters.filter(t => t.legacyId === 'welcome')
+    const oppStageMasters = masters.filter(t => (t.legacyId || '').startsWith('opp_'))
+    const otherMasters = masters.filter(t =>
+      t.legacyId !== 'welcome' && !(t.legacyId || '').startsWith('opp_'))
+    const masterActions = (tpl) => (
+      <>
+        <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+        <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
+      </>
+    )
+
+    const customActions = (tpl) => (
+      <>
+        <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+        <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+        <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+      </>
+    )
+
+    // Three top-level collapsible sections, one per template type. Each is
+    // closed by default and contains a Master sub-group (corp, read-only)
+    // and a My Templates sub-group (per-location, editable). Mirrors the
+    // Communication tab's "New Lead Emails" collapsible pattern (d3e5ce1).
+    return (
+      <div style={{ padding:'0 12px 32px' }}>
+        {TYPE_SECTIONS.map(({ type, heading, sub })=>{
+          const tc = TYPE_META[type]
+          const typeMasters = masters.filter(t=>t.type===type)
+          const typeCustoms = myCustoms.filter(t=>t.type===type)
+          const count = typeMasters.length + typeCustoms.length
+          const isLocked = type==='sms' && !settings.location.smsEnabled
+          const open = !!tplTypeExpanded[type]
+          const hovered = tplTypeHover===type
+          const wWelcome = welcomeMasters.filter(t=>t.type===type)
+          const wOpp = oppStageMasters.filter(t=>t.type===type)
+          const wOther = otherMasters.filter(t=>t.type===type)
+          return (
+            <div key={type} style={{ marginBottom:'8px' }}>
+              {/* Collapsible header (toggle) */}
+              <div
+                onClick={()=>setTplTypeExpanded(prev=>({ ...prev, [type]:!prev[type] }))}
+                onMouseEnter={()=>setTplTypeHover(type)}
+                onMouseLeave={()=>setTplTypeHover(null)}
+                style={{ padding:'14px', margin:'0 -2px', borderRadius:'10px', cursor:'pointer', background:hovered?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
+              >
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
+                  <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{open?'▼':'▶'}</span>
+                  <p style={{ fontSize:'13px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>{tc.icon} {heading}</p>
+                  {count>0 && <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{count}</span>}
+                  {isLocked && <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
+                </div>
+                <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>{sub} ({count} template{count===1?'':'s'})</p>
+              </div>
+
+              {open && (
+                <div style={{ padding:'4px 2px 10px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
+                  {/* Master Templates sub-group (corp, read-only) */}
+                  {typeMasters.length>0 && (
+                    <>
+                      <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'8px 4px 6px' }}>📚 Master Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· from Bee Organized HQ</span></p>
+                      {wWelcome.length>0 && (
+                        <>
+                          <div style={{ padding:'8px 4px 4px' }}>
+                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
+                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead sequence.</p>
+                          </div>
+                          {renderRowsCard(wWelcome, masterActions)}
+                        </>
+                      )}
+                      {wOpp.length>0 && (
+                        <>
+                          <div style={{ padding:'10px 4px 4px' }}>
+                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
+                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo). The Estimate Sent follow-ups were retired in issue 240 step 3 — Jobber sends its own.</p>
+                          </div>
+                          {renderRowsCard(wOpp, masterActions)}
+                        </>
+                      )}
+                      {wOther.length>0 && (
+                        <>
+                          <div style={{ padding:'10px 4px 4px' }}>
+                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
+                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom sequences.</p>
+                          </div>
+                          {renderRowsCard(wOther, masterActions)}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* My Templates sub-group (per-location, editable) */}
+                  <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'14px 4px 6px' }}>✏️ Your Custom Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· only your location uses these</span></p>
+                  {typeCustoms.length===0 ? (
+                    <div style={{ background:'white', padding:'16px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
+                      <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom {heading.toLowerCase()} yet. Duplicate a master above or create one from scratch.</p>
+                    </div>
+                  ) : renderRowsCard(typeCustoms, customActions)}
+                  <button onClick={()=>setEditingTemplate('new')} style={{ width:'100%', maxWidth:CONTROL_W.action, marginTop:'8px', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
     ...(ownerConfig ? [{ key:'location',  label:'My Location',icon:'📍' }] : []),
@@ -21136,9 +21232,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // Automation and Alerts retired (issue 240 step 1). Automation was a
     // hard-coded explainer describing emails that do not exist; Alerts
     // rendered toggles that were never fetched and never saved.
+    //
+    // Communication + Templates became these three (issue 240 step 4). The
+    // split is by what an owner is trying to do, not by storage: Emails is
+    // everything a client receives, Your team is who it comes from and who
+    // hears about a lead, Texts & scripts is the two channels that do not
+    // send yet. Old keys still resolve — see SETTINGS_RETIRED_SECTIONS.
     ...(ownerConfig ? [
-      { key:'paths',     label:'Communication', icon:'📧' },
-      { key:'templates', label:'Templates',  icon:'📝' },
+      { key:'emails',   label:'Emails',          icon:'📧' },
+      { key:'yourteam', label:'Your team',       icon:'👤' },
+      { key:'texts',    label:'Texts & scripts', icon:'💬' },
     ] : []),
   ]
   // Deep-link / stale-state safety: if activeSection isn't one this role can
@@ -21169,10 +21272,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               Foundation (profile/location/team/billing) and Customer Touch
               (communication/templates/automation/alerts) — separated by a wide
               gap + a solid divider injected at the cluster boundary. */}
-          <div className="bee-tab-pills" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}>
+          {/* Pills are a fixed width and sit left (issue 240 step 4). They
+              used to be flex:1 across a width:100% row, so each one grew with
+              the viewport — six tabs at ~195px each on a wide monitor, which
+              is why the labels carry whiteSpace:nowrap + ellipsis. Capped,
+              they no longer need to defend against either extreme. */}
+          <div className="bee-tab-pills" style={{ display:'flex', alignItems:'flex-end', gap:'2px' }}>
             {sections.map((sec,i)=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', paths:'Communication', templates:'Templates' }
-              const clusterOf = k => ['paths','templates'].includes(k) ? 'customer' : 'foundation'
+              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', emails:'Emails', yourteam:'Your team', texts:'Texts & scripts' }
+              const clusterOf = k => ['emails','yourteam','texts'].includes(k) ? 'customer' : 'foundation'
               const isActive = activeSection===sec.key
               const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
               return (
@@ -21180,7 +21288,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   {showDivider && <div aria-hidden="true" style={{ alignSelf:'center', flex:'0 0 auto', width:'2px', height:'20px', background:'rgba(168,201,196,0.6)', borderRadius:'1px', margin:'0 13px' }} />}
                   <button
                     onClick={()=>{ setActiveSection(sec.key); window.scrollTo(0,0) }}
-                    style={{ flex:1, padding:'7px 2px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent', minWidth:0 }}>
+                    style={{ flex:'0 0 auto', width:CONTROL_W.tab, padding:'7px 8px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent' }}>
                     {sec.icon}<br/><span style={{ fontSize:'10px' }}>{SHORT[sec.key]||sec.label}</span>
                   </button>
                 </React.Fragment>
@@ -21566,17 +21674,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         })()}
 
         {/* ── New lead emails ── */}
-        {activeSection==='paths'&&(()=>{
-          // Communication tab — a COMPOSITION in distinct tiers (hero → medium
-          // → paired → dense list → tiles), each visually sized to its weight.
-          // Element-level sharpness rules: outline icons at whole-pixel sizes,
-          // hairline 0.5px borders, exact small radii (6/8) on controls / 20px
-          // only on true pills, tight padding, flat fills, and soft shadow
-          // reserved for CARD elevation only (never on a button/pill/badge).
-          const SEQUENCES = [
-            { key:'moveDefault',    label:'Moving projects',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
-            { key:'generalDefault', label:'Organizing projects', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
-          ]
+        {/* ── Your team (issue 240 step 4) — moved verbatim from the old
+            Communication tab: the sending identity card, who hears about
+            new leads, and Slack. Nothing here is new; only its address is. */}
+        {activeSection==='yourteam'&&(()=>{
           // Was `verified` and drove a green "Verified sender" badge (issue 240
           // step 1). Nothing verified anything — a non-empty string flipped it,
           // and all 20 active locations showed the tick. Real verification
@@ -21584,14 +21685,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // stays: a blank send-from address genuinely fails sending closed
           // (lib/resend.ts), so that warning is earned.
           const senderAddressSet = !!settings.location.sendFromEmail
-          const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
           return (
           <div style={{ paddingBottom:'12px' }}>
 
-            {/* Page title (Georgia serif per house H1) */}
             <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Communications</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Your sending identity, who's told about new leads, and the follow-up that goes out automatically.</p>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Your team</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who your emails come from, and who hears about a new lead.</p>
             </div>
 
             {/* ── TIER 1 · HERO — email sending identity (the anchor) ──────── */}
@@ -21633,6 +21732,27 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 narrow screens. */}
             <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'10px' }}>
               <SlackCard settings={settings} updateLocation={updateLocation} />
+            </div>
+
+          </div>
+          )
+        })()}
+
+        {/* ── Emails (issue 240 step 4) — the new-lead sequences moved from
+            the old Communication tab, followed by the email half of the old
+            Templates tab. Both verbatim. */}
+        {activeSection==='emails'&&(()=>{
+          const SEQUENCES = [
+            { key:'moveDefault',    label:'Moving projects',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
+            { key:'generalDefault', label:'Organizing projects', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
+          ]
+          const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
+          return (
+          <div style={{ paddingBottom:'12px' }}>
+
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Emails</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>What a client receives automatically, and the templates behind it.</p>
             </div>
 
             {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
@@ -21830,7 +21950,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                             ) : (
                               <button
                                 onClick={()=>setAddingStepToPath(pathId)}
-                                style={{ width:'100%', padding:'8px', background:'transparent', border:'0.5px dashed rgba(168,201,196,0.6)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#4a7a74', fontWeight:600, marginTop:'4px' }}
+                                style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'8px', background:'transparent', border:'0.5px dashed rgba(168,201,196,0.6)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#4a7a74', fontWeight:600, marginTop:'4px' }}
                               >
                                 + Add step
                               </button>
@@ -21851,227 +21971,32 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             )}
             <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Edit a step's wording, tap its delay to change timing, tap the radio to set the default — changes save automatically.</p>
 
-            {/* Client Alerts tier removed (needs product planning before it's
-                built). Automatic follow-up (above) + Templates (below) stay. */}
-
-            {/* ── TILES — template library (lightest; opens a center modal) ─── */}
-            <CommsLabel>Templates</CommsLabel>
-            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
-              {COMMS_TEMPLATE_TILES.map(t=>{
-                const n = templates ? templates.filter(x=>x.type===t.type).length : 0
-                return (
-                  <button key={t.type} onClick={()=>setCommsTemplateType(t.type)}
-                    style={{ padding:'13px 9px', borderRadius:'10px', border:'0.5px solid rgba(26,46,43,0.10)', background:'white', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'7px', textAlign:'center' }}>
-                    <div style={{ width:'30px', height:'30px', borderRadius:'8px', background:t.tint, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      <CommsIcon name={t.icon} size={17} color={t.accent} />
-                    </div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b' }}>{t.label}</p>
-                    <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{n>0 ? `${n} template${n===1?'':'s'}` : t.sub}</p>
-                  </button>
-                )
-              })}
-            </div>
+            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.email])}
 
           </div>
           )
         })()}
 
-        {/* ── Templates ── */}
-        {activeSection==='templates'&&(()=>{
-          // After the templates rework: list contains masters (isMaster=true)
-          // and the caller's own customs (isOwnCustom=true). Owners cannot
-          // edit/delete masters; that lives in the Admin/Corp → Content tab.
-          // is_active=false is the QUARANTINE flag: the 17 Gen 1 prototype
-          // rows (t1–t9, ta1–td2) get flipped dark rather than deleted, so a
-          // step still pointing at one keeps resolving at send time while the
-          // row stops being offerable here. Nothing else uses is_active today,
-          // so this filter is inert until that flip happens.
-          const masters = templates.filter(t => t.isMaster && t.isActive)
-          const myCustoms = templates.filter(t => t.isOwnCustom && t.isActive)
-          const TYPE_META = {
-            email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
-            sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
-            call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
-          }
-          function renderTplRow(tpl, opts) {
-            const { actions } = opts
-            const tc = TYPE_META[tpl.type] || TYPE_META.email
-            return (
-              <div style={{ background:'white', borderBottom:opts.lastInGroup?'none':'1px solid rgba(0,0,0,0.05)' }}>
-                <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
-                  <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
-                      <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
-                      {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{tpl.tag}</span>}
-                    </div>
-                    <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {tpl.type==='email' && tpl.subject ? tpl.subject : tpl.body.slice(0,60)+'…'}
-                    </p>
-                  </div>
-                  <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-                    {actions}
-                  </div>
-                </div>
-              </div>
-            )
-          }
-          // Renders a single rounded card of template rows (no type label — the
-          // parent collapsible section already conveys the type).
-          function renderRowsCard(rows, actionsFn) {
-            if (!rows.length) return null
-            return (
-              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                {rows.map((tpl, i)=>(
-                  <div key={tpl.dbId || tpl.id}>
-                    {renderTplRow(tpl, { lastInGroup: i === rows.length - 1, actions: actionsFn(tpl) })}
-                  </div>
-                ))}
-              </div>
-            )
-          }
+        {/* ── Texts & scripts (issue 240 step 4) — the sms + call halves of
+            the old Templates tab, same renderer as the email half. */}
+        {activeSection==='texts'&&(
+          <div style={{ paddingBottom:'12px' }}>
 
-          // Tag-based grouping for the masters list: surface Welcome and the 6
-          // Opportunity Stage masters as their own labeled sections so owners
-          // can find them quickly (the generic "Other Templates" bucket holds
-          // legacy t1–t9 / ta-td masters). Rows are mapped to camelCase on
-          // fetch, so the key is `legacyId` — reading `legacy_id` here left
-          // both Gen 2 groups permanently empty and dumped every master into
-          // the Other bucket.
-          const welcomeMasters = masters.filter(t => t.legacyId === 'welcome')
-          const oppStageMasters = masters.filter(t => (t.legacyId || '').startsWith('opp_'))
-          const otherMasters = masters.filter(t =>
-            t.legacyId !== 'welcome' && !(t.legacyId || '').startsWith('opp_'))
-          const masterActions = (tpl) => (
-            <>
-              <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-              <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
-            </>
-          )
-
-          const customActions = (tpl) => (
-            <>
-              <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-              <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
-              <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
-            </>
-          )
-
-          // Three top-level collapsible sections, one per template type. Each is
-          // closed by default and contains a Master sub-group (corp, read-only)
-          // and a My Templates sub-group (per-location, editable). Mirrors the
-          // Communication tab's "New Lead Emails" collapsible pattern (d3e5ce1).
-          const TYPE_SECTIONS = [
-            { type:'email', heading:'Email Templates', sub:'Subject lines and bodies for client emails' },
-            { type:'sms',   heading:'Text Templates',  sub:'SMS message templates' },
-            { type:'call',  heading:'Call Scripts',    sub:'Phone call talking points' },
-          ]
-          return (
-            <div style={{ padding:'0 12px 32px' }}>
-              <div style={{ padding:'16px 4px 8px' }}>
-                <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📨 Templates</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Master templates from Bee Organized HQ plus your own customs, grouped by type.</p>
-              </div>
-
-              {TYPE_SECTIONS.map(({ type, heading, sub })=>{
-                const tc = TYPE_META[type]
-                const typeMasters = masters.filter(t=>t.type===type)
-                const typeCustoms = myCustoms.filter(t=>t.type===type)
-                const count = typeMasters.length + typeCustoms.length
-                const isLocked = type==='sms' && !settings.location.smsEnabled
-                const open = !!tplTypeExpanded[type]
-                const hovered = tplTypeHover===type
-                const wWelcome = welcomeMasters.filter(t=>t.type===type)
-                const wOpp = oppStageMasters.filter(t=>t.type===type)
-                const wOther = otherMasters.filter(t=>t.type===type)
-                return (
-                  <div key={type} style={{ marginBottom:'8px' }}>
-                    {/* Collapsible header (toggle) */}
-                    <div
-                      onClick={()=>setTplTypeExpanded(prev=>({ ...prev, [type]:!prev[type] }))}
-                      onMouseEnter={()=>setTplTypeHover(type)}
-                      onMouseLeave={()=>setTplTypeHover(null)}
-                      style={{ padding:'14px', margin:'0 -2px', borderRadius:'10px', cursor:'pointer', background:hovered?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
-                    >
-                      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
-                        <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{open?'▼':'▶'}</span>
-                        <p style={{ fontSize:'13px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>{tc.icon} {heading}</p>
-                        {count>0 && <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{count}</span>}
-                        {isLocked && <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
-                      </div>
-                      <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>{sub} ({count} template{count===1?'':'s'})</p>
-                    </div>
-
-                    {open && (
-                      <div style={{ padding:'4px 2px 10px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
-                        {/* Master Templates sub-group (corp, read-only) */}
-                        {typeMasters.length>0 && (
-                          <>
-                            <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'8px 4px 6px' }}>📚 Master Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· from Bee Organized HQ</span></p>
-                            {wWelcome.length>0 && (
-                              <>
-                                <div style={{ padding:'8px 4px 4px' }}>
-                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead sequence.</p>
-                                </div>
-                                {renderRowsCard(wWelcome, masterActions)}
-                              </>
-                            )}
-                            {wOpp.length>0 && (
-                              <>
-                                <div style={{ padding:'10px 4px 4px' }}>
-                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo; Estimate Sent 3d + 30d for both project types).</p>
-                                </div>
-                                {renderRowsCard(wOpp, masterActions)}
-                              </>
-                            )}
-                            {wOther.length>0 && (
-                              <>
-                                <div style={{ padding:'10px 4px 4px' }}>
-                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom sequences.</p>
-                                </div>
-                                {renderRowsCard(wOther, masterActions)}
-                              </>
-                            )}
-                          </>
-                        )}
-
-                        {/* My Templates sub-group (per-location, editable) */}
-                        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'14px 4px 6px' }}>✏️ Your Custom Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· only your location uses these</span></p>
-                        {typeCustoms.length===0 ? (
-                          <div style={{ background:'white', padding:'16px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
-                            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom {heading.toLowerCase()} yet. Duplicate a master above or create one from scratch.</p>
-                          </div>
-                        ) : renderRowsCard(typeCustoms, customActions)}
-                        <button onClick={()=>setEditingTemplate('new')} style={{ width:'100%', marginTop:'8px', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Texts &amp; scripts</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Text messaging needs the add-on. Call scripts are notes for you.</p>
             </div>
-          )
-        })()}
+
+            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.sms, TEMPLATE_TYPE_SECTIONS.call])}
+
+          </div>
+        )}
 
         </>)}
 
       </div>
 
       {/* Template editor popup */}
-      {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
-      {/* Communications tab — Templates tile center modal (no off-tab redirect). */}
-      {commsTemplateType&&(
-        <CommsTemplatesModal
-          type={commsTemplateType}
-          templates={templates}
-          settings={settings}
-          onPreview={(tpl)=>setPreviewTemplate(tpl)}
-          onOpenEditor={()=>{ setCommsTemplateType(null); setActiveSection('templates'); window.scrollTo(0,0) }}
-          onClose={()=>setCommsTemplateType(null)}
-        />
-      )}
       {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
       <TemplateQuickPeekModal template={peekTemplate} settings={settings} onClose={()=>setPeekTemplate(null)} />
       {editingTemplate&&(

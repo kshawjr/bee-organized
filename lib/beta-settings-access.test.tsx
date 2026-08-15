@@ -80,7 +80,11 @@ const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
 // toggles that were never fetched and never saved. Neither left an alias: a
 // deep link to either now falls through sectionAllowed to the no-access
 // notice, which is the honest outcome for a section that no longer exists.
-const ALL_SECTIONS = ['profile', 'location', 'team', 'paths', 'templates']
+// 'paths' and 'templates' became 'emails' / 'yourteam' / 'texts' (issue 240
+// step 4). Unlike automation/notifs these did NOT go away — they were split by
+// what an owner is doing, so both old keys stay live as deep-link aliases and
+// are pinned in lib/beta-comms-tabs-240.test.tsx.
+const ALL_SECTIONS = ['profile', 'location', 'team', 'emails', 'yourteam', 'texts']
 
 describe('SettingsScreen sections by franchiseRole', () => {
   it("owner sees the full section list (and elevated mounts pass franchiseRole='owner', so this also covers admin/super_admin)", async () => {
