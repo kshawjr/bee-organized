@@ -79,58 +79,90 @@ const mount = async (initialSection: string) => {
   return bodyText()
 }
 
-// Text of the section BODY only. Every tab label also appears in the header
-// strip and the mobile <select>, so asserting on container.textContent would
-// pass for "Texts & scripts" while showing the Emails body.
+// Text of the section BODY only. Every section label also appears in the two
+// navs, so asserting on container.textContent would pass for "Texts and
+// scripts" while showing the Emails body. (Both navs are stripped: happy-dom
+// does not load globals.css, so the media queries that hide one of them at any
+// given width are not in play here and BOTH are in the DOM.)
 const bodyText = () => {
   const clone = container.cloneNode(true) as HTMLElement
-  clone.querySelectorAll('.bee-tab-pills, .bee-tab-select, h1').forEach(n => n.remove())
+  clone.querySelectorAll('[data-settings-nav], h1').forEach(n => n.remove())
   return clone.textContent ?? ''
 }
 
 const sectionKeys = (): string[] => {
-  const select = container.querySelector('select[aria-label="Settings section"]')
-  return Array.from(select!.querySelectorAll('option')).map(o => (o as HTMLOptionElement).value)
+  const rail = container.querySelector('[data-settings-nav="rail"]')
+  return Array.from(rail!.querySelectorAll('[data-section]')).map(b => b.getAttribute('data-section')!)
 }
 
 const NO_ACCESS = "You don't have access to this section"
 
-describe('the three tabs exist and render', () => {
-  it('an owner is offered emails, yourteam and texts', async () => {
+describe('the sections exist and render', () => {
+  it('an owner is offered emails and texts; yourteam is no longer a section', async () => {
     await mount('profile')
     const keys = sectionKeys()
     expect(keys).toContain('emails')
-    expect(keys).toContain('yourteam')
     expect(keys).toContain('texts')
-    // The two they replaced are gone from the strip (they survive only as
+    // The two they replaced are gone from the nav (they survive only as
     // deep-link aliases, asserted below).
     expect(keys).not.toContain('paths')
     expect(keys).not.toContain('templates')
+    // issue 246 step 1 — Your team split three ways and stopped existing. It
+    // joins paths/templates as an alias, pinned below.
+    expect(keys).not.toContain('yourteam')
   })
 
-  it('each tab renders its own body, not a blank frame', async () => {
+  it('each section renders its own body, not a blank frame', async () => {
     // The subtitle, not the <h1> — bodyText() strips headings precisely
-    // because every tab name also appears in the nav strip.
-    expect(await mount('emails')).toContain('What a client receives automatically')
-    expect(await mount('yourteam')).toContain('Who your emails come from')
+    // because every section name also appears in the nav.
+    // Lower-cased mid-sentence since issue 246 step 1: the subtitle now leads
+    // with "Who your emails come from", because the sending identity moved in.
+    expect(await mount('emails')).toContain('what a client receives automatically')
     expect(await mount('texts')).toContain('Texts are on their way')
+    // The three addresses Your team's contents moved to (issue 246 step 1).
+    expect(await mount('newleads')).toContain('Who hears about a new lead')
+    expect(await mount('slack')).toContain('New leads also post to your Slack channel')
+    expect(await mount('jobber')).toContain('the client import that runs from it')
   })
 
-  it('no tab lands on the no-access guard', async () => {
-    for (const key of ['emails', 'yourteam', 'texts']) {
+  it('no section lands on the no-access guard', async () => {
+    for (const key of ['emails', 'texts', 'newleads', 'slack', 'jobber', 'mailchimp', 'location', 'team', 'profile']) {
       expect(await mount(key), `section='${key}'`).not.toContain(NO_ACCESS)
     }
   })
 })
 
 describe('nothing that worked before is unreachable', () => {
-  it('Your team still carries sending identity, recipients and Slack', async () => {
-    const text = await mount('yourteam')
+  // issue 246 step 1 — Your team's three halves, each pinned at its new
+  // address. This is the whole risk of the step: JSX moved by line range, and
+  // a block that lands nowhere is invisible to lint and to the type checker.
+  it('the sending identity landed on Emails, whole', async () => {
+    const text = await mount('emails')
     expect(text).toContain('Sending identity')
     expect(text).toContain('Send From Name')
+    expect(text).toContain('Send From Email')
     expect(text).toContain('Reply-To Email')
+  })
+
+  it('the routing table and the notification recipients landed on New leads', async () => {
+    const text = await mount('newleads')
+    expect(text).toContain('Every kind of job')
     expect(text).toContain('Who hears about new leads')
-    expect(text).toContain('Slack notifications')
+  })
+
+  it('SlackCard landed on Connections › Slack', async () => {
+    // SlackCard's own copy, so this fails if only the heading moved.
+    expect(await mount('slack')).toContain('Slack')
+    expect(await mount('slack')).not.toContain(NO_ACCESS)
+  })
+
+  it('JobberCard landed on Connections › Jobber, and left Location', async () => {
+    expect(await mount('jobber')).toContain('Jobber')
+    // Location kept everything else and lost only this.
+    const loc = await mount('location')
+    expect(loc).toContain('Location Name')
+    expect(loc).toContain('Assessment Default')   // still here, still honest
+    expect(loc).not.toContain('Integrations')
   })
 
   it('Emails still carries both project-type sequences', async () => {
@@ -182,6 +214,16 @@ describe('deep links to the old sections still resolve', () => {
     expect(await mount('billing')).not.toContain(NO_ACCESS)
   })
 
+  it('?section=yourteam lands on New leads — the larger of the three halves', async () => {
+    // issue 246 step 1. Your team split into Emails (sending identity),
+    // New leads (routing + recipients) and Slack. A deep link picks one, and
+    // it picks where the bulk went AND where the section's stated job went:
+    // "who hears about a new lead".
+    const text = await mount('yourteam')
+    expect(text).not.toContain(NO_ACCESS)
+    expect(text).toContain('Who hears about new leads')
+  })
+
   it('the step-1 retirements still hit the guard — deleted is not moved', async () => {
     // automation and notifs were removed outright, so they get the honest
     // "this section is gone" treatment rather than a silent redirect.
@@ -193,21 +235,14 @@ describe('deep links to the old sections still resolve', () => {
 describe('controls do not stretch', () => {
   const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
 
-  it('the tab pills are a fixed width, not flex:1 across a full-width row', async () => {
+  it('the rail is a fixed width and does not grow with the viewport', async () => {
+    // issue 246 step 1 — the pill row became a rail; the cap moved with it
+    // (CONTROL_W.tab → CONTROL_W.rail) and does the same job.
     await mount('emails')
-    const pills = container.querySelectorAll('.bee-tab-pills button')
-    expect(pills.length).toBeGreaterThan(0)
-    for (const p of Array.from(pills)) {
-      const style = (p as HTMLElement).style
-      expect(style.width, 'each pill carries an explicit width').toBeTruthy()
-      expect(style.flexGrow, 'no pill grows with the container').not.toBe('1')
-    }
-  })
-
-  it('the pill row itself no longer forces width:100%', () => {
-    // Pinned at source: the row is laid out by the style object, and jsdom
-    // reports the computed row width as 0 in a detached container.
-    expect(beehub).not.toContain("className=\"bee-tab-pills\" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}")
+    const rail = container.querySelector('[data-settings-nav="rail"]') as HTMLElement
+    expect(rail, 'the settings rail').toBeTruthy()
+    expect(rail.style.width, 'the rail carries an explicit width').toBeTruthy()
+    expect(rail.style.flexGrow, 'the rail does not grow with the container').not.toBe('1')
   })
 
   it('CONTROL_W exists and every cap it defines is a fixed px value', () => {

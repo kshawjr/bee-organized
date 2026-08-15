@@ -359,9 +359,10 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     // keeps the tab behind the allowlist const.
     //
     // NewLeadNotifications moved from Communication to 'Your team' in issue
-    // 240 step 4. The allowlist is what matters here, not the label, so pin
-    // the tab this component actually lives on now.
-    expect(beehub).toContain("label:'Your team'")
+    // 240 step 4, and from there to Notifications › New leads in issue 246
+    // step 1 (Your team split three ways and stopped existing). The allowlist
+    // is what matters here, not the label, so pin the section it lives on now.
+    expect(beehub).toContain("label:'New leads'")
     expect(beehub).toContain("const ownerConfig = franchiseRole === 'owner'")
   })
   it('the placeholder card is gone (no competing notifications UI)', () => {

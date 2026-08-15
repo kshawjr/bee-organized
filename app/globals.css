@@ -7,6 +7,17 @@ select{-webkit-appearance:none}
 ::-webkit-scrollbar-thumb{background:rgba(168,201,196,0.3);border-radius:2px}
 @media(min-width:768px){.bee-mobile-topbar{display:none!important}.bee-sidebar{display:flex!important}.bee-main{margin-left:220px!important}.bee-loc-banner{left:220px!important}.mobile-fab{display:none!important}.desktop-only{display:inline-flex!important}.bee-tab-pills{display:flex!important}.bee-tab-select{display:none!important}}
 @media(max-width:767px){.bee-sidebar{display:none!important}.bee-mobile-topbar{display:flex!important}.bee-main{margin-left:0!important}.bee-loc-banner{left:0!important}.desktop-only{display:none!important}.mobile-fab{display:flex!important}.bee-tab-pills{display:none!important}.bee-tab-select{display:block!important}}
+/* Settings section nav (issue 246 step 1) — one grouped list, two shapes.
+ * ≥768px: a left rail beside the section, both always on screen.
+ * <768px: a drill-down. The list and the section are the SAME two elements;
+ * which one is showing is decided by .bee-settings-hide-mobile, which the
+ * component toggles. Keeping the swap in CSS (not in a JS width check) is why
+ * the desktop layout cannot be broken by the drill state — at ≥768px the
+ * hide class has no rule at all, so the pane is always visible there.
+ * .bee-settings-hide-mobile MUST stay last in the max-width block: it has the
+ * same specificity as the two rules it overrides, so source order decides. */
+@media(min-width:768px){.bee-settings-rail{display:block!important}.bee-settings-drill{display:none!important}.bee-settings-back{display:none!important}}
+@media(max-width:767px){.bee-settings-rail{display:none!important}.bee-settings-drill{display:block!important}.bee-settings-back{display:flex!important}.bee-settings-hide-mobile{display:none!important}}
 /* bee-tip — hover/tap tooltip system
  * Used by PersonPanel icon row + scattered chip tooltips throughout the app.
  * Was lost in the .js → .jsx migration; restored 5/19.

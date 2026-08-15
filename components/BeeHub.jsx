@@ -19111,6 +19111,42 @@ export function TextsComingSoon() {
   )
 }
 
+// ─── Connections › Mailchimp — not connected (issue 246 step 1) ───────────────
+// The TextsComingSoon pattern, deliberately NOT the Assessment Default pattern.
+// Assessment Default shows the real control greyed out, which is honest for a
+// control that will one day work as drawn. There is no Mailchimp control to
+// grey out — there is no integration, no OAuth flow, no API client, no route,
+// no column, no env var — so drawing one and disabling it would invent a
+// product. This card reads nothing and writes nothing.
+//
+// NO BUTTON, not even a disabled one: a disabled button invites a click and
+// then answers with silence. There is no focusable element here at all, and
+// the preview is aria-hidden because it is a picture of a thing, not content
+// to act on.
+export function MailchimpNotConnected() {
+  return (
+    <div style={{ margin:'14px 12px 18px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'0 2px 6px', flexWrap:'wrap' }}>
+        <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>📬 Mailchimp</p>
+        <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.2)', padding:'2px 9px', borderRadius:'20px', whiteSpace:'nowrap' }}>Not connected</span>
+      </div>
+      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, margin:'0 2px 9px', maxWidth:'560px' }}>
+        Not connected yet. When it&apos;s ready, you&apos;ll be able to send clients to Mailchimp with their tags for your marketing lists.
+      </p>
+      {/* aria-hidden: a picture of a list, not content to act on. */}
+      <div aria-hidden="true" style={{ borderRadius:'12px', background:'white', boxShadow:'0 1px 4px rgba(26,46,43,0.07)', padding:'14px 16px', opacity:0.55, filter:'saturate(0.4)', maxWidth:'560px' }}>
+        <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'7px' }}>Audience</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6 }}>Bee Organized clients</p>
+        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginTop:'9px' }}>
+          {['organizing','moving','completed'].map(t=>(
+            <span key={t} style={{ fontSize:'11px', color:'#6b7c79', background:'#f7f5f0', border:'1px solid rgba(26,46,43,0.08)', padding:'2px 9px', borderRadius:'20px' }}>{t}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function TeamRouting({ realLocId, readOnly = false }) {
   const [types, setTypes] = React.useState(null)      // [{label, dripCategory}]
   const [senders, setSenders] = React.useState(null)
@@ -21073,7 +21109,11 @@ const CONTROL_W = {
   field:  '360px',   // text / email inputs
   select: '260px',   // dropdowns
   action: '220px',   // buttons that start something
-  tab:    '132px',   // one nav pill
+  // issue 246 step 1 — the horizontal pill row became a left rail, so `tab`
+  // (one pill) became `rail` (the whole nav). The cap still does the same job
+  // it did in 240 step 4: the nav is a fixed width and sits left, rather than
+  // growing with the viewport.
+  rail:   '196px',   // the settings section rail
 }
 
 export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
@@ -21311,11 +21351,98 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   //   billing   → team      the Billing section merged into Team & Billing
   //   paths     → emails    the new-lead sequences are the bulk of that tab
   //   templates → emails    the email templates are the bulk of that tab
+  //   yourteam  → newleads  see below
   // 'paths' and 'templates' both also fed Your team and Texts & scripts, but
   // a deep link has to pick one destination, so it picks the larger half.
-  const SETTINGS_RETIRED_SECTIONS = { billing:'team', paths:'emails', templates:'emails' }
+  //
+  // 'yourteam' (issue 246 step 1) split THREE ways and the same rule applies.
+  // It lands on New leads because that is where the larger half went AND where
+  // the section's own stated job went: its subtitle was "Who your emails come
+  // from, and who hears about a new lead", and two of the three things it held
+  // — the routing table that led the screen, and the notification recipients —
+  // are the "who hears" half. The sending identity is three rows on Emails;
+  // Slack is one card. Someone arriving on an old 'yourteam' link is far more
+  // likely to be after routing than after a Reply-To address.
+  const SETTINGS_RETIRED_SECTIONS = { billing:'team', paths:'emails', templates:'emails', yourteam:'newleads' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
+  // MOBILE ONLY (issue 246 step 1): false = the grouped section list, true =
+  // one section with a back control. Desktop shows the rail and the section
+  // side by side and ignores this entirely — the media queries in globals.css
+  // decide which of the two navs is on screen, not JS.
+  const [mobileDrilled, setMobileDrilled] = useState(false)
+
+  // ─── URL ↔ SECTION (issue 246 step 1) ───
+  //
+  // ?section= is READ here for the first time. The comment above says old keys
+  // "keep arriving from ?section= deep links, bookmarks, and callers" — the
+  // last of those three was true and the first two were not: nothing in the
+  // app ever read the query string, initialSection was a prop, and the only
+  // production caller (App, activeNav==='settings') passes none. So a
+  // bookmarked ?section= landed on Profile no matter what it said.
+  //
+  // The mobile drill-down forces the issue: a back control that is not real
+  // navigation traps a phone user inside Settings, and real navigation needs a
+  // history entry, which needs a URL. One mechanism now serves both.
+  //
+  // push vs replace is the whole design:
+  //   mobile row tap → pushState    · back returns to the LIST
+  //   desktop rail   → replaceState · back leaves Settings, exactly as today
+  const sectionHref = key => `${window.location.pathname}?section=${encodeURIComponent(key)}`
+  function openSection(key, { push }) {
+    setActiveSection(key)
+    setMobileDrilled(true)
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, 0)
+      const s = { beeSettingsSection: key }
+      if (push) window.history.pushState(s, '', sectionHref(key))
+      else      window.history.replaceState(s, '', sectionHref(key))
+    }
+  }
+  // Real navigation, not a state flip — so the hardware/browser back gesture
+  // and this button are literally the same action. The mount effect below
+  // guarantees a list entry sits beneath the section entry even on a cold deep
+  // link, so this can never walk the user out of the app.
+  function backToSectionList() {
+    if (typeof window !== 'undefined') window.history.back()
+  }
+  useEffect(() => {
+    // An explicit initialSection prop is a caller's decision and outranks the
+    // URL (isPastDue forces 'profile', and the test mounts pass it directly).
+    if (initialSection || typeof window === 'undefined') return
+    const raw = new URLSearchParams(window.location.search).get('section')
+    if (!raw) return
+    const key = resolveSettingsSection(raw)
+    setActiveSection(key)
+    setMobileDrilled(true)
+    const base = window.location.pathname
+    const narrow = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches
+    if (narrow) {
+      // Synthesize the list entry UNDER the section so back has a floor. Only
+      // where a list exists: on desktop this would be a phantom entry between
+      // the section and wherever the user actually came from.
+      window.history.replaceState({ beeSettingsSection: null }, '', base)
+      window.history.pushState({ beeSettingsSection: key }, '', sectionHref(key))
+    } else {
+      // Normalize a retired key in place (?section=paths → ?section=emails).
+      window.history.replaceState({ beeSettingsSection: key }, '', sectionHref(key))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    // The URL is the truth for drill state: ?section= present = drilled in,
+    // absent = the list. App's own popstate handler runs too and re-derives
+    // activeNav from the PATHNAME, which we never change — so the two agree.
+    function onPop() {
+      const raw = new URLSearchParams(window.location.search).get('section')
+      if (raw) { setActiveSection(resolveSettingsSection(raw)); setMobileDrilled(true) }
+      else setMobileDrilled(false)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Billing footer (seat pool / history / plans) inside Team & Billing —
   // collapsed by default so the roster stays the hero; a billing deep-link
   // opens it. Lifted here because the section renders via an IIFE.
@@ -22433,28 +22560,54 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     )
   }
 
-  const sections = [
-    { key:'profile',   label:'Profile',    icon:'👤' },
-    ...(ownerConfig ? [{ key:'location',  label:'My Location',icon:'📍' }] : []),
-    // Team & Billing merged (2026-07): seats are the billable half of the
-    // roster, so one section owns both. canViewBilling still gates the
-    // billing footer inside it; 'billing' survives as a deep-link alias.
-    ...(canManageTeam ? [{ key:'team', label:'Team & Billing', icon:'👥' }] : []),
-    // Automation and Alerts retired (issue 240 step 1). Automation was a
-    // hard-coded explainer describing emails that do not exist; Alerts
-    // rendered toggles that were never fetched and never saved.
-    //
-    // Communication + Templates became these three (issue 240 step 4). The
-    // split is by what an owner is trying to do, not by storage: Emails is
-    // everything a client receives, Your team is who it comes from and who
-    // hears about a lead, Texts & scripts is the two channels that do not
-    // send yet. Old keys still resolve — see SETTINGS_RETIRED_SECTIONS.
-    ...(ownerConfig ? [
-      { key:'emails',   label:'Emails',          icon:'📧' },
-      { key:'yourteam', label:'Your team',       icon:'👤' },
-      { key:'texts',    label:'Texts & scripts', icon:'💬' },
-    ] : []),
-  ]
+  // ─── THE SIDEBAR (issue 246 step 1) ───
+  //
+  // Six horizontal tabs became a grouped rail. The sections did not change;
+  // three of them changed address:
+  //   · Your team split three ways and stopped existing — sending identity to
+  //     Emails, the routing table + notification recipients to New leads,
+  //     SlackCard to Connections.
+  //   · Jobber left Location, where it sat under an "Integrations" header.
+  //
+  // Team & Billing merged (2026-07): seats are the billable half of the
+  // roster, so one section owns both. canViewBilling still gates the billing
+  // footer inside it; 'billing' survives as a deep-link alias.
+  //
+  // Automation and Alerts retired (issue 240 step 1). Automation was a
+  // hard-coded explainer describing emails that do not exist; Alerts rendered
+  // toggles that were never fetched and never saved.
+  //
+  // ROLE GATING IS UNCHANGED — the same `ownerConfig` / `canManageTeam`
+  // predicates the flat list used, applied per item. What is new is the last
+  // line: a group whose items are ALL hidden for this role is dropped whole,
+  // so a manager never sees a "Connections" header standing over nothing.
+  const SECTION_GROUPS = [
+    { title:'You', items:[
+      { key:'profile', label:'Profile', icon:'👤' },
+    ]},
+    { title:'Your business', items:[
+      // ONE name. This section answered to 'Location' on the desktop pill and
+      // 'My Location' in the mobile select — the same surface with two names
+      // depending on the width of your screen.
+      ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
+      ...(canManageTeam ? [{ key:'team',     label:'Team and seats', icon:'👥' }] : []),
+    ]},
+    { title:'Client messages', items: ownerConfig ? [
+      { key:'emails', label:'Emails',            icon:'📧' },
+      { key:'texts',  label:'Texts and scripts', icon:'💬' },
+    ] : []},
+    { title:'Notifications', items: ownerConfig ? [
+      { key:'newleads', label:'New leads', icon:'🔔' },
+    ] : []},
+    { title:'Connections', items: ownerConfig ? [
+      { key:'slack',  label:'Slack',  icon:'#️⃣' },
+      { key:'jobber', label:'Jobber', icon:'🔗' },
+      // Muted, and the row still SELECTS — what it opens is an honest "not
+      // connected" card with nothing to press. See MailchimpNotConnected.
+      { key:'mailchimp', label:'Mailchimp', icon:'📬', muted:true },
+    ] : []},
+  ].filter(g => g.items.length > 0)
+  const sections = SECTION_GROUPS.flatMap(g => g.items)
   // Deep-link / stale-state safety: if activeSection isn't one this role can
   // see (e.g. manager hits ?section=billing), show a polite no-access notice
   // instead of leaking the hidden section's UI.
@@ -22464,50 +22617,90 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem', width:'100%', position:'relative' }}>
 
       {/* Header */}
-      <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
-        <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'1rem' }}>Settings ⚙️</h1>
-        {/* Section tabs — native <select> on mobile (<768px) so labels never
-            truncate mid-word; equal-width pill row at ≥768px. */}
-        <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
-          <select
-            className="bee-tab-select"
-            aria-label="Settings section"
-            value={activeSection}
-            onChange={e=>{ setActiveSection(e.target.value); window.scrollTo(0,0) }}
-            style={{ width:'100%', padding:'12px 38px 12px 14px', marginBottom:'12px', borderRadius:'10px', border:'1px solid rgba(168,201,196,0.4)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontWeight:600, cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 14px center' }}>
-            {sections.map(sec=>(
-              <option key={sec.key} value={sec.key}>{sec.icon} {sec.label}</option>
-            ))}
-          </select>
-          {/* Desktop pill row. Tabs visually group into 2 clusters —
-              Foundation (profile/location/team/billing) and Customer Touch
-              (communication/templates/automation/alerts) — separated by a wide
-              gap + a solid divider injected at the cluster boundary. */}
-          {/* Pills are a fixed width and sit left (issue 240 step 4). They
-              used to be flex:1 across a width:100% row, so each one grew with
-              the viewport — six tabs at ~195px each on a wide monitor, which
-              is why the labels carry whiteSpace:nowrap + ellipsis. Capped,
-              they no longer need to defend against either extreme. */}
-          <div className="bee-tab-pills" style={{ display:'flex', alignItems:'flex-end', gap:'2px' }}>
-            {sections.map((sec,i)=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', emails:'Emails', yourteam:'Your team', texts:'Texts & scripts' }
-              const clusterOf = k => ['emails','yourteam','texts'].includes(k) ? 'customer' : 'foundation'
-              const isActive = activeSection===sec.key
-              const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
-              return (
-                <React.Fragment key={sec.key}>
-                  {showDivider && <div aria-hidden="true" style={{ alignSelf:'center', flex:'0 0 auto', width:'2px', height:'20px', background:'rgba(168,201,196,0.6)', borderRadius:'1px', margin:'0 13px' }} />}
-                  <button
-                    onClick={()=>{ setActiveSection(sec.key); window.scrollTo(0,0) }}
-                    style={{ flex:'0 0 auto', width:CONTROL_W.tab, padding:'7px 8px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent' }}>
-                    {sec.icon}<br/><span style={{ fontSize:'10px' }}>{SHORT[sec.key]||sec.label}</span>
-                  </button>
-                </React.Fragment>
-              )
-            })}
-          </div>
-        </div>
+      <div style={{ background:'#1a2e2b', padding:'1.25rem' }}>
+        <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', margin:0 }}>Settings ⚙️</h1>
       </div>
+
+      <div style={{ display:'flex', alignItems:'flex-start' }}>
+
+        {/* ── The rail (≥768px) ──────────────────────────────────────────
+            Fixed width and sitting left, like every other control since 240
+            step 4 — it does not stretch with the viewport. */}
+        <nav
+          className="bee-settings-rail"
+          data-settings-nav="rail"
+          aria-label="Settings sections"
+          style={{ flex:`0 0 ${CONTROL_W.rail}`, width:CONTROL_W.rail, padding:'18px 8px 32px 12px', borderRight:'1px solid rgba(26,46,43,0.08)', alignSelf:'stretch' }}>
+          {SECTION_GROUPS.map(group=>(
+            <div key={group.title} style={{ marginBottom:'15px' }}>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.7px', padding:'0 8px 5px' }}>{group.title}</p>
+              {group.items.map(sec=>{
+                const isActive = activeSection===sec.key
+                return (
+                  <button
+                    key={sec.key}
+                    type="button"
+                    data-section={sec.key}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={()=>openSection(sec.key, { push:false })}
+                    style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'7px 8px', marginBottom:'1px', borderRadius:'8px', border:'none', background:isActive?'#1a2e2b':'transparent', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
+                    <span aria-hidden="true" style={{ fontSize:'13px', flexShrink:0, opacity:sec.muted?0.5:1 }}>{sec.icon}</span>
+                    <span style={{ fontSize:'12.5px', fontWeight:isActive?600:500, color:isActive?'white':(sec.muted?'#a9b8b5':'#4a5e5a') }}>{sec.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div style={{ flex:'1 1 auto', minWidth:0 }}>
+
+        {/* ── The drill-down list (<768px) ────────────────────────────────
+            Replaces the native <select>, which worked, so this has to clear
+            the same bar rather than merely look newer: same grouping, 16px
+            labels, and rows at least as tall as the select's tap target.
+            Tapping a row is a pushState — see openSection. */}
+        <nav
+          className={`bee-settings-drill${mobileDrilled ? ' bee-settings-hide-mobile' : ''}`}
+          data-settings-nav="drill"
+          aria-label="Settings sections"
+          style={{ padding:'14px 12px 24px' }}>
+          {SECTION_GROUPS.map(group=>(
+            <div key={group.title} style={{ marginBottom:'16px' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.7px', margin:'0 4px 7px' }}>{group.title}</p>
+              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+                {group.items.map((sec,i)=>(
+                  <button
+                    key={sec.key}
+                    type="button"
+                    data-section={sec.key}
+                    onClick={()=>openSection(sec.key, { push:true })}
+                    style={{ display:'flex', alignItems:'center', gap:'11px', width:'100%', minHeight:'52px', padding:'14px 16px', background:'white', border:'none', borderBottom: i<group.items.length-1 ? '1px solid rgba(0,0,0,0.05)' : 'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
+                    <span aria-hidden="true" style={{ fontSize:'18px', flexShrink:0, opacity:sec.muted?0.5:1 }}>{sec.icon}</span>
+                    <span style={{ fontSize:'16px', fontWeight:500, color:sec.muted?'#a9b8b5':'#1a2e2b' }}>{sec.label}</span>
+                    <span aria-hidden="true" style={{ marginLeft:'auto', fontSize:'16px', color:'#c8d8d4' }}>›</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        <div className={mobileDrilled ? undefined : 'bee-settings-hide-mobile'}>
+
+        {/* Back to the list. history.back(), NOT a state flip — so the
+            hardware/browser back gesture is the same action as this button
+            and returns to the list rather than out of Settings. Display is
+            owned by the media queries (none at ≥768px, where the rail is
+            already on screen), so no `display` here. */}
+        <button
+          type="button"
+          className="bee-settings-back"
+          onClick={backToSectionList}
+          style={{ alignItems:'center', gap:'5px', width:'100%', minHeight:'48px', padding:'13px 16px', background:'transparent', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
+          <span aria-hidden="true" style={{ fontSize:'17px', color:'#1a2e2b' }}>‹</span>
+          <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>All settings</span>
+        </button>
 
       <div style={{ display:'grid', gap:'0' }}>
 
@@ -22516,7 +22709,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             <div style={{ fontSize:'40px', marginBottom:'12px' }}>🔒</div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>You don't have access to this section</p>
             <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5, maxWidth:'320px', margin:'0 auto 18px' }}>This part of Settings is managed by your franchise owner. You can still update your own profile.</p>
-            <button onClick={()=>{ setActiveSection('profile'); window.scrollTo(0,0) }} style={{ padding:'12px 24px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Go to Profile</button>
+            <button onClick={()=>openSection('profile', { push:false })} style={{ padding:'12px 24px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Go to Profile</button>
           </div>
         ) : (<>
 
@@ -22652,15 +22845,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               </div>
             </div>
 
-            {/* New-lead emails (notifications + sending identity) moved to the
-                Communication tab (activeSection==='paths'). See the composed
-                layout there. */}
-
-            <SectionHeader title="Integrations" />
-            {/* One unified Jobber card: connection status + import next-step in a
-                single plain-language card, driven by deriveJobberStatus +
-                jobber_initial_import_completed_at + the live import phase. */}
-            <JobberCard settings={settings} updateLocation={updateLocation} />
+            {/* Not here, and each moved for a different reason:
+                  the sending identity → Emails (issue 246 step 1)
+                  who hears about a new lead → Notifications › New leads
+                  Jobber → Connections › Jobber; it was the sole occupant of
+                    an "Integrations" header on this section, which is the
+                    definition of a thing filed under the wrong heading. */}
 
           </>
         )}
@@ -22906,11 +23096,105 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           )
         })()}
 
-        {/* ── New lead emails ── */}
-        {/* ── Your team (issue 240 step 4) — moved verbatim from the old
-            Communication tab: the sending identity card, who hears about
-            new leads, and Slack. Nothing here is new; only its address is. */}
-        {activeSection==='yourteam'&&(()=>{
+        {/* ── Notifications › New leads (issue 246 step 1) ────────────────
+            The larger two thirds of the old Your team tab, moved with the JSX
+            unchanged: the routing table and the notification recipients. What
+            left it went to Emails (sending identity) and Connections (Slack).
+
+            Step 2 REBUILDS this section. Everything here still writes exactly
+            what it wrote on the Your team tab, including what is inert at most
+            locations — the "also told: N others" count, the derived-default
+            dropdown and the split flag are step 2's, deliberately not this
+            step's. Rehousing and rebuilding in one commit is how you lose the
+            ability to tell which of the two broke something. */}
+        {activeSection==='newleads'&&(
+          <div style={{ paddingBottom:'12px' }}>
+
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>New leads</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who hears about a new lead, and which kinds of job reach them.</p>
+            </div>
+
+            {/* ── issue 240 step 5 — the routing table leads the screen ─────
+                A row per job type the website form offers. The cards below it
+                are unchanged and still own everything this table does not:
+                the master toggles, adding an outside email, unsubscribing,
+                and assigning one sender to several types at once. */}
+            <CommsLabel>Every kind of job</CommsLabel>
+            <TeamRouting realLocId={realLocId} readOnly={false} />
+
+            {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
+            <CommsLabel>Who hears about new leads</CommsLabel>
+            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
+
+          </div>
+        )}
+
+        {/* ── Connections › Slack (issue 246 step 1) ──────────────────────
+            One card, moved out of Your team with its wrapper intact. Slack is
+            a connection to another product, which is a different kind of thing
+            from "who on my team hears about a lead" — it was filed under the
+            latter because that is where new-lead notifications lived. */}
+        {activeSection==='slack'&&(
+          <div style={{ paddingBottom:'12px' }}>
+
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Slack</h1>
+              {/* Slack notifications — additive to the New leads emails. New
+                  leads ALSO post to the location's Slack channel once the app
+                  is installed. */}
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the emails on New leads.</p>
+            </div>
+
+            {/* Half-width: sits at ~half on the wider settings column (auto-fill
+                keeps the empty companion track) and reflows to full-width on
+                narrow screens. */}
+            <div style={{ margin:'14px 12px 0', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'10px' }}>
+              <SlackCard settings={settings} updateLocation={updateLocation} />
+            </div>
+
+          </div>
+        )}
+
+        {/* ── Connections › Jobber (issue 246 step 1) ─────────────────────
+            Moved out of Location, where it was the only thing under an
+            "Integrations" header. */}
+        {activeSection==='jobber'&&(
+          <div style={{ paddingBottom:'12px' }}>
+
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Jobber</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Your Jobber account, and the client import that runs from it.</p>
+            </div>
+
+            {/* One unified Jobber card: connection status + import next-step in a
+                single plain-language card, driven by deriveJobberStatus +
+                jobber_initial_import_completed_at + the live import phase. */}
+            <div style={{ marginTop:'14px' }}>
+              <JobberCard settings={settings} updateLocation={updateLocation} />
+            </div>
+
+          </div>
+        )}
+
+        {/* ── Connections › Mailchimp (issue 246 step 1) — nothing behind it */}
+        {activeSection==='mailchimp'&&(
+          <div style={{ paddingBottom:'12px' }}>
+
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Mailchimp</h1>
+            </div>
+
+            <MailchimpNotConnected />
+
+          </div>
+        )}
+
+        {/* ── Emails (issue 240) — one list, and it is the only place an
+            email can be read or edited. Step 4 moved the old Communication
+            and Templates content here; steps 7–10 rebuilt it as the list
+            below; step 11 removed what it replaced. */}
+        {activeSection==='emails'&&(()=>{
           // Was `verified` and drove a green "Verified sender" badge (issue 240
           // step 1). Nothing verified anything — a non-empty string flipped it,
           // and all 20 active locations showed the tick. Real verification
@@ -22922,73 +23206,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Your team</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who your emails come from, and who hears about a new lead.</p>
-            </div>
-
-            {/* ── issue 240 step 5 — the routing table leads the screen ─────
-                A row per job type the website form offers. The cards below it
-                are unchanged and still own everything this table does not:
-                the master toggles, adding an outside email, unsubscribing,
-                and assigning one sender to several types at once. */}
-            <CommsLabel>Every kind of job</CommsLabel>
-            <TeamRouting realLocId={realLocId} readOnly={false} />
-
-            {/* ── TIER 1 · HERO — email sending identity (the anchor) ──────── */}
-            <div style={{ margin:'14px 12px 0', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
-              <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
-                <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <CommsIcon name="send" size={20} color="#4f46e5" />
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
-                    <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Sending identity</h2>
-                    {!senderAddressSet && (
-                      <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
-                    )}
-                  </div>
-                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>The name and address your new-lead follow-up emails come from.</p>
-                </div>
-              </div>
-              {/* Per-project-type sender split — grouped INSIDE the identity card
-                  and LEADING it (toggle first), so the sending card matches the
-                  "Who hears about new leads" card, which also leads with its toggle. */}
-              <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
-              <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
-                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
-                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
-                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
-              </div>
-            </div>
-
-            {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
-            <CommsLabel>Who hears about new leads</CommsLabel>
-            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
-
-            {/* Slack notifications — additive to the email above. New leads ALSO
-                post to the location's Slack channel once the app is installed. */}
-            <CommsLabel>Slack notifications</CommsLabel>
-            {/* Half-width: sits at ~half on the wider settings column (auto-fill
-                keeps the empty companion track) and reflows to full-width on
-                narrow screens. */}
-            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'10px' }}>
-              <SlackCard settings={settings} updateLocation={updateLocation} />
-            </div>
-
-          </div>
-          )
-        })()}
-
-        {/* ── Emails (issue 240) — one list, and it is the only place an
-            email can be read or edited. Step 4 moved the old Communication
-            and Templates content here; steps 7–10 rebuilt it as the list
-            below; step 11 removed what it replaced. */}
-        {activeSection==='emails'&&(
-          <div style={{ paddingBottom:'12px' }}>
-
-            <div style={{ padding:'18px 16px 2px' }}>
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Emails</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>What a client receives automatically, and the templates behind it.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who your emails come from, what a client receives automatically, and the templates behind it.</p>
             </div>
 
             {/* ── issue 240 — every email a client can receive, one list.
@@ -23046,8 +23265,45 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 still called there with the call slice, so call scripts stay
                 creatable, editable and deletable. ───────────────────── */}
 
+            {/* ── The sending identity card, moved here whole from Your team
+                (issue 246 step 1) — card and contents unchanged.
+
+                BELOW the list, not above it. Steps 7–11 of 240 built this
+                section around the list as its hero, and identity is a
+                configure-once thing: three fields an owner sets in their first
+                week and then never opens again. Above the list it would also
+                put its three SettingsEditRow "Edit" buttons ahead of every
+                row's Edit — same word, different job, first in the DOM. */}
+            <CommsLabel>Who these come from</CommsLabel>
+            <div style={{ margin:'0 12px', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
+              <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
+                <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <CommsIcon name="send" size={20} color="#4f46e5" />
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
+                    <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Sending identity</h2>
+                    {!senderAddressSet && (
+                      <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
+                    )}
+                  </div>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>The name and address your new-lead follow-up emails come from.</p>
+                </div>
+              </div>
+              {/* Per-project-type sender split — grouped INSIDE the identity card
+                  and LEADING it (toggle first), so the sending card matches the
+                  "Who hears about new leads" card, which also leads with its toggle. */}
+              <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
+              <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
+                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
+                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
+                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
+              </div>
+            </div>
+
           </div>
-        )}
+          )
+        })()}
 
         {/* ── Texts & scripts (issue 240 step 4) — the sms + call halves of
             the old Templates tab, same renderer as the email half. */}
@@ -23077,6 +23333,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         </>)}
 
       </div>
+        </div>{/* /section pane */}
+        </div>{/* /content column */}
+      </div>{/* /rail + content */}
 
       {/* issue 240 step 9c — the two questions. */}
       {variantState && (

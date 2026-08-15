@@ -56,9 +56,9 @@ afterEach(() => {
 })
 
 // Mount SettingsScreen for a role and return the section keys it offers.
-// Read from the mobile <select> options — that IS the `sections` array, one
-// option per entry, so this sees exactly what the role can reach (the pill
-// row renders from the same array).
+// Read from the DESKTOP RAIL (issue 246 step 1 — this used to read the mobile
+// <select>, which is gone). Both navs render from the same SECTION_GROUPS, so
+// either would do; the rail is asserted to match the drill-down below.
 const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
   await act(async () => {
     root.render(
@@ -68,10 +68,18 @@ const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
     )
   })
   await act(async () => {})   // flush mount-time fetches
-  const select = container.querySelector('select[aria-label="Settings section"]')
-  expect(select, 'the section select').toBeTruthy()
-  return Array.from(select!.querySelectorAll('option')).map(o => (o as HTMLOptionElement).value)
+  return railKeys()
 }
+
+const railKeys = (): string[] => {
+  const rail = container.querySelector('[data-settings-nav="rail"]')
+  expect(rail, 'the settings rail').toBeTruthy()
+  return Array.from(rail!.querySelectorAll('[data-section]')).map(b => b.getAttribute('data-section')!)
+}
+
+// Which section the nav says is current.
+const currentKey = (): string | null =>
+  container.querySelector('[data-settings-nav="rail"] [aria-current="page"]')?.getAttribute('data-section') ?? null
 
 // 'billing' is gone as a standalone section (merged into 'team' — Team &
 // Billing); it survives only as an initialSection alias, pinned below.
@@ -84,7 +92,17 @@ const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
 // step 4). Unlike automation/notifs these did NOT go away — they were split by
 // what an owner is doing, so both old keys stay live as deep-link aliases and
 // are pinned in lib/beta-comms-tabs-240.test.tsx.
-const ALL_SECTIONS = ['profile', 'location', 'team', 'emails', 'yourteam', 'texts']
+//
+// 'yourteam' joined them as an alias in issue 246 step 1: it split three ways
+// and stopped being a section. The order below is the RAIL order — group by
+// group, top to bottom.
+const ALL_SECTIONS = [
+  'profile',                          // You
+  'location', 'team',                 // Your business
+  'emails', 'texts',                  // Client messages
+  'newleads',                         // Notifications
+  'slack', 'jobber', 'mailchimp',     // Connections
+]
 
 describe('SettingsScreen sections by franchiseRole', () => {
   it("owner sees the full section list (and elevated mounts pass franchiseRole='owner', so this also covers admin/super_admin)", async () => {
@@ -131,12 +149,11 @@ describe('Team & Billing merge', () => {
       )
     })
     await act(async () => {})
-    return container.querySelector('select[aria-label="Settings section"]') as HTMLSelectElement
   }
 
   it("initialSection='billing' is an alias — lands on the merged team section, not the no-access notice", async () => {
-    const select = await mount('billing')
-    expect(select.value).toBe('team')
+    await mount('billing')
+    expect(currentKey()).toBe('team')
     expect(container.textContent).not.toContain("You don't have access to this section")
     // The billing deep-link opens with the billing footer EXPANDED, so the
     // old destination's content (the seat pool) is immediately visible.
@@ -144,12 +161,90 @@ describe('Team & Billing merge', () => {
   })
 
   it('the merged section shows the roster AND a collapsed billing footer by default', async () => {
-    const select = await mount('team')
-    expect(select.value).toBe('team')
+    await mount('team')
+    expect(currentKey()).toBe('team')
     expect(container.textContent).toContain('Team Members')
     expect(container.textContent).toContain('Billing & seat details')
     // Collapsed: the seat pool only renders after the footer is expanded.
     expect(container.textContent).not.toContain('Your seats this year')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue 246 step 1 — the grouped rail must not out-run the role gate. The
+// items were already conditionally mounted and still are; what is new is the
+// GROUP, which is a second thing that can leak. A header reading "Connections"
+// over an empty space tells a manager that Settings has surfaces they cannot
+// reach, which is exactly what conditional mounting exists to avoid saying.
+describe('groups never render empty (issue 246 step 1)', () => {
+  const groupTitles = (nav: Element): string[] =>
+    Array.from(nav.querySelectorAll('p')).map(p => p.textContent?.trim() ?? '')
+
+  const mountRole = async (franchiseRole: string) => {
+    await act(async () => {
+      root.render(
+        <CurrentUserContext.Provider value={currentUser}>
+          <SettingsScreen initialSection="profile" franchiseRole={franchiseRole} />
+        </CurrentUserContext.Provider>,
+      )
+    })
+    await act(async () => {})
+  }
+
+  it('an owner sees all five groups', async () => {
+    await mountRole('owner')
+    const rail = container.querySelector('[data-settings-nav="rail"]')!
+    expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Notifications', 'Connections'])
+  })
+
+  it('a manager sees ONLY the group that has a visible item', async () => {
+    await mountRole('manager')
+    const rail = container.querySelector('[data-settings-nav="rail"]')!
+    expect(groupTitles(rail)).toEqual(['You'])
+    // Belt and braces: not a single header of the owner-only groups survives.
+    for (const gone of ['Your business', 'Client messages', 'Notifications', 'Connections']) {
+      expect(rail.textContent, `group '${gone}'`).not.toContain(gone)
+    }
+  })
+
+  it('every group that renders has at least one item, for every role', async () => {
+    for (const fr of ['owner', 'manager', 'viewer', 'some-future-role']) {
+      await mountRole(fr)
+      for (const nav of Array.from(container.querySelectorAll('[data-settings-nav]'))) {
+        for (const group of Array.from(nav.children)) {
+          expect(
+            group.querySelectorAll('[data-section]').length,
+            `role='${fr}', group '${group.querySelector('p')?.textContent}'`,
+          ).toBeGreaterThan(0)
+        }
+      }
+    }
+  })
+
+  it('the mobile drill-down offers exactly what the desktop rail offers', async () => {
+    // Two navs, one source. A role gate applied to one and not the other is
+    // the same class of bug as the manager denylist this file was written for.
+    for (const fr of ['owner', 'manager', 'viewer']) {
+      await mountRole(fr)
+      const drill = container.querySelector('[data-settings-nav="drill"]')!
+      const drillKeys = Array.from(drill.querySelectorAll('[data-section]')).map(b => b.getAttribute('data-section'))
+      expect(drillKeys, `franchiseRole='${fr}'`).toEqual(railKeys())
+    }
+  })
+
+  it('a manager deep-linking to an owner section still gets the lock panel, not the section', async () => {
+    await act(async () => {
+      root.render(
+        <CurrentUserContext.Provider value={currentUser}>
+          <SettingsScreen initialSection="newleads" franchiseRole="manager" />
+        </CurrentUserContext.Provider>,
+      )
+    })
+    await act(async () => {})
+    expect(container.textContent).toContain("You don't have access to this section")
+    expect(container.textContent).toContain('🔒')
+    // And the section itself did not render behind the panel.
+    expect(container.textContent).not.toContain('Who hears about new leads')
   })
 })
 
