@@ -18593,6 +18593,114 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
   )
 }
 
+// ─── issue 240 step 10 — timing ───
+//
+// delay_days is ABSOLUTE FROM THE START of the sequence, not relative to the
+// previous step. lib/drip-send.ts computes the wait between two sends as
+//   gap = max(0, next.delay_days - current.delay_days)
+// so raising step 2 from 5 to 10 makes step 2 arrive 10 days in and SHORTENS
+// the wait before step 3 — step 3 still lands on day 30. Nothing after it
+// moves. The UI says this rather than leaving an owner to guess.
+//
+// The floor is the previous step's value. Below it the subtraction goes
+// negative, max(0, …) clamps the gap to zero, and the email goes out on the
+// next hourly tick — which reads as a bug to the owner and as spam to the
+// client. NOTHING server-side prevents this: the route only checks
+// Number.isFinite(delay_days) && delay_days >= 0, so 0 is legal and there is
+// no upper bound anywhere. The floor is ours to hold.
+export function timingFloorFor(steps, order) {
+  const rows = (steps || []).slice().sort((a, b) => Number(a.order) - Number(b.order))
+  const i = rows.findIndex(s => Number(s.order) === Number(order))
+  if (i <= 0) return 0                        // the first step may be day 0
+  return Number(rows[i - 1].delay_days ?? 0)
+}
+
+// The lowest value that is actually SAFE, which is one day past the
+// predecessor — not equal to it.
+//
+// The brief said "may not fall below its predecessor's", which permits equal.
+// Its stated reason was that a zero gap sends on the next hourly tick, and
+// EQUAL is precisely the zero-gap case: max(0, 5 - 5) is 0. The reason is the
+// substance, so the minimum is predecessor + 1. Two emails a day apart is
+// fine; two on the same day arrive together and read as a fault.
+export function timingMinFor(steps, order) {
+  const rows = (steps || []).slice().sort((a, b) => Number(a.order) - Number(b.order))
+  const i = rows.findIndex(s => Number(s.order) === Number(order))
+  if (i <= 0) return 0
+  return timingFloorFor(steps, order) + 1
+}
+
+// What an owner is told about the consequence, computed from the real rule.
+export function timingChangeEffect(steps, order, nextDelay) {
+  const rows = (steps || []).slice().sort((a, b) => Number(a.order) - Number(b.order))
+  const i = rows.findIndex(s => Number(s.order) === Number(order))
+  const after = i >= 0 ? rows.slice(i + 1) : []
+  return {
+    movesOthers: false,                        // absolute: later steps keep their day
+    followerCount: after.length,
+    nextFollowerDay: after.length ? Number(after[0].delay_days ?? 0) : null,
+    nextDelay: Number(nextDelay),
+  }
+}
+
+export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
+  const minDay = timingMinFor(steps, row.order)
+  const [val, setVal] = React.useState(String(row.days ?? 0))
+  const n = Number(val)
+  const valid = val.trim() !== '' && Number.isInteger(n) && n >= 0 && n >= minDay
+  const tooSoon = val.trim() !== '' && Number.isInteger(n) && n >= 0 && n < minDay
+  const eff = timingChangeEffect(steps, row.order, n)
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="When this sends"
+        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>When this sends · {row.subject || 'this email'}</div>
+        <div style={{ padding:'20px 24px 22px' }}>
+          <label style={{ display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Days after someone first gets in touch</label>
+          {/* A day count is a small control. It does not stretch. */}
+          <input type="number" min={minDay} step={1} value={val}
+            onChange={e => setVal(e.target.value)}
+            style={{ width:'110px', padding:'9px 11px', border:`1.5px solid ${tooSoon ? '#c0554e' : 'rgba(26,46,43,0.14)'}`, borderRadius:'9px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }} />
+          {tooSoon && (
+            <p style={{ fontSize:'12.5px', color:'#c0554e', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
+              That’s the same day as the one before it, or earlier — so this would go out straight away, on top of the last one. It needs to be day {minDay} or later.
+            </p>
+          )}
+          {!tooSoon && (
+            <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
+              {eff.followerCount > 0
+                ? <>The emails after this one keep the days they already have — the next stays on day {eff.nextFollowerDay}. Only the wait before it changes.</>
+                : <>This is the last email in the sequence.</>}
+            </p>
+          )}
+
+          {/* Live, per path row, same shape as 9b. */}
+          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+            {ownsPath ? (
+              liveLeadCount > 0
+                ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. The email each of them is already waiting for keeps the date it was given — this changes the timing of the ones after that.</>
+                : <>Nobody is partway through this sequence at the moment, so this affects people who come in from now on.</>
+            ) : (
+              <>Nobody partway through this sequence is affected — they finish on the shared version they started on.
+              <br /><br />
+              Changing the timing also means this sequence stops following Bee Organized’s. If they change the standard wording or timing later, yours won’t change with it. <b>That can’t be undone.</b></>
+            )}
+          </div>
+          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
+          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
+          <button onClick={() => onConfirm(n)} disabled={busy || !valid}
+            style={{ ...btn, background: (busy || !valid) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !valid) ? 'not-allowed' : 'pointer' }}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── issue 240 step 9b — add an email to the end of the sequence ───
 //
 // APPEND ONLY. There is no mid-sequence insert and none should be added: an
@@ -18678,7 +18786,7 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
   )
 }
 
-function EmailRow({ row, onRead, onEdit, blockedReason }) {
+function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason }) {
   // issue 240 step 9a — a paused row is DIMMED, never hidden: the owner still
   // reads the wording and can still open it. Only the chrome recedes, and the
   // reason sits on the row so it is impossible to miss.
@@ -18686,7 +18794,14 @@ function EmailRow({ row, onRead, onEdit, blockedReason }) {
   return (
     <div style={{ background: paused ? '#fffdf7' : 'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start', boxShadow: paused ? 'inset 3px 0 0 #8a6a0e' : 'none' }}>
       <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
-        {row.when}
+        {/* issue 240 step 10 — a pencil ONLY where the timing is really data.
+            The welcome (24h) and the closed-job pair (90/365) are code
+            constants, and rows carry timingIsData from step 7 for exactly
+            this. Those three render as plain text with no affordance, rather
+            than a control that would refuse or silently do nothing. */}
+        {onEditTiming && row.timingIsData
+          ? <button onClick={onEditTiming} style={{ background:'none', border:'none', padding:0, font:'inherit', fontSize:'12px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', textAlign:'left' }}>{row.when} ✎</button>
+          : row.when}
         {row.fixedNote && <><br /><span style={{ fontSize:'11px', opacity:0.75 }}>{row.fixedNote}</span></>}
       </div>
       <div style={{ flex:1, minWidth:0, opacity: paused ? 0.62 : 1 }}>
@@ -18916,7 +19031,8 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
             <EmailRow key={r.key} row={r}
               blockedReason={blockedFor(r)}
               onRead={() => setOpen({ group:id, index:i })}
-              onEdit={canEdit ? () => actions.edit(r) : null} />
+              onEdit={canEdit ? () => actions.edit(r) : null}
+              onEditTiming={actions && actions.editTiming ? () => actions.editTiming(r) : null} />
           ))}
     </div>
   )
@@ -21585,6 +21701,60 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // point — so the confirm modal states it, not just the standing banner.
   // proceed(steps) receives the steps the mutation should build on: the
   // location's own rows when they exist, else the freshly-cloned copy.
+  // ─── issue 240 step 10 — edit a drip step's timing ───
+  //
+  // Drip rows only. The welcome and closed-job offsets are code constants and
+  // those rows never reach here — the pencil is gated on timingIsData.
+  //
+  // The floor is re-checked at save, not only at the input: the input is the
+  // courtesy, this is the guarantee. Nothing server-side enforces it (the
+  // route accepts any finite delay_days >= 0, with no upper bound and no
+  // ordering rule), so if this check is removed the only thing standing
+  // between an owner and a same-day double-send is gone.
+  const [timingEditState, setTimingEditState] = useState(null)
+
+  async function emailsRowEditTiming(row) {
+    if (!row || row.rail !== 'drip' || !row.timingIsData) return
+    const pathKey = row.pathKey
+    const owned = !!dbPaths[pathKey]
+    let liveLeadCount = 0
+    try {
+      if (owned && dbPaths[pathKey]?.id) {
+        const res = await fetch(`/api/drip-paths/${dbPaths[pathKey].id}/active-lead-count`)
+        if (res.ok) liveLeadCount = (await res.json())?.count ?? 0
+      }
+    } catch { /* unknown, not zero — the copy does not claim a number it lacks */ }
+    setTimingEditState({ row, pathKey, ownsPath: owned, liveLeadCount, busy: false, err: '' })
+  }
+
+  async function confirmTimingEdit(nextDelay) {
+    const { row, pathKey } = timingEditState
+    setTimingEditState(st => ({ ...st, busy: true, err: '' }))
+    try {
+      await new Promise((resolve, reject) => {
+        ensureOwnedThen(pathKey, async (steps) => {
+          try {
+            const minDay = timingMinFor(steps, row.order)
+            if (!Number.isInteger(nextDelay) || nextDelay < 0 || nextDelay < minDay) {
+              throw new Error(`this has to be day ${minDay} or later, or it would send straight away`)
+            }
+            const next = steps.map(s => Number(s.order) === Number(row.order)
+              // delay_days ONLY. Reset restores subject and body and never
+              // touches timing; timing changes never touch wording. The two
+              // stay separable on purpose.
+              ? { ...s, delay_days: nextDelay, delay: daysToDelayLabel(nextDelay) }
+              : s)
+            await commitSteps(pathKey, next)
+            resolve()
+          } catch (e) { reject(e) }
+        })
+      })
+      setTimingEditState(null)
+    } catch (e) {
+      setTimingEditState(st => st && ({ ...st, busy: false, err: 'Could not save that: ' + (e?.message || e) }))
+    }
+  }
+
   // ─── issue 240 step 9b — append an email ───
   //
   // The live count is read AT CONFIRM TIME, never baked in, and it is scoped to
@@ -22864,7 +23034,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault) } : null}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault), editTiming: emailsRowEditTiming } : null}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
@@ -23127,6 +23297,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
       </div>
 
+      {/* issue 240 step 10 — timing, drip rows only. */}
+      {timingEditState && (
+        <TimingEditModal
+          row={timingEditState.row}
+          steps={pathSteps[timingEditState.pathKey] || []}
+          ownsPath={timingEditState.ownsPath}
+          liveLeadCount={timingEditState.liveLeadCount}
+          busy={timingEditState.busy}
+          err={timingEditState.err}
+          onCancel={() => setTimingEditState(null)}
+          onConfirm={confirmTimingEdit}
+        />
+      )}
       {/* issue 240 step 9b — append an email. */}
       {addEmailState && (
         <AddEmailModal
