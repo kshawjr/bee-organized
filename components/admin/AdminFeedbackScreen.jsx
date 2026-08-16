@@ -773,6 +773,120 @@ function InternalComposeModal({ onClose, onFiled }) {
   )
 }
 
+// ── THE ANALYSIS BLOCK (issue 307) ────────────────────────────
+// What is probably wrong, how much of the fleet it touches, and roughly how
+// big the work is. Rendered under the row it belongs to.
+//
+// EVERY PART IS CONDITIONAL, and that is the design rather than defensiveness.
+// The analysis is allowed to know nothing, know only the mechanism, or know
+// the mechanism and a production count — and each of those has to LOOK
+// different, because a reader who cannot tell a computed count from a missing
+// one will trust both equally. So:
+//   · no probe fired  → the question, and nothing that resembles a diagnosis
+//   · fleet null      → the line is absent entirely; never "0", never "unknown"
+//   · files empty     → no file list; several real answers name no file at all
+//     ("Bee Hub did not send this")
+//
+// CONFIDENCE IS ALWAYS SHOWN when there is an analysis to qualify. An
+// unlabelled paragraph reads as certain, and a confident wrong analysis is
+// worse than none — it sends the reader to the wrong file AND leaves them with
+// a wrong model that survives being corrected.
+const ANALYSIS_TONE = {
+  confident: { bg: T.accent.soft, ink: T.accent.deep, label: 'confident' },
+  likely:    { bg: T.state.info.bg, ink: T.state.info.deep, label: 'likely' },
+  none:      { bg: T.surface.sunken, ink: T.ink.muted, label: 'not placed' },
+}
+
+function AnalysisBlock({ analysis }) {
+  if (!analysis) return null
+  const tone = ANALYSIS_TONE[analysis.confidence] || ANALYSIS_TONE.none
+  const hasAnalysis = analysis.confidence !== 'none' && !!analysis.what
+
+  return (
+    <div style={{ width: '100%', padding: '0 14px 12px 74px' }}>
+      <div style={{ padding: '10px 12px', borderRadius: T.radius.control, background: tone.bg, border: T.border.thin }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginBottom: hasAnalysis ? '6px' : 0 }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.03em', color: tone.ink, textTransform: 'uppercase' }}>
+            {tone.label}
+          </span>
+          {analysis.size && (
+            <span style={{ fontSize: '11px', color: T.ink.muted }}>· {analysis.size}</span>
+          )}
+        </span>
+
+        {hasAnalysis && (
+          <p style={{ fontSize: '12.5px', color: T.ink.primary, lineHeight: 1.5, margin: 0 }}>
+            {analysis.what}
+          </p>
+        )}
+
+        {/* THE FLEET COUNT — present only where a probe actually computed one.
+            This is the line that turns "one client's problem" into the biggest
+            item on the screen, so it must never appear speculatively. */}
+        {analysis.fleet && (
+          <p style={{ fontSize: '12.5px', fontWeight: 700, color: tone.ink, margin: '7px 0 0' }}>
+            {analysis.fleet.count} {analysis.fleet.unit} affected
+            <span style={{ fontWeight: 500, color: T.ink.muted }}> — {analysis.fleet.basis}</span>
+          </p>
+        )}
+
+        {analysis.files.length > 0 && (
+          <ul style={{ margin: '7px 0 0', padding: 0, listStyle: 'none' }}>
+            {analysis.files.map(f => (
+              <li key={f} style={{ fontSize: '11.5px', color: T.ink.secondary, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', lineHeight: 1.6 }}>
+                {f}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* No probe fired. This is a real answer, not a failure: it tells Kevin
+            which reports need him to go and ask rather than open a file. */}
+        {!hasAnalysis && analysis.question && (
+          <p style={{ fontSize: '12.5px', color: T.ink.secondary, lineHeight: 1.5, margin: 0 }}>
+            {analysis.question}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── CLUSTERS (issue 307) ──────────────────────────────────────
+// Items grouped by the probe that fired on them — i.e. by demonstrated root
+// cause, never by word similarity. The hand run is the reason: "Nuturing" and
+// "Nuturing 2" share a rare word and are different problems, while "Nuturing
+// 2" belongs with three reports it shares no distinctive vocabulary with.
+// Lexical clustering gets both of those backwards.
+function ClusterBanner({ clusters, onShow }) {
+  if (!clusters || clusters.length === 0) return null
+  return (
+    <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      {clusters.map(c => (
+        <div key={c.probe} style={{ padding: '9px 12px', borderRadius: T.radius.control, background: T.family.purple.bg, border: T.border.thin }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: T.family.purple.text }}>
+            {c.itemIds.length} reports share one root cause
+          </span>
+          {c.fleet && (
+            <span style={{ fontSize: '12px', color: T.family.purple.text, opacity: 0.9 }}>
+              {' '}· {c.fleet.count} {c.fleet.unit} affected
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => onShow(c)}
+            className="bee-small-action"
+            style={{ marginLeft: '8px', padding: 0, background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}
+          >
+            Show them
+          </button>
+          <p style={{ fontSize: '11.5px', color: T.ink.secondary, lineHeight: 1.5, margin: '4px 0 0' }}>{c.what}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── THE VERDICT BAR (issue 306) ───────────────────────────────
 // Appears only when something is selected. Presentational: it owns no data and
 // performs no write — the parent holds the selection and does the PATCHing, so
@@ -929,6 +1043,40 @@ export default function AdminFeedbackScreen({
   }, [locationId])
 
   useEffect(() => { load() }, [load])
+
+  // ── THE PER-ITEM ANALYSIS (issue 307) ───────────────────────────
+  // Fetched ON OPEN, once, alongside the list — Kevin chose that over a
+  // nightly job because this list moves fast enough that nightly would be
+  // stale by morning. The route holds the cache and decides whether this call
+  // costs anything; see its header for the signature and how it invalidates.
+  //
+  // ELEVATED MOUNTS ONLY, and the route is 403 for everyone else anyway. The
+  // analysis names files and reports fleet-wide counts across every franchise,
+  // none of which is owner-facing.
+  //
+  // A FAILURE HERE IS SILENT BY DESIGN. The analysis is an enrichment; the
+  // screen was fully usable before it existed and must stay usable if it does
+  // not arrive. No error banner, no retry — the rows simply render without it.
+  const [analyses, setAnalyses] = useState(null)
+  const [clusters, setClusters] = useState([])
+  useEffect(() => {
+    if (onReportFeedback) return
+    let cancelled = false
+    fetch('/api/admin/feedback/analysis')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d) return
+        const byId = new Map((d.analyses || []).map(a => [a.itemId, a]))
+        setAnalyses(byId)
+        setClusters(Array.isArray(d.clusters) ? d.clusters : [])
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // onReportFeedback (the franchise-mount signal) rather than the
+    // franchiseMount const, which is declared further down — a dep array is
+    // evaluated during render and would hit its temporal dead zone.
+  }, [onReportFeedback, items.length])
 
   // ONE count, computed once, shared by the header, the cards and the badge.
   const summary = useMemo(() => summarizeFeedbackQueues(items), [items])
@@ -1269,6 +1417,16 @@ export default function AdminFeedbackScreen({
         )}
       </div>
 
+      {/* CLUSTERS (issue 307) — above the list, because "these four are one
+          bug" changes what you do before you start reading rows. "Show them"
+          filters to the cluster by selecting its members. */}
+      {canTriage && !loading && !error && (
+        <ClusterBanner
+          clusters={clusters}
+          onShow={(c) => { setSelected(new Set(c.itemIds)); setArmed(null) }}
+        />
+      )}
+
       {/* THE VERDICT BAR (issue 306) — only once something is selected, so the
           screen is unchanged until Kevin starts clearing things. */}
       {canTriage && selected.size > 0 && (
@@ -1394,6 +1552,10 @@ export default function AdminFeedbackScreen({
                   </span>
                   <span style={{ flexShrink: 0 }}><FeedbackStatusBadge status={it.status} /></span>
                 </button>
+                {/* THE ANALYSIS (issue 307). Its own full-width line under the
+                    row, like the record pointer. Absent entirely until the
+                    fetch lands, and on the franchise mount forever. */}
+                {analyses && <AnalysisBlock analysis={analyses.get(it.id)} />}
                 {/* width 100% is what puts this on its own line in the wrapping
                     row above. Its indent tracks the selection gutter so it
                     stays under the title on both mounts. */}
