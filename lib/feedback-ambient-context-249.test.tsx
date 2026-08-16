@@ -301,6 +301,12 @@ describe('nothing outside the whitelist is ever persisted', () => {
 // A prop the modal accepts but nobody passes reads exactly like a shipped
 // feature and stores exactly nothing. BeeHub is 37k lines and cannot be
 // mounted here, so its single FeedbackModal mount is pinned as source.
+//
+// The BYTE-EXACT pin on that whole line lives in beta-feedback-viewas.test.tsx
+// and is the primary guard — if you change the mount, update it there. What is
+// added here is the part that pin cannot express: that the wiring is the 249
+// wiring specifically, and that a SECOND mount has not appeared elsewhere in
+// the file (a `toContain` on one line stays green when a second one is added).
 describe('BeeHub passes the ambient context (mount blind spot)', () => {
   const src = readSrc('components/BeeHub.jsx')
 
