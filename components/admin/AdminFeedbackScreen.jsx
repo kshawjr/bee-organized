@@ -318,9 +318,13 @@ function ContextCard({ item }) {
 // defect B). This stayed wrong on the admin mount too, not just the franchise
 // one: a super_admin who files feedback and later answers it is the same case,
 // just rarer than the owner screen where it was every single item.
-function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, onPrev, onNext, onClose, onSaved }) {
+// seedResponse (issue 309): a draft reply, pre-filled into the composer. It is
+// a DRAFT — Kevin edits it and presses Save, and Save is the existing PATCH to
+// /api/admin/feedback/:id, which is the only thing that sends an email. There
+// is no path from a draft to an owner that does not go through this button.
+function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, seedResponse = '', onPrev, onNext, onClose, onSaved }) {
   const [status, setStatus]     = useState(item.status)
-  const [response, setResponse] = useState('')
+  const [response, setResponse] = useState(seedResponse || '')
   const [composing, setComposing] = useState(!item.admin_response)
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
@@ -331,7 +335,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   // item — otherwise the previous item's draft reply follows you.
   useEffect(() => {
     setStatus(item.status)
-    setResponse('')
+    setResponse(seedResponse || '')
     setComposing(!item.admin_response)
     setError(null)
     setResult(null)
@@ -1152,6 +1156,10 @@ export default function AdminFeedbackScreen({
   // not arrive. No error banner, no retry — the rows simply render without it.
   const [analyses, setAnalyses] = useState(null)
   const [clusters, setClusters] = useState([])
+  // issue 309 — reply drafts for whatever the current deployment answered.
+  const [drafts, setDrafts] = useState(() => new Map())
+  // The draft Kevin chose to open, so the modal can seed its composer with it.
+  const [draftSeed, setDraftSeed] = useState(null)
   useEffect(() => {
     if (onReportFeedback) return
     let cancelled = false
@@ -1162,6 +1170,7 @@ export default function AdminFeedbackScreen({
         const byId = new Map((d.analyses || []).map(a => [a.itemId, a]))
         setAnalyses(byId)
         setClusters(Array.isArray(d.clusters) ? d.clusters : [])
+        setDrafts(new Map((d.drafts || []).map(x => [x.itemId, x])))
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -1653,6 +1662,32 @@ export default function AdminFeedbackScreen({
                     the analysis has landed — the tier label would otherwise say
                     "short" for every row while the fetch was still in flight,
                     which is a wrong statement rather than a missing one. */}
+                {/* DRAFT REPLY (issue 309) — present only when this deployment
+                    appears to have answered this report. The shape is shown
+                    before the click: "hedged" means the link between the change
+                    and the report is not certain, and the draft ASKS rather
+                    than declares. Opening it seeds the existing composer;
+                    sending is still that composer's Save, i.e. the route. */}
+                {canTriage && drafts.get(it.id) && (
+                  <div style={{ width: '100%', padding: '0 14px 8px 74px' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setDraftSeed(drafts.get(it.id)); openRow(it.id) }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                        padding: '5px 11px', borderRadius: T.radius.control,
+                        border: T.border.control, background: T.state.info.bg,
+                        fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+                        color: T.state.info.deep, cursor: 'pointer', flexShrink: 0,
+                      }}
+                    >
+                      Draft reply — {drafts.get(it.id).shape === 'confident' ? 'this is fixed' : 'may be fixed, asks them'}
+                    </button>
+                    <span style={{ fontSize: '11px', color: T.ink.muted, marginLeft: '8px' }}>
+                      {drafts.get(it.id).because}
+                    </span>
+                  </div>
+                )}
                 {canTriage && analyses && (
                   <div style={{ width: '100%', padding: '0 14px 12px 74px' }}>
                     <CopyPromptButton
@@ -1694,9 +1729,10 @@ export default function AdminFeedbackScreen({
           position={walk.index + 1}
           total={walk.ids.length}
           isOwnItem={!!myId && selectedItem.user_id === myId}
+          seedResponse={draftSeed && draftSeed.itemId === selectedItem.id ? draftSeed.text : ''}
           onPrev={() => step(-1)}
           onNext={() => step(1)}
-          onClose={() => setWalk(null)}
+          onClose={() => { setWalk(null); setDraftSeed(null) }}
           onSaved={(updated) => {
             // reply_email is the route's report on the notification attempt, not
             // a column — the modal renders it, the list must not absorb it.

@@ -10,8 +10,24 @@
 // + chat.postMessage; the function signature can stay.
 // ─────────────────────────────────────────────────────────────
 
+// Attachments are OPTIONAL and additive (issue 309). Every existing caller
+// passes text alone and posts exactly the payload it always did — the key is
+// omitted entirely when there are none, so the request body is byte-identical.
+//
+// This is the OPS webhook. The per-location lead card is a different rail
+// (lib/slack-bot.ts, OAuth bot token -> chat.postMessage) with its own
+// interactivity contract; the two share zero env vars and must not be merged.
+// Nothing here may carry an interactive element: this transport has no action
+// handler behind it, so a button would be a dead control.
+export interface SlackAttachment {
+  color: string
+  fallback: string
+  text: string
+}
+
 export async function postSlackMessage(
   text: string,
+  attachments?: SlackAttachment[],
 ): Promise<{ ok: boolean; skipped?: string; error?: string }> {
   const url = process.env.SLACK_WEBHOOK_URL
   if (!url) {
@@ -22,7 +38,7 @@ export async function postSlackMessage(
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(attachments && attachments.length ? { text, attachments } : { text }),
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')

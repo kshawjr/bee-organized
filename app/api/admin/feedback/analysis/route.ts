@@ -58,6 +58,8 @@ import {
   type NamedLeadEvidence, type FleetImpact, extractNames,
 } from '@/lib/feedback-analysis'
 import screenMap from '@/docs/screen-map.json'
+// issue 309 — drafts for whatever this deployment appears to have answered.
+import { linkCommitToItems, buildReplyDraft, type ReplyDraft } from '@/lib/feedback-reply-draft'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -78,6 +80,7 @@ type CacheEntry = {
   computedAt: number
   analyses: ItemAnalysis[]
   clusters: AnalysisCluster[]
+  drafts: ReplyDraft[]
 }
 let CACHE: CacheEntry | null = null
 
@@ -100,7 +103,7 @@ export async function GET(_req: NextRequest) {
 
   const { data: rows, error } = await supabaseService
     .from('feedback_items')
-    .select('id, type, title, description, status, updated_at, location_id, context')
+    .select('id, type, title, description, status, updated_at, location_id, context, admin_response')
     .order('created_at', { ascending: true })
   if (error) {
     console.error('[feedback analysis] read failed', error.message)
@@ -112,14 +115,63 @@ export async function GET(_req: NextRequest) {
 
   if (CACHE && CACHE.signature === signature && Date.now() - CACHE.computedAt < ANALYSIS_TTL_MS) {
     return NextResponse.json({
-      analyses: CACHE.analyses, clusters: CACHE.clusters,
+      analyses: CACHE.analyses, clusters: CACHE.clusters, drafts: CACHE.drafts,
       computedAt: CACHE.computedAt, cached: true,
     })
   }
 
   const { analyses, clusters } = await computeAnalyses(open)
-  CACHE = { signature, computedAt: Date.now(), analyses, clusters }
-  return NextResponse.json({ analyses, clusters, computedAt: CACHE.computedAt, cached: false })
+  const drafts = buildDeploymentDrafts(open, analyses)
+  CACHE = { signature, computedAt: Date.now(), analyses, clusters, drafts }
+  return NextResponse.json({ analyses, clusters, drafts, computedAt: CACHE.computedAt, cached: false })
+}
+
+// ─── Drafts for the current deployment (issue 309) ────────────────────
+//
+// WHERE THE COMMIT COMES FROM. Vercel exposes the deployed commit as system
+// environment variables, so no git access and no GitHub call is needed. This
+// sees the HEAD commit of the deployment only — a push carrying several
+// commits shows just the last. That is an honest limit rather than a hidden
+// one: this repo pushes direct to main one commit at a time (see CLAUDE.md),
+// so head-only covers the normal case, and anything it misses simply produces
+// no draft rather than a wrong one.
+//
+// NOTHING IS SENT HERE. A draft is text on a screen until Kevin edits it and
+// presses Save, which PATCHes /api/admin/feedback/:id — the route that decides
+// whether an email fires. There is no path from this function to an owner.
+function buildDeploymentDrafts(open: any[], analyses: ItemAnalysis[]): ReplyDraft[] {
+  const message = process.env.VERCEL_GIT_COMMIT_MESSAGE || ''
+  if (!message.trim()) return []
+
+  const byId = new Map(analyses.map(a => [a.itemId, a]))
+  // Items already answered are not waiting on news.
+  const waiting = open.filter(i => !String(i.admin_response || '').trim())
+  const links = linkCommitToItems({ message, sha: process.env.VERCEL_GIT_COMMIT_SHA || null }, waiting)
+
+  return links.map(link => {
+    const item = waiting.find(i => i.id === link.itemId)!
+    return buildReplyDraft({
+      item,
+      link,
+      analysis: byId.get(link.itemId) || null,
+      // The commit SUBJECT, in the owner's direction: it is the closest thing
+      // to a plain-language description we have. The draft builder is what
+      // keeps hashes and filenames out; this only supplies the sentence.
+      whatChanged: subjectToPlain(message),
+    })
+  })
+}
+
+// The commit subject with its conventional-commit prefix removed. Not a
+// paraphrase engine — if the result still looks like engineering, the draft
+// falls back to its own generic sentence rather than shipping it.
+function subjectToPlain(message: string): string | null {
+  const subject = String(message || '').split('\n')[0].trim()
+  const stripped = subject.replace(/^[a-z]+(\([^)]*\))?:\s*/i, '').trim()
+  if (!stripped) return null
+  if (/[\w/.-]+\.(ts|tsx|js|jsx|sql|json)\b/i.test(stripped)) return null
+  if (/\b(issue\s*\d+|#\d+)\b/i.test(stripped)) return null
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1) + '.'
 }
 
 async function computeAnalyses(open: any[]) {

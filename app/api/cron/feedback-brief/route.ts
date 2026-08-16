@@ -45,6 +45,10 @@ import { fetchFeedbackForBrief } from '@/lib/feedback-brief-data'
 import { buildFeedbackBrief } from '@/lib/feedback-brief'
 import { buildPlacementIndex, type ScreenMapEntry } from '@/lib/feedback-placement'
 import { postSlackMessage } from '@/lib/slack'
+// issue 309 — Slack carries NEWS, not work. The full brief is no longer posted;
+// buildFeedbackBrief still runs because its counts and its suppression decision
+// drive the nudge, and issue 307 builds on the matcher underneath it.
+import { buildNudge } from '@/lib/feedback-nudge'
 import { recordFeedbackBriefRun } from '@/lib/digest-runs'
 import screenMap from '@/docs/screen-map.json'
 
@@ -68,6 +72,8 @@ export async function GET(req: NextRequest) {
 
   // ─── Read + build ──────────────────────────────────────────────
   let brief
+  // Hoisted alongside `brief`: the nudge below needs it outside the try.
+  let appUrl = ''
   try {
     const { items, ok, internalSupported } = await fetchFeedbackForBrief()
     if (!ok) {
@@ -80,7 +86,7 @@ export async function GET(req: NextRequest) {
       console.warn('[cron feedback-brief] is_internal column absent — no row can be internal yet')
     }
 
-    const appUrl = (
+    appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       ''
@@ -111,8 +117,28 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // ─── Post ──────────────────────────────────────────────────────
-  const post = await postSlackMessage(brief.text)
+  // ─── Post the NUDGE, not the brief (issue 309) ─────────────────
+  // What used to go out here was the whole open list with per-item analysis.
+  // The verdict on it was "feels busy", then "I don't want it in Slack, that
+  // will just be a massive message" — and that is right: a wall of items is a
+  // message you scroll past, and two weeks of scrolling past is a message you
+  // have stopped reading, which is worse than none.
+  //
+  // NOTHING WAS DELETED. brief is still built above: its counts feed the nudge,
+  // its suppression decision still governs whether anything posts at all, and
+  // brief.text is still produced and still tested — it is simply no longer what
+  // gets sent. The triage screen (issues 306-308) is where the work happens.
+  const nudge = buildNudge({
+    summary: brief.summary,
+    oldestNewDays: brief.summary.oldestNewDays,
+    triageUrl: `${appUrl}/?feedback=1`,
+  })
+  if (nudge.suppressed || !nudge.post) {
+    console.log(`[cron feedback-brief] nudge suppressed (${nudge.reason || 'nothing to say'})`)
+    await recordFeedbackBriefRun(brief, { ok: false })
+    return NextResponse.json({ ok: true, posted: false, suppressed: true, open: brief.openCount })
+  }
+  const post = await postSlackMessage(nudge.post.text, nudge.post.attachments)
   // Record regardless of the Slack outcome — the row is the liveness proof,
   // and a post failure is itself worth capturing (posted:false).
   await recordFeedbackBriefRun(brief, { ok: post.ok, skipped: post.skipped })

@@ -562,13 +562,21 @@ describe('GET /api/cron/feedback-brief', () => {
     expect(svc.captured[0].suppressed).toBe(true)
   })
 
-  it('posts when something is new', async () => {
+  // ISSUE 309 RETIRED THE LONG BRIEF FROM SLACK. It used to post the whole
+  // open list with per-item analysis; the verdict was "I don't want it in
+  // Slack, that will just be a massive message". What posts now is a four-line
+  // nudge. The brief itself is still BUILT — its counts drive the nudge and
+  // issue 307 builds on the matcher underneath it — so this asserts the new
+  // payload rather than being deleted.
+  it('posts a NUDGE, not the list, when something is new', async () => {
     process.env.CRON_SECRET = 'right'
     routeMock.result = { items: [freshBug()], ok: true, internalSupported: true }
     const res = await GET(new NextRequest(`${URL_BASE}?secret=right`))
     expect(res.status).toBe(200)
     expect(routeMock.posted).toHaveLength(1)
-    expect(routeMock.posted[0]).toContain('*BUGS*')
+    // The per-item sections are gone; the counts line is what goes out.
+    expect(routeMock.posted[0]).not.toContain('*BUGS*')
+    expect(routeMock.posted[0]).toContain('Feedback — where the queue stands')
   })
 
   it('a failed READ is a 500, never a cheerful "0 open"', async () => {
@@ -609,11 +617,14 @@ describe('the route is registered and configured like the digest it was modelled
     expect(src).toContain("export const fetchCache = 'force-no-store'")
   })
 
-  it('is registered in vercel.json as a daily cron', () => {
+  // Weekday mornings since issue 309 — a nudge on a Sunday is a message about
+  // work nobody is going to do, and those are the ones that teach you to
+  // ignore the channel.
+  it('is registered in vercel.json as a weekday-morning cron', () => {
     const vercel = JSON.parse(readFileSync('vercel.json', 'utf8'))
     const cron = vercel.crons.find((c: any) => c.path === '/api/cron/feedback-brief')
     expect(cron).toBeTruthy()
-    expect(cron.schedule).toMatch(/^0 \d+ \* \* \*$/)
+    expect(cron.schedule).toMatch(/^0 \d+ \* \* 1-5$/)
   })
 
   it('does not collide with the webhook digest slot', () => {
