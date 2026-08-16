@@ -21,6 +21,28 @@ import type { WebhookDigest } from './webhook-digest'
 // (issue 159 — was 6h when the digest ran every 3h).
 export const DIGEST_STALE_MS = 48 * 60 * 60 * 1000
 
+// ─── THIS TABLE NOW HAS MORE THAN ONE WRITER (issue 248 step 2) ───────
+// The daily feedback brief records its heartbeat here too, rather than
+// carrying a migration for a second table (migrations are held; Kevin runs
+// them against a live system).
+//
+// That makes the label an ALLOWLIST, not decoration. fetchLatestDigestRun
+// answers "is the webhook digest still alive", and system-health raises the
+// stale-cron alarm from it. Before this filter it read the newest row in the
+// table by any writer — so the moment the feedback brief started writing, a
+// dead webhook digest would have looked healthy every single day, and the one
+// alarm that catches a deployment-pinned cron would have been silently
+// disarmed by an unrelated feature.
+//
+// 'last 3h' is the pre-issue-159 cadence, still present in 64 historical rows;
+// including it keeps this read's answer identical to what it was before.
+// Anything NOT on this list is excluded, which is the safe direction: an
+// unrecognised writer must never satisfy the webhook digest's heartbeat.
+export const WEBHOOK_DIGEST_LABELS = ['last 24h', 'last 3h']
+
+// The feedback brief's own label.
+export const FEEDBACK_BRIEF_LABEL = 'feedback brief'
+
 export type DigestRunRow = {
   ran_at: string
   window_label: string | null
@@ -76,6 +98,35 @@ export async function recordDigestRun(
   }
 }
 
+// The feedback brief's heartbeat (issue 248 step 2). Same contract as
+// recordDigestRun: one row per run INCLUDING suppressed ones and Slack skips,
+// because the row's job is liveness first and content second — Slack silence
+// on a quiet day and Slack silence from a dead cron look identical from
+// outside. Never throws, and no-ops before the table exists.
+//
+// The webhook-shaped counter columns are left null; they do not apply. Only
+// window_label, suppressed, posted, skipped and message_text are meaningful
+// for this writer.
+export async function recordFeedbackBriefRun(
+  brief: { suppressed: boolean; text: string },
+  post: { ok: boolean; skipped?: string } | null,
+): Promise<void> {
+  try {
+    const { error } = await supabaseService.from('digest_runs').insert({
+      window_label: FEEDBACK_BRIEF_LABEL,
+      suppressed: brief.suppressed,
+      posted: post?.ok ?? false,
+      skipped: post?.skipped ?? null,
+      message_text: brief.suppressed ? null : brief.text,
+    })
+    if (error && !isMissingTable(error.message)) {
+      console.error('[digest-runs] feedback brief insert failed (non-fatal)', error.message)
+    }
+  } catch (err: any) {
+    console.error('[digest-runs] unexpected feedback brief insert error (non-fatal)', err?.message || err)
+  }
+}
+
 // tracked:false = the table isn't there yet (pre-migration) — callers
 // render "run tracking not wired yet", never a fake "no runs".
 export async function fetchLatestDigestRun(): Promise<{
@@ -91,6 +142,8 @@ export async function fetchLatestDigestRun(): Promise<{
           'loc_other_leads, import_failed, import_stalled, import_origin_gated, ' +
           'rate_missing, booking_link_missing',
       )
+      // Webhook-digest rows ONLY — see WEBHOOK_DIGEST_LABELS.
+      .in('window_label', WEBHOOK_DIGEST_LABELS)
       .order('ran_at', { ascending: false })
       .limit(1)
     if (error) {
