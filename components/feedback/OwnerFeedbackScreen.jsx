@@ -45,6 +45,12 @@ import BeeLoader from '@/components/hive/shared/BeeLoader'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import { IconPlus, IconPaperclip } from '@/components/ui/icons'
 import { FeedbackAttachmentList } from '@/components/feedback/feedbackShared'
+// The "has it been seen since it was written?" kernel (issue 306). It moved to
+// lib/feedback-queues so triage could ask the same question from the other end
+// — "are they still waiting?" — without a second copy of the comparison. This
+// screen's isUnreadReply keeps its own two clauses (a reply exists, and it is
+// MINE) and delegates only the timestamp test.
+import { isReplyUnseen, hasFeedbackReply } from '@/lib/feedback-queues'
 
 // ── THE FOUR PLAIN WORDS ──────────────────────────────────────
 // Six database statuses, four words an owner would actually use. The mapping
@@ -77,7 +83,7 @@ export function isDoneItem(item) {
   return CLOSED.includes(String(item?.status || ''))
 }
 export function hasReply(item) {
-  return !!(item?.admin_response && String(item.admin_response).trim())
+  return hasFeedbackReply(item)
 }
 
 // "Is this reply news to the person who wrote the report?"
@@ -92,10 +98,7 @@ export function hasReply(item) {
 export function isUnreadReply(item, myId) {
   if (!hasReply(item)) return false
   if (!myId || item.user_id !== myId) return false
-  const repliedAt = item.admin_response_at
-  if (!repliedAt) return !item.reply_seen_at
-  if (!item.reply_seen_at) return true
-  return new Date(item.reply_seen_at).getTime() < new Date(repliedAt).getTime()
+  return isReplyUnseen(item)
 }
 
 // Owner-facing age. Stays in DAYS rather than flipping to a calendar date at

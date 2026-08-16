@@ -77,6 +77,8 @@ import {
   summarizeFeedbackQueues, feedbackQueueOf, isClosedFeedback,
   isAnsweredButUnmoved, feedbackAgeDays, feedbackLastTouchDays,
   FEEDBACK_STALE_DAYS,
+  // issue 306 — the derived "have they seen it?" state and the work order.
+  hasFeedbackReply, isAwaitingConfirmation, sortForTriage,
 } from '@/lib/feedback-queues'
 
 // ── the three queues, in the order they should be worked ──────
@@ -94,6 +96,32 @@ const TONES = {
   warning: { bg: T.state.warning.bg, ink: T.state.warning.deep, edge: T.state.warning.fg },
   accent:  { bg: T.accent.soft,      ink: T.accent.deep,        edge: T.accent.fg },
 }
+
+// ── VERDICTS (issue 306) ──────────────────────────────────────
+// Most items need a decision, not an investigation — one audit pass killed
+// twenty of about seventy. These are the wordless ones: each maps onto an
+// EXISTING status and is written through the EXISTING route
+// (PATCH /api/admin/feedback/:id), the same call the detail modal makes. No
+// second status path exists, here or anywhere; a direct database write would
+// skip the send rules and is exactly what left five replies undelivered.
+//
+// THE FOURTH VERDICT — "needs a question" — is deliberately NOT here. A
+// question is words, and words belong in the reply box that already exists and
+// already mails them. It is offered as "Ask a question", which opens that
+// composer on the selected item rather than writing anything.
+//
+// `emails` mirrors the route's rule 2/2a: moving INTO shipped announces itself
+// (issue 236); declined and planned say nothing without a written sentence
+// (rule 2b). Mirrored rather than guessed — the modal's own `willSend` line
+// does the same — so the confirmation can say how much mail a click sends.
+const VERDICTS = [
+  { key: 'not_real', label: 'Not real',       status: 'declined', emails: false,
+    done: 'Marked not planned' },
+  { key: 'fixed',    label: 'Already fixed',  status: 'shipped',  emails: true,
+    done: 'Marked fixed' },
+  { key: 'keep',     label: 'Real — keep it', status: 'planned',  emails: false,
+    done: 'Marked planned' },
+]
 
 // ── the type glyph ───────────────────────────────────────────
 // ONE place decides the icon and its tone, for all four types and for anything
@@ -140,6 +168,60 @@ function dayPhrase(days) {
   if (days <= 0) return 'today'
   if (days === 1) return '1 day'
   return `${days} days`
+}
+
+// ── INTERNAL MARKER (issue 306) ───────────────────────────────
+// is_internal has been on the row object since issue 247 step 1 and was never
+// rendered here. The type glyph distinguishes decision and hazard, but an
+// internal BUG looked identical to an owner's bug — and the two need opposite
+// handling: one has somebody waiting on an answer, the other does not. There
+// are zero internal rows in production today, so this is built against
+// fixtures; it is also the reason the marker is a word and not a colour.
+function InternalPill() {
+  return (
+    <span style={{
+      flexShrink: 0, display: 'inline-flex', alignItems: 'center',
+      padding: '1px 7px', borderRadius: T.radius.pill,
+      background: T.family.purple.bg, color: T.family.purple.text,
+      fontSize: '10px', fontWeight: 700, letterSpacing: '0.02em',
+    }}>
+      Internal
+    </span>
+  )
+}
+
+// ── WHO IS THIS WAITING ON? (issue 306) ───────────────────────
+// The line that separates "waiting on me" from "waiting on them". Four states,
+// in precedence order — the first two are problems, the third is patience, the
+// fourth is done:
+//
+//   1. answered but still marked New  — our own filing error, loudest
+//   2. answered, not seen             — THE MISSING STATE. We wrote back and
+//      they have not opened it. Five owners sat in this state for seven weeks
+//      while the screen said only "Replied", which reads as finished.
+//   3. no reply                       — waiting on us; the queue cards above
+//      already count it, so it stays quiet here
+//   4. answered and seen              — landed; nobody is waiting
+//
+// Internal items never reach 2 or 4: nobody is on the other end to open them,
+// so a seen/unseen distinction would be theatre. They collapse to "Replied".
+function ReplyState({ item, internal }) {
+  const wrap = (color, weight, children) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color, fontWeight: weight }}>
+      {children}
+    </span>
+  )
+  if (isAnsweredButUnmoved(item)) {
+    return wrap(T.state.warning.deep, 600, <><IconAlertTriangle size={11} /> Replied, still marked New</>)
+  }
+  if (!hasFeedbackReply(item)) {
+    return <span style={{ color: T.ink.quiet }}>No reply yet</span>
+  }
+  if (internal) return wrap(T.accent.deep, 500, <><IconCheck size={11} /> Replied</>)
+  if (isAwaitingConfirmation(item)) {
+    return wrap(T.state.info.mid, 600, <><IconCheck size={11} /> Replied · not seen yet</>)
+  }
+  return wrap(T.accent.deep, 500, <><IconCheck size={11} /> Replied · seen</>)
 }
 
 // ── QUEUE CARD ────────────────────────────────────────────────
@@ -691,6 +773,94 @@ function InternalComposeModal({ onClose, onFiled }) {
   )
 }
 
+// ── THE VERDICT BAR (issue 306) ───────────────────────────────
+// Appears only when something is selected. Presentational: it owns no data and
+// performs no write — the parent holds the selection and does the PATCHing, so
+// there is exactly one place that talks to the route.
+//
+// TWO STEPS FOR ANYTHING THAT MAILS. Picking a verdict arms it; a second click
+// commits. "Already fixed" across twelve rows sends twelve emails, and that is
+// not something a single click on a bar should be able to do — the armed state
+// says the number out loud first. The wordless verdicts that mail nothing arm
+// the same way, because a bulk status change is still a bulk status change.
+//
+// Buttons are natural width in a wrapping row. Nothing stretches: a bar that
+// grows its controls to fill an admin-width screen turns three small verdicts
+// into three billboards.
+function VerdictBar({ count, armed, emailCount, applying, canAsk, onArm, onCommit, onCancel, onAsk, onClear }) {
+  const btn = (extra = {}) => ({
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    padding: '7px 13px', borderRadius: T.radius.control,
+    border: T.border.control, background: T.surface.raised,
+    fontSize: '13px', fontFamily: 'inherit', fontWeight: 600,
+    color: T.ink.secondary, cursor: 'pointer', flexShrink: 0, ...extra,
+  })
+
+  return (
+    <div
+      role="group"
+      aria-label="Verdict actions"
+      style={{
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '9px',
+        padding: '10px 14px', marginBottom: '10px',
+        borderRadius: T.radius.control, background: T.surface.sunken,
+        border: T.border.thin,
+      }}
+    >
+      <span style={{ fontSize: '13px', fontWeight: 700, color: T.ink.primary, flexShrink: 0 }}>
+        {plural(count, 'item', 'items')} selected
+      </span>
+
+      {applying ? (
+        <span style={{ fontSize: '12.5px', color: T.ink.muted }}>
+          Saving {applying.done} of {applying.total}…
+        </span>
+      ) : armed ? (
+        <>
+          <span style={{ fontSize: '12.5px', color: T.ink.secondary }}>
+            {armed.label} — {plural(count, 'item', 'items')}.
+            {armed.emails
+              ? ` This emails ${plural(emailCount, 'person', 'people')}.`
+              : ' Nobody is emailed.'}
+          </span>
+          <button type="button" onClick={onCommit} style={btn({ background: T.accent.fg, border: 'none', color: T.accent.onFill, fontWeight: 700 })}>
+            Confirm
+          </button>
+          <button type="button" onClick={onCancel} style={btn({ border: 'none', background: 'transparent', color: T.ink.muted })}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          {VERDICTS.map(v => (
+            <button key={v.key} type="button" onClick={() => onArm(v)} style={btn()}>
+              {v.label}
+            </button>
+          ))}
+          {/* The words path. Enabled on a single selection only — a question is
+              written to one person about one thing, and the composer that sends
+              it is the one the modal already owns. */}
+          <button
+            type="button"
+            onClick={onAsk}
+            disabled={!canAsk}
+            title={canAsk ? undefined : 'Select a single item to ask about it'}
+            style={btn({
+              color: canAsk ? T.ink.secondary : T.ink.disabled,
+              cursor: canAsk ? 'pointer' : 'default',
+            })}
+          >
+            Ask a question
+          </button>
+          <button type="button" onClick={onClear} style={btn({ border: 'none', background: 'transparent', color: T.ink.muted, fontWeight: 500 })}>
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function AdminFeedbackScreen({
   // Reports the ONE open count (lib/feedback-queues) up to the nav badge. Named
   // for what it now carries: it used to report the 'submitted' count only,
@@ -725,6 +895,13 @@ export default function AdminFeedbackScreen({
   const [walk, setWalk] = useState(null)
   // The internal composer (issue 247 step 2). Elevated mounts only.
   const [composing, setComposing] = useState(false)
+  // ── VERDICT SELECTION (issue 306). Elevated mounts only — see canTriage.
+  // Not persisted, like every other control here (issue 126): a selection that
+  // survived navigation would let a bulk verdict land on rows chosen days ago.
+  const [selected, setSelected]     = useState(() => new Set())
+  const [armed, setArmed]           = useState(null)   // the verdict awaiting confirmation
+  const [applying, setApplying]     = useState(null)   // { done, total } while writing
+  const [verdictNote, setVerdictNote] = useState(null) // what the last pass did
 
   // "Just mine" matches the viewer's own submissions by user_id. Deliberately
   // NOT persisted — every filter here resets on navigation (issue 126). A
@@ -797,18 +974,25 @@ export default function AdminFeedbackScreen({
 
   const filtered = useMemo(() => {
     const rows = items.filter(i => baseMatch(i) && matchQueue(i) && matchClosed(i))
-    // ORDER. The backlog queues sort LONGEST-WAITING FIRST — that is the entire
-    // point of looking at them, and newest-first buried the three items that
-    // had been quiet for fifty-eight days at the bottom of the list. Every
-    // other view keeps the arrival order the list has always had.
-    if (queueFilter === 'new') {
-      return [...rows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    }
+    // ORDER (issue 306). This is a screen someone works DOWN, so the default
+    // view leads with what matters — bugs before ideas, longest-waiting first
+    // inside each band (lib/feedback-queues → sortForTriage, where the type
+    // rank and its reasoning live). Arrival order was never a work order; it
+    // was just the order the server happened to return, and it put the newest
+    // idea above a bug somebody reported two months ago.
+    //
+    // THE STALE QUEUE IS DELIBERATELY EXEMPT, and this is not an oversight.
+    // Issue 233 built that card to answer one question — what has been quiet
+    // longest — and ranking by type first would put a fresher bug above the
+    // item that has rotted for fifty-eight days, which is the single row the
+    // card exists to surface. Type is not the axis there; silence is. Its test
+    // calls longest-quiet-first "the whole point of looking at it", and it is
+    // right, so the type rank stops at its edge.
     if (queueFilter === 'stale') {
       return [...rows].sort((a, b) =>
         new Date(a.updated_at || a.created_at) - new Date(b.updated_at || b.created_at))
     }
-    return rows
+    return sortForTriage(rows, 'created')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, baseMatch, queueFilter, showClosed])
 
@@ -882,6 +1066,92 @@ export default function AdminFeedbackScreen({
     : (QUEUES.find(q => q.key === queueFilter)?.label || '').toLowerCase()
 
   const selectedItem = walk ? items.find(i => i.id === walk.ids[walk.index]) : null
+
+  // ── VERDICTS (issue 306) ────────────────────────────────────
+  // Triage controls are ELEVATED-ONLY. onReportFeedback marks the franchise
+  // mount (see the file header) and its absence is this file's existing signal
+  // for an admin shell — the same one the internal composer uses. An owner may
+  // legitimately patch their own location's items through the route, but "clear
+  // the obvious in bulk" is a triage motion, not an owner one, and the owner
+  // mount must not grow a selection gutter for it.
+  const canTriage = !franchiseMount
+
+  const selectedItems = useMemo(
+    () => filtered.filter(i => selected.has(i.id)),
+    [filtered, selected],
+  )
+
+  // How many of the selected rows a "fixed" pass would actually mail. Mirrors
+  // the route's guards in the same order it applies them — INTO shipped (rule
+  // 2a), not internal (rule 6), not your own item (rule 4), has an address —
+  // so the armed line states a real number rather than the selection size. Same
+  // mirroring the detail modal's `willSend` does; the route remains the only
+  // party that decides, and this only has to predict it honestly.
+  const emailCount = useMemo(() => selectedItems.filter(i =>
+    i.status !== 'shipped' && !i.is_internal && (!myId || i.user_id !== myId) && !!i.submitter_email,
+  ).length, [selectedItems, myId])
+
+  const clearSelection = useCallback(() => { setSelected(new Set()); setArmed(null) }, [])
+
+  const toggleRow = (id) => {
+    setArmed(null)
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  // Apply a verdict to every selected row, ONE PATCH PER ITEM through the same
+  // route the detail modal uses. Sequential on purpose: each save may send an
+  // email inline, and firing twenty of those concurrently is how a send rail
+  // gets rate-limited. It also makes the progress count honest.
+  //
+  // A failure on one row does NOT abort the rest — the remaining items are
+  // still decided, and the tally says how many did not take.
+  const commitVerdict = async () => {
+    const verdict = armed
+    const rows = selectedItems
+    if (!verdict || rows.length === 0) return
+    setArmed(null)
+    setVerdictNote(null)
+    setApplying({ done: 0, total: rows.length })
+
+    const saved = []
+    let failed = 0
+    let emailed = 0
+    for (let n = 0; n < rows.length; n++) {
+      try {
+        const res = await fetch(`/api/admin/feedback/${rows[n].id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: verdict.status }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const updated = await res.json()
+        // reply_email is the route's report on the send, not a column — read
+        // it for the tally, then keep it out of the list row.
+        const { reply_email, ...row } = updated
+        if (reply_email && reply_email.sent) emailed++
+        saved.push(row)
+      } catch {
+        failed++
+      }
+      setApplying({ done: n + 1, total: rows.length })
+    }
+
+    if (saved.length) {
+      const byId = new Map(saved.map(r => [r.id, r]))
+      setItems(prev => prev.map(i => (byId.has(i.id) ? { ...i, ...byId.get(i.id) } : i)))
+    }
+    setApplying(null)
+    setSelected(new Set())
+    setVerdictNote(
+      `${verdict.done}: ${plural(saved.length, 'item', 'items')}.` +
+      (emailed ? ` ${plural(emailed, 'person', 'people')} emailed.` : '') +
+      (failed ? ` ${failed} could not be saved.` : ''),
+    )
+  }
 
   const openRow = (id) => setWalk({ ids: filtered.map(i => i.id), index: filtered.findIndex(i => i.id === id) })
   const step = (delta) => setWalk(w => {
@@ -999,6 +1269,39 @@ export default function AdminFeedbackScreen({
         )}
       </div>
 
+      {/* THE VERDICT BAR (issue 306) — only once something is selected, so the
+          screen is unchanged until Kevin starts clearing things. */}
+      {canTriage && selected.size > 0 && (
+        <VerdictBar
+          count={selected.size}
+          armed={armed}
+          emailCount={emailCount}
+          applying={applying}
+          canAsk={selected.size === 1}
+          onArm={setArmed}
+          onCommit={commitVerdict}
+          onCancel={() => setArmed(null)}
+          // The words path: open the item in the detail modal, whose reply box
+          // already writes through the route and already mails the submitter.
+          // This screen does not grow a second composer.
+          onAsk={() => { const only = selectedItems[0]; if (only) openRow(only.id) }}
+          onClear={clearSelection}
+        />
+      )}
+      {verdictNote && (
+        <p style={{ fontSize: '12.5px', color: T.ink.secondary, marginBottom: '10px' }}>
+          {verdictNote}{' '}
+          <button
+            type="button"
+            onClick={() => setVerdictNote(null)}
+            className="bee-small-action"
+            style={{ padding: 0, background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <BeeLoader size="screen" label="Gathering the records…" />
       ) : error ? (
@@ -1019,16 +1322,33 @@ export default function AdminFeedbackScreen({
         <div style={{ background: T.surface.raised, border: T.border.thin, borderRadius: '12px', overflow: 'hidden' }}>
           {filtered.map((it, idx) => {
             const closed = isClosedFeedback(it.status)
-            const stranded = isAnsweredButUnmoved(it)
-            const answered = !!(it.admin_response && String(it.admin_response).trim())
+            const internal = !!it.is_internal
             const href = contextHref(it)
             const quiet = feedbackLastTouchDays(it)
+            const picked = selected.has(it.id)
+            // ONE flex row, wrapping. The checkbox and the record pointer are
+            // both SIBLINGS of the row button, never nested inside it — one
+            // row, three real targets, and valid markup. Kept FLAT rather than
+            // wrapped in an inner div so the row button's parent is still the
+            // element carrying the row's state (the dim on a closed row); the
+            // pointer takes a full-width line below by wrapping, not nesting.
             return (
-              <div key={it.id} style={{ borderTop: idx === 0 ? 'none' : T.border.divider, opacity: closed ? 0.72 : 1 }}>
+              <div key={it.id} style={{ borderTop: idx === 0 ? 'none' : T.border.divider, opacity: closed ? 0.72 : 1, background: picked ? T.accent.soft : 'transparent', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {canTriage && (
+                  <label style={{ display: 'flex', alignItems: 'center', padding: '14px 0 8px 14px', cursor: 'pointer', flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={picked}
+                      onChange={() => toggleRow(it.id)}
+                      aria-label={`Select ${it.title}`}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                  </label>
+                )}
                 <button
                   onClick={() => openRow(it.id)}
                   style={{
-                    width: '100%', display: 'flex', alignItems: 'flex-start', gap: '12px',
+                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: '12px',
                     padding: '12px 14px 8px', border: 'none',
                     background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
                   }}
@@ -1037,6 +1357,7 @@ export default function AdminFeedbackScreen({
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
                       <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</span>
+                      {internal && <InternalPill />}
                       {Array.isArray(it.attachments) && it.attachments.length > 0 && (
                         <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: T.ink.muted }}>
                           <IconPaperclip size={11} />{it.attachments.length}
@@ -1060,20 +1381,10 @@ export default function AdminFeedbackScreen({
                         {!franchiseMount && it.location_name ? ` · ${it.location_name}` : ''}
                         {` · ${feedbackTimeAgo(it.created_at)}`}
                       </span>
-                      {/* ANSWERED-BUT-UNMOVED. A reply was written and the
-                          status never moved, so it still reads as untouched and
-                          keeps ringing the "nobody has looked" queue. */}
-                      {stranded ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: T.state.warning.deep, fontWeight: 600 }}>
-                          <IconAlertTriangle size={11} /> Replied, still marked New
-                        </span>
-                      ) : answered ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: T.accent.deep }}>
-                          <IconCheck size={11} /> Replied
-                        </span>
-                      ) : (
-                        <span style={{ color: T.ink.quiet }}>No reply yet</span>
-                      )}
+                      {/* Who is this waiting on? See ReplyState — "Replied"
+                          alone used to cover both a landed answer and one the
+                          person has never opened. */}
+                      <ReplyState item={it} internal={internal} />
                       {/* How long this one has been quiet, on the queue where
                           that is the reason you are looking at it. */}
                       {queueFilter === 'stale' && quiet != null && (
@@ -1083,11 +1394,11 @@ export default function AdminFeedbackScreen({
                   </span>
                   <span style={{ flexShrink: 0 }}><FeedbackStatusBadge status={it.status} /></span>
                 </button>
-                {/* The record pointer is its own target, a sibling of the row
-                    button rather than nested inside it — one row, two real
-                    destinations, and valid markup. */}
+                {/* width 100% is what puts this on its own line in the wrapping
+                    row above. Its indent tracks the selection gutter so it
+                    stays under the title on both mounts. */}
                 {href && (
-                  <div style={{ padding: '0 14px 10px 54px' }}>
+                  <div style={{ width: '100%', padding: `0 14px 10px ${canTriage ? 74 : 54}px` }}>
                     <a
                       href={href}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 600, color: T.accent.fg, textDecoration: 'none' }}
