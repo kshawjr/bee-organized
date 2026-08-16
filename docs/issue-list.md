@@ -19,8 +19,13 @@ queries against Supabase project `pcuycyelxxkxahlxdewl`, ClickUp list
 
 ## NEW
 
-Six findings from the audit that were not on the list and should be. Numbered
-here for the first time; none has a ClickUp id yet.
+Eight findings that were not on the list and should be. Numbered here for the
+first time; none has a ClickUp id yet.
+
+**297–302** come from the audit. **304–305** come from a later read-only
+comparison of the 16 open owner-reported bugs in `feedback_items`
+(`status not in (shipped, declined)`, `is_internal=false`, `type='bug'`)
+against this list, same evidence base. There is no 303.
 
 ### 297 — `public.hub_users` has RLS disabled entirely
 Supabase's advisor flags it **critical**: 27 rows of user and role data readable
@@ -55,6 +60,41 @@ locations. The forward-facing hole is 35 locations wide.
 `payments`, `notes`, `location_jobber_users`, `import_staging`,
 `import_location_fetch`. Either dead scaffolding to remove or wiring never
 finished — unresolved either way.
+
+### 304 — 226 closed-job emails are queued across 17 locations, first firing 2026-10-09
+`opp_closed_job_3mo` and `opp_closed_job_12mo` (`lib/stage-emails.ts`).
+**0 sent, ever** — the earliest 3-month is not due until **2026-10-09**, the
+12-month until **2027-07-11**. Both are classified COMMERCIAL by the CAN-SPAM
+tripwire.
+
+Owners were never asked. The not-code list has carried this as "eight
+locations need a heads-up"; the real exposure is **17 locations and 226 queued
+rows**, and it lands on one day. Needs a person before 2026-10-09 — see
+[Not code](#not-code).
+
+Carmel's owner reported a client receiving an appreciation email offering a
+discount for a Google review (`feedback_items` 1eb7b5d2, 2026-08-05) — that was
+**NOT this**. Bee Hub has never sent a client-facing email from Carmel: its
+`notification_log` carries only `lead_notification*` and `lead_resubmission`
+rows, no `drip` / `stage_email` / `welcome`, and its 20 scheduled stage emails
+are all unsent. The email came from outside Bee Hub, Jobber's own automations
+being the obvious candidate. **Do not conflate the two.**
+
+### 305 — an archived job parks its engagement at Final Processing forever
+`deriveEngagementStage` has a `closeOnArchivedQuote` branch ([`d662baf`](../lib/engagements.ts))
+but **no equivalent for an archived JOB**. An engagement whose only job is
+`status='archived'` sits at Final Processing with `total_invoiced=0` and never
+leaves.
+
+There is no manual escape either: `canCloseWon` (`EngagementPanel.jsx:462`)
+requires `invoicesFullyPaid()`, which returns **false on an empty array**
+(`engagementStatus.js:121-123` — `invoices.length > 0 && …`), so the "Mark won"
+button never renders.
+
+**107 engagements fleet-wide** match this shape. Reported by the Northwest
+Austin owner as "Mario is closed out and paid" (`feedback_items` 8ea772a4,
+2026-08-12) — his third engagement, Final Processing, one archived job, while
+his other two are Closed Won and paid.
 
 ---
 
@@ -357,6 +397,7 @@ buy, log in, or look.
 | # | Listed under | What the person has to do |
 |---|---|---|
 | 297 | [NEW](#new) | Design the `hub_users` RLS policies **before** anyone runs `ALTER TABLE … ENABLE ROW LEVEL SECURITY`. A blind enable locks the table. |
+| 304 | [NEW](#new) | Decide, **before 2026-10-09**, whether 226 queued commercial closed-job emails go out to clients of 17 locations whose owners were never asked. Separately: open the Jobber account and find what actually sent Carmel's appreciation email. |
 | 298 | [NEW](#new) | Decide what happens to a real $550 charge sitting on a placeholder `location_id`. Refund, re-point, or reconcile — a money decision, not a patch. |
 | 275 | [Latent](#latent) | Buy the paid Supabase custom-domain add-on, set DNS, update the Google redirect URIs. Unfixable from the repo. |
 | 288 | [Active](#active) | Make the crew-assignment product decision. Note it has never run — see [300](#300). |
@@ -364,6 +405,26 @@ buy, log in, or look.
 | 293 | [Unknown](#unknown) | Pull the MAKE scenario history and the form provider's log. Neither is reachable from here. |
 | 137 | [Unknown](#unknown) | Open Zoho and identify which module or view held the ~200 client leads. |
 | 169 · 196 · 251 · 173 | [Unknown](#unknown) | Render it, run it, execute it, or produce the test definition. |
+
+**The returning-client question** — the one entry here that is *not* a
+cross-reference; it is listed nowhere else and carries no number.
+
+Three owners across two locations have now asked why a returning client lands
+in Engagements/Request rather than New — Palm Beach twice on the same
+engagement (`feedback_items` 838a02f8 8/2, 1daa96d4 8/3, Lois Groff) and Kansas
+City once (9ae16c48 8/11, Arlene Kaseff, a 2023 client whose webform
+resubmission founded a fresh engagement).
+
+`OPENING_STAGE.manual` and `OPENING_STAGE.request` are both `'Request'`
+(`lib/engagements.ts:48-53`), and any open engagement derives `'Active'`, which
+removes the person from the Inbox. `NewClientSheet.jsx` states it as doctrine:
+"The person derives Active (open engagement) and the engagement shows on the
+Board in Request — the founded-not-sent signal; no new status exists for it."
+
+**An unmade product decision, same species as [288](#288-crew-assignment-behavior-undecided--clickup-868kbc91t) — not a bug.**
+Note that the KC case is [`043287c`](../app/api/leads/intake/route.ts) (#94)
+working as designed: fixing the vanishing-resubmission bug is what produces
+this complaint.
 
 ---
 
