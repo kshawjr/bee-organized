@@ -35,6 +35,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { getLocationHandlers } from './project-type-handlers'
 import {
   canonicalProjectType,
   getProjectTypeVocabulary,
@@ -65,6 +66,19 @@ export type ProjectTypeAssignment = SenderIdentity & {
   id: string
   project_type: string
   domain_warning: boolean
+  // issue 303 — is this row's handler still a live person?
+  //
+  // The table says what a type is SET to; the send path says what it will DO,
+  // and they disagree on exactly one axis. lib/project-type-handlers.ts drops a
+  // PERSON-MODE row whose handler has been offboarded, so that type quietly
+  // falls to the location's base sender — while the row itself still sits here
+  // reading "Carol Kern". A reader that only wants to render the config can
+  // ignore this; a reader that claims to say what a sequence SENDS AS cannot.
+  //
+  // A typed row is unaffected by its handler's liveness (a shared mailbox does
+  // not stop existing when someone leaves), so this is false-but-harmless there
+  // and consumers must branch on sender_is_custom first.
+  handler_active: boolean
 }
 
 // The person half of a row — WHO HANDLES IT. Name/email are what a person-mode
@@ -178,16 +192,36 @@ export async function getSenderConfig(locationId: string): Promise<SenderConfig>
     .filter((r: { label: string }) => !!r.label)
   const projectTypes = projectTypeGroups.map((r: { label: string }) => r.label)
 
-  const assignments: ProjectTypeAssignment[] = (assignRes.data || []).map((a: any) => ({
-    id: a.id,
-    project_type: a.project_type,
-    sender_name: a.sender_name,
-    sender_email: a.sender_email,
-    sender_reply_to: a.sender_reply_to ?? null,
-    sender_is_custom: a.sender_is_custom === true,
-    source_user_id: a.source_user_id ?? null,
-    domain_warning: senderDomainWarning(a.sender_email, baseSenderEmail),
-  }))
+  // WHOSE NAME WOULD ACTUALLY GO ON THE MAIL (issue 303). This ASKS THE SEND
+  // PATH rather than re-deriving liveness from hub_users here. Re-deriving it
+  // would put a second "is this person still with us" rule over one question,
+  // which is the precise shape of the three-disagreeing-matching-rules bug that
+  // lib/project-type-vocabulary.ts exists to have ended — and this rule is
+  // fiddlier than it looks (is_active false OR disabled_at set, and a typed row
+  // survives its handler while a person-mode row does not).
+  //
+  // getLocationHandlers is fail-soft: a read error yields an empty map, so every
+  // person-mode row reads as inactive and the UI says those types fall back to
+  // the base sender. That is the same answer the SEND path would give from the
+  // same failure, which is the direction an honest report should lean.
+  const liveHandlers = await getLocationHandlers(locationId)
+
+  const assignments: ProjectTypeAssignment[] = (assignRes.data || []).map((a: any) => {
+    const resolved = liveHandlers.get(String(a.project_type || '').trim().toLowerCase())
+    return {
+      id: a.id,
+      project_type: a.project_type,
+      sender_name: a.sender_name,
+      sender_email: a.sender_email,
+      sender_reply_to: a.sender_reply_to ?? null,
+      sender_is_custom: a.sender_is_custom === true,
+      source_user_id: a.source_user_id ?? null,
+      domain_warning: senderDomainWarning(a.sender_email, baseSenderEmail),
+      // A person-mode row is ABSENT from the map when its handler is gone; a
+      // typed row is present with hub_user_id nulled. One rule covers both.
+      handler_active: !!resolved && resolved.hub_user_id !== null,
+    }
+  })
 
   const people: SenderPerson[] = (peopleRes.data || []).map((u: any) => ({
     id: u.id,

@@ -137,11 +137,21 @@ describe('nothing that worked before is unreachable', () => {
   // address. This is the whole risk of the step: JSX moved by line range, and
   // a block that lands nowhere is invisible to lint and to the type checker.
   it('the sending identity landed on Emails, whole', async () => {
+    // The 'Sending identity' HEADING is gone as of issue 303 — the card no
+    // longer leads with the location's own identity, because under a sequence
+    // toggle that was the wrong answer to "who do these come from". It leads
+    // with what the shown sequence actually sends as, and the location trio is
+    // the labelled fallback underneath.
+    //
+    // What this test is FOR is unchanged and still asserted: issue 246 step 1
+    // moved this block by line range, and the risk it guards is a block that
+    // lands nowhere. The three rows are the block; they are what "whole" means.
     const text = await mount('emails')
-    expect(text).toContain('Sending identity')
     expect(text).toContain('Send From Name')
     expect(text).toContain('Send From Email')
     expect(text).toContain('Reply-To Email')
+    // Still introduced as a fallback rather than dumped in unlabelled.
+    expect(text).toContain('Everything else')
   })
 
   it('New leads renders its own body at its own address', async () => {

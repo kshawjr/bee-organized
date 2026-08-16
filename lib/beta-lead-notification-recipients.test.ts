@@ -372,8 +372,16 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     // Issue 246 step 1 split them: identity → Emails, routing + notification →
     // New leads. Pinned because they read as one feature and a later tidy-up
     // could plausibly re-merge them.
-    expect(beehub).toContain('Sending identity')
-    expect(comp).not.toContain('Sending identity')
+    //
+    // Anchored on the three location rows rather than the old 'Sending identity'
+    // heading, which issue 303 replaced: the card now leads with what the shown
+    // sequence sends as, and those rows ARE the location identity wherever it is
+    // headed. A heading is copy and copy moves; the rows are the feature.
+    expect(beehub).toContain('label="Send From Name"')
+    expect(comp).not.toContain('Send From Name')
+    // And the reverse direction, which is the half that would actually hurt:
+    // Emails must not grow the per-type editors that New leads owns.
+    expect(comp).toContain('What it sends as')
   })
   it('the tab hosting this component is OWNER-allowlisted (hidden from manager AND lite_user)', () => {
     // The section list is an allowlist on franchiseRole==='owner' — the old

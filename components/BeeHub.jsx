@@ -33,6 +33,7 @@ import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
+import { resolveSequenceSenders } from "@/lib/sequence-senders"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
@@ -18675,7 +18676,7 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
 
   // ─── issue 240 step 7b — which sequence is on screen ───
@@ -18693,7 +18694,21 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // Not combined mode: two sequences, one on screen at a time, each fully
   // editable. A lead is on one or the other by project_type, so the toggle
   // mirrors the data rather than inventing a merged view.
-  const [view, setView] = React.useState('organizing')
+  //
+  // CONTROLLED, WITH THE OLD LOCAL DEFAULT INTACT (issue 303). This state was
+  // never lifted, and that is the whole of issue 303: the sending-identity card
+  // renders as a SIBLING of this component, later in the same section, so it
+  // could not know the toggle existed and read the LOCATION default whichever
+  // sequence was showing — "Lynette Ewy" sitting under four emails that go out
+  // as Carol Kern. No prop, no context, no store; nothing else could have told
+  // it. So the toggle now offers its value upward.
+  //
+  // Uncontrolled unless a parent asks: `view`/`onViewChange` absent keeps the
+  // exact previous behaviour, local state defaulting to organizing, which is
+  // what every other caller and the existing tests rely on.
+  const [viewLocal, setViewLocal] = React.useState('organizing')
+  const view = viewProp || viewLocal
+  const setView = onViewChange || setViewLocal
   const activePathKey = view === 'moving' ? moveDefault : generalDefault
   const hasMoving = !!moveDefault
 
@@ -20900,6 +20915,148 @@ const CONTROL_W = {
   rail:   '196px',   // the settings section rail
 }
 
+// ─── Emails › what THIS sequence sends as (issue 303) ───────────────────────
+//
+// THE DEFECT. This card used to read the LOCATION's sending identity and print
+// it under the heading "who these come from", directly beneath four emails
+// chosen by a toggle it could not see. At loc_kc that meant "Lynette Ewy" above
+// the moving sequence, which goes out as Carol Kern. It was telling the truth
+// about itself and lying about its context, and the label pointed the lie
+// straight at the four emails. Kevin built the screen and still could not tell
+// from it who the moving emails came from.
+//
+// IT REPORTS, IT DOES NOT DECIDE. The per-job-type sender controls live on New
+// leads and stay there — this tab answers "what goes out", that one answers
+// "who does it". Hence the read-only body and the single link out; duplicating
+// the editors here would give two screens the same job and no rule for which
+// wins. The location's own three fields are still editable here, unchanged,
+// because they are this card's own subject.
+//
+// A LIST IS THE NORMAL CASE. A sequence is a drip FAMILY and a family covers
+// however many job types carry its drip_category — see lib/sequence-senders.ts.
+// One name is only ever the degenerate answer, so the list is what this renders
+// and the single-sender sentence is the special case, not the reverse.
+function SequenceSenderCard({
+  view, hasMoving, senderConfig, loading, failed, locationDefault,
+  senderAddressSet, onOpenNewLeads, children,
+}) {
+  const family = view === 'moving' ? 'move' : 'general'
+  const report = resolveSequenceSenders(senderConfig, family, locationDefault)
+  // What the toggle above is currently showing, in the owner's words. With no
+  // moving sequence there is no toggle, and naming a family the owner never
+  // chose would be answering a question they did not ask.
+  const noun = !hasMoving ? 'these emails' : view === 'moving' ? 'the moving emails' : 'the organizing emails'
+  const heading = !hasMoving ? 'These emails' : view === 'moving' ? 'Moving emails' : 'Organizing emails'
+
+  const addr = { fontSize:'12.5px', color:'#4a5f5b', lineHeight:1.5, wordBreak:'break-word' }
+  const oneSender = report.uniform
+
+  // One resolved sender, as prose. Reply-to is always stated: it is the half of
+  // "who does this come from" that an owner cannot guess, and person-mode rows
+  // carry none of their own so it silently follows the location.
+  const senderLine = s => {
+    if (s.isDefault) return <>your own sending name and address, below</>
+    return (
+      <>
+        <strong style={{ fontWeight:700, color:'#1a2e2b' }}>{s.name}</strong>, {s.email}
+        {s.typed && <span style={{ color:'#8a9e9a' }}> — a shared mailbox, not one person</span>}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <CommsLabel>Who {noun} come from</CommsLabel>
+      <div data-sequence-sender-card={family}
+        style={{ margin:'0 12px', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
+        <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
+          <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <CommsIcon name="send" size={20} color="#4f46e5" />
+          </div>
+          {/* data-sequence-answer marks the half that must change with the
+              toggle. The location's own name sits in the editable rows below
+              and legitimately does not move, so a test asserting "Lynette is
+              gone when Moving is selected" has to be able to say WHERE. */}
+          <div data-sequence-answer={family} style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
+              <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>{heading}</h2>
+              {!senderAddressSet && (
+                <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
+              )}
+            </div>
+
+            {/* Never guess while the answer is still in flight, and never fall
+                back to the location default to fill the gap — showing the
+                default in place of the real answer is the original defect. */}
+            {loading && (
+              <p style={{ ...addr, marginTop:'4px' }}>Checking who these go out as…</p>
+            )}
+            {failed && (
+              <p style={{ ...addr, marginTop:'4px' }}>We could not check who these go out as just now. Reload to try again.</p>
+            )}
+
+            {!loading && !failed && oneSender && (
+              <p style={{ ...addr, marginTop:'4px' }}>
+                Every one of {noun} goes out as {senderLine(oneSender)}.
+                {!oneSender.isDefault && <> Replies come back to {oneSender.replyTo}.</>}
+              </p>
+            )}
+
+            {/* THE LIST. Types in one sequence disagreeing is normal, not an
+                error state, so it reads as an answer rather than a warning. */}
+            {!loading && !failed && !oneSender && report.rows.length > 0 && (
+              <>
+                <p style={{ ...addr, marginTop:'4px' }}>
+                  It depends on the kind of job. {heading} go out as:
+                </p>
+                <div style={{ marginTop:'9px', display:'flex', flexDirection:'column', gap:'9px' }}>
+                  {report.rows.map(r => (
+                    <div key={r.projectType} data-sender-for={r.projectType}
+                      style={{ paddingLeft:'11px', borderLeft:'2px solid rgba(99,102,241,0.22)' }}>
+                      <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', margin:0 }}>{r.projectType}</p>
+                      <p style={{ ...addr, margin:'1px 0 0' }}>{senderLine(r.sender)}</p>
+                      {!r.sender.isDefault && (
+                        <p style={{ fontSize:'11.5px', color:'#8a9e9a', margin:'1px 0 0', wordBreak:'break-word' }}>Replies to {r.sender.replyTo}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!loading && !failed && onOpenNewLeads && (
+              <button type="button" onClick={onOpenNewLeads}
+                style={{ marginTop:'11px', maxWidth:CONTROL_W.action, background:'none', border:'none', padding:0, font:'inherit', fontSize:'12.5px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', textAlign:'left' }}>
+                Change who handles a kind of job under New leads
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── The location's own identity, still editable, now labelled for
+            what it actually is: the fallback.
+
+            AND HONEST ABOUT WHEN IT APPLIES. "Every job type has someone, so
+            this is never used" is the tempting sentence and it is false: a lead
+            that arrives with no kind of job on it, or one this location does
+            not run, never reaches a handler row at all — lib/resend.ts only
+            consults them `if (senderProjectType)`. At loc_kc that is 3,346 of
+            3,391 leads. This is the most-used sender at the location, not the
+            unused one, and the copy says so. ───────────────────────────── */}
+        <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)', padding:'14px 17px 2px' }}>
+          <h3 style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', margin:0 }}>Everything else</h3>
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>
+            Plenty of leads arrive without a kind of job on them, and those emails go out
+            under the name and address below. So does any kind of job you have not given
+            to someone.
+          </p>
+        </div>
+        <div>{children}</div>
+      </div>
+    </>
+  )
+}
+
 export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation/currentUser from context
   // (populated by App from page.tsx's Supabase fetch). These are the
@@ -21150,6 +21307,14 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const SETTINGS_RETIRED_SECTIONS = { billing:'team', paths:'emails', templates:'emails', yourteam:'newleads' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
+  // ── Emails › which sequence is on screen (issue 303) ──────────────────────
+  // Lifted out of EmailsList, where it lived as private state for the whole of
+  // issue 240. The sending-identity card renders as a SIBLING of that component
+  // in the block below, so while the toggle kept its value to itself the card
+  // had no way to know a toggle existed — it read the location default and said
+  // the same thing over both sequences. One line of shared state is the entire
+  // mechanism the fix needed; everything else is copy.
+  const [emailsView, setEmailsView] = useState('organizing')
   // MOBILE ONLY (issue 246 step 1): false = the grouped section list, true =
   // one section with a back control. Desktop shows the rail and the section
   // side by side and ignores this entirely — the media queries in globals.css
@@ -21333,6 +21498,41 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // Demo / view-as paths get string ids like 'loc_kc' — skip DB writes there.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const realLocId = UUID_RE.test(settings.location.locId || '') ? settings.location.locId : null
+
+  // ── Emails › who each job type sends as (issue 303) ───────────────────────
+  //
+  // A SECOND GET, NOT A LIFT OF NEW LEADS'. New leads reads the same endpoint
+  // from inside NewLeadsSection, and lifting that fetch to here so both sections
+  // share one payload was the obvious move. It is the wrong one:
+  //
+  //   NOTHING IS SAVED BY IT. `activeSection` renders exactly ONE section, so
+  //     Emails and New leads are never mounted together. There is no pair of
+  //     simultaneous fetches to collapse — one visit, one GET, either way.
+  //   IT WOULD COST A REQUEST. Hoisted state loads on every Settings visit, so
+  //     owners who open Billing and leave would start paying for a payload
+  //     neither section on screen wants. Gating it back on `activeSection`
+  //     recovers the same request count as this, with the state living two
+  //     thousand lines from both readers.
+  //   NEW LEADS WRITES. It POSTs, PUTs and DELETEs, then re-reads. Sharing the
+  //     payload means its reload path has to be threaded back up through here.
+  //     Real coupling, in a 37k-line file, for zero saved requests.
+  //
+  // So: one reader, one read. The section that only REPORTS gets its own
+  // read-only GET, and the section that DECIDES keeps owning its own writes.
+  const [emailSenders, setEmailSenders] = useState(null)
+  const [emailSendersState, setEmailSendersState] = useState('idle') // idle | loading | ready | failed
+  useEffect(() => {
+    if (activeSection !== 'emails' || !realLocId) return
+    let alive = true
+    setEmailSendersState('loading')
+    fetch(`/api/locations/${realLocId}/project-type-senders`, { credentials:'include' })
+      .then(res => res.ok ? res.json() : Promise.reject(new Error('load')))
+      .then(j => { if (alive) { setEmailSenders(j); setEmailSendersState('ready') } })
+      // Says so rather than guessing. Falling back to the location default on a
+      // failed read would print the exact sentence issue 303 exists to delete.
+      .catch(() => { if (alive) { setEmailSenders(null); setEmailSendersState('failed') } })
+    return () => { alive = false }
+  }, [activeSection, realLocId])
 
   // Translate the UI's delay strings ("3 days later", "Immediately") into
   // an integer day count for the DB. We accept anything with a number, which
@@ -22997,6 +23197,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               // issue 240 step 7b — resolves per sequence, so the sentence
               // describes whichever one is on screen.
               variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
+              // issue 303 — the toggle's value, so the card below can answer
+              // for the sequence actually on screen.
+              view={emailsView}
+              onViewChange={setEmailsView}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
@@ -23046,34 +23250,28 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 week and then never opens again. Above the list it would also
                 put its three SettingsEditRow "Edit" buttons ahead of every
                 row's Edit — same word, different job, first in the DOM. */}
-            <CommsLabel>Who these come from</CommsLabel>
-            <div style={{ margin:'0 12px', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
-              <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
-                <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <CommsIcon name="send" size={20} color="#4f46e5" />
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
-                    <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Sending identity</h2>
-                    {!senderAddressSet && (
-                      <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
-                    )}
-                  </div>
-                  {/* Says DEFAULT, and says where the exception lives (issue 246
-                      step 3). The per-job-type override used to be a toggle on
-                      this card; step 2 moved it to New leads, which left this
-                      line reading as absolute when it is not — a handler's name
-                      replaces it at send time (resolveProjectTypeSenderOverride).
-                      An owner reading only this card would not know that. */}
-                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>The default name and address your new-lead follow-up emails come from. If you give a job type to someone on your team under New leads, their name goes on that type&apos;s emails instead.</p>
-                </div>
-              </div>
-              <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
-                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
-                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
-                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
-              </div>
-            </div>
+            {/* issue 303 — the card now answers for the sequence the toggle is
+                showing. The three location rows are unchanged and still save
+                exactly as they did; what changed is everything above them and
+                the label they sit under. */}
+            <SequenceSenderCard
+              view={emailsView}
+              hasMoving={!!settings.paths.moveDefault}
+              senderConfig={emailSenders}
+              loading={emailSendersState === 'loading'}
+              failed={emailSendersState === 'failed'}
+              locationDefault={{
+                name: settings.location.sendFromName,
+                email: settings.location.sendFromEmail,
+                replyTo: settings.location.replyToEmail,
+              }}
+              senderAddressSet={senderAddressSet}
+              onOpenNewLeads={realLocId ? () => openSection('newleads', { push:false }) : null}
+            >
+              <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
+              <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
+              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
+            </SequenceSenderCard>
 
           </div>
           )

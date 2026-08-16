@@ -130,9 +130,13 @@ describe('the retired sender toggle no longer renders on Emails', () => {
   it('the Emails tab still renders the sending identity card', async () => {
     // The control group. If this fails the rest of the file is meaningless,
     // because "the toggle is absent" is trivially true of a blank tab.
+    //
+    // The 'Sending identity' heading went in issue 303 — the card now leads
+    // with what the SHOWN SEQUENCE sends as and carries the location trio as a
+    // labelled fallback. The three rows are what makes the tab non-blank, so
+    // they are what the control group asserts.
     await mount('emails')
     const txt = bodyText()
-    expect(txt).toContain('Sending identity')
     expect(txt).toContain('Send From Name')
     expect(txt).toContain('Send From Email')
     expect(txt).toContain('Reply-To Email')
@@ -187,12 +191,37 @@ describe('the retired sender toggle no longer renders on Emails', () => {
     expect(container.querySelectorAll('[role="switch"]').length).toBe(0)
   })
 
-  it('the Emails tab asks the senders route for nothing', async () => {
-    // The strongest form. The tab no longer participates in handler routing in
-    // any direction — not even the GET the deleted component fired on mount.
+  it('the Emails tab READS the senders route and never writes to it', async () => {
+    // WAS: "asks the senders route for nothing at all", including the GET.
+    //
+    // Issue 303 deliberately reinstates the GET, and the distinction matters
+    // more than the old blanket ban did. What made the orphaned toggle a defect
+    // was that a second surface EDITED location_project_type_senders under a
+    // model contradicting NewLeadsSection's — one person → many types against
+    // one type → one person. Two editors over one table, both appearing to
+    // work. A read has none of that: this tab now REPORTS what each job type
+    // sends as, because a card that showed the location default under a
+    // per-sequence toggle was telling an owner the wrong name.
+    //
+    // So the invariant is re-aimed at the thing that was actually dangerous:
+    // Emails may look, and may not touch.
     await mount('emails')
     const senders = calls.filter(c => c.url.includes('project-type-senders'))
-    expect(senders, JSON.stringify(senders)).toEqual([])
+    expect(senders.length, 'the tab reads the config it reports on').toBeGreaterThan(0)
+    const writes = senders.filter(c => (c.method || 'GET') !== 'GET')
+    expect(writes, JSON.stringify(writes)).toEqual([])
+  })
+
+  it('and hosts no per-type editor of its own', async () => {
+    // The other half of the same invariant, stated where a reader will find it:
+    // reporting is allowed, deciding is not. New leads owns the controls.
+    await mount('emails')
+    const card = container.querySelector('[data-sequence-sender-card]') as HTMLElement
+    expect(card, 'the sequence sender card').toBeTruthy()
+    expect(card.querySelectorAll('select')).toHaveLength(0)
+    const txt = bodyText()
+    expect(txt).not.toContain('Who handles it')
+    expect(txt).not.toContain('What it sends as')
   })
 })
 
@@ -253,9 +282,18 @@ describe('the card says default, and says where the exception lives', () => {
     // already replacing it per job type. That was survivable while the override
     // was a control ON this card. Step 2 moved it to another tab, and the line
     // became a statement with no visible exception anywhere near it.
+    //
+    // Step 3 answered that with the WORD "default". Issue 303 answered it
+    // properly: the card now names the actual per-type senders, so the location
+    // trio does not have to describe its own exceptions in prose — it sits under
+    // "Everything else" and says when that is. The word was only ever a proxy
+    // for "this is not the whole answer", so the assertion moves to the thing
+    // the word stood for.
     await mount('emails')
     const txt = bodyText()
-    expect(txt).toContain('default')
+    expect(txt).toContain('Everything else')
+    expect(txt).toMatch(/any kind of job you have not given to someone/)
+    // Still says where the exception is SET, which is the half step 3 added.
     expect(txt).toMatch(/New leads/)
   })
 
@@ -277,7 +315,7 @@ describe('New leads is unaffected, and is now the sole caller', () => {
     expect(src).toContain('<NewLeadsSection realLocId={realLocId}')
   })
 
-  it('exactly one component reaches the senders route, and it is that one', () => {
+  it('exactly one component WRITES to the senders route, and it is that one', () => {
     const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
     // Slice the section rather than grepping the file: a whole-file count would
     // be satisfied by any caller anywhere, which is precisely how the orphan
@@ -289,7 +327,25 @@ describe('New leads is unaffected, and is now the sole caller', () => {
     const inside = src.slice(a, b)
     const outside = src.slice(0, a) + src.slice(b)
     expect(inside).toContain('project-type-senders')
-    expect(outside).not.toContain('project-type-senders')
+
+    // WAS: no other caller at all. Issue 303 adds a second READER — the Emails
+    // tab reports what each job type sends as — and the ban narrows to what was
+    // actually dangerous. The orphaned toggle was a second EDITOR of
+    // location_project_type_senders under the opposite model to this one, and
+    // two editors over one table both appear to work. A reader cannot do that.
+    //
+    // So: every fetch to the route outside NewLeadsSection must be a GET. This
+    // reads the option bag of each call rather than trusting the surrounding
+    // prose, so a future POST added anywhere else in the file fails here.
+    const others = Array.from(
+      outside.matchAll(/fetch\(\s*`[^`]*project-type-senders`\s*,\s*\{([\s\S]{0,200}?)\}/g),
+    ).map(m => m[1])
+    expect(others.length, 'the Emails tab reader should be found').toBeGreaterThan(0)
+    for (const opts of others) {
+      expect(opts, `a non-GET call outside NewLeadsSection: ${opts}`).not.toMatch(/method\s*:/)
+    }
+    // And no bare-URL write can hide behind a missing option bag either.
+    expect(outside).not.toMatch(/project-type-senders[\s\S]{0,120}method\s*:\s*['"](POST|PUT|PATCH|DELETE)/)
   })
 })
 
