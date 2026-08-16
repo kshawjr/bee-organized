@@ -2314,8 +2314,8 @@
         "logging an internal issue"
       ],
       "lines": [
-        978,
-        1613
+        1071,
+        1722
       ],
       "note": "Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
     },

@@ -49,7 +49,7 @@
 // lib/beta-feedback-triage-ui.test.tsx would read as a hex.
 'use client'
 
-import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react'
 import { T } from '@/components/hive/shared/tokens'
 import { SECTION_COUNT } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
@@ -80,6 +80,9 @@ import {
   // issue 306 — the derived "have they seen it?" state and the work order.
   hasFeedbackReply, isAwaitingConfirmation, sortForTriage,
 } from '@/lib/feedback-queues'
+// issue 308 — the paste-ready session prompt. The text and the two tiers live
+// in the lib; this file owns the button, the gesture and the failure path.
+import { buildCopyPrompt, promptTierFor } from '@/lib/feedback-prompt'
 
 // ── the three queues, in the order they should be worked ──────
 // Each card is a filter. `tone` picks the semantic family: the untouched queue
@@ -852,6 +855,96 @@ function AnalysisBlock({ analysis }) {
   )
 }
 
+// ── COPY PROMPT (issue 308) ───────────────────────────────────
+// Puts a ready-to-paste session prompt on the clipboard. The text is built by
+// lib/feedback-prompt; this owns only the gesture and the failure path.
+//
+// THE TIER IS SHOWN BEFORE THE CLICK, not after. Whether a click yields a
+// traced mechanism or a starting point is the difference between opening a
+// session and going to ask the owner a question first — so the row says which
+// one it is while Kevin is still deciding.
+//
+// THE FAILURE PATH IS THE POINT. navigator.clipboard needs a secure context
+// and a user gesture; both hold here, but it can still be refused by
+// permissions policy, by an insecure origin behind a proxy, or simply not
+// exist. A copy button that fails quietly is worse than a text box, because
+// the reader pastes stale clipboard contents into a session and does not find
+// out for several minutes. So a failure REVEALS the text, pre-selected, and
+// says to copy it manually.
+function CopyPromptButton({ tier, buildText }) {
+  const [state, setState] = useState('idle') // idle | copied | manual
+  const [text, setText] = useState('')
+  const areaRef = useRef(null)
+
+  useEffect(() => {
+    if (state !== 'manual' || !areaRef.current) return
+    // Select it FOR them — the fallback is only useful if the next keystroke
+    // is the copy they were already trying to make.
+    areaRef.current.focus()
+    areaRef.current.select()
+  }, [state])
+
+  const copy = async () => {
+    const built = buildText()
+    setText(built)
+    try {
+      if (!navigator?.clipboard?.writeText) throw new Error('no clipboard api')
+      await navigator.clipboard.writeText(built)
+      setState('copied')
+      setTimeout(() => setState(s => (s === 'copied' ? 'idle' : s)), 2600)
+    } catch {
+      setState('manual')
+    }
+  }
+
+  const full = tier === 'full'
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+        <button
+          type="button"
+          onClick={copy}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            padding: '5px 11px', borderRadius: T.radius.control,
+            border: T.border.control, background: T.surface.raised,
+            fontSize: '12px', fontFamily: 'inherit', fontWeight: 600,
+            color: T.ink.secondary, cursor: 'pointer', flexShrink: 0,
+          }}
+        >
+          {state === 'copied' ? 'Copied' : 'Copy prompt'}
+        </button>
+        {/* Which kind of prompt this will be, stated before the click. */}
+        <span style={{ fontSize: '11px', color: full ? T.accent.deep : T.ink.muted, fontWeight: full ? 600 : 500 }}>
+          {full ? 'full — carries the diagnosis' : 'short — cause not established'}
+        </span>
+      </span>
+
+      {state === 'manual' && (
+        <span style={{ display: 'block', width: '100%' }}>
+          <span style={{ display: 'block', fontSize: '11px', color: T.state.warning.deep, fontWeight: 600, marginBottom: '4px' }}>
+            Couldn&rsquo;t reach the clipboard — the text is below, selected. Copy it manually.
+          </span>
+          <textarea
+            ref={areaRef}
+            readOnly
+            value={text}
+            rows={8}
+            aria-label="Prompt text — copy manually"
+            style={{
+              width: '100%', padding: '8px 10px', border: T.border.control,
+              borderRadius: T.radius.control, fontSize: '11.5px',
+              fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace',
+              color: T.ink.primary, background: T.surface.raised,
+              lineHeight: 1.5, resize: 'vertical',
+            }}
+          />
+        </span>
+      )}
+    </span>
+  )
+}
+
 // ── CLUSTERS (issue 307) ──────────────────────────────────────
 // Items grouped by the probe that fired on them — i.e. by demonstrated root
 // cause, never by word similarity. The hand run is the reason: "Nuturing" and
@@ -1556,6 +1649,22 @@ export default function AdminFeedbackScreen({
                     row, like the record pointer. Absent entirely until the
                     fetch lands, and on the franchise mount forever. */}
                 {analyses && <AnalysisBlock analysis={analyses.get(it.id)} />}
+                {/* COPY PROMPT (issue 308). Elevated mounts only, and only once
+                    the analysis has landed — the tier label would otherwise say
+                    "short" for every row while the fetch was still in flight,
+                    which is a wrong statement rather than a missing one. */}
+                {canTriage && analyses && (
+                  <div style={{ width: '100%', padding: '0 14px 12px 74px' }}>
+                    <CopyPromptButton
+                      tier={promptTierFor(analyses.get(it.id))}
+                      buildText={() => buildCopyPrompt({
+                        item: it,
+                        analysis: analyses.get(it.id) || null,
+                        cluster: clusters.find(c => c.itemIds.includes(it.id)) || null,
+                      }).text}
+                    />
+                  </div>
+                )}
                 {/* width 100% is what puts this on its own line in the wrapping
                     row above. Its indent tracks the selection gutter so it
                     stays under the title on both mounts. */}
