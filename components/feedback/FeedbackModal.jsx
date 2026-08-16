@@ -23,7 +23,15 @@ import { feedbackFmtBytes, FeedbackItemCard } from '@/components/feedback/feedba
 // server-side; it never carries the client's name/email/phone. Seeded once at
 // open (the modal is remounted per open), and cleared after a successful submit
 // so the record rides exactly ONE submission.
-export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null }) {
+// ambientContext (optional): where the user was standing when the modal opened
+// — { origin:'feedback_modal', screen, path, lead_id?, engagement_id? }, built
+// by the mount from activeNav + the address bar (components/hive/shared/hubUrl
+// → buildAmbientContext). Issue 249: before this, a submission from the general
+// modal carried NO context at all and triage had only the owner's prose. It
+// rides UNDER the seed (see handleSubmit) and, unlike the seed, is NOT cleared
+// after a submit — a second report filed without closing the modal was still
+// filed from the same screen.
+export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null, ambientContext = null }) {
   const [tab, setTab]           = useState(initialTab) // 'mine' | 'submit'
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
@@ -127,10 +135,22 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
       setUploadProgress(null)
 
       // 2) Create the feedback item with the uploaded attachment metadata.
+      //
+      // Context = ambient UNDER seed (issue 249). The seed is what the user
+      // POINTED AT (a record menu); the ambient is where they were STANDING.
+      // Seed keys win on every collision, so a record report sends byte-for-byte
+      // what it always sent — same screen, same path, same origin — while a
+      // general submission, which used to send nothing, now carries its screen
+      // and path. Merged at submit rather than at open so it survives the
+      // setContext(null) below: the record rides exactly one submission, the
+      // screen rides every one. The server re-derives this through the same
+      // id-only whitelist (lib/feedback-context), so nothing here is trusted.
+      const submitContext = { ...(ambientContext || {}), ...(context || {}) }
+      const hasContext = Object.keys(submitContext).length > 0
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, title: title.trim(), description: desc.trim(), attachments: uploaded, ...(context ? { context } : {}) }),
+        body: JSON.stringify({ type, title: title.trim(), description: desc.trim(), attachments: uploaded, ...(hasContext ? { context: submitContext } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))

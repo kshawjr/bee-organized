@@ -6,7 +6,7 @@ import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
-import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath } from "@/components/hive/shared/hubUrl"
+import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buildAmbientContext } from "@/components/hive/shared/hubUrl"
 // Home redesign — read the SAME derivation/tokens the Clients surface uses so
 // Home can't drift from the views. Pure leaves (§8.5), imported statically.
 // Aliased where a local name already exists in this file (T, isTerminal,
@@ -36988,7 +36988,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         open={showManual}
         onClose={() => setShowManual(false)}
       />
-      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}
+      {/* ambientContext (issue 249) — the screen + route the user was on when
+          they opened this. Computed HERE because the modal cannot see it: it
+          receives no router and no shell state, only `seed`. activeNav lives in
+          this component (the same value the Ask Bee Hub panel below reads for
+          its screenName) and the address bar is kept in sync by the pushState
+          nav, so both halves are already to hand. Recomputed per render while
+          the modal is open — a pure string build over state we already hold. */}
+      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} ambientContext={buildAmbientContext({ nav: activeNav, role, pathname: typeof window !== 'undefined' ? window.location.pathname : null, search: typeof window !== 'undefined' ? window.location.search : null })} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}
       {showHelpChat && (
         <AskBeeHubPanel
           isMobile={isMobile}

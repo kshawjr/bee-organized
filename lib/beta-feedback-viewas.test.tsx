@@ -93,7 +93,17 @@ describe('feedback composer affordance (franchise mount only)', () => {
     // contract underneath it: the composer is still the one existing
     // FeedbackModal, opened on its Submit tab. No second composer was built.
     expect(franchiseMount).toContain("onReportSomething={() => setShowFeedback('submit')}")
-    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}")
+    // Asserted piece by piece rather than as one exact line (issue 249 added an
+    // ambientContext prop and broke the whole-line match). The contract this
+    // guards is unchanged: ONE mount, gated on showFeedback, landing on Submit,
+    // still carrying the view-as id and the record seed.
+    expect(beehub.match(/<FeedbackModal/g) ?? []).toHaveLength(1)
+    const mountLine = beehub.split('\n').find(l => l.includes('<FeedbackModal'))!
+    expect(mountLine).toContain('{showFeedback && <FeedbackModal')
+    expect(mountLine).toContain("initialTab={showFeedback === 'submit' ? 'submit' : 'mine'}")
+    expect(mountLine).toContain('viewAsUserId={viewAsUser?.id || null}')
+    expect(mountLine).toContain('seed={feedbackSeed}')
+    expect(mountLine).toContain('onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }}')
   })
 
   it('the elevated admin mounts pass NO composer prop and NO location override', () => {
