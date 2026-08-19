@@ -46,7 +46,7 @@ import {
   ownerCheckoutConfigured,
   seatPlanMarker,
 } from '@/lib/subscription-activation'
-import { isPaidThroughFuture } from '@/lib/subscription-math'
+import { isPrepaidTermCovering } from '@/lib/subscription-math'
 import { normalizeSeatPlan } from '@/lib/seat-plan'
 import {
   activationCostResponse,
@@ -98,7 +98,7 @@ export async function POST(
   //     checkout silently activating; here the server authorises the free flip
   //     off an unforgeable positive fact (paid_through_date > today) it reads
   //     itself, not off a client claim. A location that actually owes money has
-  //     paid_through_date null or past → isPaidThroughFuture is false → the gate
+  //     paid_through_date null or past → isPrepaidTermCovering is false → the gate
   //     below fires exactly as issue 167 built it. So the guarantee is intact:
   //     the ONLY owner-pays locations that free-activate here are the ones that
   //     genuinely owe nothing.
@@ -108,7 +108,11 @@ export async function POST(
     isOwnerOfTarget &&
     !isSuperAdmin &&
     location.subscription_status !== 'active' &&
-    !isPaidThroughFuture(location.paid_through_date) &&
+    // issue 313: prepaid, not merely promised. An ACH that bounced leaves a
+    // future paid_through_date behind on a past_due location; isPrepaidTermCovering
+    // refuses to read that promise as a receipt, so the gate below fires and the
+    // owner is sent to Stripe instead of free-activating on money that never came.
+    !isPrepaidTermCovering(location) &&
     (await ownerCheckoutConfigured(location))
   ) {
     return NextResponse.json({ error: 'stripe_checkout_required' }, { status: 409 })

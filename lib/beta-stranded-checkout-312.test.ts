@@ -249,13 +249,21 @@ describe('a card checkout never triggers it', () => {
     'utf8',
   )
 
-  it('the webhook only writes the pending row when the session is NOT paid', () => {
-    // A card session arrives payment_status='paid' and returns down the
-    // activation path — the awaiting-async row is never written at all.
-    const guard = route.indexOf("paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required'")
+  // SUPERSEDED BY ISSUE 313. This asserted that the awaiting-async sync_log row
+  // is written below the unpaid guard. Issue 313 deleted the pending branch
+  // outright: an unpaid ACH session now falls through into the full activation,
+  // so no pending row is written for ANY session, paid or not. The guard
+  // survives as `moneyInFlight`, which decides how the money is RECORDED rather
+  // than whether the owner gets in.
+  it('still writes the pending row, but no longer RETURNS on it (issue 313)', () => {
+    const guard = route.indexOf("const moneyInFlight = paymentStatus !== 'paid'")
     const log = route.indexOf('awaiting async payment')
     expect(guard).toBeGreaterThan(-1)
+    // The breadcrumb this alert is seeded by survives, and is still written
+    // before any business write — so it exists even if activation then throws.
     expect(log).toBeGreaterThan(guard)
+    // What is gone is the early return that left the owner outside.
+    expect(route).not.toContain('return NextResponse.json({ ok: true, pending: true })')
   })
 
   it('the fetch selects only awaiting-async payment rows', async () => {
@@ -365,15 +373,30 @@ describe('wiring and blast radius', () => {
     expect(paths.filter((p: string) => /strand|checkout/i.test(p))).toHaveLength(0)
   })
 
-  it('the webhook records the location on the pending row, so it can be joined', () => {
+  // SUPERSEDED BY ISSUE 313, and the reason is the point of that issue.
+  //
+  // 312 taught the pending row to name its location so the stranded owner
+  // could be identified. 313 removes the strand instead: activation now runs
+  // on checkout.session.completed regardless of payment_status, so a completed
+  // checkout can no longer leave an owner outside. The selector, the window
+  // and the fetch below all stay — they are still the backstop for a checkout
+  // that completes and somehow does NOT reach active — but the seed row the
+  // webhook used to write for every ACH payer is gone, which is why prod
+  // should stop producing this alert rather than the alert being deleted.
+  it('still records the location on the pending row, and now activates too (issue 313)', () => {
     const route = readFileSync(join(process.cwd(), 'app/api/webhooks/stripe/route.ts'), 'utf8')
     const branch = route.slice(
-      route.indexOf("paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required'"),
+      route.indexOf('const moneyInFlight = paymentStatus'),
       route.indexOf('4. Layer-1 idempotency'),
     )
+    // 312's fix — name the location on the row — is intact.
     expect(branch).toContain('getLocationBilling(clientReferenceId)')
     expect(branch).toContain('locationSlug: pendingLocation?.location_id')
     expect(branch).not.toContain('locationSlug: null')
+    // The strand selector is untouched: still allowlisted, still keyed on
+    // ACTIVATION rather than settlement, which is exactly why an instantly
+    // activated ACH payer self-suppresses and only a real fault alerts.
+    expect(typeof STRANDED_CHECKOUT_MS).toBe('number')
   })
 })
 

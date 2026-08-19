@@ -143,6 +143,41 @@ export function isPaidThroughFuture(
   return paid.getTime() > from.getTime()
 }
 
+// ── issue 313: prepaid, or merely promised? ───────────────────
+//
+// isPaidThroughFuture above is consumed by issue 171's complete-onboarding
+// gate as, in that route's own words, "an unforgeable positive fact
+// (paid_through_date > today)" authorising a FREE activation. That was true
+// while the only way to get a future paid_through_date was to have actually
+// paid — a card cleared, or corporate bought the year.
+//
+// Issue 313 breaks that. An ACH payer is now activated up front, on money
+// that has not settled, and activation stamps paid_through_date a year out.
+// The field became a PROMISE rather than a receipt, so the "unforgeable
+// fact" became forgeable by anyone who starts a bank transfer: let it bounce,
+// land in past_due holding a future date, and the free-activation door is
+// open for a year.
+//
+// past_due is exactly the signal that closes it. It is written only when a
+// payment was ATTEMPTED AND LOST — invoice.payment_failed on the card rail,
+// checkout.session.async_payment_failed on the bank rail — so "this term is
+// prepaid" and "your payment bounced" can never both be true. Everything
+// else keeps isPaidThroughFuture's old answer verbatim: the pre-Stripe
+// cohort, corporate-sponsored terms, and every ACH still in flight (which is
+// still 'active', not past_due) all read prepaid exactly as before.
+//
+// Deliberately NOT applied to /api/admin/subscription-checkout-link, which
+// also gates on isPaidThroughFuture: that route is super_admin-only and is
+// the REMEDY for a past_due location — minting it a fresh checkout link is
+// how the money gets collected. Blocking it would close the exit, not a hole.
+export function isPrepaidTermCovering(
+  loc: { paid_through_date?: string | null; subscription_status?: string | null },
+  from: Date = new Date(),
+): boolean {
+  if (loc.subscription_status === 'past_due') return false
+  return isPaidThroughFuture(loc.paid_through_date, from)
+}
+
 // Resolve a location's OWN renewal date for mid-cycle proration and removal
 // scheduling. Priority (issue 162):
 //   1. paid_through_date — the webhook's mirror of the Stripe subscription's

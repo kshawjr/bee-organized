@@ -8,10 +8,13 @@
 //   2. Verify the Stripe-Signature header against STRIPE_WEBHOOK_SECRET
 //      (lib/stripe-webhook.ts). Invalid/missing → 401, NO DB write —
 //      an unverified payment webhook would be a free-seats endpoint.
-//   3. Parse the event. checkout.session.completed and
-//      checkout.session.async_payment_succeeded activate (when
-//      payment_status='paid'); async_payment_failed alerts; everything
-//      else is acknowledged + logged.
+//   3. Parse the event. checkout.session.completed activates REGARDLESS of
+//      payment_status (issue 313 — an ACH checkout is always 'unpaid' at this
+//      moment, and waiting for the bank cost four locations a hand-written
+//      UPDATE). checkout.session.async_payment_succeeded is then a
+//      CONFIRMATION on an already-active location, not a trigger.
+//      async_payment_failed moves the location to past_due and alerts once;
+//      everything else is acknowledged + logged.
 //   4. Map the payment: client_reference_id → locations.id (appended by
 //      Bee Hub at click time), metadata.tier → seat tier (set by Kevin
 //      on the Payment Link in the Stripe dashboard).
@@ -64,6 +67,12 @@ import {
   type LocationBillingRow,
 } from '@/lib/subscription-activation'
 import { decodeSeatPlan, planBillingLines } from '@/lib/seat-plan'
+import {
+  achFailedLine,
+  achInFlightLine,
+  appendBillingNote,
+  clearAchInFlight,
+} from '@/lib/ach-in-flight'
 import { stripeConfigured } from '@/lib/stripe'
 import {
   retrieveSubscription,
@@ -155,21 +164,52 @@ export async function POST(req: NextRequest) {
     seatPlan: encodedSeatPlan,
   } = session
 
-  // Payment failed (async methods like ACH bank debit) — issue 197.
+  // Payment failed (async methods like ACH bank debit) — issues 197 + 313.
   //
-  // The bank transfer bounced, days after checkout.session.completed fired
-  // as UNPAID. DECISION: never auto-deactivate. An ACH failure is often
-  // transient (insufficient funds today, a retryable R01), and for a
-  // location Kevin already force-activated — or one a prior async success
-  // activated — silently revoking access mid-work would strand a real,
-  // working customer over a bounce that may clear on the next attempt.
-  // So we leave the location exactly as it is and alert a human with its
-  // CURRENT state, who decides whether to chase payment or wind it down.
+  // The bank transfer bounced, days after checkout.session.completed fired as
+  // UNPAID.
   //
-  // Idempotent like every other path: this now runs THROUGH the replay
-  // guard and records the event, so a Stripe redelivery is a silent no-op
-  // instead of a duplicate Slack ping. (It previously returned before the
-  // layer-1 guard and re-alerted on every redelivery.)
+  // ISSUE 197 DECIDED: never auto-deactivate. That decision was made when a
+  // location reaching this handler had been let in by HAND, if at all —
+  // revoking access over a bounce that may well clear on the next attempt
+  // would have punished a real, working customer for Kevin's rescue.
+  //
+  // ISSUE 313 CHANGES THE INPUT, so the answer moves. Every ACH payer is now
+  // activated automatically, up front, on money that has not settled. Leaving
+  // this path as a pure alert would mean a location with a full year of access
+  // that never paid a cent and never transitions anywhere — and the audit
+  // already found money landing against a placeholder with nobody noticing.
+  // Instant activation without a failure transition is not generous, it is a
+  // hole.
+  //
+  // THE TRANSITION IS past_due, and it is deliberately the gentlest one the
+  // existing machine offers. The machine is past_due (14-day grace, FULL
+  // access) → paused (read-only, recoverable, lifecycle_status) → inactive.
+  // past_due is right for four reasons:
+  //
+  //   1. It is what the state MEANS. classifyBillingState maps past_due to
+  //      'payment_failed' — the one billing state that already says money was
+  //      attempted and lost — and the admin UI already renders it.
+  //   2. It preserves Kevin's decision. He chose to let ACH payers in without
+  //      waiting for the money; jumping to `paused` would revoke that access
+  //      the moment a bank returns a retryable R01, which is exactly the
+  //      punishment issue 197 refused to inflict. The grace window is the
+  //      point: the customer keeps working while a human collects.
+  //   3. It is ALREADY the transition the card rail takes for the identical
+  //      event — invoice.payment_failed sets past_due. One meaning, one state,
+  //      whichever way the payment was attempted.
+  //   4. Recovery is free. invoice.paid and customer.subscription.updated both
+  //      already flip past_due back to active, so a retry that succeeds heals
+  //      the location with no new code and no human step.
+  //
+  // Escalation past_due → paused → inactive stays a human decision; nothing
+  // automates it today and this issue does not change that. past_due puts the
+  // location at the TOP of that escalator instead of inventing a state or
+  // skipping to the harshest one.
+  //
+  // Idempotent like every other path: this runs THROUGH the replay guard and
+  // records the event, so a Stripe redelivery is a silent no-op rather than a
+  // second Slack ping — that is what makes the alert exactly-once.
   if ((STRIPE_FAILURE_EVENTS as readonly string[]).includes(eventType)) {
     const replay = await eventAlreadyProcessed(eventId)
     if (replay.tableError) {
@@ -179,19 +219,57 @@ export async function POST(req: NextRequest) {
 
     const loc = isUuid(clientReferenceId) ? await getLocationBilling(clientReferenceId) : null
     const status = loc?.subscription_status ?? 'unknown'
-    // Active-with-no-money is the state that needs a human: the seat exists
-    // (forced or auto-activated) but the payment never cleared.
+    // Active-with-no-money is the state that needs the transition: the seat
+    // exists (issue 313 granted it up front) but the payment never cleared.
     const activeWithNoMoney = loc?.subscription_status === 'active'
+
+    // The move. Only from 'active' — a location that is already past_due,
+    // canceled or still deferred is not made worse by a second bounce, and
+    // re-writing past_due over canceled would resurrect a wound-down account.
+    let moved = false
+    if (loc && activeWithNoMoney) {
+      try {
+        await setLocationSubscriptionStatus(loc.id, 'past_due')
+        moved = true
+      } catch (e: any) {
+        console.error('[stripe-webhook] issue313 past_due flip failed —', e?.message || e)
+      }
+      // Close the in-flight audit line with the reason it closed. Best-effort:
+      // the state transition above is the load-bearing write, and losing an
+      // audit line must not cost us the alert or the event record below.
+      try {
+        await appendBillingNote(loc.id, achFailedLine({ amountCents: amountTotal, sessionId }))
+      } catch (e: any) {
+        console.error('[stripe-webhook] issue313 failed-note append failed —', e?.message || e)
+      }
+    }
+
+    const after = loc ? await getLocationBilling(loc.id) : null
     await logStripeEvent({
       locationSlug: loc?.location_id ?? null,
       sessionId,
       status: 'error',
-      detail: `error=async_payment_failed tier=${tier || 'unknown'} amount=${dollars(amountTotal)} location_status=${status} — access retained, no auto-deactivation (issue 197)`,
+      detail:
+        `error=async_payment_failed tier=${tier || 'unknown'} amount=${dollars(amountTotal)} ` +
+        `location_status=${status}` +
+        (moved
+          ? ' → past_due (14-day grace, access retained — issue 313)'
+          : ' — no transition (not active); access unchanged'),
+      landed: moved ? (after?.subscription_status === 'past_due' ? 'landed' : 'not_landed') : 'na',
     })
+
+    // ONE alert, on the ops rail (lib/slack postSlackMessage — the same
+    // SLACK_WEBHOOK_URL channel issue 312's stranded-checkout alert posts to).
+    // Not lib/slack-bot.ts: that is the per-location OAuth bot with its own
+    // interactivity contract, and this is an ops message about billing, not a
+    // lead card. Exactly one, because the replay guard above means a Stripe
+    // redelivery never reaches this line.
     await postSlackMessage(
-      activeWithNoMoney
-        ? `⚠️ Stripe ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). This location is ACTIVE but the bank transfer did NOT clear, so it is running with no collected payment. Access is NOT being revoked automatically — decide whether to have them retry payment or wind it down.`
-        : `⚠️ Stripe ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). The location was NOT activated (status=${status}); no seat granted. They'll need to pay again to proceed.`,
+      moved
+        ? `🚨 ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). They were activated up front on this transfer and it did NOT clear, so they have a year of access and we have no money. Moved to *past_due*: full access continues through the 14-day grace window, and billing now reads "payment failed". Collect payment or wind it down before the window closes.`
+        : activeWithNoMoney
+          ? `⚠️ ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). The location is ACTIVE with no collected payment, but the move to past_due did NOT stick — check the location's billing status by hand.`
+          : `⚠️ ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). Location status is ${status}, so nothing was changed. They'll need to pay again to proceed.`,
     )
 
     // Record the event so a redelivery short-circuits at the replay guard
@@ -207,7 +285,12 @@ export async function POST(req: NextRequest) {
       amount_cents: amountTotal,
       payload: event,
     })
-    return NextResponse.json({ ok: true, processed: false, failure: 'async_payment_failed' })
+    return NextResponse.json({
+      ok: true,
+      processed: moved,
+      failure: 'async_payment_failed',
+      moved_to: moved ? 'past_due' : null,
+    })
   }
 
   // Anything that isn't a checkout completion — acknowledge + log so a
@@ -222,21 +305,54 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'unhandled_event_type' })
   }
 
-  // Async payment still pending — the async_payment_succeeded event
-  // arrives later and does the real work.
+  // ── ISSUE 313: an unpaid ACH checkout activates NOW ───────────
   //
-  // issue 312: this row is the ONLY trace a pending checkout leaves. No
-  // business write happens on this path and no stripe_webhook_events row is
-  // written (the replay guard is below), so nothing else in the system knows
-  // an owner just paid and got nothing. That makes it the strand detector —
-  // and a detector has to name who is stranded. It previously logged
-  // locationSlug:null, so the row could not be joined to the owner sitting on
-  // the spinner; that blindness is exactly why the strand was invisible.
-  // Resolve the location here: one read, no writes, on a path that today does
-  // no DB work at all. When the reference is unmappable we still say so in the
-  // message — an unmappable pending session is doubly silent otherwise, since
-  // this branch returns BEFORE the missing_client_reference_id alert below.
-  if (paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required') {
+  // This branch used to return here — above the replay guard and every write —
+  // whenever payment_status was not 'paid'. That is what an ACH bank debit
+  // ALWAYS looks like at checkout time, so every bank payer was held deferred
+  // until checkout.session.async_payment_succeeded arrived, which prod has
+  // measured at SIX calendar days, twice. Four locations needed a hand-written
+  // UPDATE to get in; two of them four hours apart on 2026-08-19.
+  //
+  // KEVIN'S DECISION: they get access immediately. So the pending short-circuit
+  // is gone and an unpaid session falls through into the SAME activation the
+  // card path takes — subscription id, paid_through_date, seats, the
+  // subscription_started_at stamp, the lot. There is no separate ACH branch to
+  // drift out of sync; there is one activation path and unpaid money no longer
+  // diverts around it.
+  //
+  // WHAT REPLACES THE PENDING ROW. The old row was issue 312's strand detector
+  // and it was the only trace a pending checkout left. It is not needed as a
+  // detector any more — a strand is what happens when activation does NOT run,
+  // and activation now always runs — but the FACT it carried, that this money
+  // has not actually arrived, still matters and is recorded two ways below:
+  // an [ACH_IN_FLIGHT] audit line on locations.billing_notes (lib/ach-in-flight)
+  // and the absence of a billing_invoices row until invoice.paid lands. The
+  // sync_log row still gets written; it now says the location was let in on
+  // money in flight rather than that nothing happened.
+  const moneyInFlight = paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required'
+
+  // KEEP THE BREADCRUMB, DROP THE RETURN — and note what that does to 312.
+  //
+  // The row is written HERE, before any business write, exactly where it used
+  // to be, and then execution CONTINUES into activation. Writing it first is
+  // the point: if activation throws below, the route 500s and Stripe retries,
+  // and if every retry fails this row is the only evidence an owner completed
+  // checkout. That is the residual strand — no longer "the bank is slow", but
+  // "our activation is broken" — and it is worth keeping a detector for.
+  //
+  // Issue 312's alert needs NO change to do that job, because its selector
+  // already keys on ACTIVATION rather than settlement: a pending row whose
+  // location is 'active' is skipped. So the normal 313 path (activate now,
+  // money later) self-suppresses on the very next check, and the alert fires
+  // only when activation genuinely did not happen. 312 goes from firing on
+  // every bank payer to firing on a real fault — the same code, a much better
+  // signal-to-noise ratio, and not a line of it deleted.
+  //
+  // The wording keeps the 'awaiting async payment' token that
+  // fetchPendingCheckouts matches on, and says plainly that access was granted
+  // so the row is not misread as a stuck owner.
+  if (moneyInFlight) {
     const pendingLocation = isUuid(clientReferenceId)
       ? await getLocationBilling(clientReferenceId)
       : null
@@ -245,11 +361,12 @@ export async function POST(req: NextRequest) {
       sessionId,
       status: 'success',
       detail:
-        `— awaiting async payment (payment_status=${paymentStatus || 'unknown'})` +
+        `— awaiting async payment (payment_status=${paymentStatus || 'unknown'}) ` +
+        `— activating NOW anyway (issue 313); this row stays as the backstop if activation fails` +
         (pendingLocation ? '' : ` client_reference_id=${clientReferenceId || 'none'}`),
     })
-    return NextResponse.json({ ok: true, pending: true })
   }
+
 
   // 4. Layer-1 idempotency: seen this event id before → replay no-op.
   // The row is written AFTER successful processing (see bottom), so a
@@ -389,6 +506,28 @@ export async function POST(req: NextRequest) {
         subscriptionId,
       })
 
+      // ── issue 313: this event is now a CONFIRMATION, not a trigger ──
+      // Activation already happened on checkout.session.completed, days ago,
+      // so there is nothing here left to activate — and this branch has always
+      // been the one that does NOT activate (no seat, no flip, no re-stamp of
+      // subscription_started_at), which is precisely why an already-active
+      // location falls into it and is a safe no-op rather than a double
+      // activation. What the event genuinely adds is the answer to the only
+      // open question: the money arrived. So close the in-flight marker.
+      // clearAchInFlight is a no-op when nothing was in flight, which keeps
+      // the pre-313 force-activated shape (Boston, West Raleigh) unchanged.
+      let clearedInFlight = false
+      if (isAsyncClearing) {
+        try {
+          clearedInFlight = await clearAchInFlight(location.id, {
+            amountCents: amountTotal,
+            subscriptionId,
+          })
+        } catch (e: any) {
+          console.error('[stripe-webhook] issue313 clear-in-flight failed —', e?.message || e)
+        }
+      }
+
       const after = await getLocationBilling(location.id)
       const landed = after?.stripe_subscription_id === subscriptionId ? 'landed' : 'not_landed'
       await logStripeEvent({
@@ -396,7 +535,7 @@ export async function POST(req: NextRequest) {
         sessionId,
         status: 'success',
         detail: isAsyncClearing
-          ? `tier=owner — ACH cleared on already-active location (issue 197) sub=${subscriptionId} amount=${dollars(amountTotal)} — subscription id filled in, no seat, no re-activation; invoice recorded via invoice.paid`
+          ? `tier=owner — ACH cleared on already-active location (issue 197) sub=${subscriptionId} amount=${dollars(amountTotal)} — subscription id filled in, no seat, no re-activation; invoice recorded via invoice.paid${clearedInFlight ? ' payment_state=settled (was in_flight, issue 313)' : ''}`
           : `tier=owner — subscription linked to already-active location (issue 182) sub=${subscriptionId} anchor=paid_through(${location.paid_through_date || 'n/a'}) — no activation, no seat`,
         landed,
       })
@@ -462,8 +601,30 @@ export async function POST(req: NextRequest) {
         ownerUserId: owner?.id ?? null,
         proratedCostCents: amountTotal,
         paidThroughDate: paidThrough,
-        seatNotes: sessionId ? `Paid via Stripe checkout (stripe_session=${sessionId})` : 'Paid via Stripe checkout',
+        seatNotes: sessionId
+          ? `Paid via Stripe checkout (stripe_session=${sessionId})${moneyInFlight ? ' — payment not yet settled at activation (issue 313)' : ''}`
+          : 'Paid via Stripe checkout',
       })
+
+      // ── issue 313: record that the money has not actually arrived ──
+      // The location is now active, seated and paid-through on the strength of
+      // a bank debit that has not settled. Without this line nothing anywhere
+      // distinguishes it from a location whose card cleared instantly, and the
+      // audit has already found money landing against a placeholder with
+      // nobody noticing. See lib/ach-in-flight for why billing_notes and not a
+      // new column. Failing to write it must NOT fail the activation — the
+      // owner is already in, and a missing audit line is a smaller problem
+      // than a 500 that makes Stripe retry a completed activation.
+      if (moneyInFlight) {
+        try {
+          await appendBillingNote(
+            location.id,
+            achInFlightLine({ amountCents: amountTotal, sessionId, paymentStatus }),
+          )
+        } catch (e: any) {
+          console.error('[stripe-webhook] issue313 in-flight note failed —', e?.message || e)
+        }
+      }
 
       // ── issue 212: create the seats this session actually billed ──
       // activateLocationSubscription made exactly ONE owner seat. If the owner
@@ -531,13 +692,15 @@ export async function POST(req: NextRequest) {
         locationSlug: location.location_id,
         sessionId,
         status: 'success',
-        detail: `tier=owner amount=${dollars(amountTotal)} — activation${result.alreadyActive ? ' (already active)' : ''}${hasSubscription ? ` sub=${subscriptionId}` : ''}${invoiceOutcome === 'duplicate' ? ' invoice=duplicate' : ''}${seatPlanNote}${amountNote}`,
+        detail: `tier=owner amount=${dollars(amountTotal)} — activation${result.alreadyActive ? ' (already active)' : ''}${hasSubscription ? ` sub=${subscriptionId}` : ''}${invoiceOutcome === 'duplicate' ? ' invoice=duplicate' : ''}${seatPlanNote}${amountNote}${moneyInFlight ? ` payment_state=in_flight (payment_status=${paymentStatus || 'unknown'}, issue 313)` : ''}`,
         landed,
       })
       await postSlackMessage(
         result.alreadyActive && !hasSubscription && invoiceOutcome === 'inserted'
           ? `⚠️ Stripe payment ${dollars(amountTotal)} from ${location.name || location.id} — location was ALREADY active. Possible duplicate activation payment; refund from the Stripe dashboard if so.`
-          : `💰 Stripe payment: ${dollars(amountTotal)} — ${location.name || location.id} — subscription activated (paid through ${paidThrough}).${seatPlanNote}${amountNote}`,
+          : moneyInFlight
+            ? `🏦 Bank payment started: ${dollars(amountTotal)} — ${location.name || location.id} — activated NOW, paid through ${paidThrough}. The ACH debit has NOT settled yet (payment_status=${paymentStatus || 'unknown'}); Stripe will confirm in a few days. No hand-activation needed.${seatPlanNote}${amountNote}`
+            : `💰 Stripe payment: ${dollars(amountTotal)} — ${location.name || location.id} — subscription activated (paid through ${paidThrough}).${seatPlanNote}${amountNote}`,
       )
     } else {
       const invoiceOutcome = await recordStripeInvoice({
@@ -705,23 +868,53 @@ async function handleInvoiceEvent(event: any) {
 
   try {
     if (eventType === 'invoice.payment_failed') {
+      // issue 313: ONE failure, ONE alert, even though a failed ACH debit on a
+      // subscription fires TWO Stripe events — checkout.session.async_payment_failed
+      // AND invoice.payment_failed. They carry different event ids, so the
+      // layer-1 replay guard cannot collapse them; they are genuinely distinct
+      // deliveries reporting the same bounce.
+      //
+      // Both handlers converge on past_due, which is why the STATE needs no
+      // reconciling — setLocationSubscriptionStatus is idempotent and the
+      // second write is a no-op. Only the notification needs it. A location
+      // already sitting in past_due has, by construction, already had its
+      // failure reported: nothing else writes that state. So the second event
+      // updates the ledger silently instead of pinging Kevin twice about one
+      // bounce, and the sync_log row still records that it arrived.
+      const alreadyReported = location.subscription_status === 'past_due'
       await setLocationSubscriptionStatus(location.id, 'past_due')
       await logStripeEvent({
         locationSlug: location.location_id, sessionId: invoiceId, status: 'error',
-        detail: `error=payment_failed sub=${subscriptionId} amount=${dollars(amountPaid)} — marked past_due`,
+        detail:
+          `error=payment_failed sub=${subscriptionId} amount=${dollars(amountPaid)} — marked past_due` +
+          (alreadyReported ? ' (already past_due — alert suppressed as a duplicate, issue 313)' : ''),
         landed: 'landed',
       })
-      await postSlackMessage(
-        `⚠️ Stripe payment FAILED — ${location.name || location.id} marked past_due (${dollars(amountPaid)}). Owner must update their card in the billing portal.`,
-      )
+      if (!alreadyReported) {
+        await postSlackMessage(
+          `⚠️ Stripe payment FAILED — ${location.name || location.id} marked past_due (${dollars(amountPaid)}). Owner must update their card or bank details in the billing portal.`,
+        )
+      }
     } else {
       // invoice.paid — advance the renewal window and record the payment.
       const pe = subscriptionPeriodEndUnix(sub) ?? inv.periodEnd
       const newDate = unixToDateString(pe)
       const advanced = await advancePaidThroughDate(location.id, newDate)
-      // A recovered card flips past_due back to active.
+      // A recovered card flips past_due back to active. issue 313: this is
+      // ALSO the recovery for an ACH that bounced and was moved to past_due —
+      // a successful retry heals the location here with no extra code.
       if (location.subscription_status === 'past_due') {
         await setLocationSubscriptionStatus(location.id, 'active')
+      }
+
+      // issue 313: for a location activated up front on an unsettled ACH, THIS
+      // is the event where the money actually arrives — it is the same handler
+      // that writes the billing_invoices row, so the audit line and the ledger
+      // close together. A no-op for card payments (nothing was in flight).
+      try {
+        await clearAchInFlight(location.id, { amountCents: amountPaid, subscriptionId })
+      } catch (e: any) {
+        console.error('[stripe-webhook] issue313 clear-in-flight (invoice) failed —', e?.message || e)
       }
       let invoiceOutcome: 'inserted' | 'duplicate' | 'skipped_zero_amount' = 'skipped_zero_amount'
       if (amountPaid && amountPaid > 0) {

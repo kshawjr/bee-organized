@@ -14,8 +14,10 @@
 //     handler (subscription_create) — pinned separately below — never twice.
 //   • async_payment_succeeded on a NEVER-activated location activates fully
 //     through the ONE activation path (activateLocationSubscription).
-//   • async_payment_failed alerts with the location's current state and does
-//     NOT silently deactivate a working location.
+//   • async_payment_failed alerts with the location's current state. Issue 313
+//     ADDED a state transition here (active → past_due, 14-day grace, access
+//     retained) now that every ACH payer is activated up front; see the
+//     rewritten test below for why that is not a reversal of 197's decision.
 //   • every path is idempotent: a replayed event is a no-op.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHmac } from 'node:crypto'
@@ -212,28 +214,44 @@ describe('issue 197 — ACH async_payment_succeeded', () => {
 })
 
 describe('issue 197 — ACH async_payment_failed', () => {
-  it('alerts with the location state and does NOT deactivate an active location', async () => {
+  // SUPERSEDED BY ISSUE 313, deliberately, and rewritten rather than deleted.
+  //
+  // Issue 197 asserted `processed: false` and NO subscription_status write:
+  // "never auto-deactivate". That was right for its inputs — a location
+  // reaching this handler had been let in by hand, if at all, and revoking
+  // access over a retryable bounce would have punished a working customer.
+  //
+  // Issue 313 activates EVERY ACH payer up front, so the same event now finds
+  // a location with a full year of access and no money behind it. Leaving it
+  // untouched would be the hole, not the kindness. The transition is past_due,
+  // which is the gentlest state the machine offers: FULL access continues
+  // through the 14-day grace window, so 197's actual concern — don't strand a
+  // working customer over a bounce — is still honoured. What changed is that
+  // the location now MOVES somewhere a human and the billing screen can see.
+  it('moves an active location to past_due and keeps its access (issue 313)', async () => {
     h.enqueue('stripe_webhook_events', null)   // replay read → not a replay
     h.enqueue('locations', FORCED_ACTIVE())    // map client_reference_id → location (active)
+    h.enqueue('locations', FORCED_ACTIVE({ subscription_status: 'past_due' })) // read-back
     h.enqueue('stripe_webhook_events', {})     // mark processed insert
 
     const res = await post(checkoutEvent('checkout.session.async_payment_failed', { payment_status: 'unpaid' }))
     const json = await res.json()
     expect(res.status).toBe(200)
-    expect(json).toMatchObject({ ok: true, processed: false, failure: 'async_payment_failed' })
+    expect(json).toMatchObject({ ok: true, processed: true, failure: 'async_payment_failed' })
+    expect(json.moved_to).toBe('past_due')
 
-    // Loud alert that names the risky state (active, but no money).
+    // Loud alert that names the risky state (was active, no money collected).
     const msg = (postSlackMessage as any).mock.calls.at(-1)?.[0] as string
     expect(msg).toMatch(/FAILED/)
-    expect(msg).toMatch(/ACTIVE/)
-    expect(msg).toMatch(/not being revoked/i)
+    expect(msg).toMatch(/past_due/)
 
-    // Crucially: NO write that changes subscription_status — the location is
-    // left exactly as it was.
-    const statusFlip = h.state.updates.find(
-      u => u.table === 'locations' && u.arg && 'subscription_status' in u.arg,
+    // 197's real guarantee, intact: access is not revoked. past_due keeps full
+    // write access (lib/read-only-access), and nothing touches lifecycle_status
+    // — where 'paused', the read-only state, actually lives.
+    const lifecycleFlip = h.state.updates.find(
+      u => u.table === 'locations' && u.arg && 'lifecycle_status' in u.arg,
     )
-    expect(statusFlip).toBeUndefined()
+    expect(lifecycleFlip).toBeUndefined()
     // The event is recorded so a redelivery short-circuits.
     expect(h.state.inserts.find(i => i.table === 'stripe_webhook_events')).toBeDefined()
   })
