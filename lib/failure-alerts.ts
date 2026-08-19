@@ -4,7 +4,7 @@
 // this is the real-time channel. app/api/cron/failure-alerts runs every
 // ~5 min, and this module decides what — if anything — to post to Slack.
 //
-// ALLOWLIST, not a denylist. We alert on exactly four hard, actionable
+// ALLOWLIST, not a denylist. We alert on exactly five hard, actionable
 // failures and NOTHING else. This is the whole difference between a channel
 // Kevin reads and one he mutes:
 //   1. sync_log landed_status='not_landed' — a webhook processed without
@@ -16,6 +16,36 @@
 //      SELF_HEAL_WINDOW_MS verbatim; we do not re-derive the token logic.
 //   4. ASSESSMENT_TEAM_MISMATCH breadcrumbs (issue 144/147) — the send
 //      succeeded but the assessment team didn't fully apply.
+//   5. a STRANDED CHECKOUT (issue 312) — an owner completed Stripe checkout,
+//      the session came back unpaid, and STRANDED_CHECKOUT_MS later their
+//      location still is not active. See the window note below.
+//
+// THE STRANDED-CHECKOUT WINDOW — 90 minutes, and why not days.
+//
+// The obvious reasoning is that an ACH debit legitimately takes 3-5 days, so
+// a short window would page on every bank payer. Measured against the three
+// pending checkouts prod has ever recorded, that reasoning is wrong, because
+// it watches the wrong clock. The bank clears on its own schedule; the OWNER's
+// clock is how long they cannot get into Bee Hub, and those are not the same
+// number. Both real ACH payers were let in almost immediately and the money
+// arrived six days later:
+//
+//   loc_bostonsuburbs  pending 13:36:43 → ACTIVE 13:50:42  (14 min)
+//                      …ACH actually cleared 5.99 days later
+//   loc_westraleigh    pending 17:08:59 → ACTIVE 17:10:35  (96 sec)
+//                      …ACH actually cleared 5.80 days later
+//   loc_centralaustin  pending 14:12:39 → ACTIVE 15:10:44  (58 min)  ← the strand
+//
+// So the resolution signal is ACTIVATION, not settlement. Keying on activation
+// means the two bank payers never alert at ANY window — they were never locked
+// out — and the window is free to be short enough to reach a person who still
+// has the tab open. 90 minutes clears the observed maximum (58 min) with room,
+// and the cron's 5-min cadence plus 5-min settle puts the alert in Slack about
+// 100 minutes after checkout, while the owner is still in the session.
+//
+// A bank payer that nobody force-activates IS locked out and DOES alert — that
+// is correct, not a false positive: it is the same alert Kevin already acts on
+// by force-activating, and it fires exactly once per session, never repeats.
 //
 // DELIBERATELY EXCLUDED (would drown the useful signal):
 //   • raw sync_log status='error' — overwhelmingly self-healing webhook
@@ -48,7 +78,16 @@ export const ALERT_SETTLE_MS = SELF_HEAL_WINDOW_MS
 // surfaces more than this is an incident, and the count still tells the story.
 export const MAX_ALERT_LINES = 12
 
-export type AlertKind = 'not_landed' | 'import_failed' | 'token_expired' | 'assessment_mismatch'
+export type AlertKind =
+  | 'not_landed'
+  | 'import_failed'
+  | 'token_expired'
+  | 'assessment_mismatch'
+  | 'checkout_stranded'
+
+// How long an owner may sit on an unpaid checkout before it is a strand.
+// Measured, not guessed — see the window note in the module header.
+export const STRANDED_CHECKOUT_MS = 90 * 60_000
 
 export type AlertItem = {
   kind: AlertKind
@@ -73,6 +112,18 @@ export type MismatchRow = {
   created_at?: string | null
 }
 
+// Raw sync_log "awaiting async payment" row (fetchPendingCheckouts). entity_id
+// is the Stripe checkout session id; location_id is the slug — null on rows
+// written before issue 312 taught the webhook to record it.
+export type PendingCheckoutRow = {
+  created_at?: string | null
+  entity_id?: string | null
+  location_id?: string | null
+}
+
+// slug → the one billing fact the strand check needs: is the owner in?
+export type LocationBillingState = { status: string | null }
+
 // ── line helpers (phone copy: what broke and where, one line) ──────
 
 const clean = (s: string, max = 140) => s.replace(/\s+/g, ' ').trim().slice(0, max)
@@ -89,6 +140,21 @@ const progressOf = (j: ImportFailedRow) =>
 const inWindow = (t: number, sinceMs: number, cutoffMs: number) =>
   Number.isFinite(t) && t > sinceMs && t <= cutoffMs
 
+// "58 min" / "1h 30m" / "3 days" — the alert leads with how long the person
+// has been waiting, so the reader feels the wait before reading the cause.
+const ageLabel = (ms: number) => {
+  const mins = Math.max(1, Math.round(ms / 60_000))
+  if (mins < 60) return `${mins} min`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return mins % 60 ? `${hours}h ${mins % 60}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days} day${days > 1 ? 's' : ''}`
+}
+
+// Stripe session ids are 66 chars; enough of one to find it in the dashboard.
+const sessionShort = (id: string | null | undefined) =>
+  id ? `${id.slice(0, 22)}…` : 'unknown session'
+
 // ── the pure selector ──────────────────────────────────────────────
 // Given the raw sources already fetched for the run, return the alert lines
 // that are BOTH allowlisted AND newly-committed in (sinceMs, cutoffMs]. Pure:
@@ -98,11 +164,18 @@ export function selectNewAlerts(input: {
   importFailed: ImportFailedRow[]  // import_jobs status='failed' rows
   mismatches: MismatchRow[]        // sync_log ASSESSMENT_TEAM_MISMATCH rows
   locName: Map<string, string>     // slug → display name
+  // issue 312 — optional so every pre-312 caller and test is unchanged.
+  pendingCheckouts?: PendingCheckoutRow[]           // sync_log awaiting-async rows
+  locBilling?: Map<string, LocationBillingState>    // slug → subscription state
+  resolvedSessions?: Set<string>                    // sessions with a later terminal row
   sinceMs: number
   cutoffMs: number                 // = nowMs - ALERT_SETTLE_MS
   nowMs: number
 }): AlertItem[] {
-  const { events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs } = input
+  const {
+    events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs,
+    pendingCheckouts = [], locBilling, resolvedSessions,
+  } = input
   const items: AlertItem[] = []
 
   // (1) not_landed — a webhook that processed but never reached its state.
@@ -166,6 +239,46 @@ export function selectNewAlerts(input: {
     })
   }
 
+  // (5) stranded checkout (issue 312) — an owner paid and never got in.
+  //
+  // The alert moment is NOT when the row was written, it is when the row went
+  // stale: created_at + STRANDED_CHECKOUT_MS. Windowing that derived instant
+  // through the same (since, cutoff] watermark the other four kinds use means
+  // a strand is evaluated in exactly one run and alerted exactly once, even
+  // though the row itself is 90 minutes older than the window it fires in.
+  for (const pc of pendingCheckouts) {
+    const createdMs = Date.parse(pc.created_at || '')
+    if (!Number.isFinite(createdMs)) continue
+    if (!inWindow(createdMs + STRANDED_CHECKOUT_MS, sinceMs, cutoffMs)) continue
+
+    // Settled: a later non-pending sync_log row for this same checkout session
+    // (async_payment_succeeded, or the async_payment_failed path — which runs
+    // its own louder alert, so adding a strand line would double-ping).
+    if (pc.entity_id && resolvedSessions?.has(pc.entity_id)) continue
+
+    // Let in: the location is active by ANY route — the async payment cleared,
+    // a retry on a different session worked, or Kevin force-activated. This is
+    // the check that keeps genuine ACH payers quiet: both of prod's real bank
+    // payers were active within 14 minutes while their money took six days.
+    const slug = pc.location_id || null
+    if (slug && locBilling?.get(slug)?.status === 'active') continue
+
+    // A pending row with no location is either pre-312 (the webhook did not
+    // record one yet) or a session that arrived without a client_reference_id.
+    // Either way we cannot name the owner from the row — so say that plainly
+    // and point at the one place that can, rather than guessing.
+    const who = slug ? locLabel(slug, locName) : 'an unidentified location'
+    items.push({
+      kind: 'checkout_stranded',
+      ts: createdMs + STRANDED_CHECKOUT_MS,
+      text:
+        `Owner stuck at checkout — ${who}: they completed checkout ${ageLabel(nowMs - createdMs)} ago ` +
+        `and still cannot get in. Stripe never confirmed the payment, so activation ` +
+        `never ran and they are watching a spinner. Session ${sessionShort(pc.entity_id)}` +
+        (slug ? '' : ' — open it in Stripe to see who'),
+    })
+  }
+
   return items.sort((a, b) => a.ts - b.ts)
 }
 
@@ -177,6 +290,7 @@ const EMOJI: Record<AlertKind, string> = {
   import_failed: ':x:',
   token_expired: ':key:',
   assessment_mismatch: ':busts_in_silhouette:',
+  checkout_stranded: ':hourglass_flowing_sand:',
 }
 
 export function buildAlertMessage(items: AlertItem[]): { text: string; count: number } | null {
@@ -226,11 +340,90 @@ export async function fetchAssessmentMismatches(
   return (data as MismatchRow[]) ?? []
 }
 
-async function fetchLocationNames(supabase: typeof supabaseService): Promise<Map<string, string>> {
-  const { data } = await supabase.from('locations').select('location_id, name')
-  const map = new Map<string, string>()
-  for (const l of (data as any[]) || []) map.set(l.location_id, l.name || l.location_id)
-  return map
+// Pending checkouts whose STRAND MOMENT falls in this run's window. The row
+// is written at checkout; it becomes an alert STRANDED_CHECKOUT_MS later, so
+// the rows to consider are the ones created one strand-window EARLIER than
+// the window being evaluated. That shift lives here, in one place, so the
+// selector can stay pure and the bounds stay assertable.
+export async function fetchPendingCheckouts(
+  supabase: typeof supabaseService,
+  sinceMs: number,
+  cutoffMs: number,
+): Promise<PendingCheckoutRow[]> {
+  const { data } = await supabase
+    .from('sync_log')
+    .select('created_at, entity_id, location_id')
+    .eq('entity_type', 'payment')
+    .ilike('message', '%awaiting async payment%')
+    .gt('created_at', new Date(sinceMs - STRANDED_CHECKOUT_MS).toISOString())
+    .lte('created_at', new Date(cutoffMs - STRANDED_CHECKOUT_MS).toISOString())
+    .order('created_at', { ascending: true })
+    .limit(50)
+  return (data as PendingCheckoutRow[]) ?? []
+}
+
+// Which of those sessions have since reached a terminal STRIPE_PAYMENT row.
+//
+// "Later" is enforced on the CLOCK, not on the message text. Excluding the
+// seed row by its wording alone would make this query depend on the pending
+// row's phrasing to avoid resolving itself — a loop where one copy edit in
+// the webhook silently switches the whole alert off. A resolution is a row
+// for the same session written strictly AFTER the pending one; the wording
+// check stays as a second, independent guard.
+//
+// Filtered in JS rather than with a negated ilike: the candidate set is tiny
+// (prod has written three pending rows ever), and the ordering rule is
+// clearer read as code than as a PostgREST negation.
+export async function fetchCheckoutResolutions(
+  supabase: typeof supabaseService,
+  pending: PendingCheckoutRow[],
+): Promise<Set<string>> {
+  const resolved = new Set<string>()
+
+  // session id → when its pending row was written (earliest, if somehow two).
+  const pendingAt = new Map<string, number>()
+  for (const p of pending) {
+    const id = p.entity_id
+    const t = Date.parse(p.created_at || '')
+    if (!id || !Number.isFinite(t)) continue
+    pendingAt.set(id, Math.min(pendingAt.get(id) ?? Infinity, t))
+  }
+  if (pendingAt.size === 0) return resolved
+
+  const { data } = await supabase
+    .from('sync_log')
+    .select('entity_id, created_at, message')
+    .eq('entity_type', 'payment')
+    .in('entity_id', Array.from(pendingAt.keys()))
+    .limit(200)
+
+  for (const r of (data as any[]) || []) {
+    const id = r?.entity_id
+    if (!id) continue
+    const seeded = pendingAt.get(id)
+    if (seeded == null) continue
+    const t = Date.parse(r.created_at || '')
+    if (!Number.isFinite(t) || t <= seeded) continue
+    if (/awaiting async payment/i.test(r.message || '')) continue
+    resolved.add(id)
+  }
+  return resolved
+}
+
+// One locations read, two maps: the display names every alert kind uses, and
+// the subscription state the strand check needs.
+async function fetchLocationDirectory(supabase: typeof supabaseService): Promise<{
+  names: Map<string, string>
+  billing: Map<string, LocationBillingState>
+}> {
+  const { data } = await supabase.from('locations').select('location_id, name, subscription_status')
+  const names = new Map<string, string>()
+  const billing = new Map<string, LocationBillingState>()
+  for (const l of (data as any[]) || []) {
+    names.set(l.location_id, l.name || l.location_id)
+    billing.set(l.location_id, { status: l.subscription_status ?? null })
+  }
+  return { names, billing }
 }
 
 // ── the run collector (route entrypoint) ────────────────────────────
@@ -255,18 +448,27 @@ export async function collectFailureAlerts(opts: {
   // the (sinceMs, cutoffMs] filter — not the fetch window — is the real dedup
   // boundary. A cron outage longer than 24h would drop older not_landed /
   // token detail here; the daily digest is the backstop for that tail.
-  const [{ events }, importFailed, mismatches, locName] = await Promise.all([
-    fetchEvents({ window: '24h' }),
-    fetchImportFailures(supabase, sinceIso, cutoffIso),
-    fetchAssessmentMismatches(supabase, sinceIso, cutoffIso),
-    fetchLocationNames(supabase),
-  ])
+  const [{ events }, importFailed, mismatches, directory, pendingCheckouts] =
+    await Promise.all([
+      fetchEvents({ window: '24h' }),
+      fetchImportFailures(supabase, sinceIso, cutoffIso),
+      fetchAssessmentMismatches(supabase, sinceIso, cutoffIso),
+      fetchLocationDirectory(supabase),
+      fetchPendingCheckouts(supabase, opts.sinceMs, cutoffMs),
+    ])
+
+  // Second hop, and only when there is something to resolve: which of the
+  // candidate sessions already reached a terminal row.
+  const resolvedSessions = await fetchCheckoutResolutions(supabase, pendingCheckouts)
 
   const items = selectNewAlerts({
     events,
     importFailed,
     mismatches,
-    locName,
+    locName: directory.names,
+    pendingCheckouts,
+    locBilling: directory.billing,
+    resolvedSessions,
     sinceMs: opts.sinceMs,
     cutoffMs,
     nowMs: opts.nowMs,

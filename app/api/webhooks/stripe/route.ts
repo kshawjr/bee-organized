@@ -224,12 +224,29 @@ export async function POST(req: NextRequest) {
 
   // Async payment still pending — the async_payment_succeeded event
   // arrives later and does the real work.
+  //
+  // issue 312: this row is the ONLY trace a pending checkout leaves. No
+  // business write happens on this path and no stripe_webhook_events row is
+  // written (the replay guard is below), so nothing else in the system knows
+  // an owner just paid and got nothing. That makes it the strand detector —
+  // and a detector has to name who is stranded. It previously logged
+  // locationSlug:null, so the row could not be joined to the owner sitting on
+  // the spinner; that blindness is exactly why the strand was invisible.
+  // Resolve the location here: one read, no writes, on a path that today does
+  // no DB work at all. When the reference is unmappable we still say so in the
+  // message — an unmappable pending session is doubly silent otherwise, since
+  // this branch returns BEFORE the missing_client_reference_id alert below.
   if (paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required') {
+    const pendingLocation = isUuid(clientReferenceId)
+      ? await getLocationBilling(clientReferenceId)
+      : null
     await logStripeEvent({
-      locationSlug: null,
+      locationSlug: pendingLocation?.location_id ?? null,
       sessionId,
       status: 'success',
-      detail: `— awaiting async payment (payment_status=${paymentStatus || 'unknown'})`,
+      detail:
+        `— awaiting async payment (payment_status=${paymentStatus || 'unknown'})` +
+        (pendingLocation ? '' : ` client_reference_id=${clientReferenceId || 'none'}`),
     })
     return NextResponse.json({ ok: true, pending: true })
   }
