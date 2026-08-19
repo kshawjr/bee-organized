@@ -166,6 +166,35 @@ describe('buildTimelineItems — merge + ordering', () => {
     for (let k = 1; k < past.length; k++) expect(past[k - 1].ts).toBeGreaterThanOrEqual(past[k].ts)
   })
 
+  // issue 314 — the Welcome Email is retired and its pending queue was cleared.
+  // The Timeline branch is deliberately LEFT IN PLACE (same reasoning as the
+  // sender: a row that outlives the sweep should still render honestly rather
+  // than disappear or throw). What makes that safe is that the branch is driven
+  // entirely by welcome_email_scheduled_at, so clearing the column is enough to
+  // retire the row — no UI change was needed, and this pins that.
+  describe('issue 314 — a cleared welcome schedule leaves no pending row', () => {
+    it('scheduled_at NULL (what the cancel script writes) → no welcome row', () => {
+      const cleared = aggPayload({ lead: { welcome_email_scheduled_at: null } })
+      const { future, past } = buildTimelineItems(cleared, dripsPayload([]), { nowMs: NOW })
+      expect([...future, ...past].some(i => i.type === 'welcome')).toBe(false)
+    })
+
+    it('an OVERDUE pending welcome never rendered a row in the first place', () => {
+      // The branch requires ts > now, so the 41 rows that were already past due
+      // were invisible here even before the sweep. Worth pinning: it means the
+      // Timeline was never the surface that promised those sends.
+      const overdue = aggPayload({ lead: { welcome_email_scheduled_at: daysAgo(2) } })
+      const { future, past } = buildTimelineItems(overdue, dripsPayload([]), { nowMs: NOW })
+      expect([...future, ...past].some(i => i.type === 'welcome')).toBe(false)
+    })
+
+    it('control: a FUTURE pending welcome still renders, so the assertions above are real', () => {
+      const pending = aggPayload({ lead: { welcome_email_scheduled_at: daysAhead(1) } })
+      const { future } = buildTimelineItems(pending, dripsPayload([]), { nowMs: NOW })
+      expect(future.some(i => i.type === 'welcome')).toBe(true)
+    })
+  })
+
   it('only real write paths get actions: stage email + snooze YES; drips, welcome, assessments display-only', () => {
     const { future } = buildTimelineItems(agg, drips, { nowMs: NOW })
     const byType = Object.fromEntries(future.map(i => [i.type, i]))

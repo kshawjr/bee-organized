@@ -157,6 +157,51 @@ describe('opt-out enforcement — path drips', () => {
   })
 })
 
+// ═══ issue 314 — the Welcome Email writer is gone ══════════
+//
+// This is the CODE half of the retirement. The DATA half was
+// scripts/retire-welcome-email.mjs, which cleared the 43 rows already queued.
+// Either alone leaves half of them firing, so this pins the half that can
+// regress silently: a successful step 1 used to call scheduleWelcomeEmail and
+// stamp leads.welcome_email_scheduled_at 24h out.
+//
+// Asserted on the WRITE, not on a mocked function call. lib/welcome-email.ts is
+// imported for real in this suite (the sender still exists on purpose, so a row
+// that outlives the sweep still renders), which means the only honest question
+// is whether anything writes that column — not whether a spy fired.
+describe('a successful step 1 no longer schedules a welcome', () => {
+  const step1 = { id: 'st-1', step_order: 1, delay_days: 0, channel: 'email', subject: 's', body: 'b', master_template_id: null, templates: null }
+
+  it('step 1 sends, advances, and writes NO welcome_email_scheduled_at', async () => {
+    h.enqueue('drip_path_steps', step1)
+    h.enqueue('leads', baseLead())
+    h.enqueue('locations', { ...LOC, lifecycle_status: 'active' })
+
+    const res = await sendDripStepForRow(progressRow({ current_step: 1 }) as any)
+    expect(res.sent).toBe(true)
+    expect(sendEmailMock).toHaveBeenCalledTimes(1)
+
+    // The step really did fire — so a green test here cannot be a bail-out.
+    const leadWrites = updatePayloads('leads')
+    expect(leadWrites.length).toBeGreaterThan(0)
+    for (const w of leadWrites) {
+      expect(Object.keys(w)).not.toContain('welcome_email_scheduled_at')
+    }
+  })
+
+  it('the same is true on step 2, which never scheduled one anyway', async () => {
+    h.enqueue('drip_path_steps', { ...step1, id: 'st-2', step_order: 2, delay_days: 5 })
+    h.enqueue('leads', baseLead())
+    h.enqueue('locations', { ...LOC, lifecycle_status: 'active' })
+
+    const res = await sendDripStepForRow(progressRow({ current_step: 2 }) as any)
+    expect(res.sent).toBe(true)
+    for (const w of updatePayloads('leads')) {
+      expect(Object.keys(w)).not.toContain('welcome_email_scheduled_at')
+    }
+  })
+})
+
 describe('opt-out enforcement — welcome email', () => {
   it('send time: opted-out → pending welcome CANCELLED (scheduled_at cleared), NO email', async () => {
     h.enqueue('leads', baseLead({ marketing_opt_out: true }))

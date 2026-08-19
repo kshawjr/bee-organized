@@ -81,11 +81,12 @@ describe('the toggle switches which sequence is on screen', () => {
     expect(text()).not.toContain('ORG ONE')
   })
 
-  it('six rows either way — one sequence at a time, never merged', async () => {
+  // issue 314 — was six rows either way; the welcome row is retired.
+  it('five rows either way — one sequence at a time, never merged', async () => {
     await mount()
-    expect(reads().length).toBe(6)
+    expect(reads().length).toBe(5)
     await act(async () => { btn('Moving').click() })
-    expect(reads().length).toBe(6)
+    expect(reads().length).toBe(5)
     // The closed-job pair is shared, so it appears in both — the drip rows are
     // what swap.
     expect(text()).toContain('3mo')
@@ -103,7 +104,7 @@ describe('the toggle switches which sequence is on screen', () => {
   it('is hidden when a location has no moving default at all', async () => {
     await mount({ moveDefault: null })
     expect(btn('Moving')).toBeUndefined()
-    expect(reads().length).toBe(6)
+    expect(reads().length).toBe(5)
   })
 
   it('closes an open row when switching, so the modal cannot show the other sequence', async () => {

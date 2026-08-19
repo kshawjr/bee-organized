@@ -17,7 +17,8 @@
 //
 // These suites pin the behaviour, not the source:
 //   1. the onboarding preview renders MASTER subject/body
-//   2. the intro describes the REAL cadence (0 / +5d / +30d, Welcome at +24h)
+//   2. the intro describes the REAL cadence (0 / +5d / +30d; the Welcome at
+//      +24h was retired by issue 314 and must no longer be described)
 //   3. a first-time customization CLONES the master
 //   4. re-saving a customized path PRESERVES its content instead of nulling it
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -157,7 +158,10 @@ describe('onboarding preview reads the DB masters', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('onboarding intro describes the real cadence', () => {
-  it('states 0 / +5 days / +30 days plus the separate 24h Welcome', async () => {
+  // issue 314 — RETARGETED. The cadence assertions are the live part and stand
+  // unchanged. The Welcome clause is inverted: it used to pin that the intro
+  // called out a SEPARATE +24h send, and that send no longer exists.
+  it('states 0 / +5 days / +30 days, and no longer a separate 24h Welcome', async () => {
     await act(async () => { root.render(<OnboardingPathsEditor onComplete={vi.fn()} />) })
     await act(async () => {})
     const t = container.textContent || ''
@@ -165,9 +169,8 @@ describe('onboarding intro describes the real cadence', () => {
     expect(t).toContain('Right away')
     expect(t).toContain('5 days later')
     expect(t).toContain('30 days later')
-    // The Welcome Email is a SEPARATE send at +24h, not the first drip email.
-    expect(t).toMatch(/Welcome Email/)
-    expect(t).toMatch(/24 hours after/)
+    expect(t).not.toMatch(/Welcome Email/)
+    expect(t).not.toMatch(/24 hours after/)
   })
 
   it('drops the old claim that a welcome email leads and a follow-up lands in 1-2 days', async () => {
@@ -179,6 +182,11 @@ describe('onboarding intro describes the real cadence', () => {
     expect(t).not.toContain('A welcome email - goes out right when they sign up')
     // Per-path explainers no longer promise a leading welcome email either.
     expect(t).not.toContain("You'll send a welcome email")
+    // issue 314 — and now nothing anywhere in the onboarding step promises a
+    // welcome email of any shape. This is the broad guard: the two specific
+    // strings above were the Gen 1 claims, this catches a new one.
+    expect(t.toLowerCase()).not.toContain('welcome email')
+    expect(t).not.toContain('Bee Organized HQ')
   })
 })
 

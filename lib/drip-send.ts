@@ -19,7 +19,6 @@ import {
   MISSING_BOOKING_LINK_MESSAGE,
 } from './booking-link'
 import { nextSendAt } from './drip-time'
-import { scheduleWelcomeEmail } from './welcome-email'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 
@@ -423,12 +422,13 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     await resetTransientFailures(row.id)
   }
 
-  // Step 1 of any new-lead drip triggers the 24h Welcome Email. Fire and
-  // forget — a failed schedule is logged inside scheduleWelcomeEmail and
-  // doesn't block drip progression.
-  if (row.current_step === 1) {
-    await scheduleWelcomeEmail(row.lead_id)
-  }
+  // issue 314 — step 1 no longer schedules the Welcome Email. It is retired:
+  // nothing queues a new one, and scripts/retire-welcome-email.mjs cleared what
+  // was already pending. The SENDER (lib/welcome-email.ts) and the cron's
+  // Queue 2 stay wired on purpose, exactly as ec04aee left the estimate stage
+  // emails: a row that outlives the sweep — or one written by an older
+  // deployment still in flight — then renders and completes correctly instead
+  // of erroring. With the writer gone that queue drains to empty and stays there.
 
   const advancedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
   return { sent: true, advanced_to_step: advancedTo }

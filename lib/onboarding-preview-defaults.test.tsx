@@ -164,15 +164,21 @@ describe('preview parity — the open email rides the shared 14-variable pipelin
 })
 
 describe('the intro cadence derives from the masters', () => {
-  it('a 3-step 0/5/30 master set describes three emails on that schedule plus the 24h Welcome', async () => {
+  // issue 314 — RETARGETED, not removed. The live half of this test is that the
+  // cadence is DERIVED from the master steps rather than hardcoded, and that is
+  // untouched. Only the trailing "+ the 24h Welcome" clause went away with the
+  // email itself, so that assertion is inverted: onboarding must no longer
+  // promise a send that can never arrive. Leaving it as a positive would have
+  // been a test asserting a lie to a brand-new owner.
+  it('a 3-step 0/5/30 master set describes three emails on that schedule, and no Welcome', async () => {
     await mount()
     const t = container.textContent || ''
     expect(t).toContain('the same 3 emails')
     expect(t).toContain('Right away')
     expect(t).toContain('5 days later')
     expect(t).toContain('30 days later')
-    expect(t).toMatch(/Welcome Email/)
-    expect(t).toMatch(/24 hours after/)
+    expect(t).not.toMatch(/Welcome Email/)
+    expect(t).not.toMatch(/24 hours after/)
   })
 
   it('a 4-step 0/3/10/21 master set renders four emails on that schedule — nothing hardcoded', async () => {

@@ -109,16 +109,22 @@ describe('only rows whose timing is really data get a control', () => {
     expect(pencils().length).toBe(3)
   })
 
-  it('welcome and the closed-job pair render timing as plain text', async () => {
+  // issue 314 — RETARGETED. This pinned that CONSTANT timings render as plain
+  // text rather than as an editable pencil. The welcome ('Next day') was one of
+  // the three constants and is retired, so it drops out of the list and is
+  // asserted absent instead; the closed-job pair still carries the behaviour.
+  it('the closed-job pair renders timing as plain text', async () => {
     await mountList()
     const labels = pencils().map(b => b.textContent ?? '')
-    for (const fixed of ['Next day', '3 months later', 'A year later']) {
+    for (const fixed of ['3 months later', 'A year later']) {
       expect(labels.some(l => l.includes(fixed)), `${fixed} must not be editable`).toBe(false)
     }
     // …and they are still visible, just not actionable.
-    expect(container.textContent).toContain('Next day')
     expect(container.textContent).toContain('3 months later')
     expect(container.textContent).toContain('A year later')
+    // The retired welcome's timing label is gone entirely — not merely
+    // un-editable. Its template is still in the fixture, so this can fail.
+    expect(container.textContent).not.toContain('Next day')
   })
 
   it('an added step is editable like any other drip row', async () => {

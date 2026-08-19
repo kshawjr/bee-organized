@@ -124,7 +124,7 @@ describe('a blocked row is dimmed and says why', () => {
       sendConfig: { ...ALL_SET, ratePerHour: '' },
     })
     expect(text()).toContain('Second line survives')
-    expect(Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read').length).toBe(6)
+    expect(Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read').length).toBe(5)  // issue 314: was 6
   })
 
   it('an unblocked row renders normally', async () => {

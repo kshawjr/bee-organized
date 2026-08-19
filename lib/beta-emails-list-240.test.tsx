@@ -2,18 +2,23 @@
 //
 // Issue 240 step 7 — the read-only Emails list.
 //
-// Six rows a client experiences as one sequence, which the database keeps in
-// three unrelated shapes. The builder is pure so the unification can be tested
+// Five rows a client experiences as one sequence, which the database keeps in
+// two unrelated shapes. The builder is pure so the unification can be tested
 // without mounting, and the seams are asserted rather than assumed:
 //
 //   RAIL A  drip steps   delay_days is a real per-location COLUMN
-//   RAIL B  welcome      24h, a CONSTANT in lib/welcome-email.ts
 //   RAIL C  closed job   [90, 365], CONSTANTS in lib/stage-emails.ts
 //
+// RAIL B was the welcome (24h, a constant in lib/welcome-email.ts). Issue 314
+// retired it. The tests that pinned its PRESENCE are gone because the behaviour
+// is gone; the tests that used it merely as a convenient vehicle for the shared
+// fork rule were retargeted onto rail C, which still runs that rule. A new test
+// pins its ABSENCE so the row cannot come back unnoticed.
+//
 // Pinned:
-//   1) all six rows, in order, across the two groups
+//   1) all five rows, in order, across the two groups
 //   2) the groups are never interleaved — they are measured from different
-//      moments, so one sorted axis across all six would be a lie
+//      moments, so one sorted axis across all five would be a lie
 //   3) rail A resolves inline-first, mirroring lib/drip-send.ts
 //   4) fork resolution matches the server rule, and marks "Your wording"
 //   5) Read opens the full body; Previous/Next stops at both ends
@@ -59,11 +64,22 @@ const build = (over: any = {}) => buildEmailList({
   templates, pathKey:'organizing-a', ...over,
 })
 
-describe('the six rows unify across three rails', () => {
-  it('group one is the drip steps plus the welcome, in send order', () => {
+describe('the five rows unify across two rails', () => {
+  it('group one is the drip steps alone, in send order', () => {
     const { newLead } = build()
-    expect(newLead.map(r => r.when)).toEqual(['Right away', 'Next day', 'Day 5', 'Day 30'])
-    expect(newLead.map(r => r.rail)).toEqual(['drip', 'welcome', 'drip', 'drip'])
+    expect(newLead.map(r => r.when)).toEqual(['Right away', 'Day 5', 'Day 30'])
+    expect(newLead.map(r => r.rail)).toEqual(['drip', 'drip', 'drip'])
+  })
+
+  // issue 314 — the welcome master is still in the templates array (the row
+  // still exists in the library), so this is a real guard and not a tautology:
+  // it fails the moment anything re-adds a rail B row to the builder.
+  it('the retired welcome never appears, even though its template is present', () => {
+    const { newLead, afterJob } = build()
+    expect(templates.some(t => t.legacyId === 'welcome')).toBe(true)
+    expect([...newLead, ...afterJob].some(r => r.rail === 'welcome')).toBe(false)
+    expect([...newLead, ...afterJob].some(r => r.key === 'welcome')).toBe(false)
+    expect(newLead.some(r => r.when === 'Next day')).toBe(false)
   })
 
   it('group two is the closed-job pair', () => {
@@ -72,9 +88,10 @@ describe('the six rows unify across three rails', () => {
     expect(afterJob.map(r => r.rail)).toEqual(['stage', 'stage'])
   })
 
-  it('six rows in total, and the groups stay separate', () => {
+  it('five rows in total, and the groups stay separate', () => {
     const { newLead, afterJob } = build()
-    expect(newLead.length + afterJob.length).toBe(6)
+    expect(newLead.length + afterJob.length).toBe(5)
+    expect(newLead.length).toBe(3)
     // Interleaving would claim day 90 follows day 30 on one timeline. It does
     // not — group two is counted from the job closing, group one from intake.
     expect(newLead.some(r => r.rail === 'stage')).toBe(false)
@@ -84,8 +101,10 @@ describe('the six rows unify across three rails', () => {
   it('marks which timings are data and which are constants', () => {
     const { newLead, afterJob } = build()
     expect(newLead.filter(r => r.timingIsData).map(r => r.when)).toEqual(['Right away', 'Day 5', 'Day 30'])
-    // The welcome and both closed-job rows are code constants.
-    expect(newLead.find(r => r.rail === 'welcome')!.timingIsData).toBe(false)
+    // Group one is now all rail A, so all of its timings are data. Both
+    // closed-job rows remain code constants. (The welcome was the third
+    // constant; issue 314 retired it.)
+    expect(newLead.every(r => r.timingIsData === true)).toBe(true)
     expect(afterJob.every(r => r.timingIsData === false)).toBe(true)
   })
 
@@ -145,29 +164,38 @@ describe('rail A resolves content the way the sender does', () => {
   })
 })
 
+// issue 314 — these three pinned the shared fork rule (cloned_from_id →
+// master.id, active only, newest wins) and happened to use the welcome master
+// as their vehicle. The RULE is still live, so they were RETARGETED onto the
+// closed-job master rather than deleted: rail C is now the only caller of
+// templateRow, and dropping these would have left the client-side mirror of
+// lib/template-fork.ts completely unpinned.
 describe('fork resolution matches the server rule', () => {
+  const threeMo = (rows: any[]) => rows.find(r => r.key === 'opp_closed_job_3mo')!
+
   it('a location fork wins and is labelled Your wording', () => {
     const withFork = [...templates, tpl({ dbId:'f1', legacyId:null, isOwnCustom:true,
-      clonedFromId:'t-welcome', subject:'Our own welcome', body:'Ours\n\nSecond line.' })]
-    const { newLead } = build({ templates: withFork })
-    const w = newLead.find(r => r.rail === 'welcome')!
-    expect(w.subject).toBe('Our own welcome')
+      clonedFromId:'t-3mo', subject:'Our own check-in', body:'Ours\n\nSecond line.' })]
+    const { afterJob } = build({ templates: withFork })
+    const w = threeMo(afterJob)
+    expect(w.subject).toBe('Our own check-in')
     expect(w.wording).toBe('yours')
   })
 
   it('an inactive fork is ignored, exactly as the sender ignores it', () => {
     const withFork = [...templates, tpl({ dbId:'f1', legacyId:null, isOwnCustom:true,
-      isActive:false, clonedFromId:'t-welcome', subject:'Stale', body:'x' })]
-    const { newLead } = build({ templates: withFork })
-    expect(newLead.find(r => r.rail === 'welcome')!.subject).toBe('Welcome to the Bee Organized Hive!')
+      isActive:false, clonedFromId:'t-3mo', subject:'Stale', body:'x' })]
+    const { afterJob } = build({ templates: withFork })
+    expect(threeMo(afterJob).subject).toBe("We hope you're still loving your space!")
+    expect(threeMo(afterJob).wording).toBe('master')
   })
 
   it('the most recently updated fork wins', () => {
     const withForks = [...templates,
-      tpl({ dbId:'f1', isOwnCustom:true, clonedFromId:'t-welcome', subject:'Older', body:'a\n\nb', updatedAt:'2026-01-01' }),
-      tpl({ dbId:'f2', isOwnCustom:true, clonedFromId:'t-welcome', subject:'Newer', body:'a\n\nb', updatedAt:'2026-06-01' })]
-    const { newLead } = build({ templates: withForks })
-    expect(newLead.find(r => r.rail === 'welcome')!.subject).toBe('Newer')
+      tpl({ dbId:'f1', isOwnCustom:true, clonedFromId:'t-3mo', subject:'Older', body:'a\n\nb', updatedAt:'2026-01-01' }),
+      tpl({ dbId:'f2', isOwnCustom:true, clonedFromId:'t-3mo', subject:'Newer', body:'a\n\nb', updatedAt:'2026-06-01' })]
+    const { afterJob } = build({ templates: withForks })
+    expect(threeMo(afterJob).subject).toBe('Newer')
   })
 
   it('master-backed drip steps read as Bee Organized wording', () => {
@@ -205,11 +233,12 @@ describe('the list renders and Read works', () => {
   const readButtons = () =>
     Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read')
 
-  it('renders both group headings and all six Read buttons', async () => {
+  it('renders both group headings and all five Read buttons', async () => {
     await mount()
     expect(container.textContent).toContain('When someone new gets in touch')
     expect(container.textContent).toContain('After a job is finished')
-    expect(readButtons().length).toBe(6)
+    // issue 314 — was 6. Group one lost the welcome row; group two is untouched.
+    expect(readButtons().length).toBe(5)
   })
 
   it('shows no editing affordance anywhere', async () => {
@@ -226,7 +255,7 @@ describe('the list renders and Read works', () => {
     await act(async () => { readButtons()[0].click() })
     const dialog = container.querySelector('[role="dialog"]')!
     expect(dialog.textContent).toContain('Hello, and thank you so much for reaching out')
-    expect(dialog.textContent).toContain('1 of 4')
+    expect(dialog.textContent).toContain('1 of 3')
   })
 
   it('Previous is dead on the first row and Next on the last', async () => {
@@ -235,17 +264,17 @@ describe('the list renders and Read works', () => {
     const prev = () => Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Previous')) as HTMLButtonElement
     const next = () => Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Next')) as HTMLButtonElement
     expect(prev().disabled).toBe(true)
-    for (let i = 0; i < 3; i++) await act(async () => { next().click() })
-    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('4 of 4')
+    for (let i = 0; i < 2; i++) await act(async () => { next().click() })
+    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('3 of 3')
     expect(next().disabled).toBe(true)
     // Clicking a dead Next must not wrap around.
     await act(async () => { next().click() })
-    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('4 of 4')
+    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('3 of 3')
   })
 
   it('navigates only within its own group', async () => {
     await mount()
-    await act(async () => { readButtons()[4].click() })  // first closed-job row
+    await act(async () => { readButtons()[3].click() })  // first closed-job row (was [4])
     expect(container.querySelector('[role="dialog"]')!.textContent).toContain('1 of 2')
   })
 })

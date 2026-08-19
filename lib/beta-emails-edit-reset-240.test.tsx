@@ -7,7 +7,7 @@
 //   Rail A (drip steps)  the PATH is shared → clone the path, write inline.
 //                        No master drip step points at a template (24 of 24 are
 //                        inline in production), so there is nothing to repoint.
-//   Rail B/C (welcome,   the TEMPLATE row is shared → duplicate it and patch
+//   Rail C (closed job,  the TEMPLATE row is shared → duplicate it and patch
 //   closed job)          the copy. No step is touched.
 //
 // Reset overrides SUBJECT and BODY only on BOTH rails, so it is one promise on
@@ -91,10 +91,11 @@ describe('the shape guard', () => {
 
 // ───────────────────────── the affordances ─────────────────────────
 describe('Edit appears on every row, and never adds or deletes', () => {
-  it('all six rows offer Edit alongside Read', async () => {
+  // issue 314 — was six. Group one lost the retired welcome row.
+  it('all five rows offer Edit alongside Read', async () => {
     await mount()
-    expect(buttons('Read').length).toBe(6)
-    expect(buttons('Edit').length).toBe(6)
+    expect(buttons('Read').length).toBe(5)
+    expect(buttons('Edit').length).toBe(5)
   })
 
   it('there is no add affordance and no delete — the only thing that can drift a shape', async () => {
@@ -107,7 +108,7 @@ describe('Edit appears on every row, and never adds or deletes', () => {
 
   it('a read-only mount (no actions) offers no Edit at all', async () => {
     await mount({ actions: null })
-    expect(buttons('Read').length).toBe(6)
+    expect(buttons('Read').length).toBe(5)
     expect(buttons('Edit').length).toBe(0)
   })
 
@@ -119,7 +120,7 @@ describe('Edit appears on every row, and never adds or deletes', () => {
     expect(row.pathKey).toBe('organizing-a')   // rail A acts on (pathKey, order)
     expect(row.order).toBe(1)
 
-    await act(async () => { buttons('Edit')[4].click() })   // first closed-job row
+    await act(async () => { buttons('Edit')[3].click() })   // first closed-job row (was [4])
     const stageRow = props.actions.edit.mock.calls[1][0]
     expect(stageRow.rail).toBe('stage')
     expect(stageRow.masterDbId).toBe('t-3mo')  // rail B/C acts on the template
@@ -170,7 +171,7 @@ describe('reset', () => {
   it('a stage row with a fork can always reset — its shape guard does not apply', async () => {
     const withFork = [...TEMPLATES, tpl({ dbId: 'f1', isOwnCustom: true, clonedFromId: 't-3mo', subject: 'Ours', body: 'Ours\n\nSecond.' })]
     await mount({ templates: withFork })
-    await act(async () => { buttons('Read')[4].click() })
+    await act(async () => { buttons('Read')[3].click() })
     expect(container.textContent).toContain("You've changed this one")
     expect(buttons('Put the Bee Organized wording back').length).toBe(1)
   })
@@ -178,7 +179,7 @@ describe('reset', () => {
   it('hands the row back with the fork id the delete needs', async () => {
     const withFork = [...TEMPLATES, tpl({ dbId: 'f1', isOwnCustom: true, clonedFromId: 't-3mo', subject: 'Ours', body: 'Ours\n\nSecond.' })]
     const props = await mount({ templates: withFork })
-    await act(async () => { buttons('Read')[4].click() })
+    await act(async () => { buttons('Read')[3].click() })
     await act(async () => { buttons('Put the Bee Organized wording back')[0].click() })
     expect(props.actions.reset).toHaveBeenCalledTimes(1)
     expect(props.actions.reset.mock.calls[0][0].forkDbId).toBe('f1')
