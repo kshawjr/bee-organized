@@ -37,6 +37,7 @@ import { resolveSequenceSenders } from "@/lib/sequence-senders"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
+import { checkoutWaitPhase, checkoutWaitCopy, isPollingPhase, showsReopenCheckout, DEADLINE_SECONDS } from "@/lib/stripe-wait-phase"
 // issue 168 — pay modals centre against the viewport (portal to body, escaping the
 // transformed onboarding ancestor that confined position:fixed to the content column)
 // and the confirmed state gets a reduced-motion-safe confetti celebration.
@@ -34648,11 +34649,27 @@ function PaymentConfirmStep({
 }
 
 // ─── StripeCheckoutWait ────────────────────────────────────────────────────
-// Shown after the owner opens Stripe checkout in a new tab. Polls
-// /api/locations/[id]/activation-status every 4s until `until(status)`
-// says the webhook's writes are visible, then fires onPaid(status).
-// Timeout never claims failure — the payment may still land (webhook
-// retries for days); it just tells the owner what to expect.
+// Shown after the owner returns from Stripe checkout in the same tab. Polls
+// /api/locations/[id]/activation-status every 4s until `until(status)` says
+// the webhook's writes are visible, then fires onPaid(status).
+//
+// issue 311 — the poll now has a DEADLINE and the copy tells the truth.
+// Previously it re-armed forever under "usually within a few seconds", which
+// is right for a card and five orders of magnitude wrong for a bank transfer:
+// an ACH checkout completes with payment_status=unpaid, the webhook correctly
+// declines to activate, and the owner watched a spinner for twenty minutes
+// with no way to learn that the honest answer was "three to five days".
+//
+// The phase, the deadline and every line of copy live in lib/stripe-wait-phase
+// — this file is not type-checked, and that module documents in full WHY the
+// screen cannot tell a pending ACH from a slow webhook (short version: the
+// return carries no session id, activation-status reads the location row which
+// the pending path never touches, and the sync_log row that does record it is
+// written with location_id NULL). It cannot know, so the copy names both
+// outcomes rather than guessing at one.
+//
+// Timeout still never claims failure — the payment may genuinely still land.
+// It just stops spinning and says something true.
 function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
   const [elapsed, setElapsed] = useState(0)
   const untilRef = useRef(until);  untilRef.current  = until
@@ -34661,6 +34678,10 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
   React.useEffect(() => {
     let stopped = false
     let pollTimer = null
+    // Wall-clock, not the `elapsed` state: the poll closure is created once and
+    // would read a frozen 0 forever. The clock below only drives the copy.
+    const startedAt = Date.now()
+    const pastDeadline = () => (Date.now() - startedAt) / 1000 >= DEADLINE_SECONDS
     const poll = async () => {
       try {
         const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
@@ -34672,40 +34693,46 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
           }
         }
       } catch {}
-      if (!stopped) pollTimer = setTimeout(poll, 4000)
+      // The deadline. Stop re-arming — a confirmation that has not arrived by
+      // now is not arriving because we kept asking.
+      if (!stopped && !pastDeadline()) pollTimer = setTimeout(poll, 4000)
     }
     pollTimer = setTimeout(poll, 3000)
     const clock = setInterval(() => setElapsed(s => s + 1), 1000)
     return () => { stopped = true; clearTimeout(pollTimer); clearInterval(clock) }
   }, [locationId])
 
-  const slow = elapsed >= 120
+  const phase = checkoutWaitPhase(elapsed)
+  const copy  = checkoutWaitCopy(phase)
+  const waiting = isPollingPhase(phase)
+  // Controls sit at their natural width — the column is a flex container, whose
+  // default `stretch` would otherwise pull every button edge-to-edge.
+  const controlStyle = { alignSelf:'center', minWidth:'160px' }
+
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%', textAlign:'center', padding:'8px 0' }}>
-      <div style={{ fontSize:'40px' }}>🐝</div>
+      <div style={{ fontSize:'40px' }}>{waiting ? '🐝' : '✉️'}</div>
       <div>
-        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Confirming your payment…</h3>
+        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>{copy.heading}</h3>
         <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>
-          You're back from Stripe. This finishes automatically the moment your payment is confirmed — usually within a few seconds. No need to do anything.
+          {copy.body}
         </p>
       </div>
-      {slow && (
+      {copy.note && (
         <div style={{ borderRadius:'10px', border:'1px solid rgba(212,160,70,0.4)', background:'rgba(212,160,70,0.07)', padding:'10px 12px', textAlign:'left' }}>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5 }}>
-            Already paid? Confirmation can occasionally take a minute or two — you can keep waiting,
-            or come back later; your purchase activates automatically either way. If it still hasn't
-            appeared after a few minutes, contact Bee Organized.
+            {copy.note}
           </p>
         </div>
       )}
-      {payUrl && (
+      {payUrl && showsReopenCheckout(phase) && (
         <button onClick={() => navigateToStripeCheckout(payUrl)}
-          style={{ padding:'10px', background:'transparent', border:'none', fontSize:'12px', color:'#635bff', cursor:'pointer', fontFamily:'inherit', textDecoration:'underline' }}>
+          style={{ ...controlStyle, padding:'10px', background:'transparent', border:'none', fontSize:'12px', color:'#635bff', cursor:'pointer', fontFamily:'inherit', textDecoration:'underline' }}>
           Reopen Stripe checkout
         </button>
       )}
       <button onClick={onBack}
-        style={{ padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+        style={{ ...controlStyle, padding:'10px 18px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
         ← Back
       </button>
     </div>
