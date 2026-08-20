@@ -97,6 +97,17 @@ export async function getAccessToken(userEmail: string): Promise<string> {
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
+// Typed so callers can branch on status — the history.list 404 (cursor too
+// old) fallback in gmail-sync depends on it.
+export class GmailApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'GmailApiError'
+    this.status = status
+  }
+}
+
 // Delegation failures (unauthorized_client, subject not in domain, scope not
 // granted in the admin console) are only diagnosable from the response body,
 // so include it in the error. The body never contains our token or key.
@@ -115,7 +126,7 @@ export async function gmailFetch(
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Gmail API ${res.status} on ${path} (as ${userEmail}): ${body}`)
+    throw new GmailApiError(res.status, `Gmail API ${res.status} on ${path} (as ${userEmail}): ${body}`)
   }
   return res
 }
@@ -180,6 +191,43 @@ export async function getMessageMetadata(
     internalDate: data.internalDate,
     headers,
   }
+}
+
+export interface GmailHistoryPage {
+  messagesAdded: GmailMessageRef[]
+  nextPageToken?: string
+  historyId?: string
+}
+
+// Incremental sync: messages added since a history cursor. Google returns
+// 404 (as GmailApiError) when the cursor is too old to replay.
+export async function listHistory(
+  userEmail: string,
+  opts: { startHistoryId: string; pageToken?: string; maxResults?: number }
+): Promise<GmailHistoryPage> {
+  const params = new URLSearchParams({
+    startHistoryId: opts.startHistoryId,
+    historyTypes: 'messageAdded',
+  })
+  if (opts.pageToken) params.set('pageToken', opts.pageToken)
+  if (opts.maxResults) params.set('maxResults', String(opts.maxResults))
+  const res = await gmailFetch(userEmail, `history?${params}`)
+  const data = await res.json()
+  const messagesAdded: GmailMessageRef[] = []
+  for (const h of data.history ?? []) {
+    for (const ma of h.messagesAdded ?? []) {
+      if (ma.message?.id) messagesAdded.push({ id: ma.message.id, threadId: ma.message.threadId })
+    }
+  }
+  return { messagesAdded, nextPageToken: data.nextPageToken, historyId: data.historyId }
+}
+
+// format=full — body included. Only ever call this for messages that have
+// already passed the lead-match filter; unmatched mail must never leave
+// the metadata stage.
+export async function getMessageFull(userEmail: string, messageId: string): Promise<any> {
+  const res = await gmailFetch(userEmail, `messages/${encodeURIComponent(messageId)}?format=full`)
+  return res.json()
 }
 
 // Extract every email address from an RFC 5322 address header value:
