@@ -38,6 +38,9 @@ import Timeline from './shared/Timeline'
 import useIsMobile from './shared/useIsMobile'
 import InitialsAvatar from './shared/InitialsAvatar'
 import RecordMenu from './shared/RecordMenu'
+import TagsRow from './shared/TagsRow'
+import PickerModal from './shared/PickerModal'
+import { pillStyle } from './shared/cardKit'
 import { T } from './shared/tokens'
 import { matchPeople } from './shared/clientMatch'
 import {
@@ -60,6 +63,9 @@ export default function NetworkPersonRecord({
   partner,
   companies = [],
   people = [],              // loaded leads — the client-match universe
+  specialties = [],         // admin list [{ id: key, label }] — display mapping only
+  tiers = [],               // admin list [{ id: key, label }] — display mapping only
+  stages = [],              // active partner_stages [{ key, label }] — the rail's segments
   onClose = () => {},
   onUpdate = () => {},      // host updatePartner (diff PATCH + revert + toast)
   onDelete = () => {},
@@ -94,6 +100,28 @@ export default function NetworkPersonRecord({
   const lastTalk = fmtLastTalk(partner.lastContactedAt, nowMs)
 
   const patch = (fields) => onUpdate({ ...partner, ...fields })
+
+  // ── partnership vocabulary (tag system 2B) ──
+  // Junction tags live in partner_tags via /api/partner-tags — the dead
+  // partners.tags text[] is NEVER read or written here. Fetched per
+  // record open (no partner profile payload exists to ride).
+  const [junctionTags, setJunctionTags] = useState([])
+  useEffect(() => {
+    let dead = false
+    setJunctionTags([])
+    fetch(`/api/partner-tags?partner_id=${encodeURIComponent(partner.id)}`)
+      .then(r => r.json())
+      .then(j => { if (!dead) setJunctionTags(j.tags || []) })
+      .catch(() => {})
+    return () => { dead = true }
+  }, [partner.id])
+  // Tier + specialties store attrs.key slugs (NetworkAddSheet convention);
+  // PickerModal normalizes those against its fetched options, and saves
+  // write the same key-or-id shape back through the PATCH path.
+  const [pickTier, setPickTier] = useState(false)
+  const [pickSpecs, setPickSpecs] = useState(false)
+  const tierLabel = partner.tier ? (tiers.find(t => t.id === partner.tier)?.label || partner.tier) : null
+  const specialtyLabel = (key) => specialties.find(s => s.id === key)?.label || key
 
   // ── touchpoints ──
   const [logging, setLogging] = useState(false)
@@ -228,8 +256,9 @@ export default function NetworkPersonRecord({
           </div>
         )}
 
-        {/* ── relationship stage rail (partner vocabulary ONLY) ── */}
-        <StageRail stage={partner.stage} readOnly={readOnly} onChange={(s) => patch({ stage: s })} />
+        {/* ── relationship stage rail (partner vocabulary ONLY; segments
+            from lookups via the host — Configure edits take effect) ── */}
+        <StageRail stage={partner.stage} stages={stages} readOnly={readOnly} onChange={(s) => patch({ stage: s })} />
 
         {/* ── stats — real joins, '—' while loading ── */}
         <div data-testid="person-stats" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -251,6 +280,50 @@ export default function NetworkPersonRecord({
               onSave={v => patch({ addresses: v ? [{ type: addresses[0]?.type || 'Office', value: v }, ...addresses.slice(1)] : addresses.slice(1) })} />
             <InlineText label="Role" value={partner.title} placeholder="add role" readOnly={readOnly} onSave={v => patch({ title: v })} />
             <InlineText label="How met" value={partner.howWeMet} placeholder="add how you met" readOnly={readOnly} onSave={v => patch({ howWeMet: v })} />
+          </div>
+        </div>
+
+        {/* ── partnership vocabulary (tag system 2B) — tier + specialties
+            were create-only in NetworkAddSheet; now editable here via the
+            shared PickerModal. Tags ride the SAME TagsRow pairing
+            ClientProfile uses (kind 'partner' → the junction routes). ── */}
+        <div data-testid="partnership">
+          <SectionLabel>Partnership</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>Tier</span>
+              {tierLabel
+                ? <span style={pillStyle()}>{tierLabel}</span>
+                : <span style={{ fontSize: '11px', color: T.ink.quiet }}>No tier</span>}
+              {!readOnly && (
+                <button className="bee-small-action" onClick={() => setPickTier(true)} aria-label="Edit tier"
+                  style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
+                  {tierLabel ? 'Change' : '+ Tier'}
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>Specialties</span>
+              {(partner.specialties || []).map(key => (
+                <span key={key} style={pillStyle()}>{specialtyLabel(key)}</span>
+              ))}
+              {(partner.specialties || []).length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>None</span>}
+              {!readOnly && (
+                <button className="bee-small-action" onClick={() => setPickSpecs(true)} aria-label="Edit specialties"
+                  style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
+                  Edit
+                </button>
+              )}
+            </div>
+            <TagsRow
+              kind="partner"
+              recordId={partner.id}
+              locationId={partner.locationId || null}
+              tags={junctionTags}
+              onChange={setJunctionTags}
+              setToast={setToast}
+              readOnly={readOnly}
+            />
           </div>
         </div>
 
@@ -351,6 +424,32 @@ export default function NetworkPersonRecord({
           personName={partner.name}
           onClose={() => setLogging(false)}
           onSubmit={submitTouchpoint}
+        />
+      )}
+
+      {pickTier && (
+        <PickerModal
+          category="partner_tiers"
+          locationId={partner.locationId || null}
+          selected={partner.tier ? [partner.tier] : []}
+          mode="single"
+          title="Partner tier"
+          subtitle="How this relationship is classified"
+          onSave={opt => patch({ tier: opt ? (opt.attrs?.key || opt.id) : null })}
+          onClose={() => setPickTier(false)}
+        />
+      )}
+      {pickSpecs && (
+        <PickerModal
+          category="partner_specialties"
+          locationId={partner.locationId || null}
+          selected={partner.specialties || []}
+          mode="multi"
+          maxSelected={8}
+          title="Specialties"
+          subtitle="What they do — up to 8"
+          onSave={picked => patch({ specialties: picked.map(o => o.attrs?.key || o.id) })}
+          onClose={() => setPickSpecs(false)}
         />
       )}
     </OverlayShell>

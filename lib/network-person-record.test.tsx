@@ -130,6 +130,31 @@ describe('B) stage rail — the partner vocabulary, editable', () => {
     await act(async () => { (rail.querySelector('[data-stage-seg="Active Partner"]') as HTMLElement).click() })
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', stage: 'Active Partner' }))
   })
+
+  it('segments come from the stages prop (lookups) — a Configure-added stage appears; clicks write the KEY, labels display', async () => {
+    const onUpdate = vi.fn()
+    const STAGES = [
+      { key: 'New Contact', label: 'New Contact' },
+      { key: 'Building', label: 'Building the Relationship' },
+      { key: 'Champion', label: 'Champion' }, // admin-added 6th-style value
+    ]
+    await mount({ onUpdate, stages: STAGES })
+    const rail = host.querySelector('[data-testid="stage-rail"]')!
+    const segs = [...rail.querySelectorAll('[data-stage-seg]')]
+    expect(segs.map(s => s.getAttribute('data-stage-seg'))).toEqual(['New Contact', 'Building', 'Champion'])
+    // stored KEY 'Building' fills via key match while the segment shows the label
+    expect(segs[1].textContent).toContain('Building the Relationship')
+    expect(rail.querySelectorAll('[data-filled="true"]')).toHaveLength(2)
+    await act(async () => { (rail.querySelector('[data-stage-seg="Champion"]') as HTMLElement).click() })
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ stage: 'Champion' }))
+  })
+
+  it("an off-list stored value ('Customer'/legacy) still renders beside an unfilled rail — never vanishes, never coerced", async () => {
+    await mount({ partner: { ...PARTNER, stage: 'Customer' }, stages: [{ key: 'New Contact', label: 'New Contact' }] })
+    const rail = host.querySelector('[data-testid="stage-rail"]')!
+    expect(rail.querySelectorAll('[data-filled="true"]')).toHaveLength(0)
+    expect(rail.textContent).toContain('Current: Customer')
+  })
 })
 
 describe('C) honest stats', () => {
@@ -222,5 +247,75 @@ describe('F) customer path — link, never a blind copy', () => {
     const post = fetchCalls.find(c => c.url.includes('/api/leads') && c.init?.method === 'POST')!
     expect(JSON.parse(post.init.body)).toMatchObject({ name: 'Karen Martinez', location_id: 'loc-1' })
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ isCustomer: true, customerLeadId: 'lead-new-1' }))
+  })
+})
+
+// ═══ partnership vocabulary (tag system 2B) ═══════════════════
+// Tier + specialties become editable after creation via the shared
+// PickerModal; tags ride the SAME TagsRow pairing ClientProfile uses,
+// against the partner_tags junction — never the dead partners.tags column.
+describe('F) partnership — tier, specialties, tags', () => {
+  const TIERS = [{ id: 'referral-partner', label: 'Referral Partner' }, { id: 'power-partner', label: 'Power Partner' }]
+  const SPECS = [{ id: 'real-estate', label: 'Realtor' }, { id: 'senior-living', label: 'Senior Living' }]
+  const TIER_LOOKUPS = {
+    lookups: [
+      { id: 'uuid-rp', label: 'Referral Partner', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'referral-partner' } },
+      { id: 'uuid-pp', label: 'Power Partner', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'power-partner' } },
+    ],
+    location: { id: 'loc-1', name: 'Denver' },
+  }
+
+  it('renders stored keys as labels (tier + specialties) and junction tags from /api/partner-tags — the dead array column is never read', async () => {
+    installFetch({ '/api/partner-tags': { tags: [{ id: 'tag-1', label: 'Snowbird' }] } })
+    await mount({
+      partner: { ...PARTNER, tier: 'referral-partner', tags: ['stale-array-value'] },
+      tiers: TIERS, specialties: SPECS,
+    })
+    const section = host.querySelector('[data-testid="partnership"]')!
+    expect(section.textContent).toContain('Referral Partner')  // tier key → label
+    expect(section.textContent).toContain('Realtor')           // specialty key → label
+    expect(section.textContent).toContain('Snowbird')          // junction tag
+    expect(section.textContent).not.toContain('stale-array-value')
+  })
+
+  it('tier PickerModal (single) saves the attrs.key through the PATCH path', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/lookups': TIER_LOOKUPS, '/api/partner-tags': { tags: [] } })
+    await mount({ onUpdate, tiers: TIERS, specialties: SPECS })
+    await act(async () => { (host.querySelector('[aria-label="Edit tier"]') as HTMLElement).click() })
+    const dialog = host.querySelector('[role="dialog"]')!
+    const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.includes('Power Partner'))!
+    await act(async () => { row.click() })
+    const save = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Save')!
+    await act(async () => { save.click() })
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', tier: 'power-partner' }))
+    expect(host.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('specialties PickerModal carries the 8 cap (maxSelected) so the user is told before saving', async () => {
+    installFetch({
+      '/api/lookups': {
+        lookups: Array.from({ length: 10 }, (_, i) => ({ id: `u${i}`, label: `Spec ${i}`, category: 'partner_specialties', location_id: null, is_active: true, attrs: { key: `spec-${i}` } })),
+        location: { id: 'loc-1', name: 'Denver' },
+      },
+      '/api/partner-tags': { tags: [] },
+    })
+    await mount({ partner: { ...PARTNER, specialties: [] }, tiers: TIERS, specialties: SPECS })
+    await act(async () => { (host.querySelector('[aria-label="Edit specialties"]') as HTMLElement).click() })
+    const dialog = host.querySelector('[role="dialog"]')!
+    for (let i = 0; i < 9; i++) {
+      const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === `Spec ${i}`)!
+      await act(async () => { row.click() })
+    }
+    expect(dialog.textContent).toContain('Up to 8 can be selected')
+    expect(dialog.querySelectorAll('[aria-checked="true"]')).toHaveLength(8)
+  })
+
+  it('read-only hides every partnership edit affordance', async () => {
+    installFetch({ '/api/partner-tags': { tags: [] } })
+    await mount({ readOnly: true, tiers: TIERS, specialties: SPECS })
+    expect(host.querySelector('[aria-label="Edit tier"]')).toBeNull()
+    expect(host.querySelector('[aria-label="Edit specialties"]')).toBeNull()
+    expect(host.querySelector('[aria-label="Add tag"]')).toBeNull()
   })
 })

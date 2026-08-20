@@ -16139,6 +16139,12 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           partner={selected}
           companies={allCompanies}
           people={people}
+          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
+          tiers={getPartnerTiers().map(t=>({ id:t.id, label:t.label }))}
+          // The hydrated lookups list is active-only ('Customer' retired to
+          // is_active=false), so the filter only bites on the pre-hydration
+          // legacy PARTNER_STAGES fallback — the one path that still holds it.
+          stages={getPartnerStages().map(s=>({ key:s.key, label:s.label })).filter(s=>s.key!=='Customer')}
           onClose={()=>setSelected(null)}
           onUpdate={(updated)=>updatePartner(updated)}
           onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }}

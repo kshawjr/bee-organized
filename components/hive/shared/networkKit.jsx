@@ -39,7 +39,17 @@ export function deriveNetworkBadges({ partner, referralCount = null }) {
 
 // The relationship pipeline — the partner's OWN vocabulary. NEVER crossed
 // with engagement stages (different lifecycle, different table).
+//
+// Tag system 2B: the rail's segments now come from lookups
+// (partner_stages, active only, sort_order) via the host's `stages`
+// prop — Configure edits finally take effect. partners.stage stores the
+// KEY (attrs.key || label — 'Building', not 'Building the
+// Relationship'); segments render the label and write the key. This
+// hardcoded list survives ONLY as the no-lookups fallback (it is the
+// pre-2B five — 'Customer' was retired to is_active=false and must not
+// reappear through a fallback).
 export const PARTNER_STAGE_RAIL = ['New Contact', 'Reaching Out', 'Building', 'Active Partner', 'Dormant']
+const FALLBACK_STAGES = PARTNER_STAGE_RAIL.map(k => ({ key: k, label: k === 'Building' ? 'Building the Relationship' : k }))
 
 // ── chips + tiles ────────────────────────────────────────────
 const FAMILY_STYLE = (family) => {
@@ -82,27 +92,31 @@ export function SectionLabel({ children, action = null }) {
 // ── the relationship stage rail ──────────────────────────────
 // Segments left→right; the current stage and everything before it fill.
 // Click a segment to move the relationship there (readOnly hides the
-// affordance). 'Customer'/legacy values outside the rail render every
-// segment unfilled with the raw value beside it — never coerced.
-export function StageRail({ stage, onChange = () => {}, readOnly = false }) {
-  const idx = PARTNER_STAGE_RAIL.indexOf(stage)
+// affordance). `stages` is [{ key, label }] from lookups (active
+// partner_stages, sort_order) — no/empty prop falls back to the pre-2B
+// five. A stored value outside the rail ('Customer'/legacy) renders
+// every segment unfilled with the raw value beside it — never coerced,
+// never vanished.
+export function StageRail({ stage, stages = null, onChange = () => {}, readOnly = false }) {
+  const rail = (Array.isArray(stages) && stages.length > 0) ? stages : FALLBACK_STAGES
+  const idx = rail.findIndex(s => s.key === stage)
   return (
     <div data-testid="stage-rail">
       <div style={{ display: 'flex', gap: '4px' }}>
-        {PARTNER_STAGE_RAIL.map((s, i) => {
+        {rail.map((s, i) => {
           const filled = idx >= 0 && i <= idx
           const current = i === idx
           return (
-            <button key={s} type="button" disabled={readOnly}
-              data-stage-seg={s} data-filled={filled ? 'true' : 'false'}
-              onClick={() => onChange(s)}
-              aria-label={`Set stage ${s}`} aria-pressed={current}
+            <button key={s.key} type="button" disabled={readOnly}
+              data-stage-seg={s.key} data-filled={filled ? 'true' : 'false'}
+              onClick={() => onChange(s.key)}
+              aria-label={`Set stage ${s.label}`} aria-pressed={current}
               style={{
                 flex: 1, border: 'none', cursor: readOnly ? 'default' : 'pointer', padding: 0,
                 background: 'transparent', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: '4px',
               }}>
               <span aria-hidden style={{ display: 'block', width: '100%', height: '5px', borderRadius: '3px', background: filled ? T.accent.fg : T.hairline.line }} />
-              <span style={{ fontSize: '9px', fontWeight: current ? 600 : 400, color: current ? T.accent.deep : T.ink.quiet, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
+              <span style={{ fontSize: '9px', fontWeight: current ? 600 : 400, color: current ? T.accent.deep : T.ink.quiet, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s.label}</span>
             </button>
           )
         })}

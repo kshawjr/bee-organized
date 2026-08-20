@@ -96,7 +96,21 @@ const installFetch = () => {
       if (u.includes('/api/lead-tags') && method === 'POST') {
         return jsonRes({ lead_tag: { lead_id: body.lead_id, tag_lookup_id: body.tag_lookup_id } }, 201)
       }
+      if (u.includes('/api/lookups') && method === 'POST') {
+        // PickerModal allowCreate — a location-owned lookup row
+        return jsonRes({ ok: true, lookup: { id: 'tag-new', category: body.category, label: body.label, location_id: body.location_id, is_active: true } })
+      }
       return jsonRes({ ok: true })
+    }
+    if (u.includes('/api/lookups')) {
+      // PickerModal's scoped vocabulary fetch (tag system 2A)
+      return jsonRes({
+        lookups: [
+          { id: 'tag-vip', label: 'VIP', category: 'client_tags', location_id: null, is_active: true },
+          { id: 'tag-hoa', label: 'HOA community', category: 'client_tags', location_id: null, is_active: true },
+        ],
+        location: { id: 'loc-uuid-1', name: 'Denver' },
+      })
     }
     if (u.includes('/api/engagements/')) return jsonRes(engBody)
     if (u.includes('/profile')) return jsonRes(profileBody)
@@ -374,28 +388,49 @@ describe('contacts CRUD (ContactsBlock)', () => {
 })
 
 // ═══ F) tags ═══════════════════════════════════════════════════
-describe('tags (TagsRow)', () => {
-  const OPTIONS = [{ id: 'tag-vip', label: 'VIP' }, { id: 'tag-hoa', label: 'HOA community' }]
-
-  it('+ Tag popover toggle POSTs the junction row; pill appears with ✓ in the list', async () => {
+// Tag system 2A: '+ Tag' opens the shared PickerModal (staged selection,
+// Save applies the diff). Junction writes still ride /api/lead-tags.
+describe('tags (TagsRow → PickerModal)', () => {
+  it('+ Tag opens the picker; toggling VIP + Save POSTs the junction row and closes', async () => {
     let next: any = null
     const { host, unmount } = await mount(
-      <TagsRow leadId="lead-9" tags={[]} options={OPTIONS} onChange={(n: any) => { next = n }} setToast={() => {}} />
+      <TagsRow leadId="lead-9" locationId="loc-uuid-1" tags={[]} onChange={(n: any) => { next = n }} setToast={() => {}} />
     )
     await click(host.querySelector('button[aria-label="Add tag"]')!)
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy()
     await click(btnContaining(host, 'VIP')!)
+    expect(calls).toHaveLength(0) // staged — nothing written before Save
+    await click(btn(host, 'Save')!)
     expect(calls).toEqual([{
       url: expect.stringContaining('/api/lead-tags'), method: 'POST',
       body: { lead_id: 'lead-9', tag_lookup_id: 'tag-vip' },
     }])
     expect(next).toEqual([{ id: 'tag-vip', label: 'VIP' }])
+    expect(host.querySelector('[role="dialog"]')).toBeNull()
     await unmount()
   })
 
-  it('pill × DELETEs with query params (the route contract)', async () => {
+  it('unpicking an applied tag + Save DELETEs with query params (the route contract)', async () => {
     let next: any = null
     const { host, unmount } = await mount(
-      <TagsRow leadId="lead-9" tags={[{ id: 'tag-vip', label: 'VIP' }]} options={OPTIONS} onChange={(n: any) => { next = n }} setToast={() => {}} />
+      <TagsRow leadId="lead-9" locationId="loc-uuid-1" tags={[{ id: 'tag-vip', label: 'VIP' }]} onChange={(n: any) => { next = n }} setToast={() => {}} />
+    )
+    await click(host.querySelector('button[aria-label="Add tag"]')!)
+    // the picker shows VIP pre-checked — toggle it OFF, then Save
+    await click(host.querySelector('[role="dialog"] [aria-checked="true"]')!)
+    await click(btn(host, 'Save')!)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe('DELETE')
+    expect(calls[0].url).toContain('lead_id=lead-9')
+    expect(calls[0].url).toContain('tag_lookup_id=tag-vip')
+    expect(next).toEqual([])
+    await unmount()
+  })
+
+  it('pill × DELETEs immediately (unchanged fast path)', async () => {
+    let next: any = null
+    const { host, unmount } = await mount(
+      <TagsRow leadId="lead-9" locationId="loc-uuid-1" tags={[{ id: 'tag-vip', label: 'VIP' }]} onChange={(n: any) => { next = n }} setToast={() => {}} />
     )
     await click(host.querySelector('button[aria-label="Remove tag VIP"]')!)
     expect(calls).toHaveLength(1)
@@ -406,17 +441,18 @@ describe('tags (TagsRow)', () => {
     await unmount()
   })
 
-  it('failure honesty: failed add leaves the tags untouched', async () => {
+  it('failure honesty: a failed add leaves the tags untouched and keeps the modal open with the error', async () => {
     failNext = { match: '/api/lead-tags', error: 'boom' }
     const onChange = vi.fn()
-    const toasts: any[] = []
     const { host, unmount } = await mount(
-      <TagsRow leadId="lead-9" tags={[]} options={OPTIONS} onChange={onChange} setToast={(t: any) => toasts.push(t)} />
+      <TagsRow leadId="lead-9" locationId="loc-uuid-1" tags={[]} onChange={onChange} setToast={() => {}} />
     )
     await click(host.querySelector('button[aria-label="Add tag"]')!)
     await click(btnContaining(host, 'VIP')!)
+    await click(btn(host, 'Save')!)
     expect(onChange).not.toHaveBeenCalled()
-    expect(toasts.at(-1).kind).toBe('error')
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy()
+    expect(host.textContent).toContain('Save failed')
     await unmount()
   })
 })

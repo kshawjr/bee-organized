@@ -1793,12 +1793,20 @@ export default async function HubPage({
 
   const initialLookups: Record<string, any[]> = {}
   {
-    const { data: lookups, error: lookupsError } = await supabaseService
+    // Tag system 2A: lookups are corporate (location_id null) or one
+    // location's own. This seed mirrors /api/lookups' scoping — corporate
+    // plus the CURRENT scope's location only — so BeeHub's hydrated
+    // vocabularies can never carry another location's rows.
+    let lookupsQuery = supabaseService
       .from('lookups')
-      .select('id, category, label, sort_order, color, bg_color, icon, description, attrs, is_active')
+      .select('id, category, label, location_id, sort_order, color, bg_color, icon, description, attrs, is_active')
       .eq('is_active', true)
       .order('category', { ascending: true })
       .order('sort_order', { ascending: true })
+    lookupsQuery = scopeLocationUuid
+      ? lookupsQuery.or(`location_id.is.null,location_id.eq.${scopeLocationUuid}`)
+      : lookupsQuery.is('location_id', null)
+    const { data: lookups, error: lookupsError } = await lookupsQuery
 
     if (lookupsError) {
       console.error('[hub-page] lookups fetch error:', lookupsError.message)

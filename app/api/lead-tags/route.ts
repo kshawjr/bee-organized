@@ -103,7 +103,7 @@ export async function POST(req: Request) {
   // Verify the tag_lookup_id points to a valid client_tags lookup
   const { data: tagDef, error: tagDefError } = await supabaseService
     .from('lookups')
-    .select('id, category')
+    .select('id, category, location_id')
     .eq('id', tag_lookup_id)
     .single()
 
@@ -115,6 +115,12 @@ export async function POST(req: Request) {
       { error: 'tag_lookup_wrong_category', got: tagDef.category, expected: 'client_tags' },
       { status: 400 }
     )
+  }
+  // Location scope (tag system 2A): a lookup is either corporate
+  // (location_id null) or owned by the LEAD's location — a different
+  // location's tag can never be applied here, whoever the caller is.
+  if (tagDef.location_id && tagDef.location_id !== locCheck.lead.location_uuid) {
+    return NextResponse.json({ error: 'tag_lookup_wrong_location' }, { status: 403 })
   }
 
   // Insert junction row. ON CONFLICT DO NOTHING so re-adding is idempotent.

@@ -297,7 +297,7 @@ export default function HiveShell({
   // Admin-managed option lists (lookups: global, super-admin curated) —
   // fetched ONCE per shell mount and threaded to ClientProfile +
   // EngagementPanel (lighter than per-card fetches).
-  const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [], clientTags: [], closeLostReasons: [] })
+  const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [], closeLostReasons: [] })
   useEffect(() => {
     let dead = false
     fetch('/api/lookups')
@@ -312,9 +312,8 @@ export default function HiveShell({
           // Admin-configured Closed-Lost reasons — drives the CloseLostWizard
           // reason picker (labels stored verbatim in closed_reason).
           closeLostReasons: by('closed_lost_reasons'),
-          // Tag writes are id-keyed (lead_tags junction), so tags keep
-          // { id, label } instead of the label-only shape.
-          clientTags: rows.filter(l => l.category === 'client_tags').map(l => ({ id: l.id, label: l.label })),
+          // client_tags no longer threads from here — the tags PickerModal
+          // (step 2A) fetches its own location-scoped vocabulary.
         })
       })
       .catch(() => {})

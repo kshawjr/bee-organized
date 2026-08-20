@@ -91,7 +91,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -475,12 +475,13 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         readOnly={readOnly}
       />
 
-      {/* Tags — live popover (build 3): lead_tags junction writes over
-          admin-managed client_tags lookups; × removes. */}
+      {/* Tags — PickerModal (tag system 2A): lead_tags junction writes
+          over corporate + this location's client_tags lookups; the modal
+          fetches its own scoped vocabulary, so no options threading. */}
       <TagsRow
         leadId={c.id}
+        locationId={c.location_uuid || null}
         tags={tags}
-        options={lookupOptions.clientTags || []}
         onChange={next => setData(d => d ? { ...d, tags: next } : d)}
         setToast={setToast}
         readOnly={readOnly}
