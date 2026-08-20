@@ -120,6 +120,84 @@ export async function gmailFetch(
   return res
 }
 
+export interface GmailMessageRef {
+  id: string
+  threadId: string
+}
+
+export interface GmailMessageList {
+  messages: GmailMessageRef[]
+  nextPageToken?: string
+  resultSizeEstimate?: number
+}
+
+export async function listMessageIds(
+  userEmail: string,
+  opts: { query?: string; maxResults?: number; pageToken?: string } = {}
+): Promise<GmailMessageList> {
+  const params = new URLSearchParams()
+  if (opts.query) params.set('q', opts.query)
+  if (opts.maxResults) params.set('maxResults', String(opts.maxResults))
+  if (opts.pageToken) params.set('pageToken', opts.pageToken)
+  const res = await gmailFetch(userEmail, `messages?${params}`)
+  const data = await res.json()
+  return {
+    messages: data.messages ?? [],
+    nextPageToken: data.nextPageToken,
+    resultSizeEstimate: data.resultSizeEstimate,
+  }
+}
+
+export interface GmailMessageMetadata {
+  id: string
+  threadId: string
+  internalDate: string
+  // header names lowercased; repeated headers joined with ", "
+  headers: Record<string, string>
+}
+
+const METADATA_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID']
+
+// format=metadata only — never fetches message bodies.
+export async function getMessageMetadata(
+  userEmail: string,
+  messageId: string
+): Promise<GmailMessageMetadata> {
+  const params = new URLSearchParams({ format: 'metadata' })
+  for (const h of METADATA_HEADERS) params.append('metadataHeaders', h)
+  const res = await gmailFetch(userEmail, `messages/${encodeURIComponent(messageId)}?${params}`)
+  const data = await res.json()
+  const headers: Record<string, string> = {}
+  for (const h of data.payload?.headers ?? []) {
+    const key = String(h?.name ?? '').toLowerCase()
+    if (!key) continue
+    const value = String(h?.value ?? '')
+    headers[key] = headers[key] ? `${headers[key]}, ${value}` : value
+  }
+  return {
+    id: data.id,
+    threadId: data.threadId,
+    internalDate: data.internalDate,
+    headers,
+  }
+}
+
+// Extract every email address from an RFC 5322 address header value:
+// "Name <a@b.com>", bare a@b.com, comma-separated lists, and quoted
+// display names containing commas ("Doe, John" <j@x.com>). Pulling
+// @-tokens rather than splitting on commas is what makes the quoted-
+// comma case safe. Lowercased, trimmed, deduped, order of appearance.
+const ADDRESS_RE = /[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g
+
+export function parseAddresses(headerValue?: string | null): string[] {
+  if (!headerValue) return []
+  const seen = new Set<string>()
+  for (const match of headerValue.match(ADDRESS_RE) ?? []) {
+    seen.add(match.trim().toLowerCase())
+  }
+  return Array.from(seen)
+}
+
 export interface GmailProfile {
   emailAddress: string
   messagesTotal: number
