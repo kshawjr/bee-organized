@@ -44,3 +44,9 @@ backfill-assessment-duration.report*.json
 backfill-archived-quote-close.report*.json
 # #125 report carries the pre-redaction names — never commit
 redact-sync-log-names.report*.json
+
+# Google service-account keys — never commit (GOOGLE_SA_KEY env var is the only home)
+*service-account*.json
+*service_account*.json
+*gserviceaccount*.json
+*-sa-key*.json
