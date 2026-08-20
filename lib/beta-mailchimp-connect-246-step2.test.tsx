@@ -274,9 +274,15 @@ describe('the card renders the state it is in', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4 · NOTHING SYNCS
+// 4 · THE CONNECT SURFACE SYNCS NOTHING
 // ═══════════════════════════════════════════════════════════════════════════
-describe('this step reads no leads and syncs no contacts', () => {
+// Rescoped for 3A: pushing members now EXISTS, but it lives in ONE place —
+// lib/mailchimp-sync.ts behind the mailchimp_sync_live gate, triggered only by
+// POST /api/mailchimp/sync (pinned in lib/beta-mailchimp-sync-246-step3a).
+// These pins keep the CONNECT surface exactly what step 2 shipped: nothing on
+// this list may grow a leads read or a member write, because a second push
+// path is a push path without the gate.
+describe('the connect surface reads no leads and pushes no members', () => {
   const files = [
     'lib/mailchimp.ts',
     'lib/mailchimp-oauth-guard.ts',
@@ -287,7 +293,7 @@ describe('this step reads no leads and syncs no contacts', () => {
     'app/api/locations/[id]/mailchimp-disconnect/route.ts',
   ]
 
-  it('no Mailchimp file touches the leads table', () => {
+  it('no connect-surface file touches the leads table', () => {
     for (const f of files) {
       const src = readFileSync(join(process.cwd(), f), 'utf8')
       const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
@@ -296,18 +302,24 @@ describe('this step reads no leads and syncs no contacts', () => {
     }
   })
 
-  it('no Mailchimp file writes a member into an audience', () => {
+  it('no connect-surface file writes a member into an audience', () => {
     for (const f of files) {
       const src = readFileSync(join(process.cwd(), f), 'utf8')
       // /lists/{id}/members is the contact-push endpoint. Reading /lists is
-      // this step; writing members is not.
+      // the picker; writing members belongs to lib/mailchimp-sync.ts ONLY.
       expect(src, f).not.toMatch(/\/members/)
       expect(src, f).not.toMatch(/batches/)
     }
   })
 
   it('no route sets mailchimp_sync_live true — the gate only ever closes', () => {
-    for (const f of files) {
+    // The 3A sync files are covered too: the engine READS the gate, and the
+    // trigger route defers to the engine — neither may ever open it.
+    const allFiles = files.concat([
+      'lib/mailchimp-sync.ts',
+      'app/api/mailchimp/sync/route.ts',
+    ])
+    for (const f of allFiles) {
       const src = readFileSync(join(process.cwd(), f), 'utf8')
       expect(src, f).not.toMatch(/mailchimp_sync_live:\s*true/)
     }

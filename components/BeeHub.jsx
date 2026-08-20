@@ -18947,6 +18947,35 @@ export function MailchimpCard({ settings, updateLocation }) {
     if (q.get('mailchimp') === 'error') setReturnErr(q.get('reason') || 'failed')
   }, [])
 
+  // "Sync now" (issue 246 step 3A) — manual push of eligible website leads.
+  // syncResult holds the SERVER's report verbatim; the card renders numbers it
+  // was told, never numbers it computed. It never reads the sync gate itself —
+  // a gated-off location learns that from the response's reason.
+  const [syncing, setSyncing]       = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
+
+  async function runSync() {
+    if (!locationId) { setSaveErr('No location id — reload and try again.'); return }
+    setSyncing(true); setSyncResult(null); setSaveErr(null)
+    try {
+      const r = await fetch('/api/mailchimp/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: locationId }),
+      })
+      if (!r.ok) {
+        let detail = `sync_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setSaveErr(detail); setSyncing(false); return
+      }
+      setSyncResult(await r.json())
+    } catch (e) {
+      setSaveErr(String(e?.message || e))
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const needsAudience = state === 'needs_audience'
 
   useEffect(() => {
@@ -19131,9 +19160,27 @@ export function MailchimpCard({ settings, updateLocation }) {
               <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{listName || listId}</span>
             </div>
 
+            {/* Sync now (issue 246 step 3A) — ready-state only: an account and an
+                audience are both required before there is anywhere to push TO.
+                The result line repeats the server's report; when the location's
+                sending isn't switched on yet, the server says so and nothing
+                was sent — the card just relays that in owner words. */}
+            <button onClick={runSync} disabled={syncing} className="bee-small-action"
+              style={{ marginTop:'10px', padding:'9px 16px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </button>
+
+            {syncResult && (
+              <p style={{ fontSize:'12px', color:syncResult.ran?HT.ink.secondary:HT.state.warning.fg, background:syncResult.ran?HT.surface.sunken:HT.state.warning.soft, borderRadius:HT.radius.control, padding:'8px 10px', margin:'8px 0 0', lineHeight:1.5 }}>
+                {syncResult.ran
+                  ? `Pushed ${syncResult.pushed} to Mailchimp · ${syncResult.skipped} skipped · ${syncResult.failed} failed${syncResult.failed > 0 ? ' — failed contacts will be retried on the next sync' : ''}`
+                  : 'Nothing was sent — sending to Mailchimp isn\u2019t switched on for your location yet.'}
+              </p>
+            )}
+
             {!confirming ? (
               <button onClick={()=>setConfirming(true)} className="bee-small-action"
-                style={{ marginTop:'10px', padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
+                style={{ marginTop:'10px', marginLeft:'8px', padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
                 Disconnect
               </button>
             ) : (
