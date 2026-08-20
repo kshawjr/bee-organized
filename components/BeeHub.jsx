@@ -31577,7 +31577,7 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist,
 // master template library. Lives in Admin/Corp → Content tab. Edits here
 // propagate live to every drip path step that still references a master
 // (no copy semantics).
-function MasterTemplatesEditor({ locations = [] }) {
+export function MasterTemplatesEditor({ locations = [] }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -31585,6 +31585,9 @@ function MasterTemplatesEditor({ locations = [] }) {
   const [previewing, setPreviewing] = useState(null)
   const [scopeFilter, setScopeFilter] = useState('all') // 'all' | 'masters' | 'customs'
   const [expandedUsage, setExpandedUsage] = useState(() => new Set())
+  // Which scope sections have their Retired block open. Keyed by scope key
+  // ('masters' or a location uuid) so opening one does not open the rest.
+  const [retiredOpen, setRetiredOpen] = useState(() => new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -31662,6 +31665,9 @@ function MasterTemplatesEditor({ locations = [] }) {
   // distinct purple so the eye sorts the two at a glance.
   const MASTER = { color:'#0f766e', bg:'rgba(15,118,110,0.1)' }
   const CUSTOM = { color:'#9333ea', bg:'rgba(147,51,234,0.1)' }
+  // Retired is deliberately colourless. Masters and customs are two live
+  // scopes and get two live colours; out-of-service is the absence of one.
+  const RETIRED = { color:'#6b7c79', bg:'rgba(107,124,121,0.12)' }
 
   const locName = id => (locations.find(l => l.id === id) || {}).name || null
   const byId = new Map(rows.map(r => [r.id, r]))
@@ -31674,6 +31680,37 @@ function MasterTemplatesEditor({ locations = [] }) {
       return next
     })
   }
+
+  // ─── issue 315 — a retired template must not read as a live one ───
+  //
+  // is_active=false means the template is out of service. Until now this
+  // screen rendered those rows inline with the live ones, under the same type
+  // heading, with nothing at all to tell them apart. After the Welcome Email
+  // was retired (issue 314) it went on sitting in the library looking exactly
+  // like an email that still sends. It is not the exception: 20 of the 26
+  // masters in production are is_active=false.
+  //
+  // They are SEPARATED, never hidden. This screen is the super_admin library
+  // and it is the ONLY surface where an inactive template can be reached at
+  // all — the owner-facing Texts & scripts tab filters is_active out entirely
+  // (`t.isMaster && t.isActive`), so a row hidden here is a row that exists
+  // nowhere in the product. Each scope section therefore ends with its own
+  // Retired block: collapsed so the section reads live-first, labelled with
+  // its count so it advertises itself rather than concealing, one click from
+  // open. Rows inside also carry their own RETIRED badge, so a row read on
+  // its own — landed on from a filter pill, or scrolled past — still says
+  // what it is.
+  //
+  // NOT generalised to the owner-facing Emails tab, and that is deliberate.
+  // Its no-is_active-filter rule (buildEmailList, note 5) is still
+  // load-bearing: 3 live drip steps point at inactive masters today, and the
+  // cron resolves a step's template WITHOUT checking is_active, so hiding one
+  // there really would show an owner something other than what sends. What
+  // changed for the welcome row is that nothing schedules it any more — that
+  // is a fact about the welcome row, not about the flag. Whether a LIBRARY
+  // labels its own shelf is a separate question from what a send path does,
+  // and only the library question is answered here.
+  const isRetired = t => t.is_active === false
 
   const masters = rows.filter(r => r.is_master)
   const customs = rows.filter(r => !r.is_master)
@@ -31700,13 +31737,17 @@ function MasterTemplatesEditor({ locations = [] }) {
     const usage = Array.isArray(tpl.usage) ? tpl.usage : []
     const usageCount = typeof tpl.usage_count === 'number' ? tpl.usage_count : usage.length
     const expanded = expandedUsage.has(tpl.id)
+    // issue 315 — the badge rides the ROW, not just the block it sits in, so
+    // a retired template still says so when it is read on its own.
+    const retired = isRetired(tpl)
     return (
-      <div key={tpl.id} style={{ background:'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
-        <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
-          <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
+      <div key={tpl.id} style={{ background: retired ? '#fbfbfa' : 'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px', opacity: retired ? 0.72 : 1 }}>
+          <div style={{ width:'36px', height:'36px', borderRadius:'9px', background: retired ? 'rgba(107,124,121,0.09)' : `${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px', flexWrap:'wrap' }}>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', textDecoration: retired ? 'line-through' : 'none' }}>{tpl.name}</p>
+              {retired && <span style={{ fontSize:'10px', color:RETIRED.color, background:RETIRED.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>⊘ RETIRED</span>}
               {isMaster ? (
                 <span style={{ fontSize:'10px', color:MASTER.color, background:MASTER.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>🏢 MASTER</span>
               ) : (
@@ -31771,6 +31812,55 @@ function MasterTemplatesEditor({ locations = [] }) {
     })
   }
 
+  function toggleRetired(key) {
+    setRetiredOpen(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
+  // issue 315 — one scope section's worth of rows, in service first.
+  //
+  // The retired half never leaves the page; it moves below a labelled bar
+  // that carries its own count. Collapsed is the default because the live
+  // shelf is what the screen is for, but the bar states how many are down
+  // there, so nothing is silently absent. maxWidth keeps the disclosure a
+  // control rather than a full-bleed band.
+  function renderScopeBody(items, key) {
+    const live = items.filter(t => !isRetired(t))
+    const gone = items.filter(isRetired)
+    const open = retiredOpen.has(key)
+    return (
+      <>
+        {live.length > 0
+          ? renderTypeGroups(live)
+          : gone.length > 0 && (
+            <p style={{ fontSize:'12px', color:'#8a9e9a', padding:'2px 2px 10px' }}>
+              Nothing in service here — every template below has been retired.
+            </p>
+          )}
+        {gone.length > 0 && (
+          <div style={{ marginTop: live.length > 0 ? '4px' : '0' }}>
+            <button
+              onClick={()=>toggleRetired(key)}
+              aria-expanded={open}
+              style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', maxWidth:CONTROL_W.field, padding:'8px 11px', background: open ? RETIRED.bg : 'white', border:`1px solid ${open ? 'transparent' : 'rgba(0,0,0,0.1)'}`, borderRadius:'9px', fontFamily:'inherit', fontSize:'11px', fontWeight:700, color:RETIRED.color, cursor:'pointer', textAlign:'left', textTransform:'uppercase', letterSpacing:'0.6px' }}
+            >
+              <span style={{ fontSize:'10px' }}>{open ? '▾' : '▸'}</span>
+              <span>⊘ Retired</span>
+              <span style={{ background:RETIRED.bg, padding:'1px 8px', borderRadius:'20px', fontWeight:700, letterSpacing:0 }}>{gone.length}</span>
+            </button>
+            <p style={{ fontSize:'10px', color:'#8a9e9a', margin:'5px 0 0', padding:'0 2px', maxWidth:CONTROL_W.field, lineHeight:1.5 }}>
+              Out of service — nothing schedules these. Kept because this is the library: they are not reachable from any other screen.
+            </p>
+            {open && <div style={{ marginTop:'11px' }}>{renderTypeGroups(gone)}</div>}
+          </div>
+        )}
+      </>
+    )
+  }
+
   // Scope section header — coloured accent bar + label + count.
   function scopeHeader(label, scope, count) {
     return (
@@ -31823,13 +31913,13 @@ function MasterTemplatesEditor({ locations = [] }) {
           {showMasters && masters.length > 0 && (
             <div style={{ marginBottom:'24px' }}>
               {scopeHeader('🏢 Master Templates', MASTER, masters.length)}
-              {renderTypeGroups(masters)}
+              {renderScopeBody(masters, 'masters')}
             </div>
           )}
           {showCustoms && locGroups.map(g => (
             <div key={g.uuid} style={{ marginBottom:'24px' }}>
               {scopeHeader('📍 ' + g.name, CUSTOM, g.items.length)}
-              {renderTypeGroups(g.items)}
+              {renderScopeBody(g.items, g.uuid)}
             </div>
           ))}
           {((scopeFilter === 'masters' && !masters.length) ||

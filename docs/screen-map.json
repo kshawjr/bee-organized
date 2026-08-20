@@ -73,8 +73,8 @@
       ],
       "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
       "lines": [
-        35658,
-        36697
+        35748,
+        36787
       ]
     },
     {
@@ -96,8 +96,8 @@
       ],
       "note": "Role gating for which nav items appear is inline here. \"What you've told us\" only appears for franchise owner/manager; Admin only for elevated users.",
       "lines": [
-        36450,
-        36697
+        36540,
+        36787
       ]
     },
     {
@@ -2013,8 +2013,8 @@
         "the charge for adding a person"
       ],
       "lines": [
-        35192,
-        35657
+        35282,
+        35747
       ]
     },
     {
@@ -2038,8 +2038,8 @@
         "the price it quoted was wrong"
       ],
       "lines": [
-        34939,
-        35191
+        35029,
+        35281
       ]
     },
     {
@@ -2059,8 +2059,8 @@
       ],
       "note": "Currently a coming-soon surface. A report of \"reports don't work\" is expected behaviour, not a bug.",
       "lines": [
-        34197,
-        34224
+        34287,
+        34314
       ]
     },
     {
@@ -2077,8 +2077,8 @@
         "the back office tab"
       ],
       "lines": [
-        34249,
-        34324
+        34339,
+        34414
       ]
     },
     {
@@ -2095,8 +2095,8 @@
         "back office says coming soon"
       ],
       "lines": [
-        34225,
-        34248
+        34315,
+        34338
       ]
     },
     {
@@ -2122,8 +2122,8 @@
         "an admin section is missing"
       ],
       "lines": [
-        33271,
-        33806
+        33361,
+        33896
       ]
     },
     {
@@ -2148,8 +2148,8 @@
         "the overview at the top of admin"
       ],
       "lines": [
-        32904,
-        33111
+        32994,
+        33201
       ]
     },
     {
@@ -2441,8 +2441,8 @@
         "the incoming events"
       ],
       "lines": [
-        32408,
-        32668
+        32498,
+        32758
       ]
     },
     {
@@ -2465,8 +2465,8 @@
         "expired tokens"
       ],
       "lines": [
-        33158,
-        33270
+        33248,
+        33360
       ]
     },
     {
@@ -2501,7 +2501,7 @@
       "nav": "Admin",
       "file": "components/BeeHub.jsx",
       "symbol": "MasterTemplatesEditor",
-      "exported": "internal",
+      "exported": "named",
       "routes": [
         "GET /api/templates",
         "PATCH /api/templates/[id]",
@@ -2522,7 +2522,7 @@
       ],
       "lines": [
         31580,
-        31868
+        31958
       ]
     },
     {
@@ -2547,8 +2547,8 @@
         "the timing for everyone"
       ],
       "lines": [
-        31869,
-        31989
+        31959,
+        32079
       ]
     },
     {
@@ -2652,8 +2652,8 @@
         "the removal didn't happen"
       ],
       "lines": [
-        32143,
-        32386
+        32233,
+        32476
       ]
     },
     {
@@ -2753,8 +2753,8 @@
         "set up a new office"
       ],
       "lines": [
-        32689,
-        32903
+        32779,
+        32993
       ]
     },
     {
@@ -2833,8 +2833,8 @@
         "activate my subscription"
       ],
       "lines": [
-        34528,
-        34707
+        34618,
+        34797
       ]
     },
     {
