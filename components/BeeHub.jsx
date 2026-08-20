@@ -29,6 +29,7 @@ import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
+import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
@@ -16874,6 +16875,14 @@ const DEFAULT_SETTINGS = {
     slackTeamName:   '',
     slackChannelName:'',
     slackInviteUrl:  '',
+    // Mailchimp DISPLAY fields only — the access token and server prefix are
+    // server-read-only and never cross the wire. mailchimp_sync_live is
+    // deliberately absent: it is Kevin's manual per-location gate and no owner
+    // surface reads it.
+    mailchimpConnected:   false,
+    mailchimpAccountName: '',
+    mailchimpListId:      '',
+    mailchimpListName:    '',
     crmStatus:      'active',
     sendFromName:   '',
     sendFromEmail:  '',
@@ -18883,37 +18892,273 @@ export function TextsComingSoon() {
   )
 }
 
-// ─── Connections › Mailchimp — not connected (issue 246 step 1) ───────────────
-// The TextsComingSoon pattern, deliberately NOT the Assessment Default pattern.
-// Assessment Default shows the real control greyed out, which is honest for a
-// control that will one day work as drawn. There is no Mailchimp control to
-// grey out — there is no integration, no OAuth flow, no API client, no route,
-// no column, no env var — so drawing one and disabling it would invent a
-// product. This card reads nothing and writes nothing.
+// ─── Connections › Mailchimp (issue 246 step 2) ───────────────────────────────
 //
-// NO BUTTON, not even a disabled one: a disabled button invites a click and
-// then answers with silence. There is no focusable element here at all, and
-// the preview is aria-hidden because it is a picture of a thing, not content
-// to act on.
-export function MailchimpNotConnected() {
+// Replaces MailchimpNotConnected, the honest placeholder step 1 shipped when
+// there was genuinely nothing behind this row. There is now: an OAuth connect,
+// an account, and an audience choice. So the card becomes real.
+//
+// THREE STATES, and the middle one is the reason this is a state machine rather
+// than a boolean. A location that has connected but not chosen an audience has
+// a live token and no destination — it is NOT set up, and a card that showed a
+// green "Connected" there would be telling an owner they were done when they
+// were one step short. deriveMailchimpState + mailchimpCopy (lib/mailchimp-
+// connection-state) own both the states and their words, so the copy is
+// assertable without mounting this and the three branches cannot each drift
+// into their own tone.
+//
+// WHAT THIS CARD DOES NOT SHOW: mailchimp_sync_live. It is false for every
+// location and Kevin turns it on by hand, per location, exactly like
+// notifications_live. It is not read here, not written here, and not hinted at
+// — which is why the finished state says "Nothing is being sent to Mailchimp
+// yet" rather than anything about syncing.
+//
+// NOTHING SYNCS in this step. The only reads are the account's own audience
+// list; the only writes are the chosen audience and the disconnect.
+export function MailchimpCard({ settings, updateLocation }) {
+  const locationId  = settings.location.locId || null
+  const connected   = !!settings.location.mailchimpConnected
+  const accountName = settings.location.mailchimpAccountName || ''
+  const listId      = settings.location.mailchimpListId || ''
+  const listName    = settings.location.mailchimpListName || ''
+
+  const state = deriveMailchimpState({ connected, listId })
+  const copy  = mailchimpCopy(state, accountName)
+
+  // Audience list — fetched only when there is an account to fetch it from AND
+  // no audience chosen yet. The finished state has nothing to look up.
+  const [audiences, setAudiences] = useState(null)   // null = not loaded yet
+  const [loadErr, setLoadErr]     = useState(null)
+  const [choice, setChoice]       = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [saveErr, setSaveErr]     = useState(null)
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy]           = useState(false)
+  const [toast, setToast]         = useState(null)
+
+  // The connect flow is a full-page redirect, so a failure has to come back as
+  // a query param — there is no in-page promise to catch it. Read it once on
+  // mount and say what happened, rather than returning the owner to a card that
+  // looks exactly as it did before they pressed the button.
+  const [returnErr, setReturnErr] = useState(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('mailchimp') === 'error') setReturnErr(q.get('reason') || 'failed')
+  }, [])
+
+  const needsAudience = state === 'needs_audience'
+
+  useEffect(() => {
+    if (!needsAudience || !locationId) return
+    let cancelled = false
+    ;(async () => {
+      setLoadErr(null)
+      try {
+        const r = await fetch('/api/mailchimp/audiences?location_id=' + encodeURIComponent(locationId))
+        if (!r.ok) {
+          let detail = `load_failed_${r.status}`
+          try { const j = await r.json(); detail = j.error || detail } catch {}
+          if (!cancelled) { setLoadErr(detail); setAudiences([]) }
+          return
+        }
+        const j = await r.json()
+        if (!cancelled) setAudiences(Array.isArray(j.audiences) ? j.audiences : [])
+      } catch (e) {
+        if (!cancelled) { setLoadErr(String(e?.message || e)); setAudiences([]) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [needsAudience, locationId])
+
+  function goConnect() {
+    if (!locationId) { setSaveErr('No location id — reload and try again.'); return }
+    window.location.href = '/api/mailchimp/connect?location_id=' + encodeURIComponent(locationId)
+  }
+
+  async function saveAudience() {
+    if (!choice) return
+    setSaving(true); setSaveErr(null)
+    try {
+      const r = await fetch('/api/mailchimp/audiences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: locationId, list_id: choice }),
+      })
+      if (!r.ok) {
+        let detail = `save_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setSaveErr(detail); setSaving(false); return
+      }
+      const j = await r.json()
+      // The NAME comes back from the server, which read it from Mailchimp — the
+      // card never labels an id with a name it guessed locally.
+      updateLocation('mailchimpListId', j.list_id || choice)
+      updateLocation('mailchimpListName', j.list_name || '')
+      setToast({ kind:'success', msg:'Audience saved' })
+      setTimeout(() => setToast(null), 3000)
+    } catch (e) {
+      setSaveErr(String(e?.message || e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function doDisconnect() {
+    if (!locationId) { setSaveErr('No location id — reload and try again.'); return }
+    setBusy(true); setSaveErr(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/mailchimp-disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!r.ok) {
+        let detail = `disconnect_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setSaveErr(detail); setBusy(false); return
+      }
+      setConfirming(false)
+      // Optimistic local flip so the card matches the DB without a reload.
+      updateLocation('mailchimpConnected', false)
+      updateLocation('mailchimpAccountName', '')
+      updateLocation('mailchimpListId', '')
+      updateLocation('mailchimpListName', '')
+      setAudiences(null); setChoice('')
+      setToast({ kind:'success', msg:'Disconnected from Mailchimp' })
+      setTimeout(() => setToast(null), 3000)
+    } catch (e) {
+      setSaveErr(String(e?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Badge tone tracks the three states: neutral before you start, amber while
+  // something is outstanding, green only when it is genuinely finished.
+  const badgeTone =
+    state === 'ready'          ? { fg: HT.state.success.fg, bg: HT.state.success.soft } :
+    state === 'needs_audience' ? { fg: HT.state.warning.fg, bg: HT.state.warning.soft } :
+                                 { fg: HT.ink.muted,        bg: HT.state.neutralSoft }
+
+  const labelStyle = { fontSize:'11px', fontWeight:700, color:HT.ink.muted, textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }
+  const rowStyle   = { display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'12px', padding:'8px 0', borderBottom:HT.border.divider }
+
   return (
-    <div style={{ margin:'14px 12px 18px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'0 2px 6px', flexWrap:'wrap' }}>
-        <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>📬 Mailchimp</p>
-        <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.2)', padding:'2px 9px', borderRadius:'20px', whiteSpace:'nowrap' }}>Not connected</span>
+    <div style={{ margin:'14px 12px 18px', maxWidth:'560px' }}>
+      {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
+
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'0 2px 8px', flexWrap:'wrap' }}>
+        <p style={labelStyle}>📬 Mailchimp</p>
+        <span style={{ fontSize:'11px', fontWeight:700, color:badgeTone.fg, background:badgeTone.bg, padding:'2px 9px', borderRadius:HT.radius.pill, whiteSpace:'nowrap' }}>
+          {copy.badge}
+        </span>
       </div>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, margin:'0 2px 9px', maxWidth:'560px' }}>
-        Not connected yet. When it&apos;s ready, you&apos;ll be able to send clients to Mailchimp with their tags for your marketing lists.
-      </p>
-      {/* aria-hidden: a picture of a list, not content to act on. */}
-      <div aria-hidden="true" style={{ borderRadius:'12px', background:'white', boxShadow:'0 1px 4px rgba(26,46,43,0.07)', padding:'14px 16px', opacity:0.55, filter:'saturate(0.4)', maxWidth:'560px' }}>
-        <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'7px' }}>Audience</p>
-        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6 }}>Bee Organized clients</p>
-        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginTop:'9px' }}>
-          {['organizing','moving','completed'].map(t=>(
-            <span key={t} style={{ fontSize:'11px', color:'#6b7c79', background:'#f7f5f0', border:'1px solid rgba(26,46,43,0.08)', padding:'2px 9px', borderRadius:'20px' }}>{t}</span>
-          ))}
-        </div>
+
+      <div style={{ borderRadius:HT.radius.card, background:HT.surface.raised, border:HT.border.card, boxShadow:HT.shadow.card, padding:'15px' }}>
+        <p style={{ fontSize:'14px', fontWeight:700, color:HT.ink.primary, lineHeight:1.3, margin:0 }}>{copy.headline}</p>
+        <p style={{ fontSize:'13px', color:HT.ink.secondary, lineHeight:1.6, margin:'6px 0 0' }}>{copy.body}</p>
+
+        {/* A failed connect comes back as a query param, not a rejected fetch. */}
+        {returnErr && (
+          <p style={{ fontSize:'12px', color:HT.state.danger.fg, background:HT.state.danger.soft, borderRadius:HT.radius.control, padding:'8px 10px', margin:'10px 0 0', lineHeight:1.5 }}>
+            Mailchimp didn’t finish connecting ({returnErr}). Nothing was saved — you can try again.
+          </p>
+        )}
+
+        {state === 'not_connected' && (
+          <button onClick={goConnect} className="bee-small-action"
+            style={{ marginTop:'12px', width:'100%', maxWidth:CONTROL_W.action, padding:'11px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:'pointer' }}>
+            Connect Mailchimp
+          </button>
+        )}
+
+        {state === 'needs_audience' && (
+          <div style={{ marginTop:'12px' }}>
+            <div style={rowStyle}>
+              <span style={{ fontSize:'12px', color:HT.ink.muted }}>Account</span>
+              <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{accountName || '—'}</span>
+            </div>
+
+            {audiences === null && !loadErr && (
+              <p style={{ fontSize:'12px', color:HT.ink.quiet, margin:'10px 0 0' }}>Loading your audiences…</p>
+            )}
+
+            {/* Zero audiences is its OWN message. An empty dropdown would be
+                the one outcome that explains nothing — see NO_AUDIENCES_COPY. */}
+            {audiences !== null && audiences.length === 0 && !loadErr && (
+              <p style={{ fontSize:'13px', color:HT.ink.secondary, lineHeight:1.6, background:HT.surface.sunken, borderRadius:HT.radius.control, padding:'10px 12px', margin:'10px 0 0' }}>
+                {NO_AUDIENCES_COPY}
+              </p>
+            )}
+
+            {loadErr && (
+              <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'10px 0 0', lineHeight:1.5 }}>
+                We couldn’t load your audiences ({loadErr}).
+              </p>
+            )}
+
+            {audiences !== null && audiences.length > 0 && (
+              <div style={{ marginTop:'11px' }}>
+                <label htmlFor="mc-audience" style={{ display:'block', fontSize:'12px', color:HT.ink.muted, marginBottom:'5px' }}>Audience</label>
+                <select id="mc-audience" value={choice} onChange={e=>setChoice(e.target.value)}
+                  style={{ width:'100%', maxWidth:CONTROL_W.select, padding:'9px 10px', fontSize:'13px', fontFamily:'inherit', color:HT.ink.primary, background:HT.surface.raised, border:HT.border.control, borderRadius:HT.radius.control }}>
+                  <option value="">Choose an audience…</option>
+                  {audiences.map(a=>(
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.memberCount ? ` (${a.memberCount} contacts)` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div>
+                  <button onClick={saveAudience} disabled={!choice||saving} className="bee-small-action"
+                    style={{ marginTop:'10px', padding:'9px 16px', background:choice?HT.accent.fg:HT.ink.disabled, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:(!choice||saving)?'default':'pointer' }}>
+                    {saving ? 'Saving…' : 'Save audience'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {state === 'ready' && (
+          <div style={{ marginTop:'12px' }}>
+            <div style={rowStyle}>
+              <span style={{ fontSize:'12px', color:HT.ink.muted }}>Account</span>
+              <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{accountName || '—'}</span>
+            </div>
+            <div style={{ ...rowStyle, borderBottom:'none' }}>
+              <span style={{ fontSize:'12px', color:HT.ink.muted }}>Audience</span>
+              <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{listName || listId}</span>
+            </div>
+
+            {!confirming ? (
+              <button onClick={()=>setConfirming(true)} className="bee-small-action"
+                style={{ marginTop:'10px', padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
+                Disconnect
+              </button>
+            ) : (
+              <div style={{ marginTop:'10px', background:HT.surface.sunken, borderRadius:HT.radius.control, padding:'11px 12px' }}>
+                <p style={{ fontSize:'13px', color:HT.ink.secondary, lineHeight:1.6, margin:'0 0 9px' }}>
+                  Disconnect Mailchimp? Your account and audience will be forgotten here. Nothing in Mailchimp is changed or deleted.
+                </p>
+                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                  <button onClick={doDisconnect} disabled={busy} className="bee-small-action"
+                    style={{ padding:'8px 14px', background:HT.state.danger.strong, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.ink.inverse, cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+                    {busy ? 'Disconnecting…' : 'Yes, disconnect'}
+                  </button>
+                  <button onClick={()=>setConfirming(false)} disabled={busy} className="bee-small-action"
+                    style={{ padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {saveErr && (
+          <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'10px 0 0', lineHeight:1.5 }}>{saveErr}</p>
+        )}
       </div>
     </div>
   )
@@ -21184,6 +21429,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       slackTeamName:    currentLocationCtx.slack_team_name || '',
       slackChannelName: currentLocationCtx.slack_channel_name || '',
       slackInviteUrl:   currentLocationCtx.slack_invite_url || '',
+      // Mailchimp display fields (token + server prefix stay server-side).
+      mailchimpConnected:   !!currentLocationCtx.mailchimp_connected,
+      mailchimpAccountName: currentLocationCtx.mailchimp_account_name || '',
+      mailchimpListId:      currentLocationCtx.mailchimp_list_id || '',
+      mailchimpListName:    currentLocationCtx.mailchimp_list_name || '',
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',
       replyToEmail:    currentLocationCtx.reply_to_email || '',
@@ -21233,6 +21483,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     slackTeamName:    selectedLoc.slackTeamName || '',
     slackChannelName: selectedLoc.slackChannelName || '',
     slackInviteUrl:   selectedLoc.slackInviteUrl || '',
+    // Mailchimp display fields (token + server prefix stay server-side).
+    mailchimpConnected:   !!selectedLoc.mailchimpConnected,
+    mailchimpAccountName: selectedLoc.mailchimpAccountName || '',
+    mailchimpListId:      selectedLoc.mailchimpListId || '',
+    mailchimpListName:    selectedLoc.mailchimpListName || '',
     crmStatus:      selectedLoc.crmStatus,
     // Prefer the location's configured sender fields (sender_name /
     // send_from_email / reply_to_email in the DB) so super_admin sees the
@@ -22622,9 +22877,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     { title:'Connections', items: ownerConfig ? [
       { key:'slack',  label:'Slack',  icon:'#️⃣' },
       { key:'jobber', label:'Jobber', icon:'🔗' },
-      // Muted, and the row still SELECTS — what it opens is an honest "not
-      // connected" card with nothing to press. See MailchimpNotConnected.
-      { key:'mailchimp', label:'Mailchimp', icon:'📬', muted:true },
+      // No longer muted (issue 246 step 2): there is a real connect flow behind
+      // it now, so it reads like the live rows above it.
+      { key:'mailchimp', label:'Mailchimp', icon:'📬' },
     ] : []},
   ].filter(g => g.items.length > 0)
   const sections = SECTION_GROUPS.flatMap(g => g.items)
@@ -23185,15 +23440,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           </div>
         )}
 
-        {/* ── Connections › Mailchimp (issue 246 step 1) — nothing behind it */}
+        {/* ── Connections › Mailchimp (issue 246 step 2) — a real connect */}
         {activeSection==='mailchimp'&&(
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Mailchimp</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Your Mailchimp account, and the audience your clients belong to.</p>
             </div>
 
-            <MailchimpNotConnected />
+            <MailchimpCard settings={settings} updateLocation={updateLocation} />
 
           </div>
         )}

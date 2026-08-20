@@ -704,7 +704,11 @@ export default async function HubPage({
         // NOTE: slack_bot_token is intentionally NOT selected — display fields
         // only (slack_connected / slack_team_name / slack_channel_name). The
         // token is server-read-only (lib/slack-bot + intake route).
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, rate_per_hour, activated_at, lifecycle_status, slack_connected, slack_team_name, slack_channel_name'
+        // Same rule for Mailchimp: mailchimp_access_token and
+        // mailchimp_server_prefix are NOT selected (server-read-only), and
+        // mailchimp_sync_live is NOT selected either — it is the manual
+        // per-location gate and no owner surface may render it.
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, rate_per_hour, activated_at, lifecycle_status, slack_connected, slack_team_name, slack_channel_name, mailchimp_connected, mailchimp_account_name, mailchimp_list_id, mailchimp_list_name'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -752,6 +756,12 @@ export default async function HubPage({
         slack_team_name: locRow.slack_team_name || null,
         slack_channel_name: locRow.slack_channel_name || null,
         slack_invite_url: currentSlackInviteUrl,
+        // Mailchimp display fields (token + server prefix never leave the
+        // server; sync_live is never surfaced to an owner).
+        mailchimp_connected: !!locRow.mailchimp_connected,
+        mailchimp_account_name: locRow.mailchimp_account_name || null,
+        mailchimp_list_id: locRow.mailchimp_list_id || null,
+        mailchimp_list_name: locRow.mailchimp_list_name || null,
         payment_source: locRow.payment_source || 'none',
         subscription_status: locRow.subscription_status || 'deferred',
         subscription_plan: locRow.subscription_plan || null,
@@ -834,7 +844,7 @@ export default async function HubPage({
         // This is a server-render snapshot for the LIST; the duplicate-
         // subscription guard must read the id at click time, off a page that
         // may have been open for an hour. Both readers are deliberate.
-        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, stripe_customer_id, stripe_subscription_id, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, stripe_customer_id, stripe_subscription_id, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name, mailchimp_connected, mailchimp_account_name, mailchimp_list_id, mailchimp_list_name'
       )
       // issue 226 step 2 — loc_other is a ROUTING BUCKET, not a franchise. It
       // holds leads that arrived without a resolvable location until someone
@@ -1035,6 +1045,11 @@ export default async function HubPage({
         slackTeamName: row.slack_team_name || null,
         slackChannelName: row.slack_channel_name || null,
         slackInviteUrl: slackInviteById[row.id] || null,
+        // Mailchimp display fields (token never leaves the server).
+        mailchimpConnected: !!row.mailchimp_connected,
+        mailchimpAccountName: row.mailchimp_account_name || null,
+        mailchimpListId: row.mailchimp_list_id || null,
+        mailchimpListName: row.mailchimp_list_name || null,
         last_sync_status: row.last_sync_status || null,
         // Token expiry (epoch-ms) feeds deriveJobberStatus so the settings badge
         // reads reconnect_required for a dead-token location, not a false green.

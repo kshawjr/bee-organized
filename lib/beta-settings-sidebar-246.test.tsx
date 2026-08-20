@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { SettingsScreen, CurrentUserContext, MailchimpNotConnected } from '@/components/BeeHub'
+import { SettingsScreen, CurrentUserContext, MailchimpCard } from '@/components/BeeHub'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -322,69 +322,45 @@ describe('mobile drill-down: list → section → back → list', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 3 · CONNECTIONS › MAILCHIMP
 // ═══════════════════════════════════════════════════════════════════════════
-describe('Connections › Mailchimp is visibly and honestly unavailable', () => {
-  it('the sidebar row is present but muted, in both navs', async () => {
+// Step 1 shipped a placeholder and this block pinned it SHUT: no button, no
+// route, no env var, no mailchimp.com. Step 2 built the connect flow, so those
+// pins are now the wrong assertions — they described a deliberate absence that
+// is deliberately over. What survives is the part that was never about the
+// placeholder: the row is reachable from both navs, and the section it opens
+// mounts the real card.
+//
+// The card's own behaviour — its three states, its copy, its zero-audience
+// message, and the fact that it never surfaces mailchimp_sync_live — is pinned
+// in lib/beta-mailchimp-connect-246-step2.test.tsx, next to the guard and the
+// pure state module it shares them with.
+describe('Connections › Mailchimp is a live row', () => {
+  it('the row is present in both navs, and no longer muted against its neighbours', async () => {
     await mount(null)
     for (const nav of [rail(), drill()]) {
       const row = rowIn(nav, 'mailchimp')
       expect(row, 'a Mailchimp row').toBeTruthy()
       const label = row.querySelector('span:not([aria-hidden])') as HTMLElement
-      // Muted against its neighbours, not the same colour as a live row.
+      // It now reads like Slack and Jobber — the live rows beside it. This is
+      // the exact inverse of the step 1 assertion, which required it to DIFFER.
       const live = rowIn(nav, 'slack').querySelector('span:not([aria-hidden])') as HTMLElement
-      expect(label.style.color).not.toBe(live.style.color)
+      expect(label.style.color).toBe(live.style.color)
     }
   })
 
-  it('selecting it shows the card', async () => {
+  it('selecting it opens the real card, not the placeholder', async () => {
     await mount('mailchimp')
-    expect(container.textContent).toContain('Not connected yet.')
+    expect(container.textContent).toContain('Connect Mailchimp')
+    // The placeholder's copy is gone, in full.
+    expect(container.textContent).not.toContain('Not connected yet.')
+    expect(container.textContent).not.toContain("When it's ready")
   })
 
-  it('the copy says exactly what it is', async () => {
+  it('there IS a button now, and it starts the connect flow', async () => {
     await mount('mailchimp')
-    expect(container.textContent).toContain(
-      "Not connected yet. When it's ready, you'll be able to send clients to Mailchimp with their tags for your marketing lists.",
-    )
-  })
-
-  it('there is NO button — not even a disabled one', async () => {
-    // A disabled button invites a click and then says nothing. The card is
-    // text. This asserts on the card alone, not the page, because the nav and
-    // the back control are legitimately buttons.
-    const card = document.createElement('div')
-    document.body.appendChild(card)
-    const cardRoot = createRoot(card)
-    await act(async () => { cardRoot.render(<MailchimpNotConnected />) })
-
-    expect(card.querySelectorAll('button, a, input, select, textarea')).toHaveLength(0)
-    // Nothing focusable by any other route either.
-    expect(card.querySelectorAll('[tabindex], [role="button"], [contenteditable]')).toHaveLength(0)
-
-    act(() => cardRoot.unmount())
-    card.remove()
-  })
-
-  it('the decorative preview is aria-hidden', async () => {
-    await mount('mailchimp')
-    const preview = container.querySelector('[aria-hidden="true"][style*="saturate"]')
-    expect(preview, 'the preview is hidden from assistive tech').toBeTruthy()
-  })
-
-  it('it reads nothing and writes nothing — no fetch of its own', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
-    vi.stubGlobal('fetch', fetchMock)
-    await mount('mailchimp')
-    const urls = fetchMock.mock.calls.map(c => String(c[0]))
-    expect(urls.filter(u => /mailchimp/i.test(u))).toHaveLength(0)
-  })
-
-  it('no Mailchimp integration was built behind it', () => {
-    // The card is the whole feature. If a route, client or env var ever
-    // appears, this step is no longer what it claimed to be.
-    const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-    expect(src).not.toMatch(/MAILCHIMP_[A-Z_]+/)
-    expect(src).not.toMatch(/api\/mailchimp/i)
-    expect(src).not.toMatch(/mailchimp\.com/i)
+    const btn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Connect Mailchimp')
+    expect(btn, 'a Connect Mailchimp button').toBeTruthy()
+    expect(btn!.hasAttribute('disabled')).toBe(false)
   })
 })
 
