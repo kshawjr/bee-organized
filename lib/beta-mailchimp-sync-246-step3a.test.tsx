@@ -89,7 +89,10 @@ const lead = (over: any = {}) => ({
   last_name: 'Jones',
   source: 'Website',
   project_type: 'Moving',
-  tags: [],
+  // The write-orphan COLUMN, poisoned on every row: real tags live in the
+  // lead_tags junction, and any test asserting an exact tag list proves the
+  // column was never read — this string appearing anywhere is the failure.
+  tags: ['ColumnDecoyTag'],
   paid_amount: 0,
   is_junk: false,
   created_at: new Date().toISOString(),
@@ -100,7 +103,9 @@ const lead = (over: any = {}) => ({
 })
 
 // Standard resolver: a live location, one page of eligible leads, empty
-// children, a website head-count.
+// children, a website head-count. opts.leadTags = lead_tags junction rows
+// ({ lead_id, tag_lookup_id }); opts.lookups = the tag definition rows the
+// batched .in('id', …) resolution reads ({ id, label }).
 function standardResolver(leads: any[], totalWebsite: number, opts: any = {}) {
   return (q: any): Resolved => {
     if (q.table === 'locations') return { data: { ...liveLocation, ...(opts.location || {}) }, error: null }
@@ -108,6 +113,8 @@ function standardResolver(leads: any[], totalWebsite: number, opts: any = {}) {
     if (q.table === 'leads') return { data: leads, error: null }
     if (q.table === 'engagements') return { data: opts.engagements || [], error: null }
     if (q.table === 'touchpoints') return { data: opts.touchpoints || [], error: null }
+    if (q.table === 'lead_tags') return { data: opts.leadTags || [], error: null }
+    if (q.table === 'lookups') return { data: opts.lookups || [], error: null }
     return { data: [], error: null }
   }
 }
@@ -144,10 +151,10 @@ describe('the subscriber hash and the tags', () => {
       .toBe('62eeb292278cc15f5817cb78f7790b08')
   })
 
-  it('tags = project type + source + live status + the leads.tags entries', () => {
+  it('tags = project type + source + live status + the junction tag labels', () => {
     expect(buildMemberTags({
-      projectType: 'Moving', source: 'Website', clientStatus: 'New', leadTags: ['vip'],
-    })).toEqual(['Moving', 'Website', 'New', 'vip'])
+      projectType: 'Moving', source: 'Website', clientStatus: 'New', leadTags: ['VIP'],
+    })).toEqual(['Moving', 'Website', 'New', 'VIP'])
   })
 
   it('trims, drops empties, and dedupes case-insensitively (first casing wins)', () => {
@@ -157,7 +164,7 @@ describe('the subscriber hash and the tags', () => {
     })).toEqual(['Moving', 'VIP'])
   })
 
-  it('a non-array leads.tags value is survived, not crashed on', () => {
+  it('a non-array leadTags value is survived, not crashed on', () => {
     expect(buildMemberTags({ projectType: 'Organizing', leadTags: 'oops-a-string' }))
       .toEqual(['Organizing'])
   })
@@ -209,20 +216,84 @@ describe('the upsert', () => {
     expect(body.merge_fields).toEqual({ FNAME: 'Pat', LNAME: 'Jones' })
   })
 
-  it('tags ride the tags endpoint, each active', async () => {
-    dbResolver = standardResolver([lead({ tags: ['vip'] })], 1)
+  it('tags ride the tags endpoint, each active — lead tags resolved from the JUNCTION', async () => {
+    dbResolver = standardResolver([lead()], 1, {
+      leadTags: [{ lead_id: 'lead-1', tag_lookup_id: 'tl-vip' }],
+      lookups: [{ id: 'tl-vip', label: 'VIP' }],
+    })
     await syncWebsiteLeadsToMailchimp(LOC)
     const tagCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).endsWith('/tags'))!
     expect(tagCall, 'a tags POST').toBeTruthy()
     expect(tagCall[1].method).toBe('POST')
     const body = JSON.parse(tagCall[1].body)
-    // New: created just now, no engagements, no touchpoints.
+    // New: created just now, no engagements, no touchpoints. Exact equality
+    // doubles as the column pin: the row's tags column says ColumnDecoyTag,
+    // and it must not be here.
     expect(body.tags).toEqual([
       { name: 'Moving', status: 'active' },
       { name: 'Website', status: 'active' },
       { name: 'New', status: 'active' },
-      { name: 'vip', status: 'active' },
+      { name: 'VIP', status: 'active' },
     ])
+  })
+
+  it('junction tags: labels land in the PUT run, the leads.tags column is never read', async () => {
+    dbResolver = standardResolver([lead()], 1, {
+      leadTags: [
+        { lead_id: 'lead-1', tag_lookup_id: 'tl-vip' },
+        { lead_id: 'lead-1', tag_lookup_id: 'tl-ret' },
+        // A junction row whose definition is missing resolves to nothing —
+        // no crash, no raw uuid leaking into Mailchimp as a "tag".
+        { lead_id: 'lead-1', tag_lookup_id: 'tl-gone' },
+      ],
+      lookups: [
+        { id: 'tl-vip', label: 'VIP' },
+        { id: 'tl-ret', label: 'Returning' },
+      ],
+    })
+    const report = await syncWebsiteLeadsToMailchimp(LOC)
+    expect(report.pushed).toBe(1)
+    const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => String(c[0]).endsWith('/tags'))![1].body)
+    const names = body.tags.map((t: any) => t.name)
+    expect(names).toContain('VIP')
+    expect(names).toContain('Returning')
+    // The poisoned column value: present on the row, absent from the send.
+    expect(names).not.toContain('ColumnDecoyTag')
+    expect(names).not.toContain('tl-gone')
+  })
+
+  it('the tag resolution is batched — one lead_tags read and one lookups read for the whole run', async () => {
+    const queryCounts: Record<string, number> = {}
+    const inner = standardResolver([
+      lead({ id: 'l1', email: 'a@example.com' }),
+      lead({ id: 'l2', email: 'b@example.com' }),
+      lead({ id: 'l3', email: 'c@example.com' }),
+    ], 3, {
+      leadTags: [
+        { lead_id: 'l1', tag_lookup_id: 'tl-vip' },
+        { lead_id: 'l3', tag_lookup_id: 'tl-vip' },
+      ],
+      lookups: [{ id: 'tl-vip', label: 'VIP' }],
+    })
+    dbResolver = (q: any) => {
+      queryCounts[q.table] = (queryCounts[q.table] || 0) + 1
+      return inner(q)
+    }
+    const report = await syncWebsiteLeadsToMailchimp(LOC)
+    expect(report.pushed).toBe(3)
+    // 3 leads fit one 200-chunk: exactly one junction read, and exactly one
+    // definitions read — never a query per lead.
+    expect(queryCounts['lead_tags']).toBe(1)
+    expect(queryCounts['lookups']).toBe(1)
+  })
+
+  it('and the engine source never reads the leads.tags column', () => {
+    const src = readFileSync(join(process.cwd(), 'lib/mailchimp-sync.ts'), 'utf8')
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    // row.tags was the bug: the write-orphan text[] column instead of the
+    // lead_tags junction. The only lead-tag source is tagLabelsByLead.
+    expect(code).not.toMatch(/row\.tags/)
+    expect(code).toMatch(/from\('lead_tags'\)/)
   })
 
   it('THE STALE COLUMN: a won client is tagged Client, whatever client_status says', async () => {

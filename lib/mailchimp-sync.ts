@@ -66,10 +66,12 @@ export const MD5_OF_LOWERCASED_EMAIL = (email: string): string =>
   createHash('md5').update(email.trim().toLowerCase()).digest('hex')
 
 // ── Tags ──────────────────────────────────────────────────────
-// project_type + source + the LIVE derived client status + every entry of the
-// leads.tags array. Trimmed, empties dropped, deduplicated case-insensitively
-// (first casing wins, so 'Moving' beats a later 'moving' rather than sending
-// Mailchimp both).
+// project_type + source + the LIVE derived client status + the lead's tag
+// LABELS from the lead_tags junction (tag_lookup_id → lookups.label — the
+// same resolution _hub-page.tsx does; leads.tags the COLUMN is a write-orphan
+// nothing populates, so it is deliberately not read here). Trimmed, empties
+// dropped, deduplicated case-insensitively (first casing wins, so 'Moving'
+// beats a later 'moving' rather than sending Mailchimp both).
 export function buildMemberTags(args: {
   projectType?: string | null
   source?: string | null
@@ -189,27 +191,55 @@ export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise
   // lead's engagements (open → Active, won → Client, any → settles Nurturing)
   // and reach-out touchpoints (Attempting). Chunked .in() — an unfiltered
   // child read is the bug class the Hub already fixed once.
+  //
+  // lead_tags rides the same chunks: the REAL tags live in the junction
+  // (leads.tags the column is a write-orphan — nothing in the app populates
+  // it), resolved tag_lookup_id → lookups.label in ONE batched read below,
+  // never per lead. Same resolution _hub-page.tsx does for the Hub.
   const ids = eligible.map((l: any) => l.id)
   const openIds = new Set<string>()
   const wonIds = new Set<string>()
   const engagementCounts: Record<string, number> = {}
   const touchByLead: Record<string, any[]> = {}
+  const leadTagRows: Array<{ lead_id: string; tag_lookup_id: string }> = []
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200)
-    const [engRes, touchRes] = await Promise.all([
+    const [engRes, touchRes, tagRes] = await Promise.all([
       supabaseService.from('engagements').select('client_id, stage').in('client_id', chunk),
       // ⚠️ `kind`, not `type` — the COLUMN is touchpoints.kind; the mapper
       // renames it on the timeline entry the derivation reads.
       supabaseService.from('touchpoints').select('lead_id, kind, occurred_at').in('lead_id', chunk),
+      supabaseService.from('lead_tags').select('lead_id, tag_lookup_id').in('lead_id', chunk),
     ])
     if (engRes.error) throw new Error(`engagements read failed: ${engRes.error.message}`)
     if (touchRes.error) throw new Error(`touchpoints read failed: ${touchRes.error.message}`)
+    if (tagRes.error) throw new Error(`lead_tags read failed: ${tagRes.error.message}`)
     for (const e of engRes.data || []) {
       engagementCounts[e.client_id] = (engagementCounts[e.client_id] || 0) + 1
       if (e.stage === 'Closed Won') wonIds.add(e.client_id)
       if (e.stage !== 'Closed Won' && e.stage !== 'Closed Lost') openIds.add(e.client_id)
     }
     for (const t of touchRes.data || []) (touchByLead[t.lead_id] ||= []).push(t)
+    leadTagRows.push(...(tagRes.data || []))
+  }
+
+  // Resolve tag definitions ONCE for the whole run — the distinct
+  // tag_lookup_ids are bounded by the admin vocabulary (a handful of rows),
+  // so this is a single .in() read, not a per-lead query.
+  const tagLabelById: Record<string, string> = {}
+  const tagLookupIds = Array.from(new Set(leadTagRows.map((r) => r.tag_lookup_id)))
+  if (tagLookupIds.length > 0) {
+    const { data: lookupRows, error: lookupErr } = await supabaseService
+      .from('lookups')
+      .select('id, label')
+      .in('id', tagLookupIds)
+    if (lookupErr) throw new Error(`lookups read failed: ${lookupErr.message}`)
+    for (const r of lookupRows || []) tagLabelById[r.id] = r.label
+  }
+  const tagLabelsByLead: Record<string, string[]> = {}
+  for (const r of leadTagRows) {
+    const label = tagLabelById[r.tag_lookup_id]
+    if (label) (tagLabelsByLead[r.lead_id] ||= []).push(label)
   }
 
   // ── 4. Push, one lead at a time ─────────────────────────────
@@ -232,7 +262,7 @@ export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise
         projectType: row.project_type,
         source: row.source,
         clientStatus: status,
-        leadTags: row.tags,
+        leadTags: tagLabelsByLead[row.id] || [],
       })
 
       const hash = MD5_OF_LOWERCASED_EMAIL(email)
