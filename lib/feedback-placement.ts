@@ -63,6 +63,14 @@ export interface PlacementCandidate {
   score: number
   /** The owner's own words that matched — why this candidate is here at all. */
   matched: string[]
+  /**
+   * The weight of the RAREST word that matched. This is the number that says
+   * whether the match rests on a word that names something ("guide", in 3 of
+   * 120 entries) or on one that merely appears everywhere ("client", in 19).
+   * Kevin described exactly this distinction in plain English when he called
+   * `clients, client` noise and `guide` real — so the renderer reads it.
+   */
+  peak: number
 }
 
 export interface Placement {
@@ -209,7 +217,7 @@ const CONFIDENT_MARGIN = 2.0
  * At 119 entries: df=1 → 4.08, df=2 → 3.68, df=5 → 2.99, df=10 → 2.38.
  * "notifications", "kanban", "unsubscribe" clear it; "email", "client", "list" do not.
  */
-const DISTINCTIVE_MIN = 3.0
+export const DISTINCTIVE_MIN = 3.0
 /** A shortlist keeps candidates within this fraction of the leader. */
 const SHORTLIST_BAND = 0.55
 const SHORTLIST_MAX = 3
@@ -376,6 +384,7 @@ export function rankPlacements(
       // Longest first: the phrase that matched is more informative than the
       // single tokens inside it.
       matched: Array.from(new Set(matched)).sort((a, b) => b.length - a.length).slice(0, 4),
+      peak: Math.round(peak * 100) / 100,
       // ─── What "confident" has to be earned by ───────────────────────
       // Not accumulated score. Score accumulates from ordinary words, and
       // ordinary words are how the first run put an automated-email complaint
@@ -426,4 +435,71 @@ export function placeFeedbackItem(
 function strip(c: PlacementCandidate & { corroborated?: boolean }): PlacementCandidate {
   const { corroborated, ...rest } = c
   return rest
+}
+
+// ─── HOW A PLACEMENT SHOULD BE PRINTED ────────────────────────────────
+// Issue 248 step 3. Kevin's verdict on the step-2 brief was "feels busy", and
+// the diagnosis was structural: the noise was proportional to how UNCERTAIN the
+// matcher was, so the reader paid most attention exactly where the brief knew
+// least.
+//
+// His example is the whole rule. "Nuturing" was given three candidates whose
+// evidence was `clients, client` — which does not locate anything, it reports
+// that the word "client" appears in many screen descriptions. "Guide" was given
+// two whose evidence was `guide`, which is real. That is a description, in plain
+// English, of the IDF weight this module already computes: `client` occurs in 19
+// of 120 entries (weight 1.79), `guide` in 3 (weight 3.40). So the renderer
+// reads `peak` and stops guessing.
+//
+// THREE PRINTED STATES, and the reasoning for each boundary:
+//
+//   placed    Rests on at least one word that names something, AND is
+//             corroborated — either by a second matched word, or by the
+//             runner-up agreeing on the same word. Prints as one file path.
+//   weak      Rests only on words common enough to mean nothing on their own.
+//             Prints the file path AND the matched words, because this is
+//             precisely where a reader wants to judge for themselves.
+//   unplaced  Says it cannot place this. Which is true, and useful: it tells
+//             Kevin which reports need a question asked rather than a file
+//             opened.
+//
+// WHY "AGREEMENT" IS PART OF IT, AND WHAT IT FIXED. A single matched word can be
+// a noun that names a surface or a verb that collided with one, and no weight
+// separates them — `notes` (the notes box, right) and `feed` (the activity feed,
+// wrong: "leads feed directly into Jobber") are both in exactly one entry and
+// therefore both score 4.09. That was reported as an unsolved limit in step 2.
+// The shortlist itself turns out to carry the missing signal:
+//
+//   Guide  → shell.guide (guide) + admin.content (guide)      ← both say `guide`
+//   Quo    → home.follow-ups (set) + record.notes (client,feed) ← nothing shared
+//
+// When two different surfaces are pulled in by the SAME word, that word is doing
+// real work. When each candidate arrives on a different word, the shortlist is a
+// pile of coincidences. Agreement is what lets "Guide" survive while "Quo" —
+// which Kevin flagged by name — correctly falls to unplaced.
+export type PlacementRender = 'placed' | 'weak' | 'unplaced'
+
+export function placementRender(p: Placement): PlacementRender {
+  if (p.confidence === 'none' || p.candidates.length === 0) return 'unplaced'
+  // A single confident placement dominated the whole field 2:1 and was
+  // corroborated to get that label; it is not the lucky-single-word case.
+  if (p.confidence === 'confident') return 'placed'
+
+  const [top, second] = p.candidates
+
+  // Rule 3 — a lone uncertain candidate is worse than silence. It reads as a
+  // placement while resting on one word that nothing else corroborates, which
+  // is exactly how "Thumbtack Integration → the notes box (matched: feed)" got
+  // printed. It reads as unplaced now, which is what it is.
+  if (p.candidates.length === 1) return 'unplaced'
+
+  // Rests only on ordinary words — show it, but show the words with it.
+  if (top.peak < DISTINCTIVE_MIN) return 'weak'
+
+  // Distinctive, and corroborated by a second word of its own...
+  if (top.matched.length >= 2) return 'placed'
+  // ...or by the runner-up arriving on the same word.
+  if (second && second.matched.some(m => top.matched.includes(m))) return 'placed'
+
+  return 'unplaced'
 }

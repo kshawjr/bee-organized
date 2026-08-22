@@ -39,6 +39,7 @@
 // stops a wrong probe from becoming a wrong build.
 
 import type { ItemAnalysis, AnalysisCluster } from './feedback-analysis'
+import { placementRender } from './feedback-placement'
 import { feedbackAgeDays } from './feedback-queues'
 
 export type PromptTier = 'full' | 'short'
@@ -162,15 +163,31 @@ function reportBlock(item: PromptItem, now: number): string {
 // The shortlist from issue 248's word matcher. Carried WITH its caveat: it
 // matches an owner's vocabulary against a map of surfaces, so it says which
 // screen, never which bug, and it has placed things confidently wrong before.
+//
+// Gated by placementRender (lib/feedback-placement), which decides whether the
+// evidence under a shortlist supports printing it at all. A lone "possible"
+// candidate resting on one word nothing corroborates — "Thumbtack Integration
+// → the notes box (matched: feed)" — reads as a placement while being a
+// coincidence, and a prompt is exactly where a coincidence does the most harm:
+// it becomes the first file the next session opens. So 'unplaced' prints
+// nothing, and 'weak' says so in the heading rather than leaving the reader to
+// infer it from the matched words.
 function shortlistBlock(analysis?: ItemAnalysis | null): string | null {
   const p = analysis?.placement
   if (!p || p.confidence === 'none' || !p.candidates?.length) return null
+  const state = placementRender(p)
+  if (state === 'unplaced') return null
   const rows = p.candidates.map(c => {
     const ref = c.lines && c.lines.length === 2 ? `${c.file}:${c.lines[0]}` : c.file
     return `  · ${c.surface}\n    ${ref}   (matched on the owner's words: ${c.matched.join(', ')})`
   })
+  const qualifier =
+    p.confidence === 'confident'
+      ? 'one candidate'
+      : `${p.candidates.length} candidates, not certain which` +
+        (state === 'weak' ? ' — WEAK: rests only on common words, judge the matched words yourself' : '')
   return [
-    `WHICH SCREEN, PROBABLY (${p.confidence === 'confident' ? 'one candidate' : `${p.candidates.length} candidates, not certain which`})`,
+    `WHICH SCREEN, PROBABLY (${qualifier})`,
     ...rows,
     '',
     '  This comes from matching the owner\'s vocabulary against a map of surfaces.',
