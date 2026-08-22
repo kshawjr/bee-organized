@@ -1,3 +1,11 @@
+<!--
+  Bee Hub is the internal operations platform for the Bee Organized franchise
+  network: a multi-tenant Next.js + Supabase web app that gives each location one
+  place to manage clients, contacts, onboarding, subscriptions, reports, and settings.
+  It treats Zoho CRM as the source of truth, integrates with Jobber for field-service
+  scheduling, and runs scheduled jobs (email drips, syncs, briefs) via Vercel cron.
+-->
+
 # Bee Hub — Bee Organized Franchise Operations Platform
 
 ## Stack
