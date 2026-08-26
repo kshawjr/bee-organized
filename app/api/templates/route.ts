@@ -151,6 +151,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_type', allowed: Array.from(VALID_TYPES) }, { status: 400 })
   }
   if (!tplBody.trim()) return NextResponse.json({ error: 'body_required' }, { status: 400 })
+  // issue 316 — an EMAIL template must carry a subject: a blank one would
+  // save fine and then every send quoting it is HELD (missing_subject).
+  // Refuse at save, where the owner can fix it. Text and call templates
+  // have no subject by design (the insert below nulls it) — unaffected.
+  if (type === 'email' && (!subject || !subject.trim())) {
+    return NextResponse.json({ error: 'subject_required' }, { status: 400 })
+  }
 
   // Owners can only create customs scoped to their own location. Admins
   // can pass an explicit location_uuid (null for master, uuid for a

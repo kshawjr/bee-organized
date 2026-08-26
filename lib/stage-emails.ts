@@ -413,6 +413,19 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
 
+  // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
+  // subject is NULL/empty, or it renders to nothing. HOLD — send_at stays
+  // intact so the cron retries every tick and it goes out on the first tick
+  // after a subject is saved on the template. Never substitute a
+  // placeholder-subject fallback — that disguised the gap for a month in
+  // July 2026.
+  if (!rendered.subject.trim()) {
+    console.warn('[stage-emails] held: email subject is blank — send held until a subject is set on the template', {
+      rowId: row.id, leadId: lead.id, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_subject' }
+  }
+
   // #114 — wrap the four transactional estimate follow-ups in the branded
   // layout; commercial closed-job templates keep the plain path. The wrapper
   // reads the location chrome (name/phone/reviews) off the same resolved values
@@ -451,7 +464,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   const result = await sendEmail({
     locationId: loc.id,
     to: lead.email.trim(),
-    subject: rendered.subject || `(no subject)`,
+    subject: rendered.subject,
     html,
     text,
     // Notebook context (#103): stage emails share the drip's sendEmail path and

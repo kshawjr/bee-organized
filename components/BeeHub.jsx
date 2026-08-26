@@ -16470,6 +16470,12 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
   const typeConf = { email:{icon:'📧',color:'#6366f1'}, sms:{icon:'💬',color:'#10b981'}, call:{icon:'📞',color:'#f59e0b'} }
   const tc = typeConf[type]
 
+  // issue 316 — an email template can't save without a subject (a blank one
+  // would be rejected by POST /api/templates as subject_required, and every
+  // send quoting it would be HELD at send time). SMS / call templates have no
+  // subject by design, so the gate stays name+body for those.
+  const canSave = !!(name.trim() && body.trim() && (type!=='email' || subject.trim()))
+
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
@@ -16581,7 +16587,7 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
         {/* Footer */}
         <div style={{ padding:'1rem 1.25rem', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'10px', flexShrink:0 }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-          <button onClick={()=>name.trim()&&body.trim()&&onSave({ name, type, subject, body })} disabled={!name.trim()||!body.trim()} style={{ flex:2, padding:'12px', background:name.trim()&&body.trim()?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:name.trim()&&body.trim()?'white':'#9ca3af', cursor:name.trim()&&body.trim()?'pointer':'not-allowed' }}>
+          <button onClick={()=>canSave&&onSave({ name, type, subject, body })} disabled={!canSave} style={{ flex:2, padding:'12px', background:canSave?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canSave?'white':'#9ca3af', cursor:canSave?'pointer':'not-allowed' }}>
             Save Template
           </button>
         </div>
@@ -18168,7 +18174,14 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
           <button onClick={onCancel} disabled={busy} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }}>Cancel</button>
           <button
             onClick={async () => {
-              setBusy(true); setErr('')
+              setErr('')
+              // issue 316 — same checks as the drip step editor: a blank
+              // body/subject would commit, then hold at send time
+              // (no_body_source / missing_subject) — refuse here where the
+              // owner can see why. This rail is email-only.
+              if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
+              if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
+              setBusy(true)
               try { await onSave(subject, body) }
               catch (e) { setErr(String(e?.message || e)); setBusy(false) }
             }}
@@ -32431,6 +32444,12 @@ function DripPathStepEditor({ step, onSave, onClose }) {
       // An empty body would commit, then hold at send time (no_body_source) —
       // refuse here where the owner can see why.
       setLocalErr('The email body can’t be empty.')
+      return
+    }
+    if (!subject || !subject.trim()) {
+      // issue 316 — a blank subject would commit, then hold at send time
+      // (missing_subject) — refuse here where the owner can see why.
+      setLocalErr('The email subject can’t be empty.')
       return
     }
     setSaving(true)

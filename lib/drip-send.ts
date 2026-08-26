@@ -307,6 +307,26 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx)
 
+  // SUBJECT GUARD (issue 316): the resolved subject is blank — the step /
+  // template subject is NULL/empty, or it renders to nothing. HOLD exactly
+  // like the rate / booking-link guards above — row untouched, retried next
+  // tick, so the drip resumes by itself the moment a subject is saved on the
+  // template or step. What never happens again is a client receiving an email
+  // with a literal placeholder subject line — the July 2026 KC incident, where
+  // a fallback here disguised the gap for a month. (A test scans this file to
+  // assert the fallback string never returns, so it is not spelled out here.)
+  if (!rendered.subject.trim()) {
+    console.warn('[drip-send] held: email subject is blank', {
+      leadId: row.lead_id, locationId: loc.id, step: row.current_step,
+    })
+    await recordDripSendStatus(row.lead_id, {
+      status: 'failed',
+      step: row.current_step,
+      error: 'Email subject is blank — send held until a subject is entered on the template or drip step',
+    })
+    return { sent: false, error: 'missing_subject' }
+  }
+
   // #90 — wrap the rendered body in the Bee Organized branded drip layout
   // (logo header, single column, teal footer band). The wrapper reads the
   // location chrome (name/phone/reviews) straight off ctx — the same resolved
@@ -325,7 +345,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     locationId: loc.id,
     senderProjectType: lead.project_type ?? null,
     to: lead.email.trim(),
-    subject: rendered.subject || `(no subject)`,
+    subject: rendered.subject,
     html,
     text,
     // Notebook context (#103). Without these the drip's notification_log row

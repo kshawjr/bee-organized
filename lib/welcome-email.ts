@@ -272,6 +272,20 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
+
+  // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
+  // subject is NULL/empty, or it renders to nothing. HOLD — scheduled_at stays
+  // intact so the cron retries every tick and the welcome goes out on the
+  // first tick after a subject is saved on the template. Never substitute a
+  // placeholder-subject fallback — that disguised the gap for a month in
+  // July 2026.
+  if (!rendered.subject.trim()) {
+    console.warn('[welcome] held: email subject is blank — send held until a subject is set on the template', {
+      leadId, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_subject' }
+  }
+
   // Base HTML is the plain bodyToHtml path — welcome is COMMERCIAL, so it does
   // NOT adopt the #90 branded drip wrapper (#114); the CAN-SPAM footer below is
   // what makes it compliant.
@@ -302,7 +316,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   const result = await sendEmail({
     locationId: loc.id,
     to: lead.email.trim(),
-    subject: rendered.subject || `(no subject)`,
+    subject: rendered.subject,
     html: footered.html,
     text: footered.text,
     // Notebook context (#103): welcome shares the drip's sendEmail path and

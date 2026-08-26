@@ -84,6 +84,12 @@ export async function GET(req: NextRequest) {
   // one. Own counter for the same reason as the rate hold: an expected,
   // self-clearing skip that must never read as a silent drop.
   let heldMissingBookingLink = 0
+  // Sends HELD because the resolved email subject is blank (issue 316 — the
+  // July 2026 "(no subject)" incident). Own counter for the same reason as
+  // the rate / booking-link holds: an expected, self-clearing skip that must
+  // never read as a silent drop. Resumes on the first tick after a subject
+  // is saved on the template or step.
+  let heldMissingSubject = 0
   const errors: Array<{ kind: string; id: string; reason: string }> = []
 
   for (const row of dueRows ?? []) {
@@ -94,6 +100,8 @@ export async function GET(req: NextRequest) {
       heldMissingRate++
     } else if (result.error === 'missing_booking_link') {
       heldMissingBookingLink++
+    } else if (result.error === 'missing_subject') {
+      heldMissingSubject++
     } else if (
       result.error === 'no_email' ||
       result.error === 'non_email_channel' ||
@@ -143,6 +151,8 @@ export async function GET(req: NextRequest) {
         heldMissingRate++
       } else if (result.error === 'missing_booking_link') {
         heldMissingBookingLink++
+      } else if (result.error === 'missing_subject') {
+        heldMissingSubject++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -184,6 +194,8 @@ export async function GET(req: NextRequest) {
         heldMissingRate++
       } else if (result.error === 'missing_booking_link') {
         heldMissingBookingLink++
+      } else if (result.error === 'missing_subject') {
+        heldMissingSubject++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -206,10 +218,14 @@ export async function GET(req: NextRequest) {
   if (heldMissingBookingLink > 0) {
     console.warn(`[cron] ${heldMissingBookingLink} send(s) held: template quotes a booking link but none resolves for the assignee, the location owner, or the location`)
   }
+  if (heldMissingSubject > 0) {
+    console.warn(`[cron] ${heldMissingSubject} send(s) held: email subject is blank — held until a subject is entered on the template or drip step`)
+  }
 
   return NextResponse.json({
     held_missing_rate: heldMissingRate,
     held_missing_booking_link: heldMissingBookingLink,
+    held_missing_subject: heldMissingSubject,
     drips:   { sent, skipped, failed, considered: dueRows?.length ?? 0 },
     welcome: { sent: welcomeSent, skipped: welcomeSkipped, failed: welcomeFailed, considered: welcomeDue?.length ?? 0 },
     stage:   { sent: stageSent,   skipped: stageSkipped,   failed: stageFailed,   considered: stageDue?.length ?? 0 },

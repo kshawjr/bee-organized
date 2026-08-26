@@ -133,6 +133,21 @@ export async function PATCH(
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
   }
 
+  // issue 316 — refuse a patch that would leave an EMAIL template with a
+  // blank subject (it used to accept an explicit blank, silently wiping the
+  // subject; every send quoting it was then disguised as "(no subject)").
+  // The template's type comes from the row already loaded above when the
+  // patch doesn't carry one. Only enforced when the patch touches subject or
+  // type — sms/call templates have no subject by design, and unrelated edits
+  // to other fields stay untouched.
+  if ('subject' in patch || 'type' in patch) {
+    const effectiveType = ('type' in patch ? patch.type : tpl.type) as string | null
+    const effectiveSubject = ('subject' in patch ? patch.subject : tpl.subject) as string | null
+    if (effectiveType === 'email' && (!effectiveSubject || !effectiveSubject.trim())) {
+      return NextResponse.json({ error: 'subject_required' }, { status: 400 })
+    }
+  }
+
   const { data, error } = await supabaseService
     .from('templates')
     .update(patch)
