@@ -55,4 +55,4 @@ Multi-tenant client web app — Next.js + Supabase, with Jobber integration.
 
 ## Context
 - Repo renamed from bee-hub-v2 → bee-organized on 2026-04-20
-- Lives on the flightdeck mini at ~/projects/clients/bee-organized/repo/
+- Repo path on this machine: /Users/kevin/Projects/bee-organized
