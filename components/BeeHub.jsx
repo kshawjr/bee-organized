@@ -13768,27 +13768,50 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
 // issue 199 — the onboarding "Slack" step is a five-screen wizard in the same
 // plain-language shape as the issue 194 lead-emails wizard: intro, a
 // does-your-team-use-Slack question, a three-task checklist the owner ticks off
-// in one visit to Slack, the connect hand-off, and a done confirmation. It is
+// in one visit to Slack, the connect hand-off, and a connected screen. It is
 // FRONT-END ONLY — the connect entry point is SlackCard's verbatim
 // (/api/slack/connect?location_id=…), and the callback stores the channel the
 // owner picks inside Slack's own consent screen, so Bee Hub needs no channel
 // picker and asks for no new permissions.
 //
+// PRIVATE CHANNELS ARE A REAL PATH. Slack's consent-screen picker lists private
+// channels the installing owner belongs to, and owners pick them — lead data in
+// a private channel is a legitimate choice. But the bot posts via
+// chat.postMessage, and chat:write.public only covers PUBLIC channels, so a
+// private channel silently eats every post until someone invites the bot in.
+// The checklist therefore asks public-or-private up front (a SELF-REPORT — the
+// wizard can't see inside Slack), the connect screen shows the matching
+// instructions, and the connected screen proves the pipe with a real test
+// message instead of asserting success. The test button is the same route the
+// SlackCard uses (/api/locations/[id]/slack-test).
+//
 // The owner does the workspace / invite / channel work inside Slack (Bee Hub
 // can't verify any of it until connect), so the three tasks are MANUAL ticks and
-// Continue is gated until all three are checked — nobody reaches connect with no
-// channel to pick. Skip is genuine: Slack is optional and an owner without it
-// advances via onComplete without connecting.
+// Continue is gated until all three are checked AND public/private is answered.
+// Skip is genuine: Slack is optional and an owner without it advances via
+// onComplete without connecting.
 //
 // Resume: the connect hand-off leaves and returns to '/?slack=connected|error'.
 // OnboardingScreen's return handler re-opens this step; because the wizard seeds
-// its first screen from slack_connected, a returning owner lands on the done
-// screen with the real stored channel name. An owner who abandons at Slack's
-// own screen returns to '/?slack=error' (or simply never connects) with
+// its first screen from slack_connected, a returning owner lands on the
+// connected screen with the real stored channel name. The visibility answer is
+// plain useState, so the full-page redirect DROPS it — by construction the
+// connected screen can never depend on the self-report, only on what Slack
+// actually stored plus the live test. An owner who abandons at Slack's own
+// screen returns to '/?slack=error' (or simply never connects) with
 // slack_connected still false and retries cleanly — there is no half-connected
 // state to unwind.
 const SLACK_ADMIN_EMAIL = 'admin@beeorganized.com'
 const SLACK_LEADS_CHANNEL = 'leads'
+// The exact slash command that invites the Bee Hub app into a private channel.
+// The display name comes from the Slack app config (api.slack.com), NOT this
+// repo — if the app is ever renamed there, this one constant is the only place
+// the copy needs to change.
+const SLACK_INVITE_COMMAND = '/invite @Bee Hub Notifications'
+// Slack's own help pages, opened in a new tab beside the checklist.
+const SLACK_HELP_CREATE_CHANNEL = 'https://slack.com/help/articles/201402297-Create-a-channel'
+const SLACK_HELP_WHAT_IS_CHANNEL = 'https://slack.com/help/articles/360017938993-What-is-a-channel'
+const SLACK_HELP_APPS = 'https://slack.com/help/articles/360001537467-Guide-to-apps-in-Slack'
 
 // One-click copy — copies `value`, flips to a check for ~1.5s. Large tap target
 // and plain wording for the 45-65, non-technical audience.
@@ -13854,6 +13877,41 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
   const [tasks, setTasks] = useState({ workspace:false, invite:false, channel:false })
   const toggle = k => setTasks(t => ({ ...t, [k]: !t[k] }))
   const allTicked = tasks.workspace && tasks.invite && tasks.channel
+
+  // Screen 3's public-or-private answer. A SELF-REPORT (Bee Hub can't see the
+  // channel until after connect) that only changes screen 4's instructions —
+  // 'public' | 'private' | null until picked. Deliberately NOT carried past
+  // connect: the redirect drops it, and the connected screen trusts the test
+  // message instead.
+  const [visibility, setVisibility] = useState(null)
+
+  // The connected screen's test-message state. Mirrors SlackCard's sendTest —
+  // same route, same shape — so one click proves token + channel + bot access.
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null) // { ok, msg } | null
+  async function sendTest() {
+    if (!locationId) return
+    setTesting(true); setTestResult(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/slack-test', {
+        method: 'POST',
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        // The route answers in owner-actionable words. Strip any parenthesised
+        // Slack error code (rare, unknown-error case) — this screen stays free
+        // of raw codes; support gets them from the SlackCard instead.
+        const msg = String(j.error || 'The test didn’t arrive.').replace(/\s*\([a-z0-9_]+\)/gi, '')
+        setTestResult({ ok: false, msg })
+        return
+      }
+      setTestResult({ ok: true, msg: j.message || 'Test message sent — go check Slack.' })
+    } catch {
+      setTestResult({ ok: false, msg: 'The test didn’t arrive — something went wrong on the way to Slack.' })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   // Reuse SlackCard's connect entry point verbatim — a full-page redirect into
   // the "Add to Slack" flow. Slack's own consent screen shows the channel picker.
@@ -13938,68 +13996,123 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
     )
   }
 
-  // ── Screen: the three-task checklist ─────────────────────────────────────
-  if (screen === 'checklist') return (
-    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
-      <WizardDots index={2} total={5} />
-      <div>
-        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Three quick things in Slack</p>
-        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>
-          Do these in Slack, then tick each one off here. Open Slack in a new tab
-          and keep this list beside it.
-        </p>
-      </div>
-      <a href={openSlackUrl} target="_blank" rel="noreferrer"
-        style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'7px', width:'100%', padding:'11px', background:'#4a154b', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', textDecoration:'none', boxSizing:'border-box' }}>
-        Open Slack ↗
-      </a>
-
-      <div style={{ display:'grid', gap:'10px' }}>
-        <SlackTaskRow ticked={tasks.workspace} onToggle={()=>toggle('workspace')}
-          title={usesSlack ? '1. Open your Slack workspace' : '1. Create your Slack workspace'}>
-          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
-            {usesSlack
-              ? "Sign in to the workspace your team already uses."
-              : "Use the “Open Slack” button above to make one — it's free and takes a minute."}
+  // ── Screen: the three-task checklist + public/private answer ─────────────
+  if (screen === 'checklist') {
+    // Gate: all three ticks AND a visibility answer. The disabled label names
+    // the thing still missing, in order.
+    const gateReady = allTicked && visibility != null
+    const gateLabel = !allTicked
+      ? 'Tick all three to continue'
+      : visibility == null
+        ? 'Choose public or private'
+        : 'Continue →'
+    const VISIBILITY_CHOICES = [
+      { value:'public',  emoji:'#️⃣', title:'Public — it shows a # icon',
+        blurb:'Anyone in your workspace can find and join it. Bee Hub can post right away.' },
+      { value:'private', emoji:'🔒', title:'Private — it shows a padlock',
+        blurb:'Invitation-only — a fine choice for lead info. One small extra step after you connect.' },
+    ]
+    return (
+      <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+        <WizardDots index={2} total={5} />
+        <div>
+          <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Three quick things in Slack</p>
+          <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>
+            Do these in Slack, then tick each one off here. Open Slack in a new tab
+            and keep this list beside it.{' '}
+            <a href={SLACK_HELP_WHAT_IS_CHANNEL} target="_blank" rel="noreferrer"
+              style={{ color:'#4a154b', fontWeight:600 }}>
+              What’s a channel? ↗
+            </a>
           </p>
-        </SlackTaskRow>
+        </div>
+        <a href={openSlackUrl} target="_blank" rel="noreferrer"
+          style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'7px', width:'100%', padding:'11px', background:'#4a154b', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', textDecoration:'none', boxSizing:'border-box' }}>
+          Open Slack ↗
+        </a>
 
-        <SlackTaskRow ticked={tasks.invite} onToggle={()=>toggle('invite')}
-          title="2. Invite your team — and add this address">
-          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
-            Add your teammates, plus the address below, so our team can help you
-            fix any Slack issues without ever needing your password.
+        <div style={{ display:'grid', gap:'10px' }}>
+          <SlackTaskRow ticked={tasks.workspace} onToggle={()=>toggle('workspace')}
+            title={usesSlack ? '1. Open your Slack workspace' : '1. Create your Slack workspace'}>
+            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+              {usesSlack
+                ? "Sign in to the workspace your team already uses."
+                : "Use the “Open Slack” button above to make one — it's free and takes a minute."}
+            </p>
+          </SlackTaskRow>
+
+          <SlackTaskRow ticked={tasks.invite} onToggle={()=>toggle('invite')}
+            title="2. Invite your team — and add this address">
+            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+              Add your teammates, plus the address below, so our team can help you
+              fix any Slack issues without ever needing your password.
+            </p>
+            <SlackCopyRow value={SLACK_ADMIN_EMAIL} />
+          </SlackTaskRow>
+
+          <SlackTaskRow ticked={tasks.channel} onToggle={()=>toggle('channel')}
+            title="3. Create a channel called “leads”">
+            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+              This is the channel Bee Hub will post each new lead into. Public or
+              private — your call, just answer below so we can point you right.{' '}
+              <a href={SLACK_HELP_CREATE_CHANNEL} target="_blank" rel="noreferrer"
+                style={{ color:'#4a154b', fontWeight:600 }}>
+                How to create a channel ↗
+              </a>
+              {' '}Name it exactly:
+            </p>
+            <SlackCopyRow value={SLACK_LEADS_CHANNEL} />
+          </SlackTaskRow>
+        </div>
+
+        <div>
+          <p style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b' }}>Is your “leads” channel public or private?</p>
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>
+            Both work — look at the icon next to the channel name in Slack.
           </p>
-          <SlackCopyRow value={SLACK_ADMIN_EMAIL} />
-        </SlackTaskRow>
+        </div>
+        <div style={{ display:'grid', gap:'10px' }}>
+          {VISIBILITY_CHOICES.map(c => {
+            const sel = visibility === c.value
+            return (
+              <div key={c.value} onClick={()=>setVisibility(c.value)}
+                style={{ background:'white', borderRadius:'14px', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.08)'}`, padding:'14px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}>
+                <span style={{ fontSize:'24px', flexShrink:0 }}>{c.emoji}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{c.title}</p>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>{c.blurb}</p>
+                </div>
+                <div style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.2)'}`, background:'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  {sel && <div style={{ width:'11px', height:'11px', borderRadius:'50%', background:'#1a2e2b' }} />}
+                </div>
+              </div>
+            )
+          })}
+        </div>
 
-        <SlackTaskRow ticked={tasks.channel} onToggle={()=>toggle('channel')}
-          title="3. Create a public channel called “leads”">
-          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
-            Make sure it's <strong>public</strong> (not private) so your leads can
-            post there. Name it exactly:
-          </p>
-          <SlackCopyRow value={SLACK_LEADS_CHANNEL} />
-        </SlackTaskRow>
+        <div style={{ display:'flex', gap:'8px' }}>
+          <button onClick={()=>setScreen('team')} style={backBtn}>← Back</button>
+          <button onClick={()=>gateReady&&setScreen('connect')} disabled={!gateReady}
+            style={{ flex:1, padding:'11px', background:gateReady?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:gateReady?'white':'#9ca3af', cursor:gateReady?'pointer':'not-allowed' }}>
+            {gateLabel}
+          </button>
+        </div>
       </div>
-
-      <div style={{ display:'flex', gap:'8px' }}>
-        <button onClick={()=>setScreen('team')} style={backBtn}>← Back</button>
-        <button onClick={()=>allTicked&&setScreen('connect')} disabled={!allTicked}
-          style={{ flex:1, padding:'11px', background:allTicked?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:allTicked?'white':'#9ca3af', cursor:allTicked?'pointer':'not-allowed' }}>
-          {allTicked ? 'Continue →' : 'Tick all three to continue'}
-        </button>
-      </div>
-    </div>
-  )
+    )
+  }
 
   // ── Screen: connect ──────────────────────────────────────────────────────
+  // The amber box branches on the screen-3 visibility answer. Public: pick the
+  // channel, double-check the icon. Private: pick the channel, then invite the
+  // bot — private channels are invitation-only and that includes apps, so
+  // without the invite every post dies silently. The green permissions box is
+  // identical on both paths.
   if (screen === 'connect') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
       <WizardDots index={3} total={5} />
       <div>
         <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Connect Bee Hub to Slack</p>
-        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>One tap and you're done. Here's exactly what happens.</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>One tap, and Slack takes it from there. Here's exactly what happens.</p>
       </div>
       <div style={{ background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'12px', padding:'14px' }}>
         <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, marginBottom:'8px' }}>
@@ -14011,13 +14124,38 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
           posts your leads.
         </p>
       </div>
-      <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'12px 14px' }}>
-        <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
-          ⚠️ Slack will ask <strong>which channel</strong> to use — pick your
-          <strong> “leads”</strong> channel. A private channel won't show up in that
-          list, which is why we made it public.
-        </p>
-      </div>
+      {visibility === 'private' ? (
+        <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'12px 14px' }}>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>
+            ⚠️ Two steps for a private channel:
+          </p>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>
+            <strong>1.</strong> Slack will ask <strong>which channel</strong> to
+            use — pick your <strong>“leads”</strong> channel.
+          </p>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
+            <strong>2.</strong> A private channel is <strong>invitation-only</strong>,
+            and that applies to apps too — so invite Bee Hub in. Open your
+            channel in Slack and send this message:
+          </p>
+          <SlackCopyRow value={SLACK_INVITE_COMMAND} />
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'8px' }}>
+            <a href={SLACK_HELP_APPS} target="_blank" rel="noreferrer"
+              style={{ color:'#4a154b', fontWeight:600 }}>
+              How apps work in Slack ↗
+            </a>
+          </p>
+        </div>
+      ) : (
+        <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'12px 14px' }}>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
+            ⚠️ Slack will ask <strong>which channel</strong> to use — pick your
+            <strong> “leads”</strong> channel. Double-check the icon next to the
+            name: <strong>#</strong> means public, a <strong>padlock</strong> means
+            private.
+          </p>
+        </div>
+      )}
       <button onClick={goConnect}
         style={{ width:'100%', padding:'13px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
         Add to Slack
@@ -14026,9 +14164,15 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
     </div>
   )
 
-  // ── Screen: done ─────────────────────────────────────────────────────────
-  // Show the ACTUAL channel Slack handed back (the owner may have picked
-  // something other than "leads"), falling back to a plain phrase if it's blank.
+  // ── Screen: connected ────────────────────────────────────────────────────
+  // Deliberately does NOT assert that lead alerts work — that claim is what let
+  // seven private-channel locations go quiet with a green checkmark. It shows
+  // the ACTUAL channel Slack handed back (never the screen-3 self-report, which
+  // the redirect dropped anyway), then asks the owner to PROVE the pipe with a
+  // test message through the same route the SlackCard uses. A failed test gives
+  // the /invite fix inline; Continue stays available either way (Slack is
+  // optional), but an owner who abandons here without pressing Continue leaves
+  // the step INCOMPLETE in the checklist — a failing setup never shows done.
   const channelLabel = channelName
     ? (channelName.startsWith('#') ? channelName : `#${channelName}`)
     : 'your channel'
@@ -14036,13 +14180,48 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
       <WizardDots index={4} total={5} />
       <div style={{ background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.28)', borderRadius:'14px', padding:'18px', textAlign:'center' }}>
-        <p style={{ fontSize:'34px', marginBottom:'6px' }}>🎉</p>
-        <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Slack is connected!</p>
+        <p style={{ fontSize:'34px', marginBottom:'6px' }}>🔗</p>
+        <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Connected to {channelLabel}</p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6 }}>
-          New leads will now post to <strong>{channelLabel}</strong> the moment
-          they come in.
+          One last thing — let's make sure a message actually lands. Send a
+          test and go see it in Slack.
         </p>
       </div>
+
+      <button onClick={sendTest} disabled={testing}
+        style={{ width:'100%', padding:'13px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:testing?'default':'pointer', opacity:testing?0.7:1 }}>
+        {testing ? 'Sending test…' : 'Send test message'}
+      </button>
+
+      {testResult && testResult.ok && (
+        <div style={{ background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.28)', borderRadius:'12px', padding:'12px 14px' }}>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6 }}>
+            ✅ <strong>Test sent!</strong> Open Slack and look in{' '}
+            <strong>{channelLabel}</strong> — the message should be waiting. If
+            you can see it, your lead alerts will arrive the same way.
+          </p>
+        </div>
+      )}
+
+      {testResult && !testResult.ok && (
+        <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'12px 14px' }}>
+          <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', lineHeight:1.6, marginBottom:'6px' }}>
+            Bee Hub couldn’t post to {channelLabel}.
+          </p>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>{testResult.msg}</p>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
+            If {channelLabel} is <strong>private</strong>, Bee Hub has to be
+            invited before it can post. Open the channel in Slack and send this
+            message, then try the test again:
+          </p>
+          <SlackCopyRow value={SLACK_INVITE_COMMAND} />
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'8px' }}>
+            Still stuck? Email <strong>{SLACK_ADMIN_EMAIL}</strong> and we’ll get
+            it working with you.
+          </p>
+        </div>
+      )}
+
       <button onClick={()=>onComplete()}
         style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
         Continue →
