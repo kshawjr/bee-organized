@@ -80,6 +80,15 @@ export async function POST(
     return NextResponse.json({ error: 'source_not_a_master' }, { status: 400 })
   }
 
+  // issue 316, preventive — Duplicate copies subject verbatim, so a blank
+  // email-template subject would propagate past the POST /api/templates guard
+  // and every send quoting the copy would be HELD (missing_subject). No such
+  // master exists today; refuse before one ever does. Same shape as the POST
+  // guard. Text/call templates have no subject by design — unaffected.
+  if (src.type === 'email' && (!src.subject || !src.subject.trim())) {
+    return NextResponse.json({ error: 'subject_required' }, { status: 400 })
+  }
+
   // Determine target location for the new custom.
   let targetLocation: string | null = null
   if (isAdmin(hubUser.role)) {

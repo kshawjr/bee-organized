@@ -6,10 +6,12 @@
 //
 // Posts an instant Slack alert for an ALLOWLIST of hard failures only —
 // sync_log not_landed, import_jobs failed (excluding user cancels), a
-// GENUINE Jobber token expiry (reauth with no self-heal), and
-// ASSESSMENT_TEAM_MISMATCH breadcrumbs. See lib/failure-alerts for the
-// allowlist rationale and what is deliberately NOT alerted (raw
-// status='error' transients, notification_log test-lead failures).
+// GENUINE Jobber token expiry (reauth with no self-heal),
+// ASSESSMENT_TEAM_MISMATCH breadcrumbs, stranded checkouts (issue 312),
+// failed per-location Slack lead alerts, and emails held ≥6h for a blank
+// subject (issue 316). See lib/failure-alerts for the allowlist rationale
+// and what is deliberately NOT alerted (raw status='error' transients,
+// notification_log EMAIL failures, fresh subject holds, rate/booking holds).
 //
 // DEDUPE. Alerts fire EXACTLY ONCE via a stored watermark (lib/alert-runs,
 // same pattern as recordDigestRun): each run considers only rows created

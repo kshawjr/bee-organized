@@ -37,7 +37,7 @@ export async function PATCH(
   // Load step + the path it belongs to, so we can authorize.
   const { data: step, error: stepErr } = await supabaseService
     .from('drip_path_steps')
-    .select('id, drip_path_id, drip_paths!inner(id, is_master, location_uuid)')
+    .select('id, drip_path_id, channel, master_template_id, drip_paths!inner(id, is_master, location_uuid)')
     .eq('id', params.stepId)
     .maybeSingle()
 
@@ -88,6 +88,34 @@ export async function PATCH(
 
   if (Object.keys(patch).length === 1) {
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
+  }
+
+  // issue 316, server side — a subject edit on an EMAIL step must not leave
+  // it with no subject from any source. The sender resolves
+  // `step.subject ?? template.subject` (nullish, lib/drip-send.ts): patching
+  // subject to NULL is fine WHEN a linked master template supplies a real one
+  // (that restores inheritance — the design), but NULL with no template, or
+  // an empty/whitespace string (which SHADOWS the template), would hold every
+  // send forever. Guarded only when the patch touches subject — subject is
+  // the sole lever here (channel and master_template_id are not editable on
+  // this route), so an untouched-subject edit cannot open the gap.
+  if ('subject' in body && (step as any).channel === 'email') {
+    let effective = patch.subject as string | null
+    if (effective === null && (step as any).master_template_id) {
+      const { data: tpl, error: tplErr } = await supabaseService
+        .from('templates')
+        .select('subject')
+        .eq('id', (step as any).master_template_id)
+        .maybeSingle()
+      if (tplErr) {
+        console.error('[/api/drip-path-steps PATCH] template lookup error', tplErr.message)
+        return NextResponse.json({ error: 'template_lookup_failed' }, { status: 500 })
+      }
+      effective = tpl?.subject ?? null
+    }
+    if (!effective || !effective.trim()) {
+      return NextResponse.json({ error: 'subject_required' }, { status: 400 })
+    }
   }
 
   const { data, error } = await supabaseService

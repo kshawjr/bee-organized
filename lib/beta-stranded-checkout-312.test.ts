@@ -410,7 +410,7 @@ function makeSupabase(byTable: Record<string, any[]>) {
       const b: any = {
         then: (resolve: (v: any) => void) => resolve({ data: byTable[table] ?? [], error: null }),
       }
-      for (const m of ['select', 'eq', 'gt', 'gte', 'lte', 'lt', 'in', 'ilike', 'not', 'or', 'order', 'limit']) {
+      for (const m of ['select', 'eq', 'gt', 'gte', 'lte', 'lt', 'in', 'ilike', 'not', 'or', 'order', 'limit', 'is']) {
         b[m] = (...args: any[]) => { rec.ops.push([m, args]); return b }
       }
       return b

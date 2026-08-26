@@ -250,7 +250,7 @@ function makeSupabase(byTable: Record<string, any[]>) {
       const b: any = {
         then: (resolve: (v: any) => void) => resolve({ data: byTable[table] ?? [], error: null }),
       }
-      for (const m of ['select', 'eq', 'gt', 'gte', 'lte', 'lt', 'ilike', 'not', 'or', 'order', 'limit']) {
+      for (const m of ['select', 'eq', 'gt', 'gte', 'lte', 'lt', 'ilike', 'not', 'or', 'order', 'limit', 'is', 'in']) {
         b[m] = (...args: any[]) => { rec.ops.push([m, args]); return b }
       }
       return b
@@ -335,13 +335,16 @@ describe('cron route + registration pins', () => {
     expect(lib).not.toContain('writeSyncLog(')
   })
 
-  it('is an allowlist: never QUERIES notification_log or send_status', () => {
-    // The doc comment names these as deliberately-excluded, so scope the pin to
-    // actual query surfaces (.from(...) / column filters), not prose.
-    expect(lib).not.toContain("from('notification_log')")
-    expect(lib).not.toContain("'send_status'")
+  it('is an allowlist: the ONLY notification_log read is the slack-failed slice', () => {
+    // The silent-sends rail deliberately opened ONE notification_log slice:
+    // channel='slack' + send_status='failed' (fetchSlackSendFailures). Email
+    // rows stay excluded — pin that the module queries the table exactly once
+    // and that the one query is scoped to that slice, and the route not at all.
+    expect(lib.match(/from\('notification_log'\)/g)).toHaveLength(1)
+    expect(lib).toContain(".eq('channel', 'slack')")
+    expect(lib).toContain(".eq('send_status', 'failed')")
     expect(route).not.toContain("from('notification_log')")
-    // The four allowlisted sources ARE queried.
+    // The original allowlisted sources ARE still queried.
     expect(lib).toContain("from('import_jobs')")
     expect(lib).toContain("from('sync_log')")
     expect(lib).toContain('ASSESSMENT_TEAM_MISMATCH')

@@ -123,6 +123,42 @@ export async function PATCH(
     })
   }
 
+  // issue 316, server side — an EMAIL step must end up with a subject from
+  // SOME source. The sender resolves `step.subject ?? template.subject`
+  // (nullish, lib/drip-send.ts) — so an inline NULL inherits the linked
+  // master template's subject (the design: 10 active steps do exactly this),
+  // while an EMPTY-STRING inline subject SHADOWS the template and the send
+  // holds forever (missing_subject). This guard mirrors that exact rule and
+  // refuses any step whose resolved subject is blank — BEFORE the destructive
+  // delete-then-insert below, so a rejected save leaves the path untouched.
+  // The step editor's own blank check is UI-only; this is the backstop.
+  const inheritingTplIds = Array.from(new Set(
+    stepsIn
+      .filter(s => s.channel === 'email' && s.subject === null && s.master_template_id)
+      .map(s => s.master_template_id as string),
+  ))
+  const tplSubjects = new Map<string, string | null>()
+  if (inheritingTplIds.length) {
+    const { data: tpls, error: tplErr } = await supabaseService
+      .from('templates')
+      .select('id, subject')
+      .in('id', inheritingTplIds)
+    if (tplErr) {
+      console.error('[/api/drip-paths/[id]/steps PATCH] template lookup error:', tplErr.message)
+      return NextResponse.json({ error: 'template_lookup_failed' }, { status: 500 })
+    }
+    for (const t of tpls ?? []) tplSubjects.set(t.id, t.subject ?? null)
+  }
+  for (const s of stepsIn) {
+    if (s.channel !== 'email') continue
+    const effective = s.subject !== null
+      ? s.subject
+      : (s.master_template_id ? tplSubjects.get(s.master_template_id) ?? null : null)
+    if (!effective || !effective.trim()) {
+      return NextResponse.json({ error: 'subject_required', step_order: s.step_order }, { status: 400 })
+    }
+  }
+
   // Two-phase write to avoid bumping into the UNIQUE(drip_path_id, step_order)
   // constraint when reordering: stash incoming step_orders into a high range
   // first by deleting all existing rows, then inserting fresh ones. The DB has

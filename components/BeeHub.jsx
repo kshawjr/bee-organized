@@ -20924,6 +20924,11 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
   const [error, setError]     = useState(null)
   const [toast, setToast]     = useState(null)
   const [managing, setManaging] = useState(false)
+  // Test-message button — result is PERSISTENT text (not a toast): the failure
+  // copy tells the owner what to fix (invite the bot / reconnect) and must
+  // stay readable while they go do it.
+  const [testing, setTesting]       = useState(false)
+  const [testResult, setTestResult] = useState(null) // { ok, msg } | null
 
   const locationId  = settings.location.locId || null
   const connected   = !!settings.location.slackConnected
@@ -20987,6 +20992,29 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
   function goConnect() {
     if (!locationId) { setError('No location id — reload and try again.'); return }
     window.location.href = '/api/slack/connect?location_id=' + encodeURIComponent(locationId)
+  }
+
+  // One click → a plain "this is a test" message lands in the connected
+  // channel, proving the whole path (token, channel, bot access). A failure
+  // comes back as owner-actionable words from the route, shown inline below.
+  async function sendTest() {
+    if (!locationId) { setError('No location id — reload and try again.'); return }
+    setTesting(true); setTestResult(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/slack-test', {
+        method: 'POST',
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setTestResult({ ok: false, msg: j.error || `Test failed (HTTP ${r.status}) — try again.` })
+        return
+      }
+      setTestResult({ ok: true, msg: j.message || 'Test message sent — go check Slack.' })
+    } catch (e) {
+      setTestResult({ ok: false, msg: String(e?.message || e) })
+    } finally {
+      setTesting(false)
+    }
   }
 
   async function doDisconnect() {
@@ -21064,6 +21092,24 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
             style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
             Add to Slack
           </button>
+        )}
+
+        {/* Send test message — proves the whole path (token → channel → bot)
+            with one click. For a broken channel (e.g. a private channel the
+            bot was never invited to) the inline result tells the owner what
+            to do, instead of them finding out from a missed lead. */}
+        {connected && (
+          <div style={{ marginTop:'10px' }}>
+            <button onClick={sendTest} disabled={testing}
+              style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'10px', background:'white', border:'0.5px solid rgba(74,21,75,0.30)', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'#4a154b', cursor:testing?'default':'pointer', opacity:testing?0.6:1 }}>
+              {testing ? 'Sending test…' : 'Send test message'}
+            </button>
+            {testResult && (
+              <p style={{ fontSize:'11px', lineHeight:1.5, marginTop:'7px', color: testResult.ok ? '#16a34a' : '#ef4444' }}>
+                {testResult.msg}
+              </p>
+            )}
+          </div>
         )}
 
         {/* Team invite link — only meaningful once Slack is connected. LOCATION
