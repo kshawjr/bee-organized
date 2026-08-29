@@ -19,7 +19,11 @@ import { withRepliesFallback } from '@/lib/feedback-replies'
 
 export const runtime = 'nodejs'
 
-const VALID_TYPES = new Set(['bug', 'feature'])
+// What an OWNER may file. 'question' joined (migrations/
+// feedback_question_answered.sql) — owners were filing questions as bugs for
+// lack of the option. decision/hazard stay internal-only and MUST NOT appear
+// here; this narrowness is the enforcement.
+const VALID_TYPES = new Set(['bug', 'feature', 'question'])
 
 // Roles allowed to read another user's items via ?user_id=. Matches
 // ELEVATED_ROLES in /api/admin/feedback and ADMIN_ROLES in the attachment
@@ -117,7 +121,7 @@ export async function POST(req: NextRequest) {
 
   const type = String(body.type || '').trim()
   if (!VALID_TYPES.has(type)) {
-    return NextResponse.json({ error: 'type_must_be_bug_or_feature' }, { status: 400 })
+    return NextResponse.json({ error: 'type_must_be_bug_feature_or_question' }, { status: 400 })
   }
 
   const title = String(body.title || '').trim()

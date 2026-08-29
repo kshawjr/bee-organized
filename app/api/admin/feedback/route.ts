@@ -47,7 +47,7 @@ const LOCATION_SCOPED_ROLES = ['owner', 'manager']
 // will diverge further. They are deliberately not shared, and neither points at
 // lib/feedback-types: importing would create exactly the coupling that lets a
 // later tidy-up widen the owner path by accident.
-const VALID_TYPES = new Set(['bug', 'feature', 'decision', 'hazard'])
+const VALID_TYPES = new Set(['bug', 'feature', 'question', 'decision', 'hazard'])
 
 // A THIRD meaning, kept separate for the same reason: what the internal
 // composer below may file. All four are legal here precisely because every row
@@ -56,7 +56,7 @@ const VALID_TYPES = new Set(['bug', 'feature', 'decision', 'hazard'])
 const INTERNAL_FILEABLE_TYPES = new Set(['bug', 'feature', 'decision', 'hazard'])
 
 const VALID_STATUSES = new Set([
-  'submitted', 'under_review', 'planned', 'in_progress', 'shipped', 'declined',
+  'submitted', 'under_review', 'planned', 'in_progress', 'answered', 'shipped', 'declined',
 ])
 
 const MAX_TITLE = 100

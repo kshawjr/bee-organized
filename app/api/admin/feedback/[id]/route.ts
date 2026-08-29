@@ -71,10 +71,21 @@
 //      only covers replying to your OWN item; see the guard for the two cases
 //      rule 4 lets through.
 //
-// TYPE IS NOT PATCHABLE, and neither is is_internal. This route accepts status
-// and admin_response, nothing else. Flipping an existing item's visibility is
-// therefore not possible through the app — a deliberate choice, not an
-// oversight; the reasoning is in the issue 247 step 2 report.
+// TYPE IS NOW PATCHABLE — BY ELEVATED CALLERS, AMONG THE OWNER-VISIBLE THREE.
+// Owners mislabel constantly (questions filed as bugs, bugs filed as ideas),
+// and reclassifying is the whole point of having a question type. The bounds:
+//   · elevated (super_admin/admin) only — an owner/manager sending `type`
+//     gets a 403 naming the field, never a silent drop;
+//   · values limited to 'bug' | 'feature' | 'question'. decision and hazard
+//     stay unreachable from the app: moving a row INTO an internal-only type
+//     is coupled to is_internal (feedback_items_internal_type_check), and
+//     is_internal remains not patchable — that flip stays hand-run SQL with
+//     the CHECK policing it.
+// A type change sends NO email — it is a filing correction, not news.
+//
+// is_internal remains not patchable. Flipping an existing item's visibility is
+// still not possible through the app — deliberate; the reasoning is in the
+// issue 247 step 2 report.
 //
 // notification_log records the send by construction — logging is hooked inside
 // sendEmailDirect, so this rail lands in the notebook exactly like invites and
@@ -96,8 +107,11 @@ const LOCATION_SCOPED_ROLES = ['owner', 'manager']
 // (without is_internal) and the normal one cannot drift apart.
 const TARGET_COLS = 'id, location_id, user_id, type, title, status, admin_response'
 const VALID_STATUSES = new Set([
-  'submitted', 'under_review', 'planned', 'in_progress', 'shipped', 'declined',
+  'submitted', 'under_review', 'planned', 'in_progress', 'answered', 'shipped', 'declined',
 ])
+// What a type may be CHANGED to through the app: the owner-visible three only.
+// See the header — internal-only types are reachable by hand SQL alone.
+const PATCHABLE_TYPES = new Set(['bug', 'feature', 'question'])
 
 // What the caller is told about the notification attempt. 'skipped' carries the
 // reason so the UI can be specific ("no email on file") rather than silent.
@@ -169,7 +183,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  let body: { status?: string; admin_response?: string | null }
+  let body: { status?: string; admin_response?: string | null; type?: string }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
@@ -181,6 +195,22 @@ export async function PATCH(
       return NextResponse.json({ error: 'invalid_status' }, { status: 400 })
     }
     patch.status = body.status
+  }
+
+  // Reclassification — elevated only, owner-visible types only, loud on both
+  // refusals (a silently-dropped field would leave triage believing the
+  // mislabel was fixed). Sends nothing: a filing correction is not news.
+  if (body.type !== undefined) {
+    if (!isElevatedCaller) {
+      return NextResponse.json({ error: 'type_change_requires_admin' }, { status: 403 })
+    }
+    if (!PATCHABLE_TYPES.has(String(body.type))) {
+      return NextResponse.json(
+        { error: 'invalid_type', allowed: Array.from(PATCHABLE_TYPES) },
+        { status: 400 },
+      )
+    }
+    patch.type = body.type
   }
 
   // The reply as it will be stored, and whether it is genuinely new. Both are
@@ -260,7 +290,10 @@ export async function PATCH(
     statusChanged,
     shippedNow,
     callerId: caller!.id,
-    target,
+    // The email's noun ("your report" / "your idea" / "your question") should
+    // speak the type as of THIS save — a reply sent alongside a reclassify
+    // must not call a question a report one last time.
+    target: { ...target, type: patch.type ?? target.type },
     newStatus: patch.status ?? target.status,
   })
 

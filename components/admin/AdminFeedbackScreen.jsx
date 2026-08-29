@@ -57,7 +57,7 @@ import BeeLoader from '@/components/hive/shared/BeeLoader'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import {
   IconBug, IconBulb, IconPlus, IconPaperclip, IconExternalLink,
-  IconChevronRight, IconCheck, IconAlertTriangle, IconSelector,
+  IconChevronRight, IconCheck, IconAlertTriangle, IconSelector, IconMessage,
 } from '@/components/ui/icons'
 // The four-value type vocabulary (issue 247 step 2). Labels and the
 // known-value predicate only — the write validators live in their routes and
@@ -143,11 +143,14 @@ const VERDICTS = [
 // value gets the neutral family and the generic glyph: quiet, never another
 // type's colour.
 const TYPE_ICON = {
-  bug: IconBug, feature: IconBulb, decision: IconSelector, hazard: IconAlertTriangle,
+  bug: IconBug, feature: IconBulb, question: IconMessage, decision: IconSelector, hazard: IconAlertTriangle,
 }
 const TYPE_TONE = {
   bug:      { bg: T.state.danger.soft,  fg: T.state.danger.fg },
   feature:  { bg: T.state.info.soft,    fg: T.state.info.mid },
+  // A question is a conversation — the brand teal, matching its chip family in
+  // lib/feedback-types.
+  question: { bg: T.family.teal.bg,     fg: T.family.teal.text },
   decision: { bg: T.family.purple.bg,   fg: T.family.purple.text },
   hazard:   { bg: T.state.warning.soft, fg: T.state.warning.fg },
 }
@@ -334,7 +337,7 @@ function ContextCard({ item }) {
 // a DRAFT — Kevin edits it and presses Save, and Save is the existing PATCH to
 // /api/admin/feedback/:id, which is the only thing that sends an email. There
 // is no path from a draft to an owner that does not go through this button.
-function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, seedResponse = '', onPrev, onNext, onClose, onSaved }) {
+function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, canChangeType = false, seedResponse = '', onPrev, onNext, onClose, onSaved }) {
   // The conversation so far — thread rows plus the legacy single reply, merged
   // and ordered by lib/feedback-replies. The composer opens itself when the
   // item is owed words: nothing said yet, or the owner spoke last.
@@ -344,6 +347,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
     return t.length === 0 || t[t.length - 1].authorRole === 'owner'
   }
   const [status, setStatus]     = useState(item.status)
+  const [itemType, setItemType] = useState(item.type)
   const [response, setResponse] = useState(seedResponse || '')
   const [composing, setComposing] = useState(() => owesWords(item))
   const [saving, setSaving]     = useState(false)
@@ -355,13 +359,15 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   // item — otherwise the previous item's draft reply follows you.
   useEffect(() => {
     setStatus(item.status)
+    setItemType(item.type)
     setResponse(seedResponse || '')
     setComposing(owesWords(item))
     setError(null)
     setResult(null)
   }, [item.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = status !== item.status || response.trim().length > 0
+  const typeChanged = canChangeType && itemType !== item.type
+  const dirty = status !== item.status || typeChanged || response.trim().length > 0
   // Does Save actually send? The button used to read "Save and send" whenever
   // anything was typed, including the two cases the route refuses to mail —
   // your own item (rule 4) and a submitter with no address on file.
@@ -382,8 +388,11 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
     try {
       // admin_response is only SENT when something was typed. Omitting the key
       // leaves the stored reply untouched — a status-only save must never blank
-      // an existing reply, and must never re-send it either.
+      // an existing reply, and must never re-send it either. Same for type:
+      // sent only when actually changed, so a non-elevated save never trips
+      // the route's admin-only refusal on a value it didn't mean to send.
       const body = { status }
+      if (typeChanged) body.type = itemType
       if (response.trim()) body.admin_response = response.trim()
       const res = await fetch(`/api/admin/feedback/${item.id}`, {
         method: 'PATCH',
@@ -497,6 +506,49 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
                 Attachments ({item.attachments.length})
               </p>
               <FeedbackAttachmentList attachments={item.attachments} thumb={88} />
+            </div>
+          )}
+
+          {/* ── TYPE, correctable ──────────────────────────────────
+              Owners mislabel constantly (a question dressed as a bug is the
+              common case), and fixing the filing IS the triage act — a
+              question marked Fixed later would tell the owner something
+              false. Elevated mounts only (the route refuses everyone else),
+              and only among the owner-visible three: an internal decision or
+              hazard keeps its type, so the control simply doesn't render on
+              one. Saving a type change sends no email. */}
+          {canChangeType && ['bug', 'feature', 'question'].includes(item.type) && (
+            <div>
+              <label style={fieldLabel}>Type</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {[{ k: 'bug', label: 'Bug' }, { k: 'feature', label: 'Idea' }, { k: 'question', label: 'Question' }].map(t => {
+                  const on = itemType === t.k
+                  return (
+                    <button
+                      key={t.k}
+                      type="button"
+                      onClick={() => setItemType(t.k)}
+                      aria-pressed={on}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                        padding: '7px 12px', borderRadius: T.radius.control, fontFamily: 'inherit',
+                        fontSize: '12px', fontWeight: on ? 700 : 500, cursor: 'pointer',
+                        border: on ? 'none' : T.border.control,
+                        background: on ? T.ink.primary : 'transparent',
+                        color: on ? T.ink.inverse : T.ink.secondary,
+                      }}
+                    >
+                      <TypeGlyph type={t.k} size={11} box={18} />
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </div>
+              {typeChanged && (
+                <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '8px', lineHeight: 1.5 }}>
+                  Saving refiles this as {itemType === 'feature' ? 'an idea' : `a ${itemType}`}. Nobody is emailed about a refiling.
+                </p>
+              )}
             </div>
           )}
 
@@ -1306,9 +1358,12 @@ export default function AdminFeedbackScreen({
   const hasUnknownType = useMemo(() => items.some(i => !isKnownFeedbackType(i.type)), [items])
 
   const typeItems = [
-    { key: 'all',     label: 'Everything', count: countType('all') },
-    { key: 'bug',     label: 'Bugs',       count: countType('bug') },
-    { key: 'feature', label: 'Ideas',      count: countType('feature') },
+    { key: 'all',      label: 'Everything', count: countType('all') },
+    { key: 'bug',      label: 'Bugs',       count: countType('bug') },
+    { key: 'feature',  label: 'Ideas',      count: countType('feature') },
+    // Always offered, like Bugs and Ideas — 'question' is owner-fileable, so
+    // its chip must exist before the first one arrives, not after.
+    { key: 'question', label: 'Questions',  count: countType('question') },
     ...INTERNAL_ONLY_TYPES
       .filter(t => presentTypes.has(t))
       .map(t => ({ key: t, label: FEEDBACK_TYPE_TAB_LABEL[t], count: countType(t) })),
@@ -1752,6 +1807,7 @@ export default function AdminFeedbackScreen({
           position={walk.index + 1}
           total={walk.ids.length}
           isOwnItem={!!myId && selectedItem.user_id === myId}
+          canChangeType={canTriage}
           seedResponse={draftSeed && draftSeed.itemId === selectedItem.id ? draftSeed.text : ''}
           onPrev={() => step(-1)}
           onNext={() => step(1)}

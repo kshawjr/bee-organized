@@ -91,12 +91,18 @@ const chipCount = (el: HTMLElement, label: string): number | null => {
 
 // ═══════════════════════════════════════════════════════════════════
 describe('the vocabulary itself', () => {
-  it('knows exactly four types, two of them internal-only', () => {
-    expect([...FEEDBACK_TYPES]).toEqual(['bug', 'feature', 'decision', 'hazard'])
+  it('knows exactly five types, two of them internal-only', () => {
+    // 'question' joined as the third owner-fileable value (migrations/
+    // feedback_question_answered.sql) — and it is NOT internal-only, which is
+    // the pin that matters: the coupling constraint's fail-safe default would
+    // have made it internal by accident.
+    expect([...FEEDBACK_TYPES]).toEqual(['bug', 'feature', 'question', 'decision', 'hazard'])
     expect([...INTERNAL_ONLY_TYPES]).toEqual(['decision', 'hazard'])
     expect(isInternalOnlyType('decision')).toBe(true)
     expect(isInternalOnlyType('hazard')).toBe(true)
     expect(isInternalOnlyType('bug')).toBe(false)
+    expect(isInternalOnlyType('question')).toBe(false)
+    expect(isKnownFeedbackType('question')).toBe(true)
     expect(isKnownFeedbackType('chore')).toBe(false)
   })
 
@@ -117,6 +123,7 @@ describe('the vocabulary itself', () => {
   it('gives an unknown type the neutral family, not another type\'s tone', () => {
     expect(feedbackTypeChipStyle('bug')).toBe('red')
     expect(feedbackTypeChipStyle('feature')).toBe('blue')
+    expect(feedbackTypeChipStyle('question')).toBe('teal')
     expect(feedbackTypeChipStyle('decision')).toBe('purple')
     expect(feedbackTypeChipStyle('hazard')).toBe('amber')
     expect(feedbackTypeChipStyle('chore')).toBe('gray')
@@ -155,14 +162,15 @@ describe('the triage type chips reconcile with Everything', () => {
 
     const bugs = chipCount(el, 'Bugs')
     const ideas = chipCount(el, 'Ideas')
+    const questions = chipCount(el, 'Questions')
     const decisions = chipCount(el, 'Decisions')
     const hazards = chipCount(el, 'Hazards')
     const other = chipCount(el, 'Other')
 
-    expect([bugs, ideas, decisions, hazards, other]).toEqual([2, 1, 2, 1, 1])
+    expect([bugs, ideas, questions, decisions, hazards, other]).toEqual([2, 1, 0, 2, 1, 1])
     // THE INVARIANT. Before this, Bugs + Ideas was 3 against Everything's 7 and
     // nothing on screen said where the other four went.
-    expect((bugs! + ideas! + decisions! + hazards! + other!)).toBe(everything)
+    expect((bugs! + ideas! + questions! + decisions! + hazards! + other!)).toBe(everything)
   })
 
   it('the internal-only chips stay hidden until such an item exists', async () => {
@@ -175,8 +183,11 @@ describe('the triage type chips reconcile with Everything', () => {
     expect(chipCount(el, 'Decisions')).toBeNull()
     expect(chipCount(el, 'Hazards')).toBeNull()
     expect(chipCount(el, 'Other')).toBeNull()
-    // …and the two that are always offered still reconcile on their own.
-    expect(chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')!).toBe(2)
+    // …and the OWNER-fileable chips are always offered — Questions included,
+    // at zero, because the chip must exist before the first question arrives —
+    // and still reconcile on their own.
+    expect(chipCount(el, 'Questions')).toBe(0)
+    expect(chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')! + chipCount(el, 'Questions')!).toBe(2)
   })
 
   it('"Other" appears only when a row carries a type outside the four', async () => {
@@ -184,7 +195,7 @@ describe('the triage type chips reconcile with Everything', () => {
     const el = await mount(known)
     expect(chipCount(el, 'Other')).toBeNull()
     expect(
-      chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')! +
+      chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')! + chipCount(el, 'Questions')! +
       chipCount(el, 'Decisions')! + chipCount(el, 'Hazards')!,
     ).toBe(chipCount(el, 'Everything'))
   })

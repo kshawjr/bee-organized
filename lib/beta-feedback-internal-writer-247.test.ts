@@ -195,7 +195,9 @@ describe('the owner filing path is untouched', () => {
       h.state.inserts = []
       const { status, body } = await ownerPost({ type, title: 't', description: 'd' })
       expect(status).toBe(400)
-      expect(body.error).toBe('type_must_be_bug_or_feature')
+      // The error name widened when 'question' became owner-fileable; the pin
+      // that matters — decision/hazard refused at the owner door — is intact.
+      expect(body.error).toBe('type_must_be_bug_feature_or_question')
       expect(h.state.inserts).toHaveLength(0)
     }
   })

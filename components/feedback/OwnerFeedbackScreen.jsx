@@ -76,12 +76,16 @@ const OWNER_STATUS = {
   under_review: { label: 'Being looked at', family: 'amber' },
   planned:      { label: 'Planned',         family: 'blue'  },
   in_progress:  { label: 'Planned',         family: 'blue'  },
+  // The happy ending for a question (legal on any type): resolved with words,
+  // nothing shipped. Teal, not Fixed's green — both read as "done well", but
+  // "Answered" must never imply something was broken and repaired.
+  answered:     { label: 'Answered',        family: 'teal'  },
   shipped:      { label: 'Fixed',           family: 'green' },
   declined:     { label: 'Not planned',     family: 'gray'  },
 }
 const FALLBACK_STATUS = OWNER_STATUS.submitted
 
-const CLOSED = ['shipped', 'declined']
+const CLOSED = ['answered', 'shipped', 'declined']
 
 export function isDoneItem(item) {
   return CLOSED.includes(String(item?.status || ''))

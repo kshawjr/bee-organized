@@ -40,7 +40,12 @@
 // lib/feedback-queues.
 
 // Every value the database will accept. Mirrors feedback_items_type_check.
-export const FEEDBACK_TYPES = ['bug', 'feature', 'decision', 'hazard'] as const
+// 'question' is the third OWNER-fileable value (migrations/
+// feedback_question_answered.sql): owners were dressing questions as bugs and
+// ideas because the picker offered nothing else, and a question mislabeled as
+// a bug ends up "Fixed" — a false statement about something that was never
+// broken.
+export const FEEDBACK_TYPES = ['bug', 'feature', 'question', 'decision', 'hazard'] as const
 export type FeedbackType = (typeof FEEDBACK_TYPES)[number]
 
 // Enforced in the database by feedback_items_internal_type_check:
@@ -62,6 +67,7 @@ export function isInternalOnlyType(type: unknown): boolean {
 export const FEEDBACK_TYPE_TAB_LABEL: Record<string, string> = {
   bug: 'Bugs',
   feature: 'Ideas',
+  question: 'Questions',
   decision: 'Decisions',
   hazard: 'Hazards',
 }
@@ -72,11 +78,13 @@ export const FEEDBACK_TYPE_TAB_LABEL: Record<string, string> = {
 //
 //   bug      red     — something is broken
 //   feature  blue    — in-motion, the existing "idea" tone
+//   question teal    — a conversation, the brand "engaging" tone
 //   decision purple  — its own category, not an urgency
 //   hazard   amber   — the attention family; a risk wants the warning tone
 export const FEEDBACK_TYPE_CHIP_STYLE: Record<string, string> = {
   bug: 'red',
   feature: 'blue',
+  question: 'teal',
   decision: 'purple',
   hazard: 'amber',
 }

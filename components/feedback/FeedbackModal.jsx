@@ -205,7 +205,7 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
               <div style={{ textAlign:'center', padding:'34px 16px' }}>
                 <div style={{ fontSize:'34px', marginBottom:'10px' }}>📭</div>
                 <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>You haven't submitted anything yet</p>
-                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Switch to the Submit tab to file your first bug report or feature request.</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Switch to the Submit tab to report a problem, share an idea, or ask a question.</p>
               </div>
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
@@ -214,12 +214,20 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
             )
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
-              {/* Type toggle */}
+              {/* Type toggle. The label asks the question an owner can answer
+                  ("What is this?"), and each option is a thing they'd say —
+                  never a cold enum. 'question' joined so a how-do-I stops
+                  having to dress up as a bug (the mislabels were constant, and
+                  a question marked Fixed later is a false statement). */}
               <div>
-                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'7px' }}>Type</label>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'7px' }}>What is this?</label>
                 <div style={{ display:'flex', gap:'8px' }}>
-                  {[{ k:'bug', icon:'🐛', label:'Bug' }, { k:'feature', icon:'✨', label:'Feature' }].map(o => (
-                    <button key={o.k} onClick={() => setType(o.k)} style={{ flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, border:'1.5px solid', borderColor: type === o.k ? '#1a2e2b' : 'rgba(0,0,0,0.1)', background: type === o.k ? '#1a2e2b' : 'white', color: type === o.k ? 'white' : '#4a5e5a' }}>
+                  {[
+                    { k:'bug', icon:'🐛', label:'Something broken' },
+                    { k:'feature', icon:'✨', label:'An idea' },
+                    { k:'question', icon:'❓', label:'A question' },
+                  ].map(o => (
+                    <button key={o.k} onClick={() => setType(o.k)} style={{ flex:1, padding:'10px 6px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, border:'1.5px solid', borderColor: type === o.k ? '#1a2e2b' : 'rgba(0,0,0,0.1)', background: type === o.k ? '#1a2e2b' : 'white', color: type === o.k ? 'white' : '#4a5e5a' }}>
                       {o.icon} {o.label}
                     </button>
                   ))}

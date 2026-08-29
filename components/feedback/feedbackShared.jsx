@@ -16,10 +16,13 @@ const FEEDBACK_STATUS_CONF = {
   under_review: { label:'Under Review', color:'#0C447C', bg:'#E6F1FB' },
   planned:      { label:'Planned',      color:'#3C3489', bg:'#EEEDFE' },
   in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' },
+  // The teal pair (T.family.teal) — a happy ending like Fixed, but the
+  // conversational one: resolved with words, nothing shipped.
+  answered:     { label:'Answered',     color:'#03403C', bg:'#E3EEEC' },
   shipped:      { label:'Shipped',      color:'#27500A', bg:'#EAF3DE' },
   declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' },
 }
-const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
+const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','answered','shipped','declined']
 
 function feedbackTimeAgo(iso) {
   if (!iso) return ''
@@ -112,7 +115,7 @@ function FeedbackAttachmentList({ attachments, thumb = 80 }) {
 // ELEVATED viewer, where Kevin's own internal items do appear.
 //
 // An unrecognised type gets a neutral pin, never another type's glyph.
-const FEEDBACK_TYPE_EMOJI = { bug: '🐛', feature: '✨', decision: '🔀', hazard: '⚠️' }
+const FEEDBACK_TYPE_EMOJI = { bug: '🐛', feature: '✨', question: '❓', decision: '🔀', hazard: '⚠️' }
 function feedbackTypeEmoji(type) {
   return FEEDBACK_TYPE_EMOJI[String(type || '')] || '📌'
 }

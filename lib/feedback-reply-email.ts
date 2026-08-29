@@ -117,7 +117,9 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
   const first = firstNameOf(args.recipientName)
   const greeting = first ? `Hi ${first},` : 'Hi there,'
   const feature = args.itemType === 'feature'
-  const noun = feature ? 'idea' : 'report'
+  // "the question you sent in", never "the report you sent in" about a
+  // question — the same one-noun shift the feature case already makes.
+  const noun = feature ? 'idea' : args.itemType === 'question' ? 'question' : 'report'
   const title = String(args.itemTitle || '').trim() || 'your feedback'
   const reply = String(args.replyText || '').trim()
 

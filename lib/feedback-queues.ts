@@ -53,12 +53,18 @@ export const FEEDBACK_STATUS_PLAIN: Record<string, string> = {
   under_review: 'Looking at it',
   planned: 'Planned',
   in_progress: 'In progress',
+  answered: 'Answered',
   shipped: 'Fixed',
   declined: 'Not planned',
 }
 
 // Terminal statuses. A decision was made; the item is off the books.
-export const CLOSED_FEEDBACK_STATUSES = ['shipped', 'declined'] as const
+// 'answered' is terminal too: it is the truthful ending for anything resolved
+// with words where nothing shipped — a question above all, but legal on any
+// type, because owners mislabel and the answer closes the item either way.
+// Being in this list is what keeps the open count honest: an answered question
+// must not ring the backlog forever for lack of an ending it could wear.
+export const CLOSED_FEEDBACK_STATUSES = ['answered', 'shipped', 'declined'] as const
 
 // The two statuses that mean "picked up, not finished". These are the ones that
 // can go stale — 'submitted' can't (it has never been touched, so its age is
@@ -201,8 +207,16 @@ export function isAwaitingConfirmation(item: FeedbackQueueItem): boolean {
 // so it must not push a known bug down the page.
 //
 // With only bug and feature present this degenerates to exactly the brief.
+//
+// question SLOTS BETWEEN hazard AND decision. The rank orders by the cost of
+// doing nothing today: bug and hazard mean something is (or is about to be)
+// broken; a question means a PERSON is standing still waiting for words —
+// often blocked ("will editing an address mess up Jobber?" blocks the edit) —
+// and is usually minutes to clear; a decision blocks us; a feature costs
+// nothing today. Above decision because the person waiting on a question is a
+// paying owner, and the person waiting on a decision is us.
 export const TRIAGE_TYPE_RANK: Record<string, number> = {
-  bug: 0, hazard: 1, decision: 2, feature: 3,
+  bug: 0, hazard: 1, question: 2, decision: 3, feature: 4,
 }
 export const TRIAGE_TYPE_RANK_UNKNOWN = 9
 
