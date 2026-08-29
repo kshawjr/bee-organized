@@ -42,6 +42,10 @@ export const WEBHOOK_DIGEST_LABELS = ['last 24h', 'last 3h']
 
 // The feedback brief's own label.
 export const FEEDBACK_BRIEF_LABEL = 'feedback brief'
+// The wired unopened-reply alert's own rows: one per POSTED (or attempted)
+// alert, never one per check. Their existence is the "alerted before" state
+// the fire-once-for-the-stock rule reads.
+export const FEEDBACK_UNOPENED_LABEL = 'feedback unopened-reply'
 
 export type DigestRunRow = {
   ran_at: string
@@ -124,6 +128,74 @@ export async function recordFeedbackBriefRun(
     }
   } catch (err: any) {
     console.error('[digest-runs] unexpected feedback brief insert error (non-fatal)', err?.message || err)
+  }
+}
+
+// The two facts the unopened-reply alert decision needs (lib/feedback-unopened):
+//   · lastBriefRunAt — the PREVIOUS brief run's ran_at, i.e. the start of this
+//     run's crossing window (brief rows are written every run, posted or not,
+//     so the windows tile with no gaps);
+//   · unopenedAlertedBefore — has a POSTED unopened alert ever gone out (the
+//     guard on the one-time stock alert). posted=false attempts don't count,
+//     so a failed Slack post retries the stock next run.
+// FAIL-QUIET: on any read error this returns { null, true }, which suppresses
+// the alert entirely for the run (no window → no crossings; alertedBefore →
+// no stock). A read hiccup must never spam the channel with a re-fired stock.
+export async function fetchFeedbackAlertState(): Promise<{
+  lastBriefRunAt: string | null
+  unopenedAlertedBefore: boolean
+}> {
+  try {
+    const [brief, alert] = await Promise.all([
+      supabaseService
+        .from('digest_runs')
+        .select('ran_at')
+        .eq('window_label', FEEDBACK_BRIEF_LABEL)
+        .order('ran_at', { ascending: false })
+        .limit(1),
+      supabaseService
+        .from('digest_runs')
+        .select('id')
+        .eq('window_label', FEEDBACK_UNOPENED_LABEL)
+        .eq('posted', true)
+        .limit(1),
+    ])
+    if (brief.error || alert.error) {
+      const message = brief.error?.message || alert.error?.message
+      if (!isMissingTable(message || '')) {
+        console.error('[digest-runs] alert state read failed (non-fatal)', message)
+      }
+      return { lastBriefRunAt: null, unopenedAlertedBefore: true }
+    }
+    return {
+      lastBriefRunAt: (brief.data && brief.data[0]?.ran_at) || null,
+      unopenedAlertedBefore: !!(alert.data && alert.data.length > 0),
+    }
+  } catch (err: any) {
+    console.error('[digest-runs] unexpected alert state error (non-fatal)', err?.message || err)
+    return { lastBriefRunAt: null, unopenedAlertedBefore: true }
+  }
+}
+
+// One row per unopened-reply alert ATTEMPT. posted records whether Slack took
+// it; message_text keeps what was (or would have been) said.
+export async function recordFeedbackUnopenedRun(
+  post: { ok: boolean; skipped?: string },
+  messageText: string,
+): Promise<void> {
+  try {
+    const { error } = await supabaseService.from('digest_runs').insert({
+      window_label: FEEDBACK_UNOPENED_LABEL,
+      suppressed: false,
+      posted: post.ok,
+      skipped: post.skipped ?? null,
+      message_text: messageText,
+    })
+    if (error && !isMissingTable(error.message)) {
+      console.error('[digest-runs] unopened alert insert failed (non-fatal)', error.message)
+    }
+  } catch (err: any) {
+    console.error('[digest-runs] unexpected unopened alert insert error (non-fatal)', err?.message || err)
   }
 }
 

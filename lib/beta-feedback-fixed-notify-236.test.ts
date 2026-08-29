@@ -217,7 +217,11 @@ describe('the announcement email', () => {
 
   it('invites the correction, since nobody is on the other end of this one', () => {
     expect(built.text).toContain('still doesn’t look right')
-    expect(built.text).toContain('reply to this email')
+    // The door offered is the IN-APP one now — "reply to this email" taught
+    // owners the mailbox, which lands outside the system. The mailbox still
+    // works; it is simply no longer what we advertise when a button exists.
+    expect(built.text).toContain('tell us right on your report')
+    expect(built.text).not.toContain('reply to this email')
   })
 
   it('an idea was BUILT, not fixed', () => {

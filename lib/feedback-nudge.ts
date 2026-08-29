@@ -195,14 +195,16 @@ export function buildAlert(event: FeedbackAlertEvent, triageUrl: string): SlackP
     }
   }
 
-  // The seven-week failure, turned into an alert. An answered item the owner
+  // The seven-week failure, turned into an alert. A replied-to item the owner
   // has never opened is not "done" — it is a message that did not arrive.
+  // ("Replied to", not "answered": Answered is a status now, and this alert is
+  // about ANY unread reply whatever the status.)
   if (event.kind === 'unopened-reply') {
     if (event.count < 1 || event.oldestDays < UNOPENED_REPLY_DAYS) return null
     const body = [
-      `${event.count} answered ${event.count === 1 ? 'report has' : 'reports have'} never been opened by the person who filed ${event.count === 1 ? 'it' : 'them'}.`,
-      `The oldest was answered ${event.oldestDays} days ago.`,
-      `<${triageUrl}|Open triage>`,
+      `${event.count} ${event.count === 1 ? 'report we replied to has' : 'reports we replied to have'} never been opened by the person who filed ${event.count === 1 ? 'it' : 'them'}.`,
+      `The oldest reply went out ${event.oldestDays} days ago.`,
+      `<${triageUrl}|Open Bee Hub>`,
     ]
     return {
       text: 'Feedback — answers nobody has read',

@@ -154,9 +154,23 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
   // reply is a person you can answer, whereas this arrives unattended, and the
   // claim it makes ("it's fixed") is one the reader is the first to be able to
   // check.
+  //
+  // THE DOOR BEING OFFERED IS THE IN-APP ONE. The old copy said "just reply to
+  // this email" — and an email reply lands in the admin@ mailbox, outside the
+  // system, where triage never sees it and the thread never records it. The
+  // in-app reply box (which lands the answer ON the report, in front of
+  // whoever is working it) was never mentioned. The mailbox still works as an
+  // unadvertised fallback — reply-to is unchanged — we just stop teaching it
+  // as the way in. When there is no button to point at (no app URL
+  // configured), the mailbox copy returns: without a door, pointing at one
+  // would be worse.
   const closing = announceOnly
-    ? 'Everything you’ve sent us is in Bee Hub under Feedback. If it still doesn’t look right on your end, just reply to this email and tell us — we would rather hear it twice than not at all.'
-    : "Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. Just reply to this email if you'd like to tell us more."
+    ? (link
+        ? 'Everything you’ve sent us is in Bee Hub under Feedback. If it still doesn’t look right on your end, tap the button above and tell us right on your report — we would rather hear it twice than not at all.'
+        : 'Everything you’ve sent us is in Bee Hub under Feedback. If it still doesn’t look right on your end, just reply to this email and tell us — we would rather hear it twice than not at all.')
+    : (link
+        ? "Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. To answer us, tap the button above and reply right on your report — that way it reaches the person working on it."
+        : "Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. Just reply to this email if you'd like to tell us more.")
 
   const statusLine = !announceOnly && args.statusLabel
     ? `We've also marked it: ${args.statusLabel}.`

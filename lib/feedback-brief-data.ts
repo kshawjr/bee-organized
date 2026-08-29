@@ -28,13 +28,15 @@ type Joined = {
   created_at: string | null
   updated_at: string | null
   admin_response: string | null
+  admin_response_at: string | null
+  reply_seen_at: string | null
   is_internal?: boolean | null
   submitter?: { full_name?: string | null; first_name?: string | null; email?: string | null } | null
   location?: { name?: string | null } | null
 }
 
 const SELECT = `
-  id, type, title, description, status, created_at, updated_at, admin_response, is_internal,
+  id, type, title, description, status, created_at, updated_at, admin_response, admin_response_at, reply_seen_at, is_internal,
   submitter:hub_users!user_id ( full_name, first_name, email ),
   location:locations!location_id ( name )
 `
@@ -86,6 +88,8 @@ function shape(row: Joined): BriefItem {
     created_at: row.created_at,
     updated_at: row.updated_at,
     admin_response: row.admin_response,
+    admin_response_at: row.admin_response_at,
+    reply_seen_at: row.reply_seen_at,
     is_internal: row.is_internal ?? false,
     submitter: s?.full_name || s?.first_name || s?.email || null,
     location: row.location?.name || null,

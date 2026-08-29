@@ -143,11 +143,18 @@ describe('awaitingTeamReply / ownerCanReply', () => {
     expect(awaitingTeamReply({ admin_response: null, replies: [] })).toBe(false)
   })
 
-  it('only the submitter may write back, and only once the team has spoken', () => {
+  it('only the submitter may write back, once the team has spoken — or the item was closed', () => {
     const answered = { user_id: 'owner-9', admin_response: 'Hello.', admin_response_at: null, replies: [] }
     expect(ownerCanReply(answered, 'owner-9')).toBe(true)
     expect(ownerCanReply(answered, 'colleague-2')).toBe(false)
+    // Open and never answered: still no box — "add more to my own report"
+    // remains a different feature.
     expect(ownerCanReply({ user_id: 'owner-9', admin_response: null, replies: [] }, 'owner-9')).toBe(false)
+    // But a CLOSED item invites a reply even with no words on it: the bare
+    // Fixed announcement says "tap the button and tell us right on your
+    // report", and that invitation must have a box behind it.
+    expect(ownerCanReply({ user_id: 'owner-9', status: 'shipped', admin_response: null, replies: [] }, 'owner-9')).toBe(true)
+    expect(ownerCanReply({ user_id: 'owner-9', status: 'shipped', admin_response: null, replies: [] }, 'colleague-2')).toBe(false)
   })
 })
 

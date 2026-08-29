@@ -10,6 +10,10 @@ import React, { useState } from 'react'
 // import this 'use client' file. Re-exported below, so every existing importer
 // of FEEDBACK_STATUS_PLAIN from here keeps working and there is still one home.
 import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
+// The conversation thread + the "does this item invite a reply?" rule — the
+// same builders the owner screen and the triage modal use, so all three
+// surfaces render one history from one definition.
+import { buildFeedbackThread, threadInvitesReply } from '@/lib/feedback-replies'
 
 const FEEDBACK_STATUS_CONF = {
   submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' },
@@ -121,10 +125,47 @@ function feedbackTypeEmoji(type) {
 }
 
 // One card in the "My Items" tab — handles its own show-more collapse.
-function FeedbackItemCard({ item }) {
+//
+// THE THREAD AND THE REPLY BOX LIVE HERE TOO. The reply email's button lands
+// on this tab (the one surface every role can reach), so the promise the email
+// makes — "tap the button and reply right on your report" — has to be true
+// HERE, not only on the owner nav screen. allowReply comes from the mount:
+// false under view-as (those are someone else's items; the server would refuse
+// the write anyway) and for any read-only rendering.
+function FeedbackItemCard({ item, allowReply = false, onReplied = () => {} }) {
   const [expanded, setExpanded] = useState(false)
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyText, setReplyText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [replyError, setReplyError] = useState(null)
   const long = (item.description || '').length > 150
   const shown = !long || expanded ? item.description : `${item.description.slice(0, 150)}…`
+  const thread = buildFeedbackThread(item)
+  const canReply = allowReply && threadInvitesReply(item)
+
+  const sendReply = async () => {
+    const body = replyText.trim()
+    if (!body || sending) return
+    setSending(true)
+    setReplyError(null)
+    try {
+      const res = await fetch(`/api/feedback/${item.id}/replies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const row = await res.json()
+      setReplyText('')
+      setReplyOpen(false)
+      onReplied(item.id, row)
+    } catch {
+      // The words stay in the box — the one failure that must not lose them.
+      setReplyError('Couldn’t send your reply. Please try again.')
+    } finally {
+      setSending(false)
+    }
+  }
   return (
     <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'14px', background:'white' }}>
       <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px', marginBottom:'6px' }}>
@@ -143,13 +184,62 @@ function FeedbackItemCard({ item }) {
           </button>
         )}
       </p>
-      {item.admin_response && (
-        <div style={{ marginTop:'12px', marginLeft:'26px', padding:'10px 12px', background:'rgba(168,201,196,0.14)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px' }}>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>💬 Response from team</p>
-          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{item.admin_response}</p>
-          {item.admin_response_at && (
-            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px' }}>{feedbackTimeAgo(item.admin_response_at)}</p>
-          )}
+      {/* The whole conversation, oldest first — team words and the owner's
+          answers, from the same builder every other surface uses. This used to
+          show only the LATEST team reply (admin_response), which made the
+          email's "reply right on your report" land on a card with no history
+          and no box. */}
+      {thread.map(e => {
+        const team = e.authorRole === 'team'
+        return (
+          <div key={e.id} style={{ marginTop:'12px', marginLeft:'26px', padding:'10px 12px', background: team ? 'rgba(168,201,196,0.14)' : 'rgba(0,0,0,0.035)', border: team ? '1px solid rgba(168,201,196,0.3)' : '1px solid rgba(0,0,0,0.08)', borderRadius:'10px' }}>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>
+              {team ? '💬 Response from team' : 'You replied'}
+            </p>
+            <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{e.body}</p>
+            {e.createdAt && (
+              <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px' }}>{feedbackTimeAgo(e.createdAt)}</p>
+            )}
+          </div>
+        )
+      })}
+      {canReply && !replyOpen && (
+        <button
+          type="button"
+          onClick={() => setReplyOpen(true)}
+          style={{ marginTop:'10px', marginLeft:'26px', padding:0, background:'none', border:'none', color:'#2563eb', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}
+        >
+          Reply to the team
+        </button>
+      )}
+      {canReply && replyOpen && (
+        <div style={{ marginTop:'10px', marginLeft:'26px' }}>
+          <textarea
+            value={replyText}
+            onChange={e => setReplyText(e.target.value)}
+            rows={3}
+            maxLength={2000}
+            placeholder="Write back to the team — they’ll see it on your report."
+            style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }}
+          />
+          {replyError && <p style={{ fontSize:'12px', color:'#b91c1c', margin:'6px 0 0' }}>{replyError}</p>}
+          <div style={{ display:'flex', gap:'8px', marginTop:'7px' }}>
+            <button
+              type="button"
+              onClick={sendReply}
+              disabled={sending || !replyText.trim()}
+              style={{ padding:'8px 14px', background:'#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, cursor:(sending || !replyText.trim()) ? 'default' : 'pointer', opacity:(sending || !replyText.trim()) ? 0.6 : 1 }}
+            >
+              {sending ? 'Sending…' : 'Send reply'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setReplyOpen(false); setReplyError(null) }}
+              style={{ padding:'8px 10px', background:'transparent', border:'none', color:'#8a9e9a', fontFamily:'inherit', fontSize:'13px', fontWeight:500, cursor:'pointer' }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       {Array.isArray(item.attachments) && item.attachments.length > 0 && (

@@ -59,6 +59,11 @@ export interface BriefItem {
   created_at?: string | null
   updated_at?: string | null
   admin_response?: string | null
+  // The two timestamps behind "answered and never opened" — carried so the
+  // unopened-reply alert can decide from the same fetch the brief already
+  // does. The brief itself reads neither.
+  admin_response_at?: string | null
+  reply_seen_at?: string | null
   is_internal?: boolean | null
   submitter?: string | null
   location?: string | null

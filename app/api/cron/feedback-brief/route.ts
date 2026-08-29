@@ -48,8 +48,12 @@ import { postSlackMessage } from '@/lib/slack'
 // issue 309 — Slack carries NEWS, not work. The full brief is no longer posted;
 // buildFeedbackBrief still runs because its counts and its suppression decision
 // drive the nudge, and issue 307 builds on the matcher underneath it.
-import { buildNudge } from '@/lib/feedback-nudge'
-import { recordFeedbackBriefRun } from '@/lib/digest-runs'
+import { buildNudge, buildAlert } from '@/lib/feedback-nudge'
+// The one wired alert of the three built in feedback-nudge: answers nobody has
+// read. The decision (thresholds, fire-once rules) lives in feedback-unopened;
+// this route owns only the state reads, the post, and the record.
+import { decideUnopenedAlert } from '@/lib/feedback-unopened'
+import { recordFeedbackBriefRun, fetchFeedbackAlertState, recordFeedbackUnopenedRun } from '@/lib/digest-runs'
 import screenMap from '@/docs/screen-map.json'
 
 export const runtime = 'nodejs'
@@ -72,10 +76,13 @@ export async function GET(req: NextRequest) {
 
   // ─── Read + build ──────────────────────────────────────────────
   let brief
-  // Hoisted alongside `brief`: the nudge below needs it outside the try.
+  // Hoisted alongside `brief`: the nudge below needs appUrl outside the try,
+  // and the unopened-reply alert needs the raw items.
   let appUrl = ''
+  let briefItems: Awaited<ReturnType<typeof fetchFeedbackForBrief>>['items'] = []
   try {
     const { items, ok, internalSupported } = await fetchFeedbackForBrief()
+    briefItems = items
     if (!ok) {
       // Distinguish a failed read from a genuinely empty queue. Posting
       // "0 open" because the database hiccuped would be a lie in the one
@@ -97,6 +104,40 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     console.error('[cron feedback-brief] build failed', err?.message || err)
     return NextResponse.json({ error: 'feedback_brief_failed' }, { status: 500 })
+  }
+
+  // ─── THE UNOPENED-REPLY ALERT ──────────────────────────────────
+  // Runs on EVERY authorized run, BEFORE the quiet-day suppression below —
+  // deliberately. The brief's suppression asks "did anything arrive or newly
+  // go quiet?", and an unread three-week-old answer is precisely the thing
+  // that happens on days when nothing else does. Its own fire-once rules live
+  // in lib/feedback-unopened; a failure here never takes the brief down.
+  try {
+    const state = await fetchFeedbackAlertState()
+    const decision = decideUnopenedAlert({
+      items: briefItems,
+      lastCheckedAt: state.lastBriefRunAt,
+      alertedBefore: state.unopenedAlertedBefore,
+    })
+    if (decision.event) {
+      const alertPost = buildAlert(decision.event, `${appUrl}/?feedback=1`)
+      if (alertPost) {
+        const sent = await postSlackMessage(alertPost.text, alertPost.attachments)
+        await recordFeedbackUnopenedRun(
+          { ok: sent.ok, skipped: sent.skipped },
+          alertPost.attachments[0]?.text || alertPost.text,
+        )
+        console.log(
+          `[cron feedback-brief] unopened-reply alert posted=${sent.ok} ` +
+            `count=${decision.count} crossed=${decision.crossedCount} (${decision.reason})` +
+            `${sent.skipped ? ` skipped=${sent.skipped}` : ''}`,
+        )
+      }
+    } else {
+      console.log(`[cron feedback-brief] unopened-reply alert: ${decision.reason} (count=${decision.count})`)
+    }
+  } catch (err: any) {
+    console.error('[cron feedback-brief] unopened-reply alert failed (non-fatal)', err?.message || err)
   }
 
   // ─── Suppress a quiet day ──────────────────────────────────────

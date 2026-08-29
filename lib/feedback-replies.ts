@@ -155,17 +155,29 @@ export function awaitingTeamReply(item: FeedbackThreadItem | null | undefined): 
   return thread[thread.length - 1].authorRole === 'owner'
 }
 
+// Does this item invite a reply from its submitter at all? Two doors in:
+//   · the team has written something — a reply is an answer; or
+//   · the item is CLOSED. An ending is itself the team saying something — the
+//     Fixed announcement email explicitly invites "tell us if it still doesn't
+//     look right", and that invitation must have a box behind it even when the
+//     item was marked Fixed with no words (the bare-shipped case).
+// What stays out: "add more to my own OPEN, unanswered report" — a different
+// feature (entry ede746a9 asks for it) and still deliberately not this.
+export function threadInvitesReply(item: FeedbackThreadItem | null | undefined): boolean {
+  if (!item) return false
+  if (buildFeedbackThread(item).some(e => e.authorRole === 'team')) return true
+  return isClosedFeedback(item.status)
+}
+
 // May THIS viewer write into the thread from the owner screen? The submitter
 // only — reply_seen_at is submitter-scoped and the conversation is theirs; a
-// colleague at the same location reads it but does not speak in it. And only
-// once the team has said something: "add more to my own report before anyone
-// answers" is a different feature (entry ede746a9 asks for it) and is not this.
+// colleague at the same location reads it but does not speak in it.
 export function ownerCanReply(
   item: FeedbackThreadItem | null | undefined,
   viewerId: string | null | undefined,
 ): boolean {
   if (!item || !viewerId || item.user_id !== viewerId) return false
-  return buildFeedbackThread(item).some(e => e.authorRole === 'team')
+  return threadInvitesReply(item)
 }
 
 // Re-exported so screen code can gate on closedness without a second import.

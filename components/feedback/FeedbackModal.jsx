@@ -209,7 +209,19 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
               </div>
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
-                {items.map(it => <FeedbackItemCard key={it.id} item={it} />)}
+                {/* allowReply: only for the real session's own items — under
+                    view-as these are the IMPERSONATED user's reports, and the
+                    server would refuse the write anyway (submitter only). */}
+                {items.map(it => (
+                  <FeedbackItemCard
+                    key={it.id}
+                    item={it}
+                    allowReply={!viewAsUserId}
+                    onReplied={(id, row) => setItems(prev => prev.map(i => i.id === id
+                      ? { ...i, replies: [...(Array.isArray(i.replies) ? i.replies : []), row] }
+                      : i))}
+                  />
+                ))}
               </div>
             )
           ) : (
