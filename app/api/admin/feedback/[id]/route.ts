@@ -86,6 +86,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { sendFeedbackReplyEmail } from '@/lib/feedback-reply-email'
 import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 import { isInternalItem, withInternalFallback } from '@/lib/feedback-internal'
+import { isMissingRepliesTable } from '@/lib/feedback-replies'
 
 export const runtime = 'nodejs'
 
@@ -222,6 +223,37 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
   if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+
+  // ─── THE THREAD ROW ─────────────────────────────────────────────────
+  // A genuinely-new reply is ALSO appended to feedback_replies, with its author
+  // — the history admin_response cannot hold (each save overwrites it). The
+  // column keeps being written above exactly as before, as the denormalized
+  // "latest team reply" every existing consumer reads; this row is the record.
+  //
+  // author_role snapshots the voice: elevated callers write as the team;
+  // owner/manager (who may patch their own location's items) write as the
+  // owner side.
+  //
+  // NEVER FATAL. The item update has already landed and the email decision
+  // below must still run — a missing table (migration pending) or a failed
+  // insert degrades to exactly the pre-thread behavior, reported in the log.
+  if (newReplyText) {
+    const { error: threadErr } = await supabaseService
+      .from('feedback_replies')
+      .insert({
+        feedback_item_id: id,
+        author_id: caller!.id,
+        author_role: isElevatedCaller ? 'team' : 'owner',
+        body: newReplyText,
+      })
+    if (threadErr) {
+      if (isMissingRepliesTable(threadErr)) {
+        console.warn('[admin feedback PATCH] feedback_replies table missing — reply stored on the item only (migration pending)')
+      } else {
+        console.error('[admin feedback PATCH] thread insert failed:', threadErr)
+      }
+    }
+  }
 
   const replyEmail = await maybeNotifySubmitter({
     newReplyText,

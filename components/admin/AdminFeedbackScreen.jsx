@@ -83,6 +83,11 @@ import {
 // issue 308 — the paste-ready session prompt. The text and the two tiers live
 // in the lib; this file owns the button, the gesture and the failure path.
 import { buildCopyPrompt, promptTierFor } from '@/lib/feedback-prompt'
+// The conversation thread (feedback_replies + the legacy single-reply merge),
+// shared with the owner screen so both render the same history from the same
+// builder. awaitingTeamReply is the list marker: an owner wrote back and the
+// last word is theirs.
+import { buildFeedbackThread, awaitingTeamReply } from '@/lib/feedback-replies'
 
 // ── the three queues, in the order they should be worked ──────
 // Each card is a filter. `tone` picks the semantic family: the untouched queue
@@ -214,6 +219,13 @@ function ReplyState({ item, internal }) {
       {children}
     </span>
   )
+  // 0. THEY wrote back and the last word is theirs — the loudest state,
+  //    because nothing else about the row changes when an owner replies:
+  //    status stays put, admin_response stays put, and without this line the
+  //    conversation dies exactly where the old footer-link tab buried it.
+  if (!internal && awaitingTeamReply(item)) {
+    return wrap(T.state.warning.deep, 600, <><IconAlertTriangle size={11} /> They replied · needs an answer</>)
+  }
   if (isAnsweredButUnmoved(item)) {
     return wrap(T.state.warning.deep, 600, <><IconAlertTriangle size={11} /> Replied, still marked New</>)
   }
@@ -323,9 +335,17 @@ function ContextCard({ item }) {
 // /api/admin/feedback/:id, which is the only thing that sends an email. There
 // is no path from a draft to an owner that does not go through this button.
 function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, seedResponse = '', onPrev, onNext, onClose, onSaved }) {
+  // The conversation so far — thread rows plus the legacy single reply, merged
+  // and ordered by lib/feedback-replies. The composer opens itself when the
+  // item is owed words: nothing said yet, or the owner spoke last.
+  const thread = buildFeedbackThread(item)
+  const owesWords = (it) => {
+    const t = buildFeedbackThread(it)
+    return t.length === 0 || t[t.length - 1].authorRole === 'owner'
+  }
   const [status, setStatus]     = useState(item.status)
   const [response, setResponse] = useState(seedResponse || '')
-  const [composing, setComposing] = useState(!item.admin_response)
+  const [composing, setComposing] = useState(() => owesWords(item))
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
   const [result, setResult]     = useState(null)
@@ -336,7 +356,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   useEffect(() => {
     setStatus(item.status)
     setResponse(seedResponse || '')
-    setComposing(!item.admin_response)
+    setComposing(owesWords(item))
     setError(null)
     setResult(null)
   }, [item.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -524,30 +544,33 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
             )}
           </div>
 
-          {/* ── THE REPLY ──────────────────────────────────────────
-              An existing reply renders AS A REPLY — read-only, attributed,
-              dated. It used to be prefilled into the textarea, so the owner who
-              opened their own item saw the team's answer as a form field they
-              could overwrite by accident. Writing a new one is a deliberate
-              act behind its own button. */}
+          {/* ── THE CONVERSATION ───────────────────────────────────
+              The whole exchange, oldest first — team words and the owner's
+              answers on one rail, from the same builder the owner screen uses.
+              Read-only prose, never a prefilled form field (the issue 233
+              lesson). Writing the next reply is a deliberate act behind its
+              own button, and it APPENDS — it no longer replaces what was said. */}
           <div>
-            <label style={fieldLabel}>Reply to {item.submitter_name || 'the submitter'}</label>
-            {item.admin_response && (
-              <div style={{ padding: '12px 14px', borderRadius: T.radius.control, background: T.accent.faint, border: T.border.thin, marginBottom: composing ? '10px' : 0 }}>
-                <p style={{ fontSize: '11px', fontWeight: 700, color: T.ink.muted, marginBottom: '5px' }}>
-                  Replied{item.admin_response_at ? ` ${feedbackTimeAgo(item.admin_response_at)}` : ''}
-                </p>
-                <p style={{ fontSize: '13px', color: T.ink.primary, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {item.admin_response}
-                </p>
-              </div>
-            )}
-            {item.admin_response && !composing && (
+            <label style={fieldLabel}>Conversation with {item.submitter_name || 'the submitter'}</label>
+            {thread.map(e => {
+              const team = e.authorRole === 'team'
+              return (
+                <div key={e.id} style={{ padding: '12px 14px', borderRadius: T.radius.control, background: team ? T.accent.faint : T.surface.sunken, border: T.border.thin, marginBottom: '8px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, color: T.ink.muted, marginBottom: '5px' }}>
+                    {team ? 'The team' : (item.submitter_name || 'They')} replied{e.createdAt ? ` ${feedbackTimeAgo(e.createdAt)}` : ''}
+                  </p>
+                  <p style={{ fontSize: '13px', color: T.ink.primary, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {e.body}
+                  </p>
+                </div>
+              )
+            })}
+            {thread.length > 0 && !composing && (
               <button
                 type="button"
                 onClick={() => setComposing(true)}
                 className="bee-small-action"
-                style={{ marginTop: '8px', padding: 0, background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}
+                style={{ marginTop: '2px', padding: 0, background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}
               >
                 Write a new reply
               </button>
@@ -558,7 +581,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
                   value={response}
                   onChange={e => setResponse(e.target.value)}
                   rows={4}
-                  placeholder={item.admin_response ? 'Your new reply replaces the one above.' : 'Write back in plain words — they will read this in an email.'}
+                  placeholder="Write back in plain words — they will read this in an email."
                   style={{ width: '100%', padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, boxSizing: 'border-box', outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
                 />
                 {/* Says exactly what Save will do. The old copy claimed the box

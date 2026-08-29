@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { withInternalFallback } from '@/lib/feedback-internal'
+import { withRepliesFallback } from '@/lib/feedback-replies'
 
 export const runtime = 'nodejs'
 
@@ -107,12 +108,22 @@ export async function GET(req: NextRequest) {
   // is_internal predicate dropped when that column has not been migrated yet
   // (lib/feedback-internal). Everything except that one predicate is identical
   // between the two passes — that is what makes the retry safe to reason about.
-  const buildQuery = (filterInternal: boolean) => {
+  const buildQuery = (filterInternal: boolean, includeReplies: boolean) => {
     // Disambiguate the embeds by FK column — feedback_items has exactly one FK
-    // into hub_users (user_id) and one into locations (location_id).
+    // into hub_users (user_id) and one into locations (location_id). The
+    // replies embed is the conversation thread; it is dropped (and retried
+    // without) while migrations/feedback_replies.sql has not been run. No
+    // author-name embed on the replies, deliberately: this same response feeds
+    // the owner screen, which labels team entries "The team" — author_id is the
+    // stored record, not a display field.
     let query = supabaseService
       .from('feedback_items')
-      .select(`
+      .select(includeReplies ? `
+        *,
+        submitter:hub_users!user_id ( id, full_name, first_name, email ),
+        location:locations!location_id ( id, name ),
+        replies:feedback_replies ( id, author_id, author_role, body, created_at )
+      ` : `
         *,
         submitter:hub_users!user_id ( id, full_name, first_name, email ),
         location:locations!location_id ( id, name )
@@ -150,12 +161,20 @@ export async function GET(req: NextRequest) {
     return query
   }
 
-  const { data, error, internalSupported } = await withInternalFallback<any[]>(
-    async (filterInternal) => await buildQuery(filterInternal),
+  const { data, error, internalSupported, repliesSupported } = await withRepliesFallback<any[], any>(
+    async (includeReplies) =>
+      await withInternalFallback<any[]>(
+        async (filterInternal) => await buildQuery(filterInternal, includeReplies),
+      ),
   )
   if (error) {
     console.error('[admin feedback GET]', error)
     return NextResponse.json({ error: (error as { message?: string })?.message }, { status: 500 })
+  }
+  if (!repliesSupported) {
+    // Pre-migration breadcrumb, same species as the is_internal one below: with
+    // no table, no thread exists, so the threadless read is the complete one.
+    console.warn('[admin feedback GET] feedback_replies table missing — items returned without threads (migration pending)')
   }
   if (!internalSupported && isLocationScopedCaller) {
     // Pre-migration breadcrumb. Not a warning about a leak: with no column, no

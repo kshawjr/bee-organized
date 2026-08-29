@@ -51,6 +51,10 @@ import { FeedbackAttachmentList } from '@/components/feedback/feedbackShared'
 // screen's isUnreadReply keeps its own two clauses (a reply exists, and it is
 // MINE) and delegates only the timestamp test.
 import { isReplyUnseen, hasFeedbackReply } from '@/lib/feedback-queues'
+// The conversation thread (feedback_replies) plus the legacy single-reply
+// merge, and the "may THIS viewer write back?" rule. One home for both — the
+// triage modal renders the same thread from the same builder.
+import { buildFeedbackThread, ownerCanReply } from '@/lib/feedback-replies'
 
 // ── THE FOUR PLAIN WORDS ──────────────────────────────────────
 // Six database statuses, four words an owner would actually use. The mapping
@@ -167,28 +171,33 @@ function StatePill({ status }) {
   )
 }
 
-// ── the reply ─────────────────────────────────────────────────
+// ── the conversation ──────────────────────────────────────────
 // The green rule and the "The team replied, N days ago" line are the two things
-// this screen exists to show. Quoted text, never a form field: issue 233 had
-// already stopped prefilling a reply into an editable textarea on the triage
-// screen, but an owner could still overwrite it. Here there is nothing to
-// overwrite — it is prose.
-function ReplyBlock({ item, isNew }) {
+// this screen exists to show — now once per entry, because a reply can be
+// answered and answered again. Team words render as quoted prose, never a form
+// field (the issue 233 lesson); the viewer's own replies render quieter, on the
+// same rail, so the exchange reads top-to-bottom like the conversation it is.
+//
+// The New pill rides the LAST team entry only — it is the unread marker, and
+// what is unread is the latest thing the team said.
+function ThreadEntry({ entry, item, mine, isNew }) {
+  const team = entry.authorRole === 'team'
+  const who = team
+    ? 'The team replied'
+    : (mine ? 'You replied' : `${item.submitter_name || 'They'} replied`)
+  const accent = team ? T.state.success.fg : T.ink.muted
   return (
     <div style={{
-      background: T.accent.faint,
-      borderLeft: `3px solid ${T.state.success.fg}`,
+      background: team ? T.accent.faint : T.surface.sunken,
+      borderLeft: `3px solid ${accent}`,
       borderRadius: '0 8px 8px 0',
       padding: '11px 14px', marginTop: '11px',
     }}>
       <p style={{
         display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
-        fontSize: '12.5px', fontWeight: 600, color: T.state.success.fg, marginBottom: '3px',
+        fontSize: '12.5px', fontWeight: 600, color: team ? T.state.success.fg : T.ink.secondary, marginBottom: '3px',
       }}>
-        <span>💬 The team replied, {agoPhrase(item.admin_response_at || item.updated_at)}</span>
-        {/* Not in the mockup, and needed once the count is real: the Palm Beach
-            owner has twenty-six answers waiting the first time this screen
-            loads. A banner naming two of them gives no way to find the rest. */}
+        <span>{team ? '💬 ' : ''}{who}{entry.createdAt ? `, ${agoPhrase(entry.createdAt)}` : ''}</span>
         {isNew && (
           <span style={{
             fontSize: '10.5px', fontWeight: 700, padding: '1px 7px',
@@ -199,18 +208,122 @@ function ReplyBlock({ item, isNew }) {
         )}
       </p>
       <p style={{ margin: 0, fontSize: '14.5px', color: T.ink.secondary, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {item.admin_response}
+        {entry.body}
       </p>
     </div>
   )
 }
 
+// ── writing back ──────────────────────────────────────────────
+// The submitter's side of the conversation. Only ever rendered for the person
+// who filed the report (ownerCanReply), and only once the team has said
+// something — answering is what this box is for. POST /api/feedback/:id/replies
+// stores it; no email leaves the app for it, the team sees it on the triage
+// list as "They replied — needs an answer".
+function ReplyComposer({ item, onReplied }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState(null)
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          marginTop: '10px', padding: 0, background: 'none', border: 'none',
+          color: T.accent.fg, fontFamily: 'inherit', fontSize: '13.5px',
+          fontWeight: 600, cursor: 'pointer',
+        }}
+      >
+        Reply to the team
+      </button>
+    )
+  }
+
+  const send = async () => {
+    const body = text.trim()
+    if (!body || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/feedback/${item.id}/replies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const row = await res.json()
+      setText('')
+      setOpen(false)
+      onReplied(item.id, row)
+    } catch {
+      // The words are still in the box — the one failure that must not lose them.
+      setError('Couldn’t send your reply. Please try again.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={3}
+        maxLength={2000}
+        placeholder="Write back to the team — they’ll see it on your report."
+        style={{
+          width: '100%', padding: '10px 12px', border: T.border.thin,
+          borderRadius: '8px', fontSize: '14px', fontFamily: 'inherit',
+          color: T.ink.primary, background: T.surface.raised, boxSizing: 'border-box',
+          outline: 'none', resize: 'vertical', lineHeight: 1.5,
+        }}
+      />
+      {error && <p style={{ fontSize: '12.5px', color: T.state.danger.strong, margin: '6px 0 0' }}>{error}</p>}
+      <div style={{ display: 'flex', gap: '8px', marginTop: '7px' }}>
+        <button
+          type="button"
+          onClick={send}
+          disabled={sending || !text.trim()}
+          style={{
+            padding: '8px 16px', background: T.ink.primary, color: T.ink.inverse,
+            border: 'none', borderRadius: T.radius.control, fontSize: '13.5px',
+            fontFamily: 'inherit', fontWeight: 600,
+            cursor: (sending || !text.trim()) ? 'default' : 'pointer',
+            opacity: (sending || !text.trim()) ? 0.6 : 1,
+          }}
+        >
+          {sending ? 'Sending…' : 'Send reply'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setError(null) }}
+          style={{
+            padding: '8px 12px', background: 'transparent', border: 'none',
+            color: T.ink.muted, fontFamily: 'inherit', fontSize: '13.5px',
+            fontWeight: 500, cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── one card ──────────────────────────────────────────────────
-function ItemCard({ item, myId, expanded, onToggle }) {
+function ItemCard({ item, myId, expanded, onToggle, onReplied }) {
   const mine = !!myId && item.user_id === myId
   const atts = Array.isArray(item.attachments) ? item.attachments : []
-  const replied = hasReply(item)
+  const thread = buildFeedbackThread(item)
+  const replied = thread.length > 0 || hasReply(item)
   const isNew = isUnreadReply(item, myId)
+  // The unread marker rides the LAST team entry — what is unread is the latest
+  // thing the team said, and a second reply makes an already-read item new
+  // again (the timestamp compare in lib/feedback-queues).
+  const lastTeamId = [...thread].reverse().find(e => e.authorRole === 'team')?.id || null
 
   return (
     <div style={{
@@ -257,7 +370,20 @@ function ItemCard({ item, myId, expanded, onToggle }) {
 
       <div style={{ padding: '0 18px 16px' }}>
         {replied
-          ? <ReplyBlock item={item} isNew={isNew} />
+          ? (
+            <>
+              {thread.map(e => (
+                <ThreadEntry
+                  key={e.id}
+                  entry={e}
+                  item={item}
+                  mine={mine}
+                  isNew={isNew && e.id === lastTeamId}
+                />
+              ))}
+              {ownerCanReply(item, myId) && <ReplyComposer item={item} onReplied={onReplied} />}
+            </>
+          )
           : <p style={{ fontSize: '13.5px', color: T.ink.quiet, fontStyle: 'italic', margin: 0 }}>
               Nobody&rsquo;s replied yet.
             </p>}
@@ -450,6 +576,14 @@ export default function OwnerFeedbackScreen({
     return next
   })
 
+  // A sent reply lands in the item's thread in place — no refetch, so the
+  // screen doesn't scroll away from the conversation the person is having.
+  const appendReply = useCallback((itemId, row) => {
+    setItems(prev => prev.map(i => i.id === itemId
+      ? { ...i, replies: [...(Array.isArray(i.replies) ? i.replies : []), row] }
+      : i))
+  }, [])
+
   const subtitle = counts.total === 0
     ? 'Nothing sent in yet'
     : `${counts.open} thing${counts.open === 1 ? '' : 's'} · ${counts.answered} answered · ${counts.waiting} still with the team`
@@ -549,6 +683,7 @@ export default function OwnerFeedbackScreen({
               myId={myId}
               expanded={expanded.has(it.id)}
               onToggle={() => toggle(it.id)}
+              onReplied={appendReply}
             />
           ))}
         </div>

@@ -15,6 +15,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { buildSafeContext, insertFeedbackRow } from '@/lib/feedback-context'
 import { withInternalFallback } from '@/lib/feedback-internal'
+import { withRepliesFallback } from '@/lib/feedback-replies'
 
 export const runtime = 'nodejs'
 
@@ -53,11 +54,16 @@ export async function GET(req: NextRequest) {
   const override = req.nextUrl.searchParams.get('user_id')
   if (override && override !== user.id && isElevatedCaller) targetUserId = override
 
-  const { data, error } = await withInternalFallback<any[]>(
+  // The replies embed carries the conversation thread; it is dropped (and the
+  // read retried without it) until migrations/feedback_replies.sql has run.
+  const { data, error } = await withRepliesFallback<any[], any>(async (includeReplies) =>
+    await withInternalFallback<any[]>(
     async (filterInternal) => {
       let query = supabaseService
         .from('feedback_items')
-        .select('*')
+        .select(includeReplies
+          ? '*, replies:feedback_replies ( id, author_id, author_role, body, created_at )'
+          : '*')
         .eq('user_id', targetUserId)
         .order('created_at', { ascending: false })
       // Defence in depth. This list is ALREADY scoped to a single user_id, so
@@ -70,7 +76,7 @@ export async function GET(req: NextRequest) {
       if (filterInternal && !isElevatedCaller) query = query.eq('is_internal', false)
       return await query
     },
-  )
+  ))
 
   if (error) {
     console.error('[feedback GET]', error)
