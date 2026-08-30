@@ -409,7 +409,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             is the person-scoped first-touch — its ONE edit home. */}
         <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
         <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
-        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
+        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} jobberLinked={!!effJobberClientId} formerAddresses={c.former_addresses || c.formerAddresses || []} />
         <SourceField
           leadId={c.id}
           value={c.source}

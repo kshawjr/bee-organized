@@ -145,3 +145,63 @@ export function diffAddressPatch(
     prevDisplay,
   }
 }
+
+// ─── FORMER ADDRESSES (the two-address feature) ───────────────────────
+//
+// A client's CURRENT address stays in the four columns above, with its
+// Jobber property link in leads.jobber_property_id. When an owner answers
+// "They moved" on an address edit, the address they moved FROM is appended
+// to leads.former_addresses (migrations/lead_former_addresses.sql) —
+// strictly additive history, never edited from the card, each entry
+// carrying the Jobber property it IS so inbound property events can route
+// to it instead of stomping the current address.
+
+export interface FormerAddress {
+  street: string
+  city: string
+  state: string
+  zip: string
+  display: string
+  jobber_property_id: string | null
+  moved_at: string
+}
+
+// The entry the "They moved" branch appends — built from the lead's
+// BEFORE-state (the address being vacated) and its property link at that
+// moment. Returns null when there is nothing worth keeping (a move onto a
+// previously empty address keeps no history).
+export function buildFormerAddress(
+  stored: LeadAddressParts,
+  jobberPropertyId: string | null | undefined,
+  nowIso: string,
+): FormerAddress | null {
+  const display = formatLeadAddress(stored)
+  if (!display) return null
+  return {
+    street: deriveStreet(stored.address, stored),
+    city: String(stored.city ?? '').trim(),
+    state: String(stored.state ?? '').trim(),
+    zip: String(stored.zip ?? '').trim(),
+    display,
+    jobber_property_id: jobberPropertyId ? String(jobberPropertyId) : null,
+    moved_at: nowIso,
+  }
+}
+
+// Tolerant reader — rows predating the migration (or fixtures) read as [].
+export function parseFormerAddresses(raw: unknown): FormerAddress[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((e): e is FormerAddress => !!e && typeof e === 'object' && !!(e as any).display)
+}
+
+// Postgres "column does not exist", named — the lead PATCH's move branch
+// refuses to proceed (calm error, old address never silently dropped)
+// while the migration is pending. Same posture as lib/feedback-internal.
+export function isMissingFormerAddressesColumn(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { code?: unknown; message?: unknown }
+  const msg = String(e.message ?? '').toLowerCase()
+  if (!msg.includes('former_addresses')) return false
+  const code = String(e.code ?? '')
+  return code === '42703' || code === 'PGRST204' || msg.includes('column') || msg.includes('schema cache')
+}

@@ -1272,9 +1272,18 @@ async function handlePropertyCore(
   const propertyNumeric = extractJobberId(propRec.id)
   const clientNumeric   = extractJobberId(propRec.client?.id)
 
-  // Find the matching lead — prefer existing property link, fall back to
-  // the client link (PROPERTY_CREATE typically arrives before we've
-  // backfilled jobber_property_id).
+  // Find the matching lead. Routing order (the two-address feature):
+  //   1. The lead whose CURRENT address IS this property
+  //      (jobber_property_id match) → update the current columns below.
+  //   2. The lead holding this property as a FORMER address → update that
+  //      stored entry only; the current address is a DIFFERENT property
+  //      and must not be stomped.
+  //   3. Client-link fallback, ONLY when that lead has no property link
+  //      yet (the original backfill case: PROPERTY_CREATE arriving before
+  //      jobber_property_id exists). A lead linked to a DIFFERENT
+  //      property is deliberately left alone — before this rule, any
+  //      property event on a multi-property client overwrote the lead's
+  //      address and re-pointed its link at whichever property last fired.
   let lead: { id: string; name: string | null; stage: string | null } | null = null
   if (propertyNumeric) {
     const { data } = await supabaseService
@@ -1285,14 +1294,72 @@ async function handlePropertyCore(
       .maybeSingle()
     if (data) lead = data
   }
+
+  // 2. A former address of some lead? Update the stored entry in place.
+  //    (jsonb containment: [{"jobber_property_id": N}] matches an array
+  //    holding an object with that pair.) Fail-soft pre-migration: the
+  //    filter errors while the column is absent, and nothing can match
+  //    anyway.
+  if (!lead && propertyNumeric) {
+    const { data: formerHolder, error: fhErr } = await supabaseService
+      .from('leads')
+      .select('id, name, stage, former_addresses')
+      .eq('location_id', ctx.location.location_id)
+      .filter('former_addresses', 'cs', JSON.stringify([{ jobber_property_id: propertyNumeric }]))
+      .maybeSingle()
+    if (fhErr) {
+      if (!/former_addresses/i.test(fhErr.message || '')) {
+        console.warn('[jobber-webhook] former-address lookup failed', fhErr.message)
+      }
+    } else if (formerHolder) {
+      const a2 = propRec.address || {}
+      const joined = [a2.street, a2.city, a2.province, a2.postalCode].filter(Boolean).join(', ')
+      const updatedList = (Array.isArray(formerHolder.former_addresses) ? formerHolder.former_addresses : []).map(
+        (e: any) => (e && String(e.jobber_property_id || '') === String(propertyNumeric)
+          ? {
+              ...e,
+              street: a2.street || e.street,
+              city: a2.city || e.city,
+              state: a2.province || e.state,
+              zip: a2.postalCode || e.zip,
+              display: joined || e.display,
+            }
+          : e),
+      )
+      await supabaseService
+        .from('leads')
+        .update({ former_addresses: updatedList, updated_at: new Date().toISOString() })
+        .eq('id', formerHolder.id)
+      return {
+        processed: true,
+        lead_id: formerHolder.id,
+        lead_stage: formerHolder.stage || null,
+        prev_stage: formerHolder.stage || null,
+        note: `${noun}: synced FORMER address entry (property=${propertyNumeric}) on lead ${formerHolder.id}; current address untouched`,
+      }
+    }
+  }
+
+  // 3. Client fallback — unlinked leads only.
   if (!lead && clientNumeric) {
     const { data } = await supabaseService
       .from('leads')
-      .select('id, name, stage')
+      .select('id, name, stage, jobber_property_id')
       .eq('jobber_client_id', clientNumeric)
       .eq('location_id', ctx.location.location_id)
       .maybeSingle()
-    if (data) lead = data
+    if (data) {
+      const linkedElsewhere =
+        !!(data as any).jobber_property_id &&
+        String((data as any).jobber_property_id) !== String(propertyNumeric ?? '')
+      if (linkedElsewhere) {
+        return {
+          processed: true,
+          note: `${noun}: property=${propertyNumeric} is not lead ${data.id}'s linked property (${(data as any).jobber_property_id}) — left alone`,
+        }
+      }
+      lead = { id: data.id, name: data.name, stage: data.stage }
+    }
   }
 
   if (!lead) {

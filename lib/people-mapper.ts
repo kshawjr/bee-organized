@@ -33,6 +33,7 @@ type LeadRow = {
   referred_by_kind: string | null
   referred_by_id: string | null
   addresses: any
+  former_addresses?: any
   jobber_client_id: string | null
   jobber_synced_at: string | null
   paid_amount?: number | null
@@ -332,6 +333,11 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     jobberRef: row.jobber_client_id || null,
     jobberClient: null,
     jobberSearchStatus: row.jobber_client_id ? 'found' : 'not_found',
+    // Addresses this client moved away from (the two-address feature) —
+    // read-only history on the card; tolerant of pre-migration rows.
+    formerAddresses: Array.isArray(row.former_addresses)
+      ? row.former_addresses.filter((e: any) => !!e && typeof e === 'object' && !!e.display)
+      : [],
     // Derived refs for Journey milestone hyperlinks
     requestRef: requestRow?.jobber_request_id || null,
     quoteRef: quoteRow?.jobber_quote_id || null,

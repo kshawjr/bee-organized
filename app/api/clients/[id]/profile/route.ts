@@ -44,11 +44,24 @@ export async function GET(
     return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
   }
 
-  const { data: lead, error: leadError } = await supabaseService
+  // former_addresses rides the select for the card's address history; the
+  // retry drops it while migrations/lead_former_addresses.sql is pending —
+  // the profile must never 500 over a column that only adds history.
+  const PROFILE_COLS =
+    'id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type'
+  let { data: lead, error: leadError } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
+    .select(`${PROFILE_COLS}, former_addresses`)
     .eq('id', id)
     .maybeSingle()
+  if (leadError && /former_addresses/i.test(leadError.message || '')) {
+    console.warn('[client profile] former_addresses column missing — served without history (migration pending)')
+    ;({ data: lead, error: leadError } = await supabaseService
+      .from('leads')
+      .select(PROFILE_COLS)
+      .eq('id', id)
+      .maybeSingle())
+  }
   if (leadError || !lead) {
     return NextResponse.json({ error: 'client_not_found' }, { status: 404 })
   }

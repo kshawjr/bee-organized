@@ -63,6 +63,19 @@ import { composeLeadAddress, deriveStreet, formatLeadAddress, normalizeAddressKe
 
 // The whole-truth suffix from the per-target write-back outcomes.
 // Exported for the toast-truth tests.
+// Toast suffix for a MOVE's Jobber outcome (mirrors syncSuffix's honesty:
+// what landed is said, what failed is said louder).
+export function moveSuffix(mv) {
+  if (!mv) return ''
+  if (mv.created) {
+    return mv.billing === 'failed'
+      ? ' · new Jobber property added (billing update failed)'
+      : ' · new Jobber property added — the old one and its history are untouched'
+  }
+  if (mv.error) return ' · saved here — Jobber property could not be added'
+  return ''
+}
+
 export function syncSuffix(wb) {
   if (!wb) return ''
   const bOk = wb.billing === 'updated' || wb.billing === 'added'
@@ -93,9 +106,16 @@ const INPUT_STYLE = {
   color: T.ink.primary, background: T.surface.raised, outline: 'none', boxSizing: 'border-box',
 }
 
-export default function AddressField({ leadId, value, onSaved = () => {}, setToast = () => {}, readOnly = false }) {
+export default function AddressField({ leadId, value, onSaved = () => {}, setToast = () => {}, readOnly = false, jobberLinked = false, formerAddresses = [] }) {
   // value: { address, city, state, zip } — the lead's four address columns.
+  // jobberLinked: the client exists in Jobber, so a REAL address change has
+  // to ask move-or-correction before anything is pushed (the two cannot be
+  // told apart mechanically — a move across the street diffs like a typo).
+  // formerAddresses: addresses this client moved away from, rendered as
+  // read-only history under the current one.
   const [editing, setEditing] = useState(false)
+  // The move-or-correction question, armed with the cols the save built.
+  const [choice, setChoice] = useState(null) // null | { cols }
   const [street, setStreet] = useState('')
   const [apt, setApt] = useState('')
   const [city, setCity] = useState('')
@@ -121,7 +141,7 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     setErr(null)
     setEditing(true)
   }
-  const cancel = () => { setErr(null); setEditing(false) }
+  const cancel = () => { setErr(null); setChoice(null); setEditing(false) }
 
   async function save() {
     if (saving.current) return
@@ -132,20 +152,38 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     const streetLine = [s, a].filter(Boolean).join(' ')
     const composed = composeLeadAddress({ street: streetLine, city: c, state: st, zip: z })
     if (normalizeAddressKey(composed) === normalizeAddressKey(display)) { cancel(); return } // no real change
+    const cols = { address: composed || null, city: c || null, state: st || null, zip: z || null }
+    // ASK ONLY WHEN IT MATTERS: a Jobber-linked client, a real change, and
+    // an actual previous address being replaced by an actual new one. First
+    // addresses, removals, unlinked clients and formatting-only edits (the
+    // bail above) never see the question.
+    if (jobberLinked && display && composed) {
+      setChoice({ cols })
+      return
+    }
+    await doSave(cols, null)
+  }
+
+  async function doSave(cols, mode) {
+    if (saving.current) return
     saving.current = true
     setBusy(true)
     try {
-      const cols = { address: composed || null, city: c || null, state: st || null, zip: z || null }
       const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cols),
+        body: JSON.stringify(mode ? { ...cols, address_change: mode } : cols),
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setChoice(null)
       setEditing(false)
       onSaved(cols, j)
-      const verb = !display ? 'added' : !composed ? 'removed' : 'updated'
-      setToast({ kind: 'success', msg: `Address ${verb}${syncSuffix(j?.address_writeback)}` })
+      if (mode === 'move') {
+        setToast({ kind: 'success', msg: `Address updated — old address kept on file${moveSuffix(j?.address_move)}` })
+      } else {
+        const verb = !display ? 'added' : !cols.address ? 'removed' : 'updated'
+        setToast({ kind: 'success', msg: `Address ${verb}${syncSuffix(j?.address_writeback)}` })
+      }
     } catch (e) {
       // The standard: never silently drop a draft — stay open with the error.
       setErr(`Save failed: ${e.message}`)
@@ -159,6 +197,46 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
   const keys = (e) => {
     if (e.key === 'Enter') save()
     if (e.key === 'Escape') cancel()
+  }
+
+  if (editing && choice) {
+    // ── MOVE OR CORRECTION ─────────────────────────────────────────
+    // Owner-facing, asked once per qualifying save. The two paths do
+    // different things to Jobber history and cannot be told apart from
+    // the text of the edit — so the person who knows says which it is.
+    const btn = (primary) => ({
+      display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+      padding: '9px 12px', borderRadius: '9px', fontFamily: 'inherit',
+      border: primary ? `1.5px solid ${T.accent.fg}` : T.border.control,
+      background: primary ? T.accent.soft : T.surface.raised,
+    })
+    return (
+      <div onClick={e => e.stopPropagation()} style={{ border: T.border.thin, borderRadius: '10px', padding: '11px 12px', background: T.surface.raised }}>
+        <p style={{ fontSize: '13.5px', fontWeight: 700, color: T.ink.primary, marginBottom: '2px' }}>Did they move?</p>
+        <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, marginBottom: '9px' }}>
+          This client is connected to Jobber, so it matters which kind of change this is.
+        </p>
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <button type="button" disabled={busy} onClick={() => doSave(choice.cols, 'move')} style={btn(true)}>
+            <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: T.ink.primary }}>They moved</span>
+            <span style={{ display: 'block', fontSize: '11.5px', color: T.ink.secondary, lineHeight: 1.45 }}>
+              Keeps the old address and its job history in Jobber. The new address starts fresh.
+            </span>
+          </button>
+          <button type="button" disabled={busy} onClick={() => doSave(choice.cols, 'correction')} style={btn(false)}>
+            <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: T.ink.primary }}>Just fixing the address</span>
+            <span style={{ display: 'block', fontSize: '11.5px', color: T.ink.secondary, lineHeight: 1.45 }}>
+              Corrects it everywhere, including Jobber. Nothing extra is kept.
+            </span>
+          </button>
+        </div>
+        <button type="button" disabled={busy} onClick={() => setChoice(null)}
+          style={{ marginTop: '8px', padding: 0, background: 'none', border: 'none', color: T.ink.muted, fontFamily: 'inherit', fontSize: '12px', cursor: 'pointer' }}>
+          Go back
+        </button>
+        {err && <p style={{ fontSize: '11px', color: T.state.danger.fg, marginTop: '6px' }}>{err}</p>}
+      </div>
+    )
   }
 
   if (editing) {
@@ -207,7 +285,22 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     )
   }
 
+  // Read-only history: the addresses they moved away from, newest last.
+  // Never editable from the card, absent entirely in the common
+  // one-address case — the screen with one address is unchanged.
+  const formerBlock = Array.isArray(formerAddresses) && formerAddresses.length > 0 ? (
+    <div data-meta-row="former-addresses" style={{ paddingLeft: '20px' }}>
+      {formerAddresses.map((f, i) => (
+        <p key={`${f.display}-${i}`} style={{ fontSize: '11.5px', color: T.ink.quiet, margin: '1px 0 0', lineHeight: 1.5 }}>
+          Previously: <span title={f.display}>{f.display}</span>
+          {f.moved_at ? ` · moved ${new Date(f.moved_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : ''}
+        </p>
+      ))}
+    </div>
+  ) : null
+
   return display ? (
+    <>
     <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : 'Edit address'}
       data-meta-row="address"
       style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
@@ -218,6 +311,8 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
       <span style={metaValueStyle} title={display}>{display}</span>
       {!readOnly && <EditPencil />}
     </p>
+    {formerBlock}
+    </>
   ) : readOnly ? null : (
     <p onClick={open} data-meta-row="address"
       style={{ ...metaRowStyle({ tone: 'faint' }), cursor: 'text' }}>
