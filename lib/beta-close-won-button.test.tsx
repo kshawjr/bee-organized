@@ -5,15 +5,18 @@
 // alongside the ··· menu's "Mark as Closed Won": same gate, same wizard.
 //
 // THE GATE (canCloseWon, refined 7/11): stage === 'Final Processing' AND
-// invoicesFullyPaid(invoices) — ≥1 invoice AND every invoice paid. This is
-// the SAME predicate the import's stage derivation keys on to move a done
-// job to Closed Won (lib/engagements.ts → engagementStatus.invoicesFullyPaid),
-// so the button and import can never drift. The empty-invoice case is the
-// FIX: zero invoices = never invoiced = not wrapping up = NO button (the
-// old invoicesSettled([])===true behavior was wrong for this).
+// invoicesSettled(invoices) — every invoice paid or zero balance, and ZERO
+// invoices counts as settled. REVERSED from the earlier ≥1-paid-invoice
+// gate, deliberately: "zero invoices = not wrapping up" turned out to be
+// the assumption that stranded 160 engagements (feedback 8ea772a4,
+// 911d2602, 12db10b9, 5d3fb0ec) — a job finished at no charge, archived
+// without an invoice, or deleted in Jobber is DONE and has nothing to
+// collect, and its owner must be able to close it. Money owed still
+// refuses. The import's auto-close keeps the stricter invoicesFullyPaid;
+// a $0 close is a human's call through the wizard, never automatic.
 //
 //   Final Processing + ≥1 invoice + all paid → button SHOWS (opens wizard)
-//   Final Processing + zero invoices          → NO button (the fix)
+//   Final Processing + zero invoices          → button SHOWS (the $0 close)
 //   Final Processing + an unpaid invoice      → NO button
 //   any non-Final-Processing stage            → NO button
 //   readOnly (any state)                      → NO button
@@ -118,9 +121,9 @@ describe('Ready-to-close button — gate matrix (Final Processing + ≥1 invoice
     expect(wizardOpen(), 'CloseWonWizard opened on click').toBe(true)
   })
 
-  it('does NOT show at Final Processing with ZERO invoices (the fix — un-invoiced is not wrapping up)', async () => {
+  it('SHOWS at Final Processing with ZERO invoices — the stuck-engagement fix ($0 close is the owner\'s call)', async () => {
     await mountPanel(eng(), { ...emptyChildren(), invoices: [] })
-    expect(readyButton()).toBeFalsy()
+    expect(readyButton()).toBeTruthy()
   })
 
   it('does NOT show at Final Processing when an invoice is still owing', async () => {

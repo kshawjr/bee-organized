@@ -105,20 +105,50 @@ export const engagementJobDone = (j: { status?: string | null; completed_at?: st
 const jobUnbooked = (j: { status?: string | null; completed_at?: string | null }) =>
   !j.completed_at && isUnbookedJobStatus(j.status)
 
+// A job DELETED in Jobber (JOB_DESTROY marks the row rather than removing
+// it — the row is the record that work was once agreed). Deleted jobs are
+// invisible to stage classification: they must neither hold an engagement
+// at 'Job in Progress' nor count as done work. When EVERY job is deleted
+// and no invoice exists, the gated branch below closes the deal.
+const jobDeleted = (j: { status?: string | null }) =>
+  (j.status || '').toLowerCase() === 'deleted'
+
 const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null; created_at?: string | null }) =>
   Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
 
 export function deriveEngagementStage(
   children: EngagementChildren,
-  opts: { mode?: 'live' | 'backfill'; nowMs?: number; closeWonOnDone?: boolean; closeOnArchivedQuote?: boolean } = {},
+  opts: { mode?: 'live' | 'backfill'; nowMs?: number; closeWonOnDone?: boolean; closeOnArchivedQuote?: boolean; closeOnDeletedJobs?: boolean } = {},
 ): DerivedStage {
   const mode = opts.mode ?? 'live'
   const now = opts.nowMs ?? Date.now()
   const closeWonOnDone = opts.closeWonOnDone ?? true
   const { sr, quotes, jobs, invoices } = children
 
-  const bookedJobs = jobs.filter(j => !jobUnbooked(j))
-  const unbookedJobs = jobs.filter(jobUnbooked)
+  const liveJobs = jobs.filter(j => !jobDeleted(j))
+  const bookedJobs = liveJobs.filter(j => !jobUnbooked(j))
+  const unbookedJobs = liveJobs.filter(jobUnbooked)
+
+  // Every job deleted in Jobber, nothing invoiced → the agreed work was
+  // removed at the source; the deal did not happen. Closed Lost with its
+  // own reason (never Won — deletion is not evidence of completed work,
+  // and a mistaken close is one Reopen away, which Closed Lost supports).
+  // Gated exactly like the archived-quote close: ONLY the automated
+  // advance path (webhook + import) may trigger it, so a human reopen is
+  // never re-closed by the next drift recovery. The forward-only rank
+  // guard in the caller keeps an already-terminal row untouched.
+  if (
+    opts.closeOnDeletedJobs &&
+    jobs.length > 0 &&
+    invoices.length === 0 &&
+    jobs.every(jobDeleted)
+  ) {
+    return {
+      stage: 'Closed Lost',
+      closed_reason: 'job_deleted',
+      closed_at: new Date(now).toISOString(),
+    }
+  }
 
   // #117 — archived-quote close. An archived quote is Jobber's lost/dead
   // state (quote-status-map.ts: ARCHIVED → 'archived'). When EVERY quote on
@@ -143,7 +173,7 @@ export function deriveEngagementStage(
   if (
     opts.closeOnArchivedQuote &&
     quotes.length > 0 &&
-    jobs.length === 0 &&
+    liveJobs.length === 0 &&
     invoices.length === 0 &&
     quotes.every(q => (q.status || '').toLowerCase() === 'archived')
   ) {
@@ -810,7 +840,7 @@ export async function maybeAdvanceEngagementStage(
     // an archived quote closes the deal. Its own guard (all quotes archived,
     // no jobs, no invoices) makes it inert on job/invoice events. Reopen and
     // drift recovery call deriveEngagementStage directly WITHOUT this flag.
-  }, { mode, closeWonOnDone, closeOnArchivedQuote: true })
+  }, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: true })
 
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const patch: Record<string, any> = {
@@ -838,6 +868,9 @@ export async function maybeAdvanceEngagementStage(
     }
     if (derived.closed_reason === 'quote_archived') {
       patch.closed_note = 'Closed automatically: the quote was archived in Jobber (#117).'
+    }
+    if (derived.closed_reason === 'job_deleted') {
+      patch.closed_note = 'Closed automatically: the job was deleted in Jobber and nothing was invoiced. Reopen if this deal is still live.'
     }
     if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
   }

@@ -1193,10 +1193,46 @@ export function handleQuoteDestroy(ctx: HandlerCtx) {
   return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'QUOTE_DESTROY')
 }
 
-// JOB_DESTROY → null jobber_job_id
-export function handleJobDestroy(ctx: HandlerCtx) {
+// JOB_DESTROY → null jobber_job_id on the lead, AND mark the jobs row(s)
+// deleted + re-derive their engagement.
+//
+// Before this, the jobs ROW was left untouched at its last known status —
+// so a job deleted mid-flight froze its engagement at 'Job in Progress'
+// forever (nothing re-derived, and the frozen 'upcoming' row read as live
+// work), and a deleted done-job kept reading as done. Marking the row
+// 'deleted' (never removing it — it is the record that work was once
+// agreed) makes it invisible to stage classification, and the re-derive
+// closes an all-deleted, never-invoiced engagement as Closed Lost
+// ('job_deleted', Reopen-able) through the same gated advance path the
+// archived-quote close uses. Fail-soft: the row marking and re-derive
+// never fail the webhook — the lead nullify above already landed.
+export async function handleJobDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.JOB_DESTROY
-  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'JOB_DESTROY')
+  const res = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'JOB_DESTROY')
+  try {
+    const { data: rows, error } = await supabaseService
+      .from('jobs')
+      .select('id, engagement_id, status')
+      .eq('jobber_job_id', ctx.itemId)
+      .eq('location_id', ctx.location.location_id)
+    if (error) throw new Error(error.message)
+    for (const row of rows || []) {
+      await supabaseService
+        .from('jobs')
+        .update({ status: 'deleted', updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (row.engagement_id) await maybeAdvanceEngagementStage(row.engagement_id)
+    }
+    if (rows?.length) {
+      res.note = `${res.note || 'JOB_DESTROY'}; marked ${rows.length} job row(s) deleted + re-derived engagement`
+    }
+  } catch (err: any) {
+    console.warn('[jobber-webhook] JOB_DESTROY job-row cleanup failed (webhook still processed)', {
+      itemId: ctx.itemId,
+      error: err?.message || String(err),
+    })
+  }
+  return res
 }
 
 // INVOICE_DESTROY → null jobber_invoice_id

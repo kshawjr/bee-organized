@@ -79,9 +79,10 @@ import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
+import { invoicesSettled } from './shared/closeEngagement'
 import ClosedSummary from './shared/ClosedSummary'
 import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
-import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage, invoicesFullyPaid } from './shared/engagementStatus'
+import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
 import { recordJobberUrl, jobberClientUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
 import BeeLoader from './shared/BeeLoader'
@@ -452,14 +453,24 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   }
 
   // Won is offered ONLY at the final working stage (Final Processing — the
-  // invoicing stage, the last non-terminal rank) AND only once the money is
-  // in: the SAME predicate the import's stage derivation keys on to move a
-  // done job to Closed Won (invoicesFullyPaid — ≥1 invoice AND every invoice
-  // paid; engagementStatus.js), so the button/menu gate and import can never
-  // drift. An engagement with ZERO invoices is NOT wrapping up (never
-  // invoiced) — hence length>0 is required, unlike the wizard's looser
-  // invoicesSettled display check. Absent — not disabled — everywhere else.
-  const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesFullyPaid(children.invoices || [])
+  // last non-terminal rank) AND only when no money is outstanding:
+  // invoicesSettled (closeEngagement.js) — every invoice paid or zero
+  // balance, and ZERO invoices counts as settled. That last clause is the
+  // fix for the stuck-at-Final-Processing reports (feedback 8ea772a4,
+  // 911d2602, 12db10b9, 5d3fb0ec): a job finished at no charge, archived
+  // without an invoice, or deleted in Jobber produces a done engagement
+  // with NO invoices, and the old gate (invoicesFullyPaid — ≥1 invoice all
+  // paid) made such deals permanently uncloseable. 160 engagements across
+  // 19 locations were stranded this way when the gate changed.
+  //
+  // The wizard was ALWAYS ready for this case (its own settled check reads
+  // invoicesSettled and its invoice step says "No invoices outstanding");
+  // only this gate disagreed. An UNPAID invoice still refuses — money owed
+  // is the one thing that must keep a deal open. The import's derivation
+  // keeps invoicesFullyPaid untouched: auto-close still requires real paid
+  // invoices; a human confirming a $0 outcome is exactly what the button +
+  // wizard are for.
+  const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesSettled(children.invoices || [])
 
   // Masthead ··· menu items — grows with more record actions later.
   // Visibility rules (beta-record-menu-visibility pin):
@@ -952,9 +963,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       )}
 
       {/* READY-TO-CLOSE cue — the primary, obvious win path. Surfaces
-          ONLY when canCloseWon (Final Processing + ≥1 invoice all paid —
-          the import's own wrapping-up-settled rule): the deal is done and
-          the money is in, so we say so and offer the win in one tap. This
+          ONLY when canCloseWon (Final Processing + invoices settled: every
+          invoice paid or zero balance, zero invoices included): the deal is
+          done and no money is outstanding, so we offer the win in one tap. This
           button is the SOLE Close-Won affordance — the ··· menu no longer
           carries a "Mark as Closed Won" item. Opens the EXISTING CloseWonWizard
           (setWizard('won')) — same commit + confetti path. readOnly hides
