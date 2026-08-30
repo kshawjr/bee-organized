@@ -25,43 +25,14 @@
 //     hub_user can ask for help).
 
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { buildSystem } from '@/lib/help-chat-prompt'
 
 // The fast Sonnet — see components/hive/shared (help chat). Concise how-to
 // answers for a non-technical audience; thinking off keeps it snappy.
 const MODEL = 'claude-sonnet-5'
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const MAX_HISTORY = 12 // last N turns kept — a help chat needs no long memory
-const MAX_SCREEN_CHARS = 6000
 const MAX_QUESTION_CHARS = 4000
-
-const SYSTEM_BRIEF = [
-  'You are the in-app help assistant for Bee Hub, a franchise CRM.',
-  'Answer how-to questions clearly for a non-technical audience (franchise',
-  'owners, roughly 45-65). Be concise, plain-language, and warm.',
-  '',
-  'You can EXPLAIN how to do things, but you CANNOT take actions on the',
-  "user's behalf. If asked to do something (transfer a lead, send an email,",
-  'change a setting), never claim you did it — explain, step by step, how the',
-  'user can do it themselves in the app.',
-  '',
-  'Base your answers on the CURRENT SCREEN context provided below. It is a',
-  'live readout of what is actually on the screen right now. If the context',
-  "does not tell you the answer, say so plainly and suggest where they might",
-  'look (e.g. "try the Settings screen" or "the ··· menu on that card").',
-  'Keep answers short — a sentence or a few short steps. No preamble.',
-].join('\n')
-
-function buildSystem(screen: { name?: string; detail?: string } | null): string {
-  const name = (screen?.name || 'Bee Hub').toString().slice(0, 200)
-  const detail = (screen?.detail || '').toString().slice(0, MAX_SCREEN_CHARS)
-  return [
-    SYSTEM_BRIEF,
-    '',
-    '── CURRENT SCREEN ──',
-    `The user is on: ${name}`,
-    detail ? `\nWhat is visible on this screen right now:\n${detail}` : '(No extra on-screen detail was captured.)',
-  ].join('\n')
-}
 
 export async function POST(req: Request) {
   // Auth — any signed-in hub_user may use the help chat (no role gate).
