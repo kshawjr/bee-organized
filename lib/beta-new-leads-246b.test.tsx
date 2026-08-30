@@ -278,17 +278,25 @@ describe('who is told is a switch, and the send path reads it', () => {
     expect(emails).toContain('legacy@outside.test')
   })
 
-  it('who is told is INDEPENDENT of job types — a handler muted still handles', async () => {
+  it('a muted handler is STILL TOLD about their own leads — the assignee is always emailed', async () => {
+    // REVERSED 2026-08-30 (Kevin, option c for Lynette's 279fcfbf). This pin
+    // used to assert the opposite — told: no, assigned: yes — the "still
+    // assigned these, just not emailed" state. That state is now impossible:
+    // there is no second channel, so an untold assignee never learns the lead
+    // exists. The switch still governs every lead NOT assigned to them.
     rows.location_project_type_senders = [handlerRow('Moving/Relocation', 'u-carol', 'Carol Kern', 'carol@bee.test')]
     rows.lead_notification_prefs = [
       { location_id: LOC, hub_user_id: 'u-carol', category: 'all', subscribed: false },
     ]
     const { resolveLeadRecipients } = await import('@/lib/notification-recipients')
     const { resolveLeadAssignees } = await import('@/lib/lead-assignment')
-    const told = (await resolveLeadRecipients(LOC, { project_type: 'Moving/Relocation' })).map(r => r.email)
+    const told = (await resolveLeadRecipients(LOC, { project_type: 'Moving/Relocation' })).map(r => r.email).sort()
     const assigned = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
-    expect(told).not.toContain('carol@bee.test')     // not told
-    expect(assigned.hubUserIds).toEqual(['u-carol']) // still handles
+    expect(told).toEqual(['carol@bee.test', 'lynette@bee.test']) // told after all
+    expect(assigned.hubUserIds).toEqual(['u-carol'])             // still handles
+    // …but her switch still covers leads assigned to someone ELSE:
+    const other = (await resolveLeadRecipients(LOC, { project_type: 'Home or Office Organizing' })).map(r => r.email)
+    expect(other).toEqual(['lynette@bee.test'])
   })
 
   it('project type does NOT filter the notify list any more', async () => {
@@ -489,14 +497,34 @@ describe('the New leads section', () => {
   })
 
   it('a handler with notifications OFF still shows as a handler, and says so', async () => {
-    // The exact case an owner needs to see before they flip the switch.
+    // COPY REVERSED 2026-08-30 with the assignee-always-told rule: it used to
+    // read "still assigned these, just not emailed" — a state that no longer
+    // exists. Off now means off for OTHER leads only.
     await mountSection(HANDLER_CFG, {
       ...NOTIF_CFG,
       users: [NOTIF_CFG.users[0], { ...NOTIF_CFG.users[1], subscribed: false }],
     })
     const line = container.querySelector('[data-handles="carol@bee.test"]')
     expect(line!.textContent).toContain('Moving/Relocation')
-    expect(line!.textContent).toContain('still assigned these, just not emailed')
+    expect(line!.textContent).toContain('still emailed about these; the switch only covers other leads')
+    expect(line!.textContent).not.toContain('just not emailed')
+  })
+
+  it('an OWNER with notifications OFF is told their no-handler leads still email them', async () => {
+    // The owner is the fallback assignee for anything without a handler, so
+    // their off-switch narrows them to those leads — it cannot silence them.
+    await mountSection(HANDLER_CFG, {
+      ...NOTIF_CFG,
+      users: [{ ...NOTIF_CFG.users[0], subscribed: false }, NOTIF_CFG.users[1]],
+    })
+    const note = container.querySelector('[data-owner-note="lynette@bee.test"]')
+    expect(note, 'the owner-off note renders').toBeTruthy()
+    expect(note!.textContent).toContain('without a handler')
+    expect(note!.textContent).toContain('still email')
+    // …and it does NOT render while the owner is on.
+    await act(async () => { root.unmount() })
+    await mountSection(HANDLER_CFG, NOTIF_CFG)
+    expect(container.querySelector('[data-owner-note="lynette@bee.test"]')).toBeFalsy()
   })
 
   it('toggling a person off PATCHes subscribed, not a category', async () => {

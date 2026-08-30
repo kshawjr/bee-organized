@@ -20,6 +20,7 @@
 
 import { supabaseService } from './supabase-service'
 import { getZohoLocationNotificationContacts } from './zoho'
+import { resolveLeadAssignees } from './lead-assignment'
 
 // Legacy single-value categories (B1). Retained for the API's backward-compat
 // validation and for tests; the unified UI now writes a project-type SET (or
@@ -228,9 +229,10 @@ export async function getNotificationConfig(
 // Effective SEND list (B2 calls this). PRECEDENCE:
 //   1. If the location has ANY in-interface recipients (owner/manager hub_users
 //      or externals — B1 tables), use those: subscribed users + all externals,
-//      flattened. Zoho is NOT consulted. An all-unsubscribed interface location
-//      returns [] deliberately (the owner turned everyone off) — we do NOT
-//      resurrect Zoho contacts behind their back.
+//      flattened, PLUS the lead's assignee whether subscribed or not (the
+//      2026-08-30 rule — see resolveLeadRecipients). Zoho is NOT consulted.
+//      An all-unsubscribed interface location still reaches its assignee and
+//      nobody else — we do NOT resurrect Zoho contacts behind their back.
 //   2. ELSE (a non-interface location — no hub_users at all) fall back to the
 //      location's Zoho Contacts related list, so B2's send transparently
 //      reaches the ~non-interface locations too.
@@ -247,6 +249,11 @@ export async function getNotificationConfig(
 // applied by resolveBaseLeadRecipients. Job types decide who HANDLES a lead
 // (lib/project-type-handlers.ts), never who hears about it.
 //
+// AMENDED 2026-08-30: one exception in one direction. Being ASSIGNED a lead
+// now guarantees hearing about it (the union in resolveBaseLeadRecipients) —
+// job types still never REMOVE anyone from the list. The step-2 deletion of
+// filterRecipientsByProjectType stands; this is not routing coming back.
+//
 // The `lead` parameter is retained and deliberately unused: every caller
 // passes it, the signature is load-bearing across the send path, and removing
 // it would be a wider change than this step wants. It is documented as ignored
@@ -255,11 +262,21 @@ export async function getNotificationConfig(
 // Verified against production 2026-08-15: this changes who is notified at ZERO
 // locations. The flag was true at only loc_scottsdale (0 prefs, 0 claims — the
 // filter already resolved to everyone, so it was inert) and loc_test.
+//
+// AMENDED 2026-08-30 (Kevin, deciding Lynette's 279fcfbf): one directional
+// guarantee layered on top — THE ASSIGNEE IS ALWAYS TOLD. "Who is told" keeps
+// its meaning (who hears about EVERY lead, per-person on/off), but the person
+// the lead is ASSIGNED to — the handler for its type, or the owner when there
+// is none (lib/lead-assignment.ts, the same resolution assignment uses, so
+// notified and assigned can never disagree) — is emailed regardless of their
+// switch. The switch can add ears beyond the assignee; it can never silence
+// someone's own assignments. This is a UNION, never a filter: nobody who was
+// emailed before this rule stops being emailed because of it.
 export async function resolveLeadRecipients(
   locationId: string,
-  _lead?: { project_type?: string | null } | null,
+  lead?: { project_type?: string | null } | null,
 ): Promise<EffectiveRecipient[]> {
-  return resolveBaseLeadRecipients(locationId)
+  return resolveBaseLeadRecipients(locationId, lead)
 }
 
 // The unfiltered send list: subscribed interface users + all externals, or the
@@ -267,6 +284,7 @@ export async function resolveLeadRecipients(
 // out so resolveLeadRecipients can optionally layer PART 1 routing on top.
 async function resolveBaseLeadRecipients(
   locationId: string,
+  lead?: { project_type?: string | null } | null,
 ): Promise<EffectiveRecipient[]> {
   const { users, externals } = await getManageableRecipients(locationId)
 
@@ -319,6 +337,52 @@ async function resolveBaseLeadRecipients(
         email: e.email,
         category: e.category,
       })
+    }
+
+    // THE ASSIGNEE IS ALWAYS TOLD (2026-08-30, Lynette's 279fcfbf, option c).
+    //
+    // A muted person's own assignments must still reach them: there is no
+    // second channel — no assignee email, badge, or queue — so an untold
+    // assignee simply never learns the lead exists. The assignee comes from
+    // resolveLeadAssignees, the EXACT resolution the assignment write uses
+    // (handler for the type → primary owner → loudly nobody), so the person
+    // added here and the person on the lead's record are the same by
+    // construction, not by coincidence.
+    //
+    // ONLY when someone is switched off. When every interface user is
+    // subscribed — every production location today except one Seattle manager
+    // — the assignee is already in `out`, the resolver is not even queried,
+    // and this block is bytes-identical to the pre-rule behaviour.
+    //
+    // ADD-ONLY, FAIL-SOFT: this can only ever append a hub_user from the
+    // location's own owner/manager rows (handlers are restricted to those
+    // roles, so every possible assignee is in `users`); it never removes or
+    // reorders anyone, externals and the global CC are untouched, and a
+    // resolution failure returns the list exactly as it stands today.
+    const someoneIsOff = users.some((u) => !u.subscribed)
+    if (someoneIsOff) {
+      try {
+        const resolved = await resolveLeadAssignees({
+          locationUuid: locationId,
+          projectType: lead?.project_type ?? null,
+        })
+        for (const id of resolved.hubUserIds) {
+          if (out.some((r) => r.hub_user_id === id)) continue
+          const u = users.find((x) => x.hub_user_id === id)
+          if (!u?.email) continue
+          out.push({
+            source: 'user',
+            hub_user_id: u.hub_user_id,
+            name: u.name,
+            email: u.email,
+            category: u.category,
+          })
+        }
+      } catch (err: any) {
+        console.warn(
+          `[notification-recipients] assignee-always-told resolution failed for location ${locationId} (${err?.message}) — sending to the switched-on list only`,
+        )
+      }
     }
     return out
   }

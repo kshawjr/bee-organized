@@ -19809,7 +19809,7 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
           <strong style={{ fontWeight:600 }}>The location owner</strong> — and any lead that doesn&apos;t match a
           job type — comes to the owner. What a job type <em>sends as</em> is a separate choice: the person who
           handles it, or a shared mailbox with its own reply-to. Either way the lead is still assigned to the
-          person who handles it.
+          person who handles it, and whoever a lead is assigned to is always emailed about it.
         </p>
       </div>
 
@@ -19819,8 +19819,8 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
 
         <div style={{ padding:'9px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
-            Separate from who handles the work. Someone can hear about every lead while handling none,
-            or handle a job type and hear about nothing.
+            The person a lead is assigned to is always emailed about it — no switch changes that.
+            This list is who hears about every lead, whoever it&rsquo;s assigned to.
           </p>
         </div>
 
@@ -19847,13 +19847,20 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
                       label={`Tell ${u.name} about new leads`} />}
               </div>
               {/* Deliberately OUTSIDE the dimmed block and shown whether the
-                  switch is on or off: an owner turning off someone who handles
-                  Moving needs to see that they will still be ASSIGNED those
-                  leads, they just won't be emailed about them. */}
+                  switch is on or off. Since 2026-08-30 the assignee is ALWAYS
+                  emailed (the send path guarantees it), so switching a handler
+                  off narrows them to their own assignments — it can no longer
+                  silence them. The note states that, and the owner's
+                  no-handler fallback gets its own line below. */}
               {handled.length > 0 && (
                 <p data-handles={u.email} style={{ fontSize:'11px', color:'#3a5e58', marginTop:'4px' }}>
                   Handles {handled.join(', ')}
-                  {!u.subscribed && <span style={{ color:'#b07d3a' }}> — still assigned these, just not emailed</span>}
+                  {!u.subscribed && <span style={{ color:'#b07d3a' }}> — still emailed about these; the switch only covers other leads</span>}
+                </p>
+              )}
+              {u.role === 'owner' && !u.subscribed && (
+                <p data-owner-note={u.email} style={{ fontSize:'11px', color:'#b07d3a', marginTop:'4px' }}>
+                  Any lead without a handler is assigned to the owner — those still email {u.name.split(' ')[0]}
                 </p>
               )}
             </div>

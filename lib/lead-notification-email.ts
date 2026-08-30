@@ -412,10 +412,11 @@ export async function notifyNewLead(args: {
 
   let recipients
   try {
-    // Pass the lead so resolveLeadRecipients can route by project type when the
-    // location's split-notifications toggle is ON (unassigned types → whole
-    // team; never-drop to the whole team if the filter empties). When the
-    // toggle is OFF, this is a no-op and every subscribed recipient is returned.
+    // Pass the lead so resolveLeadRecipients can guarantee the ASSIGNEE is on
+    // the list (2026-08-30 rule): the handler for the lead's type — or the
+    // owner when there is none — is emailed even if their notify switch is
+    // off. Everyone switched on is returned regardless; the lead only ever
+    // ADDS its assignee, never removes anyone.
     recipients = await resolveLeadRecipients(location.id, {
       project_type: lead.project_type,
     })

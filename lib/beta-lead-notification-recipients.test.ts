@@ -23,17 +23,24 @@ vi.mock('@/lib/supabase-service', () => {
     b.in = (col: string, vals: any[]) => { filters.push(['in', col, vals]); return b }
     // .is(col, null) — used by locationHasActiveHubUser for `disabled_at IS NULL`.
     b.is = (col: string, val: any) => { filters.push(['is', col, val]); return b }
+    // .not(col,'is',null) + .maybeSingle() — used by the owner-resolution chain,
+    // reached since the assignee-always-told rule (2026-08-30) whenever a
+    // location has someone switched off.
+    b.not = (col: string, _op: string, val: any) => { filters.push(['not', col, val]); return b }
     b.limit = (n: number) => { limitN = n; return b }
     const resolve = () => {
       let data = tableData.current[table] || []
       for (const [op, col, val] of filters) {
         data = op === 'in'
           ? data.filter((r: any) => val.includes(r[col]))
-          : data.filter((r: any) => r[col] === val)
+          : op === 'not'
+            ? data.filter((r: any) => (r[col] ?? null) !== val)
+            : data.filter((r: any) => r[col] === val)
       }
       if (limitN != null) data = data.slice(0, limitN)
       return { data, error: null }
     }
+    b.maybeSingle = () => Promise.resolve({ data: resolve().data[0] ?? null, error: null })
     b.then = (res: any, rej: any) => Promise.resolve(resolve()).then(res, rej)
     return b
   }
@@ -262,8 +269,12 @@ describe('resolveLeadRecipients — Zoho fallback (B3)', () => {
     expect(eff.every(r => r.source !== 'zoho')).toBe(true)
   })
 
-  it('an interface location with EVERYONE unsubscribed and no externals stays interface (empty), does NOT fall back to Zoho', async () => {
-    // loc1: unsubscribe every user, drop externals → still interface-managed.
+  it('an interface location with EVERYONE unsubscribed stays interface — the ASSIGNEE alone is emailed, Zoho is NOT consulted', async () => {
+    // REVERSED 2026-08-30 (assignee-always-told): this used to pin `eff ===
+    // []` — "the owner turned everyone off" silenced the location entirely,
+    // including the person each lead is assigned to. All-off now means the
+    // broadcast is off but a lead still reaches its assignee (here the owner:
+    // no handler rows at loc1). The Zoho half of the old pin stands untouched.
     tableData.current.lead_notification_prefs = [
       { location_id: 'loc1', hub_user_id: 'u-owner', category: 'all', subscribed: false },
       { location_id: 'loc1', hub_user_id: 'u-mgr', category: 'all', subscribed: false },
@@ -271,7 +282,7 @@ describe('resolveLeadRecipients — Zoho fallback (B3)', () => {
     ]
     tableData.current.lead_notification_externals = []
     const eff = await resolveLeadRecipients('loc1')
-    expect(eff).toEqual([])
+    expect(eff.map(r => r.email)).toEqual(['olivia@x.com'])
     expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
   })
 

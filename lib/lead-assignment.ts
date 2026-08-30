@@ -22,6 +22,11 @@
 // you an assignee). Both are gone. Job types decide who HANDLES; a per-person
 // switch decides who is TOLD; neither reads the other.
 //
+// AMENDED 2026-08-30 (Kevin, Lynette's 279fcfbf): one one-way read now exists —
+// the notify resolver calls resolveLeadAssignees so the ASSIGNEE IS ALWAYS
+// EMAILED, switch or no switch (lib/notification-recipients.ts). Notification
+// still never influences assignment; assignment now guarantees notification.
+//
 // NO FLAG. split_notifications_enabled is not read here any more. "No handler
 // row" is the off state, and it is expressed per type instead of per location.
 //
