@@ -24,8 +24,10 @@ import { supabaseService } from './supabase-service'
 
 // organizing-b / organizing-d / moving-b / moving-d point the client at a
 // calendar (see migrations/seed_master_drip_paths.sql); -a / -c don't.
+// The returning-client sequence (path_key 'returning', RETURNING_PATH_KEY in
+// lib/drip-lifecycle.ts) carries the booking link in all three emails.
 export function isBookingPathKey(pathKey: string | null | undefined): boolean {
-  return typeof pathKey === 'string' && /-(b|d)$/.test(pathKey)
+  return typeof pathKey === 'string' && (/-(b|d)$/.test(pathKey) || pathKey === 'returning')
 }
 
 export type BookingLinkHealthRow = {

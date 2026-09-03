@@ -855,6 +855,46 @@ async function mergeResubmission(args: {
     warnings.push(`engagement_found_failed: ${err?.message || String(err)}`)
   }
 
+  // ─── Returning-client sequence ─────────────────────────────────
+  // A PAST client's fresh enquiry gets its own short sequence (path_key
+  // 'returning'), enrolled here and only here. The founding above already
+  // proved the two shape conditions — no other open engagement (else the
+  // request was surfaced onto it and nothing was founded) and the enquiry
+  // sits at Request — so the only test left is "is this a past client":
+  // Jobber-imported, or with a closed engagement on record. A new website
+  // lead who submits twice is neither and stays on the ordinary drip below,
+  // which is untouched. The sequence bypasses the import pause on purpose
+  // (see enrolReturningSequence). Non-fatal: the merge, the founding and the
+  // notifications already stand; the token on the log line says what
+  // happened. Dynamic import keeps this route's module graph unchanged.
+  let returningDrip = 'skipped:not_founded'
+  if (engagementFounded) {
+    try {
+      const { isPastClient, enrolReturningSequence } = await import('@/lib/drip-lifecycle')
+      if (!(await isPastClient(matched.id))) {
+        returningDrip = 'skipped:not_past_client'
+      } else {
+        const r = await enrolReturningSequence(matched.id, location.id)
+        if (r.enrolled) {
+          returningDrip = 'enrolled'
+          // Step 1 is scheduled for "now" — send it inline like the ordinary
+          // drip does, so the client hears back within the minute, not the hour.
+          try {
+            await sendDripStep(matched.id)
+          } catch (err: any) {
+            console.error('[intake] returning-sequence inline send threw', err)
+            warnings.push(`returning_drip_send_failed: ${err?.message || String(err)}`)
+          }
+        } else {
+          returningDrip = `skipped:${r.reason}`
+        }
+      }
+    } catch (err: any) {
+      console.error('[intake] returning-sequence enrol failed', err)
+      warnings.push(`returning_drip_failed: ${err?.message || String(err)}`)
+    }
+  }
+
   // The resubmission touchpoint is anchored to that engagement (engagement_id),
   // so it lands on the engagement's timeline — the "new request arrived" trace
   // on the returning card (Kevin's option 1). Founded-or-existing both carry it.
@@ -1083,6 +1123,8 @@ async function mergeResubmission(args: {
         ? ` engagement=${engagementFounded ? 'founded' : 'updated'}:${engagementId}`
         : '') +
       ` drip_enrolled=${dripEnrolled}` +
+      // Returning-client sequence outcome: enrolled | skipped:<reason>.
+      ` returning_drip=${returningDrip}` +
       // assigned_via=existing means the merge left a human's choice alone.
       ` assigned=${mergeAssignedCount}` +
       // #86 — resubmissions now notify; surface the count + mute state the same

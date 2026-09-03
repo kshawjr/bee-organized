@@ -378,6 +378,18 @@ export async function PATCH(
     return NextResponse.json({ error: updateError.message }, { status: 500 })
   }
 
+  // Returning-client sequence: closing the enquiry from Request (won or
+  // lost, this route is terminal-only) ends the "we've got your enquiry"
+  // emails. Scoped to the 'returning' path; non-fatal — the close committed.
+  if (stageChanged && engagement.stage === 'Request') {
+    try {
+      const { stopReturningSequenceForLead } = await import('@/lib/drip-lifecycle')
+      await stopReturningSequenceForLead(engagement.client_id, 'engagement_closed')
+    } catch (err) {
+      console.error('[engagements PATCH] returning-sequence stop failed', { id, err })
+    }
+  }
+
   // Stage-change trail — mirrors the leads-PATCH auto-log so the unified
   // timeline can show engagement moves. GOING FORWARD ONLY: there is no
   // stage-history table, so moves made before this landed are

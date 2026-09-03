@@ -18,8 +18,10 @@ import { supabaseService } from './supabase-service'
 // organizing-a / organizing-b / moving-a / moving-b quote the rate in
 // their Email 1 (see migrations/seed_master_drip_paths.sql); -c / -d
 // move pricing to the call.
+// The returning-client sequence (path_key 'returning', RETURNING_PATH_KEY in
+// lib/drip-lifecycle.ts) quotes the rate in its Email 1 too.
 export function isRateQuotingPathKey(pathKey: string | null | undefined): boolean {
-  return typeof pathKey === 'string' && /-(a|b)$/.test(pathKey)
+  return typeof pathKey === 'string' && (/-(a|b)$/.test(pathKey) || pathKey === 'returning')
 }
 
 export type RateHealthRow = {

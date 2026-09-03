@@ -38,6 +38,12 @@ export type DripStopReason =
   // this reason. Distinct from 'junk' so the Notebook/stopped_reason shows
   // the lead was closed lost, not junked (she was a real lead, not junk).
   | 'closed_lost'
+  // Returning-client sequence only (stopReturningSequenceForLead): an owner
+  // logged a reach-out, or the enquiry's engagement moved past Request /
+  // was closed. The ordinary new-lead drip never stops for these.
+  | 'reach_out'
+  | 'engagement_advanced'
+  | 'engagement_closed'
 
 interface LocationCtx {
   id: string
@@ -235,6 +241,210 @@ export async function stopActiveDripsForLead(
     if (error) console.error('[drip] stopActiveDrips: update failed', { leadId, reason, error })
   } catch (err) {
     console.error('[drip] stopActiveDrips: unexpected error', { leadId, err })
+  }
+}
+
+// ── Returning-client sequence (path_key 'returning') ───────────────────
+//
+// A PAST client who fills in the website form again gets a short, warmer
+// sequence of its own (migrations/seed_returning_drip_path.sql). The intake's
+// merge path enrols it right after founding the enquiry's engagement. It
+// differs from the new-lead drip in three deliberate ways:
+//
+//   · It IGNORES leads.paused. Every Jobber-imported client landed paused so
+//     the import never mailed thousands of people; that blanket must not also
+//     silence the one email a returning enquiry should get. Send time never
+//     reads leads.paused (only the progress row's paused_at — lib/drip-send.ts
+//     and the cron both filter on that), so nothing else about the person
+//     changes, and an owner pausing them later still pauses these rows
+//     through applyDripSideEffects → pauseActiveDripsForLead.
+//   · It is keyed on a FIXED path, never the location's default_drip_path.
+//     Location copy first, master fallback — the same resolution the
+//     ordinary drip uses, so an owner's edit under Settings › Emails wins.
+//   · It stops on what actually happens to a returning enquiry — a logged
+//     reach-out (lib/touchpoints.ts) or the engagement moving past Request
+//     (lib/engagements.ts, the close route) — because leads.stage never
+//     changes on a resubmission, so the stage-based stop above can't fire.
+//
+// Every gate the ordinary drip has EXCEPT paused still applies: email on
+// record, not opted out, location active. UNIQUE(lead_id, drip_path_id)
+// makes a repeat enrolment a no-op ('already_enrolled').
+export const RETURNING_PATH_KEY = 'returning'
+
+export type ReturningEnrolResult =
+  | { enrolled: true }
+  | {
+      enrolled: false
+      reason:
+        | 'lead_not_found'
+        | 'no_email'
+        | 'opted_out'
+        | 'location_not_active'
+        | 'path_not_found'
+        | 'step_missing'
+        | 'already_enrolled'
+        | 'insert_failed'
+    }
+
+// Past client = came in through the Jobber import (any import_source other
+// than 'manual'), OR has at least one closed engagement on record. A new
+// website lead who submits the form twice is neither — import_source is
+// 'manual' and nothing has closed — so they stay on the ordinary drip.
+export async function isPastClient(leadId: string): Promise<boolean> {
+  const { data: lead } = await supabaseService
+    .from('leads')
+    .select('import_source')
+    .eq('id', leadId)
+    .maybeSingle()
+  if (lead?.import_source && lead.import_source !== 'manual') return true
+
+  const { data: closed } = await supabaseService
+    .from('engagements')
+    .select('id')
+    .eq('client_id', leadId)
+    .in('stage', ['Closed Won', 'Closed Lost'])
+    .limit(1)
+    .maybeSingle()
+  return !!closed
+}
+
+export async function enrolReturningSequence(
+  leadId: string,
+  locationUuid: string,
+): Promise<ReturningEnrolResult> {
+  try {
+    const { data: leadRow, error: leadErr } = await supabaseService
+      .from('leads')
+      .select('email, marketing_opt_out')
+      .eq('id', leadId)
+      .maybeSingle()
+    if (leadErr || !leadRow) return { enrolled: false, reason: 'lead_not_found' }
+    // Deliberately NO leads.paused check — see the header above.
+    if (!leadRow.email || !String(leadRow.email).trim()) return { enrolled: false, reason: 'no_email' }
+    if (leadRow.marketing_opt_out) return { enrolled: false, reason: 'opted_out' }
+
+    const { data: loc, error: locErr } = await supabaseService
+      .from('locations')
+      .select('id, timezone, lifecycle_status')
+      .eq('id', locationUuid)
+      .maybeSingle()
+    // Same interface-active safety gate as startDripForLead: a drip can only
+    // be stopped from the interface, so a non-active location never enrols.
+    if (locErr || !loc || loc.lifecycle_status !== 'active') {
+      return { enrolled: false, reason: 'location_not_active' }
+    }
+
+    // Location copy first, corp master fallback — mirrors startDripForLead.
+    let path: { id: string } | null = null
+    {
+      const { data: locCopy } = await supabaseService
+        .from('drip_paths')
+        .select('id')
+        .eq('location_uuid', locationUuid)
+        .eq('path_key', RETURNING_PATH_KEY)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (locCopy) {
+        path = locCopy
+      } else {
+        const { data: master } = await supabaseService
+          .from('drip_paths')
+          .select('id')
+          .eq('is_master', true)
+          .eq('path_key', RETURNING_PATH_KEY)
+          .eq('is_active', true)
+          .maybeSingle()
+        path = master
+      }
+    }
+    if (!path) {
+      console.error('[drip] returning: path not found (neither copy nor master)', { leadId, locationUuid })
+      return { enrolled: false, reason: 'path_not_found' }
+    }
+
+    const { data: step1 } = await supabaseService
+      .from('drip_path_steps')
+      .select('delay_days')
+      .eq('drip_path_id', path.id)
+      .eq('step_order', 1)
+      .maybeSingle()
+    if (!step1) {
+      console.error('[drip] returning: step 1 missing', { leadId, drip_path_id: path.id })
+      return { enrolled: false, reason: 'step_missing' }
+    }
+
+    // Step 1 at delay 0 is "now" so the next hourly tick (or the intake's
+    // inline send) picks it up — same as startDripForLead.
+    const delayDays = step1.delay_days ?? 0
+    const next =
+      delayDays === 0
+        ? new Date()
+        : nextSendAt({ from: new Date(), tz: loc.timezone ?? 'UTC', delayDays })
+
+    const { error: insertErr } = await supabaseService
+      .from('lead_drip_progress')
+      .insert({
+        lead_id: leadId,
+        drip_path_id: path.id,
+        current_step: 1,
+        started_at: new Date().toISOString(),
+        next_send_at: next.toISOString(),
+      })
+    if (insertErr) {
+      if (insertErr.code === '23505') return { enrolled: false, reason: 'already_enrolled' }
+      console.error('[drip] returning: insert failed', { leadId, insertErr })
+      return { enrolled: false, reason: 'insert_failed' }
+    }
+    return { enrolled: true }
+  } catch (err) {
+    console.error('[drip] returning: unexpected error', { leadId, err })
+    return { enrolled: false, reason: 'insert_failed' }
+  }
+}
+
+// Stop ONLY the returning sequence for this lead. Scoped by path so it can
+// never touch an ordinary drip: it reads the lead's live progress rows first
+// (the common case — none — costs one query), then narrows to rows whose path
+// is 'returning' (location copy or master) before writing.
+export async function stopReturningSequenceForLead(
+  leadId: string,
+  reason: DripStopReason,
+): Promise<void> {
+  try {
+    const { data: live, error: liveErr } = await supabaseService
+      .from('lead_drip_progress')
+      .select('id, drip_path_id')
+      .eq('lead_id', leadId)
+      .is('stopped_at', null)
+      .is('completed_at', null)
+    if (liveErr) {
+      console.error('[drip] stopReturning: progress read failed', { leadId, liveErr })
+      return
+    }
+    if (!live || live.length === 0) return
+
+    const { data: paths, error: pathErr } = await supabaseService
+      .from('drip_paths')
+      .select('id')
+      .eq('path_key', RETURNING_PATH_KEY)
+      .in('id', live.map((r) => r.drip_path_id))
+    if (pathErr) {
+      console.error('[drip] stopReturning: path read failed', { leadId, pathErr })
+      return
+    }
+    const returningPathIds = (paths ?? []).map((p) => p.id)
+    if (returningPathIds.length === 0) return
+
+    const rowIds = live.filter((r) => returningPathIds.includes(r.drip_path_id)).map((r) => r.id)
+    if (rowIds.length === 0) return
+
+    const { error } = await supabaseService
+      .from('lead_drip_progress')
+      .update({ stopped_at: new Date().toISOString(), stopped_reason: reason })
+      .in('id', rowIds)
+    if (error) console.error('[drip] stopReturning: update failed', { leadId, reason, error })
+  } catch (err) {
+    console.error('[drip] stopReturning: unexpected error', { leadId, err })
   }
 }
 

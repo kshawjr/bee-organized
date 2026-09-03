@@ -97,6 +97,19 @@ export async function insertTouchpoint(row: TouchpointRow): Promise<InsertTouchp
         .from('leads')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', row.lead_id)
+      // Returning-client sequence: a logged reach-out means the owner has
+      // spoken to (or written to) the client, so the "we've got your
+      // enquiry" emails stop here. Scoped to the 'returning' path only — the
+      // ordinary new-lead drip keeps running through Attempting, exactly as
+      // before. Dynamic import keeps this module's graph unchanged for every
+      // existing caller; failure is logged, never thrown (the touchpoint is
+      // already written).
+      try {
+        const { stopReturningSequenceForLead } = await import('./drip-lifecycle')
+        await stopReturningSequenceForLead(row.lead_id as string, 'reach_out')
+      } catch (err) {
+        console.error('[touchpoints] returning-sequence stop failed', { leadId: row.lead_id, err })
+      }
     } else {
       const contactedAt = row.occurred_at || new Date().toISOString()
       await supabaseService

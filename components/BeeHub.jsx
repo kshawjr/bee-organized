@@ -18136,6 +18136,11 @@ const CLOSED_JOB_ROWS = [
   { legacyId:'opp_closed_job_12mo', days:365, when:'A year later' },
 ]
 
+// The returning-client sequence: a fixed path key, never a location default.
+// Mirrors RETURNING_PATH_KEY in lib/drip-lifecycle.ts (not imported — that
+// module pulls the Supabase service client into the browser bundle).
+export const RETURNING_EMAILS_PATH_KEY = 'returning'
+
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
 function firstMeaningfulLine(body) {
@@ -18190,41 +18195,51 @@ function templateRow(templates, legacyId, days, when) {
 }
 
 export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null }) {
-  // RAIL A — the default organizing path's email steps, inline-first.
-  const steps = (pathKey && pathSteps[pathKey]) || []
-  const dripRows = steps
-    .filter(s => (s.type || 'email') === 'email')
-    .slice()
-    .sort((a, b) => (a.order || 0) - (b.order || 0))
-    .map(s => {
-      // Mirrors lib/drip-send.ts: the step's own text wins, the linked
-      // template is the fallback. Deliberately does NOT filter on isActive.
-      const linked = (templates || []).find(t =>
-        (s.masterTemplateId && t.dbId === s.masterTemplateId) ||
-        (s.templateId && t.legacyId === s.templateId))
-      const subject = s.subject ?? linked?.subject ?? ''
-      const body = s.body ?? linked?.body ?? ''
-      return {
-        key: `step-${s.dbId ?? s.order}`,
-        rail: 'drip',
-        // issue 240 step 8b — rail A acts on (pathKey, order). step_order is
-        // the identity that survives the bulk PATCH's delete-and-reinsert.
-        pathKey,
-        order: Number(s.order ?? 0),
-        days: Number(s.delay_days ?? 0),
-        when: whenLabelForDays(s.delay_days ?? 0),
-        timingIsData: true,
-        subject, body,
-        firstLine: firstMeaningfulLine(body),
-        // NOT "does the step carry inline text" — master steps carry inline
-        // text too, so that test marks everything as edited. The honest signal
-        // is which map the row came from: masterStepsToUi stamps fromMaster,
-        // loadLocationPaths gives real location rows a dbId.
-        wording: s.fromMaster ? 'master' : 'yours',
-        origin: s.origin === 'added' ? 'added' : 'master',
-        contentMissing: !subject && !body,
-      }
-    })
+  // RAIL A — a path's email steps, inline-first. Used for the default
+  // organizing/moving path (group one) and for the fixed returning-client
+  // path (the "past client" group) — same row shape, same controls.
+  const dripRowsFor = (key) => {
+    const steps = (key && pathSteps[key]) || []
+    return steps
+      .filter(s => (s.type || 'email') === 'email')
+      .slice()
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(s => {
+        // Mirrors lib/drip-send.ts: the step's own text wins, the linked
+        // template is the fallback. Deliberately does NOT filter on isActive.
+        const linked = (templates || []).find(t =>
+          (s.masterTemplateId && t.dbId === s.masterTemplateId) ||
+          (s.templateId && t.legacyId === s.templateId))
+        const subject = s.subject ?? linked?.subject ?? ''
+        const body = s.body ?? linked?.body ?? ''
+        return {
+          key: `step-${key}-${s.dbId ?? s.order}`,
+          rail: 'drip',
+          // issue 240 step 8b — rail A acts on (pathKey, order). step_order is
+          // the identity that survives the bulk PATCH's delete-and-reinsert.
+          pathKey: key,
+          order: Number(s.order ?? 0),
+          days: Number(s.delay_days ?? 0),
+          when: whenLabelForDays(s.delay_days ?? 0),
+          timingIsData: true,
+          subject, body,
+          firstLine: firstMeaningfulLine(body),
+          // NOT "does the step carry inline text" — master steps carry inline
+          // text too, so that test marks everything as edited. The honest signal
+          // is which map the row came from: masterStepsToUi stamps fromMaster,
+          // loadLocationPaths gives real location rows a dbId.
+          wording: s.fromMaster ? 'master' : 'yours',
+          origin: s.origin === 'added' ? 'added' : 'master',
+          contentMissing: !subject && !body,
+        }
+      })
+  }
+  const dripRows = dripRowsFor(pathKey)
+
+  // The returning-client sequence — the "past client" group. Empty until the
+  // master path is seeded (migrations/seed_returning_drip_path.sql); the list
+  // hides an empty group rather than promise emails that do not exist yet.
+  const returning = [...dripRowsFor(RETURNING_EMAILS_PATH_KEY)].sort((a, b) => a.days - b.days)
 
   // RAIL B is gone — issue 314 retired the Welcome Email. It used to sit here
   // as templateRow(templates, 'welcome', 1, 'Next day'), where the `1` was a
@@ -18243,7 +18258,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null 
     .map(r => templateRow(templates, r.legacyId, r.days, r.when))
     .filter(Boolean)
 
-  return { newLead, afterJob }
+  return { newLead, returning, afterJob }
 }
 
 // ─── issue 240 step 7 — the read-only Emails list ───
@@ -18953,7 +18968,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // one location whose letters differ (organizing-a / moving-c).
   const activeAnswers = variantAnswersFor ? variantAnswersFor(activePathKey) : null
 
-  const { newLead, afterJob } = React.useMemo(
+  const { newLead, returning, afterJob } = React.useMemo(
     () => buildEmailList({ pathSteps, templates, pathKey: activePathKey }),
     [pathSteps, templates, activePathKey])
 
@@ -18964,16 +18979,17 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
     // holds a fixed position in group one, so first is the only fixed note.
     fixedNote: i === 0 ? 'always first' : null,
   }))
-  const groups = { new: withNotes, job: afterJob }
+  const groups = { new: withNotes, returning, job: afterJob }
   const openRows = open ? groups[open.group] : []
 
-  // issue 240 step 8b — one reason string, computed once per path, shown on
-  // every row of that path. Never hidden silently.
-  const dripShapeOk = dripShapeMatchesMaster(
-    (activePathKey && pathSteps[activePathKey]) || [],
-    (activePathKey && masterSteps[activePathKey]) || [])
+  // issue 240 step 8b — one reason string per path, shown on every row of
+  // that path. Never hidden silently. Read off the ROW's path, because the
+  // returning-client rows sit in the same list as the default path's rows.
+  const dripShapeOkFor = key => dripShapeMatchesMaster(
+    (key && pathSteps[key]) || [],
+    (key && masterSteps[key]) || [])
   const resetBlockedFor = row =>
-    row.rail === 'drip' && !dripShapeOk
+    row.rail === 'drip' && !dripShapeOkFor(row.pathKey)
       ? 'these emails have been added to or reordered, so we can no longer tell which one to put back'
       : null
   const canEdit = !!actions
@@ -19047,6 +19063,16 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', marginTop:'-14px', marginBottom:'22px', background:'transparent', border:'1px dashed rgba(26,46,43,0.22)', borderRadius:'10px', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#4a5f5b', cursor:'pointer' }}>
           + Add another email
         </button>
+      )}
+      {/* The returning-client sequence. One fixed path, so no organizing /
+          moving toggle and no variant sentence; the same rows, Read, Edit,
+          Reset and timing as group one. Hidden until the master is seeded —
+          an empty "Nothing here yet" would promise emails that do not exist. */}
+      {returning.length > 0 && (
+        <Group id="returning" title="When a past client gets back in touch"
+          count={`${returning.length} email${returning.length === 1 ? '' : 's'}`}
+          note="For someone you've worked with before who fills in the website form again. Counted from the day their enquiry arrives. Stops the moment you log a reach-out, or the enquiry moves past Request."
+          rows={returning} />
       )}
       <Group id="job" title="After a job is finished"
         count={`${afterJob.length} email${afterJob.length === 1 ? '' : 's'}`}
@@ -32572,8 +32598,8 @@ function MasterDripPathsEditor() {
       .then(j => {
         if (cancelled) return
         const list = Array.isArray(j?.masters) ? j.masters : []
-        // Sort: Organizing A→D, then Moving A→D
-        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d']
+        // Sort: Organizing A→D, then Moving A→D, then the returning-client sequence
+        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d', RETURNING_EMAILS_PATH_KEY]
         list.sort((a,b) => order.indexOf(a.path_key) - order.indexOf(b.path_key))
         setMasters(list)
         setErr(null)

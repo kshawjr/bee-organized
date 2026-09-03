@@ -811,7 +811,7 @@ export async function maybeAdvanceEngagementStage(
 ): Promise<{ advanced: boolean; stage?: EngagementStage }> {
   const { data: eng } = await supabaseService
     .from('engagements')
-    .select('id, stage, closed_reason')
+    .select('id, stage, closed_reason, client_id')
     .eq('id', engagementId)
     .maybeSingle()
   if (!eng) return { advanced: false }
@@ -879,6 +879,19 @@ export async function maybeAdvanceEngagementStage(
   if (error) {
     console.error('[engagements] stage advance write failed', { engagementId, error: error.message })
     return { advanced: false }
+  }
+  // Returning-client sequence: the enquiry has moved past Request (a quote
+  // went out, a job was booked, or it closed), so it is being worked and the
+  // "we've got your enquiry" emails stop. Scoped to the 'returning' path;
+  // non-fatal; dynamic import so this module's graph is unchanged.
+  if (advance && eng.stage === 'Request' && eng.client_id) {
+    try {
+      const { stopReturningSequenceForLead } = await import('./drip-lifecycle')
+      const terminal = derived.stage === 'Closed Won' || derived.stage === 'Closed Lost'
+      await stopReturningSequenceForLead(eng.client_id, terminal ? 'engagement_closed' : 'engagement_advanced')
+    } catch (err) {
+      console.error('[engagements] returning-sequence stop failed', { engagementId, err })
+    }
   }
   return advance ? { advanced: true, stage: derived.stage } : { advanced: false }
 }
