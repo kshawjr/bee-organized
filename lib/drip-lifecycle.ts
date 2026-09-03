@@ -12,6 +12,10 @@ import {
   resolveDripCategory,
 } from './stage-emails'
 import { cancelPendingWelcomeEmail } from './welcome-email'
+import {
+  RETURNING_PATH_KEYS as RAW_RETURNING_PATH_KEYS,
+  returningPathKeyFor as rawReturningPathKeyFor,
+} from '@/components/hive/shared/returningVariant'
 
 // Any of these stages = drip should stop (only 'New' / 'Attempting' keep
 // the drip active).
@@ -244,7 +248,7 @@ export async function stopActiveDripsForLead(
   }
 }
 
-// ── Returning-client sequence (path_key 'returning') ───────────────────
+// ── Returning-client sequence (path_key returning-a..d) ────────────────
 //
 // A PAST client who fills in the website form again gets a short, warmer
 // sequence of its own (migrations/seed_returning_drip_path.sql). The intake's
@@ -258,9 +262,14 @@ export async function stopActiveDripsForLead(
 //     and the cron both filter on that), so nothing else about the person
 //     changes, and an owner pausing them later still pauses these rows
 //     through applyDripSideEffects → pauseActiveDripsForLead.
-//   · It is keyed on a FIXED path, never the location's default_drip_path.
-//     Location copy first, master fallback — the same resolution the
-//     ordinary drip uses, so an owner's edit under Settings › Emails wins.
+//   · It follows the location's two Settings answers the same way the
+//     ordinary drips do — by VARIANT, not by conditional blocks. The letter
+//     of default_drip_path ('organizing-c') picks 'returning-c', whose body
+//     simply does not quote the rate or a booking link; an owner who
+//     answered "no" is never held for a preference they declined. See
+//     components/hive/shared/returningVariant.js. Location copy first,
+//     master fallback — the same resolution the ordinary drip uses, so an
+//     owner's edit under Settings › Emails wins.
 //   · It stops on what actually happens to a returning enquiry — a logged
 //     reach-out (lib/touchpoints.ts) or the engagement moving past Request
 //     (lib/engagements.ts, the close route) — because leads.stage never
@@ -269,7 +278,8 @@ export async function stopActiveDripsForLead(
 // Every gate the ordinary drip has EXCEPT paused still applies: email on
 // record, not opted out, location active. UNIQUE(lead_id, drip_path_id)
 // makes a repeat enrolment a no-op ('already_enrolled').
-export const RETURNING_PATH_KEY = 'returning'
+export const RETURNING_PATH_KEYS = RAW_RETURNING_PATH_KEYS as readonly string[]
+export const returningPathKeyFor = rawReturningPathKeyFor as (defaultPathKey: string | null | undefined) => string
 
 export type ReturningEnrolResult =
   | { enrolled: true }
@@ -325,7 +335,7 @@ export async function enrolReturningSequence(
 
     const { data: loc, error: locErr } = await supabaseService
       .from('locations')
-      .select('id, timezone, lifecycle_status')
+      .select('id, timezone, lifecycle_status, default_drip_path')
       .eq('id', locationUuid)
       .maybeSingle()
     // Same interface-active safety gate as startDripForLead: a drip can only
@@ -334,6 +344,10 @@ export async function enrolReturningSequence(
       return { enrolled: false, reason: 'location_not_active' }
     }
 
+    // The variant follows the location's organizing answers (its letter),
+    // exactly as the ordinary drip's default path does.
+    const pathKey = returningPathKeyFor(loc.default_drip_path)
+
     // Location copy first, corp master fallback — mirrors startDripForLead.
     let path: { id: string } | null = null
     {
@@ -341,7 +355,7 @@ export async function enrolReturningSequence(
         .from('drip_paths')
         .select('id')
         .eq('location_uuid', locationUuid)
-        .eq('path_key', RETURNING_PATH_KEY)
+        .eq('path_key', pathKey)
         .eq('is_active', true)
         .maybeSingle()
       if (locCopy) {
@@ -351,14 +365,14 @@ export async function enrolReturningSequence(
           .from('drip_paths')
           .select('id')
           .eq('is_master', true)
-          .eq('path_key', RETURNING_PATH_KEY)
+          .eq('path_key', pathKey)
           .eq('is_active', true)
           .maybeSingle()
         path = master
       }
     }
     if (!path) {
-      console.error('[drip] returning: path not found (neither copy nor master)', { leadId, locationUuid })
+      console.error('[drip] returning: path not found (neither copy nor master)', { leadId, locationUuid, pathKey })
       return { enrolled: false, reason: 'path_not_found' }
     }
 
@@ -405,7 +419,7 @@ export async function enrolReturningSequence(
 // Stop ONLY the returning sequence for this lead. Scoped by path so it can
 // never touch an ordinary drip: it reads the lead's live progress rows first
 // (the common case — none — costs one query), then narrows to rows whose path
-// is 'returning' (location copy or master) before writing.
+// is one of the returning variants (location copy or master) before writing.
 export async function stopReturningSequenceForLead(
   leadId: string,
   reason: DripStopReason,
@@ -426,7 +440,7 @@ export async function stopReturningSequenceForLead(
     const { data: paths, error: pathErr } = await supabaseService
       .from('drip_paths')
       .select('id')
-      .eq('path_key', RETURNING_PATH_KEY)
+      .in('path_key', [...RETURNING_PATH_KEYS])
       .in('id', live.map((r) => r.drip_path_id))
     if (pathErr) {
       console.error('[drip] stopReturning: path read failed', { leadId, pathErr })

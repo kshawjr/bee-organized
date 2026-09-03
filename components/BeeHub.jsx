@@ -18136,10 +18136,10 @@ const CLOSED_JOB_ROWS = [
   { legacyId:'opp_closed_job_12mo', days:365, when:'A year later' },
 ]
 
-// The returning-client sequence: a fixed path key, never a location default.
-// Mirrors RETURNING_PATH_KEY in lib/drip-lifecycle.ts (not imported — that
-// module pulls the Supabase service client into the browser bundle).
-export const RETURNING_EMAILS_PATH_KEY = 'returning'
+// The returning-client sequence follows the location's two answers by VARIANT
+// (returning-a..d), exactly as the new-lead sequence does — one shared, pure
+// resolver so Settings shows the same emails the intake enrols.
+import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -18194,7 +18194,7 @@ function templateRow(templates, legacyId, days, when) {
   }
 }
 
-export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null }) {
+export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null, returningPathKey = null }) {
   // RAIL A — a path's email steps, inline-first. Used for the default
   // organizing/moving path (group one) and for the fixed returning-client
   // path (the "past client" group) — same row shape, same controls.
@@ -18236,10 +18236,11 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null 
   }
   const dripRows = dripRowsFor(pathKey)
 
-  // The returning-client sequence — the "past client" group. Empty until the
-  // master path is seeded (migrations/seed_returning_drip_path.sql); the list
+  // The returning-client sequence — the "past client" group. The caller
+  // passes the VARIANT that matches the location's answers (returning-a..d,
+  // via returningPathKeyFor); empty until that master is seeded, and the list
   // hides an empty group rather than promise emails that do not exist yet.
-  const returning = [...dripRowsFor(RETURNING_EMAILS_PATH_KEY)].sort((a, b) => a.days - b.days)
+  const returning = [...dripRowsFor(returningPathKey)].sort((a, b) => a.days - b.days)
 
   // RAIL B is gone — issue 314 retired the Welcome Email. It used to sit here
   // as templateRow(templates, 'welcome', 1, 'Next day'), where the `1` was a
@@ -18968,9 +18969,13 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // one location whose letters differ (organizing-a / moving-c).
   const activeAnswers = variantAnswersFor ? variantAnswersFor(activePathKey) : null
 
+  // The returning-client group follows the ORGANIZING answers (generalDefault's
+  // letter), not the toggle: it is one sequence, and a past client's enquiry
+  // carries no project type at intake.
+  const returningPathKey = returningPathKeyFor(generalDefault)
   const { newLead, returning, afterJob } = React.useMemo(
-    () => buildEmailList({ pathSteps, templates, pathKey: activePathKey }),
-    [pathSteps, templates, activePathKey])
+    () => buildEmailList({ pathSteps, templates, pathKey: activePathKey, returningPathKey }),
+    [pathSteps, templates, activePathKey, returningPathKey])
 
   // Step 10 decides what is editable; nothing here is a control.
   const withNotes = newLead.map((r, i) => ({
@@ -32598,8 +32603,8 @@ function MasterDripPathsEditor() {
       .then(j => {
         if (cancelled) return
         const list = Array.isArray(j?.masters) ? j.masters : []
-        // Sort: Organizing A→D, then Moving A→D, then the returning-client sequence
-        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d', RETURNING_EMAILS_PATH_KEY]
+        // Sort: Organizing A→D, then Moving A→D, then Returning A→D
+        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d', ...RETURNING_PATH_KEYS]
         list.sort((a,b) => order.indexOf(a.path_key) - order.indexOf(b.path_key))
         setMasters(list)
         setErr(null)

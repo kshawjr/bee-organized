@@ -857,7 +857,8 @@ async function mergeResubmission(args: {
 
   // ─── Returning-client sequence ─────────────────────────────────
   // A PAST client's fresh enquiry gets its own short sequence (path_key
-  // 'returning'), enrolled here and only here. The founding above already
+  // returning-a..d, the variant following the location's two Settings
+  // answers), enrolled here and only here. The founding above already
   // proved the two shape conditions — no other open engagement (else the
   // request was surfaced onto it and nothing was founded) and the enquiry
   // sits at Request — so the only test left is "is this a past client":

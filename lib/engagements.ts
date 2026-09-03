@@ -882,7 +882,7 @@ export async function maybeAdvanceEngagementStage(
   }
   // Returning-client sequence: the enquiry has moved past Request (a quote
   // went out, a job was booked, or it closed), so it is being worked and the
-  // "we've got your enquiry" emails stop. Scoped to the 'returning' path;
+  // "we've got your enquiry" emails stop. Scoped to the returning variants;
   // non-fatal; dynamic import so this module's graph is unchanged.
   if (advance && eng.stage === 'Request' && eng.client_id) {
     try {

@@ -14,7 +14,7 @@
 //     (lib/engagements.ts maybeAdvanceEngagementStage)   → 'engagement_advanced'
 //
 // Both hooks call stopReturningSequenceForLead, which is scoped to the
-// 'returning' path (pinned in beta-returning-drip-lifecycle.test.ts). Here
+// returning variants (pinned in beta-returning-drip-lifecycle.test.ts). Here
 // @/lib/drip-lifecycle is mocked so only the WIRING is under test: when the
 // hook fires, what it passes, and that it never fires for the wrong event.
 import { describe, it, expect, vi, beforeEach } from 'vitest'

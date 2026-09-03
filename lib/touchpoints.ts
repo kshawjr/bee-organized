@@ -99,7 +99,7 @@ export async function insertTouchpoint(row: TouchpointRow): Promise<InsertTouchp
         .eq('id', row.lead_id)
       // Returning-client sequence: a logged reach-out means the owner has
       // spoken to (or written to) the client, so the "we've got your
-      // enquiry" emails stop here. Scoped to the 'returning' path only — the
+      // enquiry" emails stop here. Scoped to the returning variants only — the
       // ordinary new-lead drip keeps running through Attempting, exactly as
       // before. Dynamic import keeps this module's graph unchanged for every
       // existing caller; failure is logged, never thrown (the touchpoint is
