@@ -171,9 +171,13 @@ describe('triage stays a work order', () => {
       }),
     ]))
     const { host, unmount } = await mount(asUser('admin-1', <AdminFeedbackScreen />))
-    const text = host.textContent || ''
-    expect(text).toContain('No reply yet')
-    expect(text).toContain('They replied · needs an answer')
+    // Both sit in "Needs an answer" — the unanswered one because nobody has
+    // spoken, the other because the OWNER spoke last — and the row says so.
+    const needs = host.querySelector('section[aria-label="Needs an answer"]')!
+    expect(needs.textContent).toContain('Never answered')
+    expect(needs.textContent).toContain('They wrote back')
+    expect(needs.textContent).toContain('They replied')
+    expect(host.querySelector('section[aria-label="Waiting on them"]')!.textContent).toContain('Nothing here.')
     await unmount()
   })
 })

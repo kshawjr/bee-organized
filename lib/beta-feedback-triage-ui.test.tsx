@@ -107,7 +107,9 @@ describe('token sweep — the extracted screen carries no color literal of its o
   })
 
   it('composes the SHARED primitives rather than re-rolling them', () => {
-    expect(SCREEN_SRC).toContain("from '@/components/ui/FilterChips'")
+    // The queues redesign retired FilterChips here (type is a tab row in the
+    // record cards' anatomy); the queue arithmetic is a shared lib module.
+    expect(SCREEN_SRC).toContain("from '@/lib/feedback-triage-groups'")
     expect(SCREEN_SRC).toContain("from '@/components/hive/shared/tokens'")
     // The feedback chip anatomy + status maps stay single-homed in
     // feedbackShared (the surface's own StatusChip-equivalent).
@@ -288,15 +290,18 @@ describe('rows and the detail modal', () => {
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
 
     await click(rowButton(host, 'Login button broken')!)
-    expect(host.textContent).toContain('Description')
-    // Status is a ROW OF BUTTONS since issue 233, in plain words — a dropdown
-    // hid five of the six options behind a click.
-    const statusBtn = (label: string) =>
-      [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === label)!
-    expect(statusBtn('Looking at it')).toBeTruthy()
+    expect(host.textContent).toContain('What they said')
+    // Status is a DROPDOWN in plain words (the queues redesign) — never the
+    // database values.
+    const sel = host.querySelector('select[aria-label="Status"]') as HTMLSelectElement
+    expect([...sel.options].map(o => o.textContent)).toContain('Looking at it')
     expect(host.textContent).not.toContain('under_review') // plain words, not db values
 
-    await click(statusBtn('In progress'))
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(sel, 'in_progress')
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
     const save = [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Save')!
     await click(save)
 
@@ -307,7 +312,7 @@ describe('rows and the detail modal', () => {
     expect(JSON.parse(patch[1].body)).toEqual({ status: 'in_progress' })
     // onSaved merged the update back into the list. The modal deliberately
     // STAYS OPEN now (next/previous walks the queue without reopening).
-    expect(host.textContent).toContain('Description')
+    expect(host.textContent).toContain('What they said')
     await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Close')!)
     expect(rowButton(host, 'Login button broken')!.textContent).toContain('In progress')
     await unmount()

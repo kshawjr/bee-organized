@@ -322,11 +322,22 @@ const screenFor = (props: any = {}) =>
 beforeEach(() => { document.body.innerHTML = '' })
 afterEach(() => { vi.unstubAllGlobals() })
 
+// The queues redesign moved the analysis off the row and into the modal's
+// corporate-only block, so every read below opens the item first.
+const click = (el: Element) => act(async () => {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+})
+const openRow = (host: Element, title: string) =>
+  click([...host.querySelectorAll('button')].find(b => (b.textContent || '').startsWith(title))!)
+const modalText = (host: Element) => (host.querySelector('[role="dialog"]')?.textContent) || ''
+
 describe('the screen renders the analysis', () => {
-  it('a confident item shows its analysis WITH its confidence', async () => {
+  it('a confident item shows its analysis WITH its confidence — in the modal, not on the row', async () => {
     stubFetch()
     const { host, unmount } = await screenFor()
-    const t = host.textContent || ''
+    expect(host.textContent).not.toContain('lib/engagements.ts') // nothing corporate on the list
+    await openRow(host, 'Problem with Office Organization')
+    const t = modalText(host)
     expect(t.toLowerCase()).toContain('confident')
     expect(t).toContain('Final Processing')
     expect(t).toContain('lib/engagements.ts')
@@ -336,18 +347,20 @@ describe('the screen renders the analysis', () => {
   it('shows the fleet count on the item that has one', async () => {
     stubFetch()
     const { host, unmount } = await screenFor()
-    expect(host.textContent).toContain('106 engagements affected')
+    await openRow(host, 'Problem with Office Organization')
+    expect(modalText(host)).toContain('106 engagements affected')
     await unmount()
   })
 
   it('an unanalysable item says so and shows no count or file', async () => {
     stubFetch()
     const { host, unmount } = await screenFor()
-    const t = host.textContent || ''
+    await openRow(host, 'Email cut off')
+    const t = modalText(host)
     expect(t).toContain('needs a follow-up question')
     expect(t).toContain('not placed')
-    // The only count on screen belongs to Mario, not to this one.
-    expect((t.match(/affected/g) || []).length).toBe(1)
+    // No count for this one — the only count belongs to Mario.
+    expect(t).not.toContain('affected')
     await unmount()
   })
 
@@ -364,6 +377,7 @@ describe('the screen renders the analysis', () => {
     stubFetch({ analysisOk: false })
     const { host, unmount } = await screenFor()
     expect(host.textContent).toContain('Problem with Office Organization')
+    await openRow(host, 'Problem with Office Organization')
     expect(host.textContent).not.toContain('106 engagements affected')
     await unmount()
   })

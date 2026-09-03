@@ -164,18 +164,20 @@ describe('the order puts what matters first', () => {
     expect(rows.map(r => r.id)).toEqual(ORDER_ITEMS.map(r => r.id))
   })
 
-  // Issue 233 built the stale card to answer ONE question — what has been
-  // quiet longest. Ranking by type there would put a fresher bug above the row
-  // the card exists to surface, so the work order stops at its edge.
-  it('leaves the stale queue on longest-quiet-first, ignoring type', async () => {
+  // The queues redesign retired the stale card. An item nobody has answered
+  // sits in "Needs an answer" whatever its status says, and inside that queue
+  // the fixed type order holds — the header, not the row order, carries the
+  // age (both have waited since filing: 60 days, so the header is red).
+  it('unanswered under_review/planned items need an answer, in type order, with the age on the header', async () => {
     const stale = [
-      { ...base, id: 'sb', title: 'Stale bug',  type: 'bug',     status: 'under_review', created_at: daysAgo(60), updated_at: daysAgo(15) },
       { ...base, id: 'sf', title: 'Stale idea', type: 'feature', status: 'planned',      created_at: daysAgo(60), updated_at: daysAgo(30) },
+      { ...base, id: 'sb', title: 'Stale bug',  type: 'bug',     status: 'under_review', created_at: daysAgo(60), updated_at: daysAgo(15) },
     ]
     const { host, unmount } = await screenFor(stale)
-    await click(btn(host, 'Going stale')!)
-    // The idea has been quiet longest, so it leads DESPITE being a feature.
-    expect(rowTitles(host, stale)).toEqual(['Stale idea', 'Stale bug'])
+    const needs = host.querySelector('section[aria-label="Needs an answer"]')!
+    expect(rowTitles(needs, stale)).toEqual(['Stale bug', 'Stale idea'])
+    expect(needs.textContent).toContain('oldest 60 days')
+    expect(host.querySelector('section[aria-label="Waiting on them"]')!.textContent).toContain('Nothing here.')
     await unmount()
   })
 })
@@ -203,9 +205,11 @@ describe('"answered, unconfirmed" is derived, not stored', () => {
     const { host, unmount } = await screenFor(STATE_ITEMS, {})
     await click(btn(host, 'Show ')!) // reveal the two closed rows
     expect(rowText(host, 'Answered not seen')).toContain('not seen yet')
-    // Distinct from an unanswered item…
-    expect(rowText(host, 'Waiting on us')).toContain('No reply yet')
+    // Distinct from an unanswered item — which carries no reply note at all
+    // and sits under "Needs an answer"…
+    expect(rowText(host, 'Waiting on us')).not.toContain('Replied')
     expect(rowText(host, 'Waiting on us')).not.toContain('not seen yet')
+    expect(host.querySelector('section[aria-label="Needs an answer"]')!.textContent).toContain('Waiting on us')
     // …and from an answered one they HAVE read.
     expect(rowText(host, 'Answered and seen')).toContain('seen')
     expect(rowText(host, 'Answered and seen')).not.toContain('not seen yet')

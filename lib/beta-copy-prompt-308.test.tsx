@@ -290,12 +290,21 @@ const copyButtonIn = (host: Element, marker: string) => {
 beforeEach(() => { document.body.innerHTML = ''; stubFetch() })
 afterEach(() => { vi.unstubAllGlobals() })
 
+// The queues redesign moved the button off the row and into the modal's
+// corporate-only block, so each read opens the item first.
+const openRow = (host: Element, title: string) =>
+  click([...host.querySelectorAll('button')].find(b => (b.textContent || '').startsWith(title))!)
+const closeModal = (host: Element) =>
+  click(host.querySelector('[aria-label="Close"]')!)
+
 describe('the button', () => {
-  it('says which tier a row will produce, BEFORE the click', async () => {
+  it('says which tier an item will produce, BEFORE the click', async () => {
     const { host, unmount } = await screenFor()
-    const t = host.textContent || ''
-    expect(t).toContain('full — carries the diagnosis')
-    expect(t).toContain('short — cause not established')
+    await openRow(host, 'Problem with Office Organization')
+    expect(host.textContent).toContain('full — carries the diagnosis')
+    await closeModal(host)
+    await openRow(host, 'Email cut off')
+    expect(host.textContent).toContain('short — cause not established')
     await unmount()
   })
 
@@ -303,6 +312,7 @@ describe('the button', () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const { host, unmount } = await screenFor()
+    await openRow(host, 'Problem with Office Organization')
     await click(copyButtonIn(host, 'Mario is closed out and paid.'))
     expect(writeText).toHaveBeenCalledTimes(1)
     const written = writeText.mock.calls[0][0] as unknown as string
@@ -317,8 +327,9 @@ describe('the button', () => {
   it('reveals selectable text when the clipboard is unavailable', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
     const { host, unmount } = await screenFor()
+    await openRow(host, 'Problem with Office Organization')
     await click(copyButtonIn(host, 'Mario is closed out and paid.'))
-    const area = host.querySelector('textarea') as HTMLTextAreaElement
+    const area = host.querySelector('textarea[aria-label="Prompt text — copy manually"]') as HTMLTextAreaElement
     expect(area, 'no fallback textarea rendered').toBeTruthy()
     expect(area.value).toContain('Mario is closed out and paid.')
     expect(host.textContent).toContain('Couldn’t reach the clipboard')
@@ -331,15 +342,17 @@ describe('the button', () => {
       configurable: true,
     })
     const { host, unmount } = await screenFor()
+    await openRow(host, 'Problem with Office Organization')
     await click(copyButtonIn(host, 'Mario is closed out and paid.'))
-    const area = host.querySelector('textarea') as HTMLTextAreaElement
+    const area = host.querySelector('textarea[aria-label="Prompt text — copy manually"]') as HTMLTextAreaElement
     expect(area).toBeTruthy()
     expect(area.value).toContain('Mario is closed out and paid.')
     await unmount()
   })
 
-  it('is absent on the franchise mount', async () => {
+  it('is absent on the franchise mount — even with the item open', async () => {
     const { host, unmount } = await screenFor({ onReportFeedback: () => {} })
+    await openRow(host, 'Problem with Office Organization')
     expect(copyButtons(host)).toHaveLength(0)
     await unmount()
   })

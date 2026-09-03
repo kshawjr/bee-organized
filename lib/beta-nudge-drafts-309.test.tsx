@@ -296,15 +296,22 @@ const btn = (host: Element, prefix: string) =>
 beforeEach(() => { document.body.innerHTML = ''; stubFetch() })
 afterEach(() => { vi.unstubAllGlobals() })
 
+// The queues redesign moved the draft button off the row and into the modal's
+// corporate-only block; the reply box it fills is in the same modal.
+const openMario = (host: Element) => click(btn(host, MARIO.title)!)
+
 describe('a draft reaches the owner only through the route', () => {
-  it('shows the draft affordance, labelled with its shape', async () => {
+  it('shows the draft affordance, labelled with its shape, inside the item', async () => {
     const { host, unmount } = await screenFor()
+    expect(btn(host, 'Draft reply')).toBeUndefined() // nothing corporate on the list
+    await openMario(host)
     expect(btn(host, 'Draft reply — may be fixed, asks them')).toBeTruthy()
     await unmount()
   })
 
-  it('opens the composer pre-filled with the draft', async () => {
+  it('fills the reply box with the draft', async () => {
     const { host, unmount } = await screenFor()
+    await openMario(host)
     await click(btn(host, 'Draft reply')!)
     const area = [...host.querySelectorAll('textarea')].find(t => (t as HTMLTextAreaElement).value.includes('Thanks for reporting this'))
     expect(area, 'composer not seeded with the draft').toBeTruthy()
@@ -315,6 +322,7 @@ describe('a draft reaches the owner only through the route', () => {
   // the email fires from the route on save, not from the database.
   it('saving PATCHes the route — the only thing that sends an email', async () => {
     const { host, unmount } = await screenFor()
+    await openMario(host)
     await click(btn(host, 'Draft reply')!)
     const save = [...host.querySelectorAll('button')].find(b => /^Save/.test((b.textContent || '').trim()))
     expect(save, 'no Save button in the composer').toBeTruthy()
@@ -328,6 +336,7 @@ describe('a draft reaches the owner only through the route', () => {
 
   it('nothing sends without that press — the draft alone writes nothing', async () => {
     const { host, unmount } = await screenFor()
+    await openMario(host)
     await click(btn(host, 'Draft reply')!)
     expect(WRITES).toEqual([])
     await unmount()
