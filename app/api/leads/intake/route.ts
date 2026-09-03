@@ -832,22 +832,53 @@ async function mergeResubmission(args: {
   // from the presence of an open engagement, not stored).
   //
   // NON-FATAL: the merge already committed; a founding failure only warns.
+  //
+  // ─── Fresh-lead guard (3 Sept 2026) ───
+  // Founding is for a PAST client's genuine next job. A brand-new website lead
+  // whose form arrives twice (three prod cases were 1½–3 minutes apart, one a
+  // day later) is not a past client: founding gave them a Request engagement,
+  // the engagement made them derive Active, and Active is outside the Inbox,
+  // the badge and the Home tile — six uncalled leads vanished from every
+  // worklist. So a resubmission founds ONLY when the client is a past client,
+  // by the same test the returning-client sequence already applies
+  // (isPastClient: Jobber-imported, or a closed engagement on record). A fresh
+  // lead's second form merges, notifies and leaves its touchpoint at lead
+  // level, and the lead stays New/Attempting exactly as after the first form.
+  // The answer is computed once here and reused by the sequence below.
+  // If the check itself fails, founding is SKIPPED (fail toward visibility —
+  // a hidden lead is worse than a past client without a card) and the reason
+  // rides the warnings + log line.
   let engagementId: string | null = null
   let engagementFounded = false
+  let foundingSkipped: string | null = null
   try {
     const open = await findOpenEngagementForClient(matched.id)
     if (open) {
       engagementId = open.id
     } else {
-      const founded = await foundManualEngagement({
-        clientId: matched.id,
-        note: `founded from webform resubmission (matched on ${matchedOn})`,
-      })
-      if ('engagement' in founded) {
-        engagementId = founded.engagement.id
-        engagementFounded = true
+      let pastClient = false
+      let checkFailed = false
+      try {
+        const { isPastClient } = await import('@/lib/drip-lifecycle')
+        pastClient = await isPastClient(matched.id)
+      } catch (err: any) {
+        checkFailed = true
+        console.error('[intake] resubmission past-client check failed; not founding', err)
+        warnings.push(`past_client_check_failed: ${err?.message || String(err)}`)
+      }
+      if (!pastClient) {
+        foundingSkipped = checkFailed ? 'past_client_check_failed' : 'not_past_client'
       } else {
-        warnings.push(`engagement_found_failed: ${founded.error}`)
+        const founded = await foundManualEngagement({
+          clientId: matched.id,
+          note: `founded from webform resubmission (matched on ${matchedOn})`,
+        })
+        if ('engagement' in founded) {
+          engagementId = founded.engagement.id
+          engagementFounded = true
+        } else {
+          warnings.push(`engagement_found_failed: ${founded.error}`)
+        }
       }
     }
   } catch (err: any) {
@@ -859,22 +890,21 @@ async function mergeResubmission(args: {
   // A PAST client's fresh enquiry gets its own short sequence (path_key
   // returning-a..d, the variant following the location's two Settings
   // answers), enrolled here and only here. The founding above already
-  // proved the two shape conditions — no other open engagement (else the
-  // request was surfaced onto it and nothing was founded) and the enquiry
-  // sits at Request — so the only test left is "is this a past client":
-  // Jobber-imported, or with a closed engagement on record. A new website
-  // lead who submits twice is neither and stays on the ordinary drip below,
-  // which is untouched. The sequence bypasses the import pause on purpose
-  // (see enrolReturningSequence). Non-fatal: the merge, the founding and the
+  // proved all three shape conditions — no other open engagement (else the
+  // request was surfaced onto it and nothing was founded), the enquiry sits
+  // at Request, and the client IS a past client (the fresh-lead guard asked
+  // isPastClient before founding; a fresh lead's second form founds nothing
+  // and reads skipped:not_past_client here, exactly as before the guard). So
+  // engagementFounded alone is the gate, and the set of people enrolled is
+  // unchanged. The sequence bypasses the import pause on purpose (see
+  // enrolReturningSequence). Non-fatal: the merge, the founding and the
   // notifications already stand; the token on the log line says what
   // happened. Dynamic import keeps this route's module graph unchanged.
-  let returningDrip = 'skipped:not_founded'
+  let returningDrip = foundingSkipped === 'not_past_client' ? 'skipped:not_past_client' : 'skipped:not_founded'
   if (engagementFounded) {
     try {
-      const { isPastClient, enrolReturningSequence } = await import('@/lib/drip-lifecycle')
-      if (!(await isPastClient(matched.id))) {
-        returningDrip = 'skipped:not_past_client'
-      } else {
+      const { enrolReturningSequence } = await import('@/lib/drip-lifecycle')
+      {
         const r = await enrolReturningSequence(matched.id, location.id)
         if (r.enrolled) {
           returningDrip = 'enrolled'
@@ -1122,7 +1152,8 @@ async function mergeResubmission(args: {
       // failed (a warning carries the reason).
       (engagementId
         ? ` engagement=${engagementFounded ? 'founded' : 'updated'}:${engagementId}`
-        : '') +
+        // Fresh-lead guard: nothing founded on purpose, and why.
+        : foundingSkipped ? ` engagement=skipped:${foundingSkipped}` : '') +
       ` drip_enrolled=${dripEnrolled}` +
       // Returning-client sequence outcome: enrolled | skipped:<reason>.
       ` returning_drip=${returningDrip}` +
@@ -1158,7 +1189,7 @@ async function mergeResubmission(args: {
     // #94 — the engagement the resubmission founded or surfaced onto.
     ...(engagementId
       ? { engagement_id: engagementId, engagement_action: engagementFounded ? 'founded' : 'updated' }
-      : {}),
+      : foundingSkipped ? { engagement_action: 'skipped', engagement_skipped: foundingSkipped } : {}),
     // #86 — resubmissions notify now; expose the count + mute like the create path.
     notified_count: notifiedCount,
     ...(notificationsMuted ? { notifications_muted: true } : {}),

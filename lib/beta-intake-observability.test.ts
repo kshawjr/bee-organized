@@ -55,6 +55,9 @@ vi.mock('@/lib/sync-log', () => syncLog)
 vi.mock('@/lib/drip-lifecycle', () => ({
   applyDripSideEffects: vi.fn(async () => {}),
   startDripForLead: vi.fn(async () => {}),
+  // Fresh-lead guard (3 Sept 2026): the intake asks this before founding on a
+  // resubmission. These cases are about a past client's merge, so: yes.
+  isPastClient: vi.fn(async () => true),
 }))
 vi.mock('@/lib/drip-send', () => ({
   sendDripStep: vi.fn(async () => ({ sent: true })),

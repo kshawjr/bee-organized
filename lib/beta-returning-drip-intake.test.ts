@@ -151,9 +151,14 @@ describe('a NEW lead who submitted the form twice', () => {
     h.enqueue('lead_drip_progress', { id: 'p1' }) // seeded re-check → yes
     await POST(makeReq(submission()))
 
-    expect(foundManualMock).toHaveBeenCalledTimes(1) // the engagement is still founded (#94)
+    // Fresh-lead guard (3 Sept 2026): a new lead's second form founds NOTHING —
+    // founding made them derive Active and vanish from the Inbox. The past-
+    // client answer is asked once, before founding, and reused by the sequence.
+    expect(foundManualMock).not.toHaveBeenCalled()
+    expect(isPastClientMock).toHaveBeenCalledWith('lead-A')
     expect(enrolReturningMock).not.toHaveBeenCalled()
     expect(startDripMock).toHaveBeenCalledWith('lead-A', 'loc-uuid-1')
+    expect(intakeLogLine()).toContain('engagement=skipped:not_past_client')
     expect(intakeLogLine()).toContain('returning_drip=skipped:not_past_client')
     expect(intakeLogLine()).toContain('drip_enrolled=true')
   })
