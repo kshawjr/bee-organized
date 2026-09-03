@@ -365,10 +365,16 @@ describe('the screen renders the analysis', () => {
   })
 
   it('renders a cluster banner when two items share a root cause', async () => {
-    stubFetch({ clusters: [{ probe: 'returning-client-request-stage', itemIds: ['mario', 'emailcut'], what: 'A returning client leaves the Inbox.', fleet: FLEET['returning-client-request-stage'] }] })
+    stubFetch({ clusters: [{ probe: 'returning-client-request-stage', itemIds: ['mario', 'emailcut'], what: 'A returning client leaves the Inbox.', summary: 'Returning clients leave the Inbox.', fleet: FLEET['returning-client-request-stage'] }] })
     const { host, unmount } = await screenFor()
-    expect(host.textContent).toContain('2 reports share one root cause')
-    expect(host.textContent).toContain('17 returning clients affected')
+    // The bar: a count and the plain sentence. The impact number is NOT on
+    // the bar — it is in the modal the bar opens.
+    const bar = host.querySelector('[data-testid="cluster-bar"]')!
+    expect(bar.textContent).toContain('2 reports, one cause')
+    expect(bar.textContent).toContain('Returning clients leave the Inbox.')
+    expect(bar.textContent).not.toContain('affected')
+    await click(bar)
+    expect(host.querySelector('[data-testid="cluster-modal"]')!.textContent).toContain('17 returning clients affected')
     await unmount()
   })
 

@@ -71,6 +71,17 @@ export interface ItemAnalysis {
   confidence: AnalysisConfidence
   /** What is probably wrong, in one or two sentences. Empty when confidence is none. */
   what: string
+  /**
+   * THE ONE PLAIN SENTENCE. Written next to the probe, by the same hand that
+   * wrote `what`, and restating it with NO code identifier — no function,
+   * field or constant name. It exists because `what` is one string that
+   * interleaves plain prose with the mechanism (probe 2's very first sentence
+   * names two constants and a function), so it cannot be cleanly divided
+   * after the fact and a first-sentence cut would carry code onto a bar meant
+   * to be read on a phone. Under ~80 characters so it wraps to two lines
+   * there. Null when no probe fired.
+   */
+  summary: string | null
   /** Where it lives. Empty when nothing was established. */
   files: string[]
   /** Only when computed. Null is the normal case and must stay cheap to render. */
@@ -189,6 +200,7 @@ const stuckFinalProcessing: Probe = {
     return {
       probe: 'stuck-final-processing',
       confidence: 'confident',
+      summary: 'An archived job with no invoice freezes the engagement at Final Processing.',
       what:
         'The engagement is frozen at Final Processing with no exit in either direction. ' +
         'Its job is archived in Jobber, and an archived job is neither "unbooked" (jobUnbooked tests only ' +
@@ -242,6 +254,7 @@ const returningClientOutOfInbox: Probe = {
     return {
       probe: 'returning-client-request-stage',
       confidence: named ? 'confident' : 'likely',
+      summary: 'Returning clients leave the Inbox as soon as an enquiry creates an engagement.',
       what:
         'A returning client\'s new enquiry founds an engagement at stage Request (OPENING_STAGE.request and ' +
         '.manual are both \'Request\'), and deriveClientStatus returns \'Active\' for anyone with ANY open ' +
@@ -290,6 +303,7 @@ const notSentByHub: Probe = {
     return {
       probe: 'not-sent-by-hub',
       confidence: 'confident',
+      summary: 'Bee Hub did not send this email; it almost certainly came from Jobber.',
       what:
         'Bee Hub did not send this. The location has no client-facing send on record — its entire outbound ' +
         'history is staff notifications (' +
@@ -329,6 +343,7 @@ const clientNotFound: Probe = {
     return {
       probe: 'named-client-not-found',
       confidence: 'likely',
+      summary: 'The client named in the report was never created here — a migration question.',
       what:
         `Checked: ${missing.map(m => m.query).join(', ')} — no lead of that name exists in the database at all. ` +
         'So this is not a display or filter problem; the record was never created here. The owner is really asking ' +
@@ -384,6 +399,7 @@ export function analyseItem({ item, evidence, index = null }: AnalyseInput): Ite
     probe: null,
     confidence: 'none',
     what: '',
+    summary: null,
     files: [],
     fleet: null,
     size: null,
@@ -411,6 +427,8 @@ export interface AnalysisCluster {
   itemIds: string[]
   /** Shared by construction — every member fired the same probe. */
   what: string
+  /** The probe's one plain sentence — what the list-level bar reads. */
+  summary: string | null
   fleet: FleetImpact | null
 }
 
@@ -429,6 +447,7 @@ export function clusterAnalyses(analyses: ItemAnalysis[]): AnalysisCluster[] {
       probe,
       itemIds: list.map(a => a.itemId),
       what: list[0].what,
+      summary: list[0].summary ?? null,
       fleet: list.find(a => a.fleet)?.fleet || null,
     })
   }

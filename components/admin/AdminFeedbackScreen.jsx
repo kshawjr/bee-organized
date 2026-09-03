@@ -942,6 +942,169 @@ function AdminFeedbackDetailModal({
   )
 }
 
+// ── THE CLUSTER BAR ───────────────────────────────────────────
+// One line per cluster: a count, ONE plain sentence, "Open". Full width, dark,
+// a 44px target. On a phone the trailing word hides (BAR_CSS) so the sentence
+// keeps the width and wraps to two lines rather than three; the sentence is
+// never clamped or cut — the probe's summary is written short for exactly
+// this bar, and a bar with no summary shows the count alone rather than a
+// slice of the paragraph.
+const BAR_CSS = `
+  @media (max-width: 480px) {
+    .bee-fb-bar-open { display: none !important; }
+  }
+`
+
+function clusterHeadline(cluster) {
+  return `${cluster.itemIds.length} reports, one cause`
+}
+
+function ClusterBar({ cluster, onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="cluster-bar"
+      aria-label={`${clusterHeadline(cluster)} — open`}
+      style={{
+        width: '100%', minHeight: '44px', padding: '10px 14px',
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        background: T.ink.primary, color: T.ink.inverse,
+        border: 'none', borderRadius: T.radius.control, cursor: 'pointer',
+        textAlign: 'left', fontFamily: 'inherit',
+      }}
+    >
+      <span aria-hidden="true" style={{ color: T.brand.gold, fontSize: '14px', lineHeight: '20px', flexShrink: 0 }}>◈</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: '13px', lineHeight: '20px', overflowWrap: 'anywhere' }}>
+        <strong style={{ fontWeight: 700 }}>{clusterHeadline(cluster)}</strong>
+        {cluster.summary ? <span style={{ opacity: 0.92 }}> — {cluster.summary}</span> : null}
+      </span>
+      <span className="bee-fb-bar-open" aria-hidden="true" style={{ flexShrink: 0, fontSize: '13px', lineHeight: '20px', fontWeight: 600, opacity: 0.9 }}>Open →</span>
+    </button>
+  )
+}
+
+// ── THE CLUSTER MODAL ─────────────────────────────────────────
+// Everything the bar does not say. Corporate-only by construction: the bars
+// only exist on the elevated mount, and their data only comes from the
+// analysis route, which is 403 below admin.
+//
+// THE PLAIN / TECHNICAL SPLIT. "What is happening" is the probe's summary —
+// the one sentence written without identifiers. The technical detail is the
+// probe's `what` paragraph and its file list, VERBATIM, behind a disclosure
+// that is closed by default and rendered only when opened (absent from the
+// DOM, not display:none — so find-in-page, screen readers and the test all
+// agree it is not there). The paragraph is not split: it cannot be cleanly,
+// so it moves whole.
+//
+// NO VERDICT LINE. The analysis carries nothing that says what a cluster
+// needs (a decision, a fix, a confirmation); three of the four probes bury a
+// hint inside `what` and one has none. Rather than hand-write one per
+// cluster, the section is left out until the library can supply it.
+function ClusterModal({ cluster, items, analyses, onClose, onSelect }) {
+  const [showTech, setShowTech] = useState(false)
+  useEffect(() => { setShowTech(false) }, [cluster?.probe])
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+  if (!cluster) return null
+
+  const members = cluster.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean)
+  const missing = cluster.itemIds.length - members.length
+  // The mechanism and the files come from a member's own analysis (every
+  // member fired the same probe, so the first with files is representative).
+  const withFiles = analyses ? cluster.itemIds.map(id => analyses.get(id)).find(a => a && a.files && a.files.length) : null
+  const files = withFiles ? withFiles.files : []
+  const headline = clusterHeadline(cluster)
+  const label = { fontSize: '12px', fontWeight: 700, color: T.ink.primary, margin: '0 0 6px' }
+
+  return (
+    <div className="bee-fb-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
+      <style>{MODAL_CSS}</style>
+      <div className="bee-fb-dialog" role="dialog" aria-modal="true" aria-label={headline} data-testid="cluster-modal" style={{ background: T.surface.raised, borderRadius: T.radius.card, width: '100%', maxWidth: '640px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: T.shadow.overlay, overflow: 'hidden' }}>
+
+        <div style={{ padding: '12px 16px 10px', borderBottom: T.border.divider, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ fontSize: '17px', fontFamily: 'Georgia,serif', color: T.ink.primary, margin: 0, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+              {headline}
+              {cluster.fleet && (
+                <span style={{ fontFamily: 'inherit', fontSize: '13px', fontWeight: 500, color: T.ink.muted }}> · {cluster.fleet.count} {cluster.fleet.unit} affected</span>
+              )}
+            </h2>
+            <p style={{ fontSize: '12px', color: T.ink.muted, margin: '3px 0 0' }}>Only the team sees this. The owner never does.</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: T.ink.muted, cursor: 'pointer', fontSize: '26px', lineHeight: 1, padding: 0, minWidth: '44px', minHeight: '44px', flexShrink: 0, marginTop: '-6px', marginRight: '-8px' }}>×</button>
+        </div>
+
+        <div style={{ padding: '16px', overflowY: 'auto', WebkitOverflowScrolling: 'touch', flex: 1, display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div>
+            <p style={label}>What is happening</p>
+            <p style={{ fontSize: '14px', color: T.ink.primary, lineHeight: 1.6, margin: 0 }}>
+              {cluster.summary || 'No plain summary has been written for this cause yet — see the technical detail below.'}
+            </p>
+          </div>
+
+          <div>
+            <p style={label}>The {cluster.itemIds.length} reports</p>
+            <div style={{ border: T.border.thin, borderRadius: T.radius.control, overflow: 'hidden' }}>
+              {members.map((m, i) => {
+                const days = triageWaitingDays(m)
+                return (
+                  <div key={m.id} style={{ padding: '10px 12px', borderTop: i === 0 ? 'none' : T.border.divider }}>
+                    <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 500, color: T.ink.primary, overflowWrap: 'anywhere' }}>{m.title}</span>
+                    <span style={{ display: 'block', fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
+                      {m.submitter_name || 'Unknown'}{m.location_name ? ` · ${m.location_name}` : ''}
+                      {days == null ? '' : days <= 0 ? ' · waiting since today' : ` · waiting ${dayPhrase(days)}`}
+                    </span>
+                  </div>
+                )
+              })}
+              {missing > 0 && (
+                <p style={{ fontSize: '12px', color: T.ink.quiet, margin: 0, padding: '10px 12px', borderTop: members.length ? T.border.divider : 'none' }}>
+                  {plural(missing, 'report is', 'reports are')} not in the loaded list.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowTech(v => !v)}
+              aria-expanded={showTech}
+              className="bee-chip-action"
+              style={{ padding: 0, minHeight: '44px', background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}
+            >
+              {showTech ? 'Hide the technical detail' : 'Show the technical detail'}
+            </button>
+            {showTech && (
+              <div data-testid="cluster-technical" style={{ marginTop: '6px', padding: '12px 14px', borderRadius: T.radius.control, background: T.surface.sunken, border: T.border.thin }}>
+                <p style={{ fontSize: '13px', color: T.ink.primary, lineHeight: 1.55, margin: 0, overflowWrap: 'anywhere' }}>{cluster.what}</p>
+                {files.length > 0 && (
+                  <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none' }}>
+                    {files.map(f => (
+                      <li key={f} style={{ fontSize: '12px', color: T.ink.secondary, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', lineHeight: 1.6, overflowWrap: 'anywhere' }}>{f}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: '12px 16px', borderTop: T.border.divider, display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, background: T.surface.raised }}>
+          <button onClick={onClose} style={{ minHeight: '44px', padding: '0 16px', background: 'transparent', border: T.border.control, borderRadius: T.radius.control, fontFamily: 'inherit', fontWeight: 600, color: T.ink.secondary, cursor: 'pointer' }}>Close</button>
+          <button onClick={onSelect} style={{ minHeight: '44px', padding: '0 18px', background: T.accent.fg, border: 'none', borderRadius: T.radius.control, fontFamily: 'inherit', fontWeight: 700, color: T.accent.onFill, cursor: 'pointer' }}>
+            Select these {cluster.itemIds.length} reports
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── TYPE TABS ─────────────────────────────────────────────────
 // The record cards' tab anatomy (CardTabs): 44px targets, inset underline,
 // no layout shift — except the underline takes the TYPE's colour when a type
@@ -1004,6 +1167,8 @@ export default function AdminFeedbackScreen({
   const [userQuery, setUserQuery]   = useState('')
   // The open modal: a snapshot of the visible list's ids plus the index.
   const [walk, setWalk] = useState(null)
+  // The open CLUSTER modal, by probe key (one bar per probe).
+  const [openCluster, setOpenCluster] = useState(null)
   // The internal composer (issue 247 step 2). Elevated mounts only.
   const [composing, setComposing] = useState(false)
   // VERDICT SELECTION (issue 306). Not persisted, like every filter here.
@@ -1368,19 +1533,16 @@ export default function AdminFeedbackScreen({
         )}
       </div>
 
-      {/* CLUSTERS (issue 307) — one quiet line each. "Show them" selects the
-          members so a verdict can land on all of them at once. */}
+      {/* CLUSTERS (issue 307) — ONE DARK BAR EACH, above the queues. A count,
+          one plain sentence, a way in. Everything else — the impact number,
+          the members, the mechanism with its identifiers — is in the cluster
+          modal the bar opens. The mechanism used to print here in full, code
+          names and all, before a single report was visible. */}
       {canTriage && !loading && !error && clusters.length > 0 && (
-        <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <style>{BAR_CSS}</style>
           {clusters.map(c => (
-            <p key={c.probe} style={{ fontSize: '12.5px', color: T.ink.secondary, margin: 0, lineHeight: 1.5 }}>
-              <strong style={{ color: T.ink.primary }}>{c.itemIds.length} reports share one root cause</strong>
-              {c.fleet ? ` · ${c.fleet.count} ${c.fleet.unit} affected` : ''}
-              {c.what ? ` — ${c.what}` : ''}{' '}
-              <button type="button" onClick={() => { setSelected(new Set(c.itemIds)); setArmed(null) }} className="bee-small-action" style={linkBtn}>
-                Show them
-              </button>
-            </p>
+            <ClusterBar key={c.probe} cluster={c} onOpen={() => setOpenCluster(c.probe)} />
           ))}
         </div>
       )}
@@ -1471,6 +1633,18 @@ export default function AdminFeedbackScreen({
             const { reply_email: _ignored, ...row } = updated
             setItems(prev => prev.map(i => (i.id === row.id ? { ...i, ...row } : i)))
           }}
+        />
+      )}
+
+      {canTriage && openCluster && clusters.some(c => c.probe === openCluster) && (
+        <ClusterModal
+          cluster={clusters.find(c => c.probe === openCluster)}
+          items={items}
+          analyses={analyses}
+          onClose={() => setOpenCluster(null)}
+          // The footer button does exactly what "Show them" did: select the
+          // members so a verdict can land on all of them at once.
+          onSelect={() => { const c = clusters.find(x => x.probe === openCluster); if (c) { setSelected(new Set(c.itemIds)); setArmed(null) } setOpenCluster(null) }}
         />
       )}
 
