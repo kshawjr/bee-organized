@@ -37591,7 +37591,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           franchiseRole={franchiseRole}
           locationId={viewAsUser?.locationId || null}
           viewAsUserId={viewAsUser?.id || null}
-          onAsk={(ask) => { setFeedbackSeed({ type: ask?.type || 'question', title: '', description: ask?.description || '', context: ask?.context || null }); setShowFeedback('submit') }}
+          onAsk={(ask) => { setFeedbackSeed({ type: ask?.type || 'question', title: '', about: ask?.about || '', context: ask?.context || null }); setShowFeedback('submit') }}
           onReportSomething={() => setShowFeedback('submit')}
         />
       </div>

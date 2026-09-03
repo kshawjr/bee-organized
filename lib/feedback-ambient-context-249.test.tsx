@@ -69,9 +69,20 @@ const typeIn = (el: Element, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value)
   el.dispatchEvent(new Event('input', { bubbles: true }))
 })
-// The tab strip also has a button reading "Submit"; the action button is last.
-const submitBtn = (host: Element) =>
-  [...host.querySelectorAll('button')].filter(b => (b.textContent || '').trim() === 'Submit').pop()!
+// The guided intake (design A): door → three questions → review → Send.
+// Drives the bug flow end to end with the given answers.
+const driveGuided = async (host: Element, { title, q2, q3 = 'On the Clients tab' }: { title?: string; q2: string; q3?: string }) => {
+  const door = host.querySelector('[data-intake-door="bug"]')
+  if (door) await click(door)
+  const q1 = host.querySelector('[data-intake-field="q1"]')!
+  if (title !== undefined) await typeIn(q1, title)
+  await click(host.querySelector('[data-intake-next]')!)
+  await typeIn(host.querySelector('[data-intake-field="q2"]')!, q2)
+  await click(host.querySelector('[data-intake-next]')!)
+  await typeIn(host.querySelector('[data-intake-field="q3"]')!, q3)
+  await click(host.querySelector('[data-intake-next]')!)
+  await click(host.querySelector('[data-intake-send]')!)
+}
 const postBody = () =>
   calls.find(c => c.url.includes('/api/feedback') && c.method === 'POST' && !c.url.includes('/upload'))!.body
 
@@ -80,9 +91,7 @@ const submitGeneral = async (ambientContext: any) => {
   const { host, unmount } = await mount(
     <FeedbackModal initialTab="submit" ambientContext={ambientContext} onClose={() => {}} />,
   )
-  await typeIn(host.querySelector('input[placeholder="Short summary"]')!, 'Board is slow')
-  await typeIn(host.querySelector('textarea')!, 'Takes ten seconds to open.')
-  await click(submitBtn(host))
+  await driveGuided(host, { title: 'Board is slow', q2: 'Takes ten seconds to open.' })
   await unmount()
   return postBody()
 }
@@ -200,9 +209,7 @@ describe('the general modal now says where it came from', () => {
     )
     for (const n of ['First', 'Second']) {
       await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Submit')!)
-      await typeIn(host.querySelector('input[placeholder="Short summary"]')!, n)
-      await typeIn(host.querySelector('textarea')!, `${n} report.`)
-      await click(submitBtn(host))
+      await driveGuided(host, { title: n, q2: `${n} report.` })
     }
     const posts = calls.filter(c => c.method === 'POST' && !c.url.includes('/upload'))
     expect(posts).toHaveLength(2)
@@ -232,8 +239,8 @@ describe('a record report still carries exactly what it carried before', () => {
         <FeedbackModal initialTab="submit" seed={{ type: 'bug', title: 'Problem', context: ctx }}
                        ambientContext={ambient} onClose={() => {}} />,
       )
-      await typeIn(host.querySelector('textarea')!, 'Something is wrong.')
-      await click(submitBtn(host))
+      // The seed chose the type and the title; the door is skipped.
+      await driveGuided(host, { q2: 'Something is wrong.' })
       // Byte-for-byte: the seed wins every collision, incl. origin.
       expect(postBody().context).toEqual(ctx)
       await unmount()

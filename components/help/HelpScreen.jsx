@@ -85,14 +85,17 @@ function BackLink({ label, onClick }) {
 }
 
 // ── the ask strip ─────────────────────────────────────────────
-// Ends every level. Carries where the owner was — the breadcrumb in words
-// (visible to triage today) and the entry id (for a future resolver).
+// Ends every level. Three doors — the guided intake's own three — so the
+// type is chosen here and the form opens straight on question 1. Carries
+// where the owner was: the breadcrumb in words as `about` (stored as an
+// "About:" line under the answers, visible to triage today) and the entry
+// id in context (for a future resolver).
 export function AskStrip({ crumbs, onAsk }) {
   const where = helpBreadcrumb(crumbs) || 'Help'
   const deepest = [...crumbs].reverse().find(c => c && c.id) || null
   const ask = (type) => onAsk?.({
     type,
-    description: `Asking about: ${where}\n\n`,
+    about: where,
     context: { origin: 'help_ask_strip', screen: 'Help', ...(deepest ? { help_entry_id: deepest.id } : {}) },
   })
   return (
@@ -101,10 +104,13 @@ export function AskStrip({ crumbs, onAsk }) {
         Still stuck on <b style={{ color: T.ink.primary }}>{where}</b>? A person reads every one and writes back — the reply lands under My requests.
       </p>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => ask('question')} style={{ minHeight: '46px', padding: '10px 16px', background: T.ink.primary, color: T.ink.inverse, border: 'none', borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
+        <button type="button" onClick={() => ask('bug')} data-help-door="bug" style={{ minHeight: '46px', padding: '10px 14px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
+          🐛 Report a bug
+        </button>
+        <button type="button" onClick={() => ask('question')} data-help-door="question" style={{ minHeight: '46px', padding: '10px 14px', background: T.ink.primary, color: T.ink.inverse, border: 'none', borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
           ❓ Ask a question
         </button>
-        <button type="button" onClick={() => ask('feature')} style={{ minHeight: '46px', padding: '10px 16px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
+        <button type="button" onClick={() => ask('feature')} data-help-door="feature" style={{ minHeight: '46px', padding: '10px 14px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
           ✨ Suggest a feature
         </button>
       </div>

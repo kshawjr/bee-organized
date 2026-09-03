@@ -181,23 +181,27 @@ describe('an item renders', () => {
 // ─── the ask strip ─────────────────────────────────────────────────
 
 describe('the ask strip', () => {
-  it('carries the topic through — type, breadcrumb, entry id — at every level', async () => {
+  it('has three doors, and carries the topic through — type, breadcrumb, entry id — at every level', async () => {
     stubFetch({ '/api/help/entries': OWNER_TREE })
     const onAsk = vi.fn()
     const { host, unmount } = await mount(<HelpScreen canEdit={false} onAsk={onAsk} />)
     // section list: nothing chosen yet
     expect(host.querySelectorAll('[data-help-ask-strip]').length).toBe(1)
+    expect(Array.from(host.querySelectorAll('[data-help-door]')).map(b => b.getAttribute('data-help-door'))).toEqual(['bug', 'question', 'feature'])
     await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Ask a question')) || null)
-    expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', description: 'Asking about: Help\n\n', context: { origin: 'help_ask_strip', screen: 'Help' } })
+    expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', about: 'Help', context: { origin: 'help_ask_strip', screen: 'Help' } })
 
     await click(host.querySelector('[data-help-section="s1"]'))
     await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Suggest a feature')) || null)
-    expect(onAsk).toHaveBeenLastCalledWith({ type: 'feature', description: 'Asking about: Getting started\n\n', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 's1' } })
+    expect(onAsk).toHaveBeenLastCalledWith({ type: 'feature', about: 'Getting started', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 's1' } })
 
     await click(host.querySelector('[data-help-item-row="i1"]'))
     expect(host.textContent).toContain('Still stuck on Getting started › Connect Jobber › Turn on alerts')
     await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Ask a question')) || null)
-    expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', description: 'Asking about: Getting started › Connect Jobber › Turn on alerts\n\n', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 'i1' } })
+    expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', about: 'Getting started › Connect Jobber › Turn on alerts', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 'i1' } })
+    // the third door
+    await click(host.querySelector('[data-help-door="bug"]'))
+    expect(onAsk).toHaveBeenLastCalledWith({ type: 'bug', about: 'Getting started › Connect Jobber › Turn on alerts', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 'i1' } })
     await unmount()
   })
 })

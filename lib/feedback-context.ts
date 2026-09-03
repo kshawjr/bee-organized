@@ -28,7 +28,10 @@
 //   help_entry_id — the Help section/topic/item the ask strip was under (an
 //                   id into help_entries; the breadcrumb in words rides the
 //                   description, so triage reads it today with no resolver)
-export const FEEDBACK_CONTEXT_KEYS = ['kind', 'lead_id', 'location_id', 'engagement_id', 'stage', 'screen', 'path', 'origin', 'help_entry_id'] as const
+//   device        — a fixed label ('iPhone' | 'iPad' | 'Android' | 'Mac' |
+//                   'Windows'), never the user-agent string; the one thing
+//                   the guided intake adds so nobody has to type it
+export const FEEDBACK_CONTEXT_KEYS = ['kind', 'lead_id', 'location_id', 'engagement_id', 'stage', 'screen', 'path', 'origin', 'help_entry_id', 'device'] as const
 
 export type FeedbackContext = Partial<Record<(typeof FEEDBACK_CONTEXT_KEYS)[number], string>>
 

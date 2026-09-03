@@ -51,10 +51,18 @@ const typeIn = (el: Element, value: string) => act(async () => {
 })
 const btn = (host: Element, text: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text)
-// The Submit ACTION button (the tab strip also has a button reading "Submit";
-// the action button is the last one).
-const submitBtn = (host: Element) =>
-  [...host.querySelectorAll('button')].filter(b => (b.textContent || '').trim() === 'Submit').pop()!
+// The guided intake (design A): a seeded type skips the door; the seeded
+// title is answer 1. Walk question 2, question 3, then Send from the review.
+const next = (host: Element) => click(host.querySelector('[data-intake-next]')!)
+const finishBug = async (host: Element, q2: string, q3 = 'On the client record') => {
+  await next(host)
+  await typeIn(host.querySelector('[data-intake-field="q2"]')!, q2)
+  await next(host)
+  await typeIn(host.querySelector('[data-intake-field="q3"]')!, q3)
+  await next(host)
+  await click(host.querySelector('[data-intake-send]')!)
+}
+import { composeDescription } from '@/lib/feedback-intake'
 
 const CONTEXT = { kind: 'client', lead_id: 'lead-9', location_id: 'loc-uuid-1', screen: 'Clients', path: '/clients/lead-9', origin: 'client_profile_menu' }
 const SEED = { type: 'bug', title: 'Problem with Dana Client', context: CONTEXT }
@@ -64,7 +72,9 @@ beforeEach(() => { document.body.innerHTML = ''; installFetch() })
 describe('seed pre-fills the Submit form', () => {
   it('opens on the Submit tab with the seeded title', async () => {
     const { host, unmount } = await mount(<FeedbackModal initialTab="submit" seed={SEED} onClose={() => {}} />)
-    const title = host.querySelector('input[placeholder="Short summary"]') as HTMLInputElement
+    // Straight to question 1 (the seed chose bug), title prefilled.
+    expect(host.querySelector('[data-intake-step="1"][data-intake-type="bug"]')).toBeTruthy()
+    const title = host.querySelector('[data-intake-field="q1"]') as HTMLInputElement
     expect(title).toBeTruthy()
     expect(title.value).toBe('Problem with Dana Client')
     await unmount()
@@ -74,23 +84,29 @@ describe('seed pre-fills the Submit form', () => {
 describe('the report submits WITH the record context attached', () => {
   it('POST /api/feedback carries the id-only context', async () => {
     const { host, unmount } = await mount(<FeedbackModal initialTab="submit" seed={SEED} onClose={() => {}} />)
-    await typeIn(host.querySelector('textarea')!, 'The address on the invoice is wrong.')
-    await click(submitBtn(host))
+    await finishBug(host, 'The address on the invoice is wrong.', 'Her invoice, the address line')
 
     const post = calls.find(c => c.url.includes('/api/feedback') && c.method === 'POST' && !c.url.includes('/upload'))
     expect(post).toBeTruthy()
     expect(post!.body.type).toBe('bug')
     expect(post!.body.title).toBe('Problem with Dana Client')
-    expect(post!.body.description).toBe('The address on the invoice is wrong.')
+    // Answers 2 and 3 fold into the description under their headings.
+    expect(post!.body.description).toBe(composeDescription('bug', { q2: 'The address on the invoice is wrong.', q3: 'Her invoice, the address line' }))
+    expect(post!.body.description).toContain('What I expected, and what happened instead:\nThe address on the invoice is wrong.')
     expect(post!.body.context).toEqual(CONTEXT)
     await unmount()
   })
 
   it('a plain (unseeded) submission sends NO context key', async () => {
     const { host, unmount } = await mount(<FeedbackModal initialTab="submit" onClose={() => {}} />)
-    await typeIn(host.querySelector('input[placeholder="Short summary"]')!, 'General idea')
-    await typeIn(host.querySelector('textarea')!, 'Would be nice to export a CSV.')
-    await click(submitBtn(host))
+    // No seed: the door comes first.
+    await click(host.querySelector('[data-intake-door="feature"]')!)
+    await typeIn(host.querySelector('[data-intake-field="q1"]')!, 'General idea')
+    await next(host)
+    await typeIn(host.querySelector('[data-intake-field="q2"]')!, 'Would be nice to export a CSV.')
+    await next(host)
+    await next(host) // question 3 is optional on an idea — Skip
+    await click(host.querySelector('[data-intake-send]')!)
     const post = calls.find(c => c.url.includes('/api/feedback') && c.method === 'POST' && !c.url.includes('/upload'))
     expect(post).toBeTruthy()
     expect('context' in post!.body).toBe(false)
@@ -102,8 +118,9 @@ describe('screenshot slot — attaches in the seeded flow (issue 116)', () => {
   it('a selected image uploads, then rides the report as attachment metadata', async () => {
     const { host, unmount } = await mount(<FeedbackModal initialTab="submit" seed={SEED} onClose={() => {}} />)
 
-    // The attach affordance is present…
-    expect(btn(host, '📎 Add file')).toBeTruthy()
+    // The attach affordance sits on bug question 2, where the evidence is.
+    await next(host)
+    expect(btn(host, '📎 Add a screenshot')).toBeTruthy()
     const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement
     expect(fileInput).toBeTruthy()
 
@@ -117,8 +134,11 @@ describe('screenshot slot — attaches in the seeded flow (issue 116)', () => {
     // The chip for the selected file shows before submit.
     expect(host.textContent).toContain('screenshot.png')
 
-    await typeIn(host.querySelector('textarea')!, 'See attached screenshot.')
-    await click(submitBtn(host))
+    await typeIn(host.querySelector('[data-intake-field="q2"]')!, 'See attached screenshot.')
+    await next(host)
+    await typeIn(host.querySelector('[data-intake-field="q3"]')!, 'Her record')
+    await next(host)
+    await click(host.querySelector('[data-intake-send]')!)
 
     // Upload happened first, then the report carried the uploaded metadata.
     const upload = calls.find(c => c.url.includes('/api/feedback/upload'))

@@ -2,10 +2,40 @@
 // User-facing feedback modal (My Items + Submit tabs). Extracted from BeeHub.jsx so
 // it is imported in ONE place and mount-testable. `seed` pre-fills the form and
 // carries an id-only record `context` into the POST (see lib/feedback-context.ts).
+//
+// The Submit tab is the GUIDED intake (components/feedback/GuidedIntake.jsx,
+// design A): three doors, three questions one screen at a time, a review. The
+// My Items tab is untouched. What the modal POSTs is the same body the old
+// two-box form posted.
+//
+// THE PHONE. On mobile this is no longer a centred box: it is a top-anchored
+// sheet sized to the VISUAL viewport (window.visualViewport.height), so when
+// the iPhone keyboard rises the sheet shrinks above it and the field being
+// typed in stays on screen — the fault Ankur reported on the new-lead form
+// (feedback ddc3afab). Desktop keeps the centred modal.
 'use client'
 import React, { useState, useRef, useEffect } from 'react'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
-import { feedbackFmtBytes, FeedbackItemCard } from '@/components/feedback/feedbackShared'
+import useIsMobile from '@/components/hive/shared/useIsMobile'
+import { FeedbackItemCard } from '@/components/feedback/feedbackShared'
+import GuidedIntake from '@/components/feedback/GuidedIntake'
+
+// The visible height of the viewport — the part the keyboard has not taken.
+// null until measured (SSR, or a browser without visualViewport).
+function useVisualViewportHeight(enabled) {
+  const [h, setH] = useState(null)
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return
+    const vv = window.visualViewport
+    if (!vv) return
+    const read = () => setH(Math.round(vv.height))
+    read()
+    vv.addEventListener('resize', read)
+    vv.addEventListener('scroll', read)
+    return () => { vv.removeEventListener('resize', read); vv.removeEventListener('scroll', read) }
+  }, [enabled])
+  return h
+}
 
 // initialTab: 'mine' (default — the Help "?" menu path) | 'submit' (the
 // Feedback screen's composer button lands straight on the form).
@@ -17,18 +47,18 @@ import { feedbackFmtBytes, FeedbackItemCard } from '@/components/feedback/feedba
 // everyone else. Null for real sessions → no param, own items as always.
 // Known wrinkle: the Submit tab still files as the REAL session user, so a
 // submission made while impersonating won't appear in the list it lands on.
-// seed (optional): pre-fills the Submit form when the modal is opened FROM a
-// record — { type?, title?, description?, context? }. `context` is an id-only
-// record pointer (lib/feedback-context) that rides the POST and is re-sanitized
-// server-side; it never carries the client's name/email/phone. Seeded once at
-// open (the modal is remounted per open), and cleared after a successful submit
-// so the record rides exactly ONE submission.
+// seed (optional): pre-fills the form when the modal is opened FROM a record
+// or the Help ask strip — { type?, title?, description?, about?, context? }.
+// `type` skips the door. `title` is answer 1. `about` is the Help breadcrumb,
+// appended to the stored description as an "About:" line. `context` is an
+// id-only record pointer (lib/feedback-context) that rides the POST and is
+// re-sanitized server-side. Seeded once at open (the modal is remounted per
+// open), and cleared after a successful submit so the record rides exactly
+// ONE submission.
 // ambientContext (optional): where the user was standing when the modal opened
 // — { origin:'feedback_modal', screen, path, lead_id?, engagement_id? }, built
 // by the mount from activeNav + the address bar (components/hive/shared/hubUrl
-// → buildAmbientContext). Issue 249: before this, a submission from the general
-// modal carried NO context at all and triage had only the owner's prose. It
-// rides UNDER the seed (see handleSubmit) and, unlike the seed, is NOT cleared
+// → buildAmbientContext). Issue 249. It rides UNDER the seed and is NOT cleared
 // after a submit — a second report filed without closing the modal was still
 // filed from the same screen.
 export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null, ambientContext = null }) {
@@ -36,56 +66,15 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null)
-
-  // Submit form
-  const [type, setType]         = useState(seed?.type || 'bug')
-  const [title, setTitle]       = useState(seed?.title || '')
-  const [desc, setDesc]         = useState(seed?.description || '')
-  const [context, setContext]   = useState(seed?.context || null)
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState(null)
   const [toast, setToast]       = useState(null)
+  // The seed rides exactly one submission; a second report from the same
+  // open modal starts clean (same rule as before).
+  const [liveSeed, setLiveSeed] = useState(seed)
+  // Remount the intake after a send so a second report starts at the door.
+  const [intakeKey, setIntakeKey] = useState(0)
   const bodyRef = useRef(null)
-
-  // Attachments — selected client-side, uploaded only at submit time. Each
-  // entry: { id, file, preview }. preview is an image data URL (or null).
-  const FB_MAX_FILES = 5
-  const FB_MAX_BYTES = 10 * 1024 * 1024
-  const [files, setFiles]       = useState([])
-  const [uploadProgress, setUploadProgress] = useState(null) // e.g. "Uploading 1 of 3…"
-  const fileInputRef = useRef(null)
-
-  function onPickFiles(e) {
-    const picked = Array.from(e.target.files || [])
-    e.target.value = '' // allow re-picking the same file after a remove
-    if (picked.length === 0) return
-    setSubmitError(null)
-    setFiles(prev => {
-      const next = [...prev]
-      for (const file of picked) {
-        if (next.length >= FB_MAX_FILES) {
-          setSubmitError(`You can attach up to ${FB_MAX_FILES} files.`)
-          break
-        }
-        if (file.size > FB_MAX_BYTES) {
-          setSubmitError(`"${file.name}" is larger than 10MB and was skipped.`)
-          continue
-        }
-        const entry = { id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`, file, preview: null }
-        next.push(entry)
-        if (file.type && file.type.startsWith('image/')) {
-          const reader = new FileReader()
-          reader.onload = () => setFiles(cur => cur.map(f => f.id === entry.id ? { ...f, preview: reader.result } : f))
-          reader.readAsDataURL(file)
-        }
-      }
-      return next
-    })
-  }
-
-  function removeFile(id) {
-    setFiles(prev => prev.filter(f => f.id !== id))
-  }
+  const isMobile = useIsMobile()
+  const vvHeight = useVisualViewportHeight(isMobile)
 
   async function loadItems() {
     setLoading(true)
@@ -110,81 +99,40 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
     return () => clearTimeout(t)
   }, [toast])
 
-  const canSubmit = title.trim().length > 0 && desc.trim().length > 0 && !submitting
-
-  async function handleSubmit() {
-    if (!canSubmit) return
-    setSubmitting(true)
-    setSubmitError(null)
-    try {
-      // 1) Upload any selected files first, collecting their stored metadata.
-      //    A failure here leaves the form (and file selection) intact so the
-      //    user can retry without re-entering anything.
-      const uploaded = []
-      for (let i = 0; i < files.length; i++) {
-        setUploadProgress(`Uploading ${i + 1} of ${files.length}…`)
-        const fd = new FormData()
-        fd.append('file', files[i].file)
-        const upRes = await fetch('/api/feedback/upload', { method: 'POST', body: fd })
-        if (!upRes.ok) {
-          const err = await upRes.json().catch(() => ({}))
-          throw new Error(err.detail || err.error || `Upload failed (${upRes.status})`)
-        }
-        uploaded.push(await upRes.json())
-      }
-      setUploadProgress(null)
-
-      // 2) Create the feedback item with the uploaded attachment metadata.
-      //
-      // Context = ambient UNDER seed (issue 249). The seed is what the user
-      // POINTED AT (a record menu); the ambient is where they were STANDING.
-      // Seed keys win on every collision, so a record report sends byte-for-byte
-      // what it always sent — same screen, same path, same origin — while a
-      // general submission, which used to send nothing, now carries its screen
-      // and path. Merged at submit rather than at open so it survives the
-      // setContext(null) below: the record rides exactly one submission, the
-      // screen rides every one. The server re-derives this through the same
-      // id-only whitelist (lib/feedback-context), so nothing here is trusted.
-      const submitContext = { ...(ambientContext || {}), ...(context || {}) }
-      const hasContext = Object.keys(submitContext).length > 0
-      const res = await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, title: title.trim(), description: desc.trim(), attachments: uploaded, ...(hasContext ? { context: submitContext } : {}) }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-      // Reset form, switch to My Items, refresh, toast.
-      setTitle(''); setDesc(''); setType('bug'); setFiles([]); setContext(null)
-      setTab('mine')
-      setToast("Submitted! We'll review and respond.")
-      await loadItems()
-      if (bodyRef.current) bodyRef.current.scrollTop = 0
-    } catch (e) {
-      setSubmitError(e?.message ? `Could not submit — ${e.message}` : 'Could not submit — please try again.')
-    } finally {
-      setUploadProgress(null)
-      setSubmitting(false)
-    }
+  async function afterSubmit() {
+    setLiveSeed(null)
+    setIntakeKey(k => k + 1)
+    setTab('mine')
+    setToast("Sent! We'll read it and write back.")
+    await loadItems()
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
   }
 
   const tabBtn = (key, label) => (
     <button
       onClick={() => setTab(key)}
-      style={{ flex:1, padding:'11px', background:'none', border:'none', borderBottom: tab === key ? '2px solid #1a2e2b' : '2px solid transparent', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight: tab === key ? 700 : 500, color: tab === key ? '#1a2e2b' : '#8a9e9a' }}>
+      style={{ flex:1, minHeight:'48px', padding:'11px', background:'none', border:'none', borderBottom: tab === key ? '2px solid #1a2e2b' : '2px solid transparent', cursor:'pointer', fontFamily:'inherit', fontWeight: tab === key ? 700 : 500, color: tab === key ? '#1a2e2b' : '#8a9e9a' }}>
       {label}
     </button>
   )
 
+  // Mobile: a top-anchored sheet that is exactly as tall as the visible
+  // viewport, so the keyboard shrinks it instead of covering it. Desktop:
+  // the centred modal as before.
+  const shell = isMobile
+    ? { position:'fixed', inset:0, zIndex:10120, display:'flex', alignItems:'flex-start', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }
+    : { position:'fixed', inset:0, zIndex:10120, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }
+  const panel = isMobile
+    ? { background:'white', width:'100%', height: vvHeight ? `${vvHeight}px` : '100dvh', maxHeight: vvHeight ? `${vvHeight}px` : '100dvh', display:'flex', flexDirection:'column', overflow:'hidden', borderRadius:0 }
+    : { background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }
+
   return (
-    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position:'fixed', inset:0, zIndex:10120, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
-      <div style={{ background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={shell} data-feedback-modal={isMobile ? 'sheet' : 'modal'}>
+      <div style={panel}>
         {/* Sticky header */}
-        <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>
+        <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>
           <h2 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0 }}>🐛 Feedback</h2>
-          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', color:'#8a9e9a', cursor:'pointer', fontSize:'24px', lineHeight:1, padding:0 }}>×</button>
+          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', color:'#8a9e9a', cursor:'pointer', fontSize:'24px', lineHeight:1, padding:0, width:'44px', height:'44px' }}>×</button>
         </div>
         {/* Tab strip */}
         <div style={{ display:'flex', borderBottom:'1px solid rgba(0,0,0,0.07)', flexShrink:0 }}>
@@ -192,7 +140,7 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
           {tabBtn('submit', 'Submit')}
         </div>
         {/* Scrollable body */}
-        <div ref={bodyRef} style={{ padding:'18px 20px', overflowY:'auto', flex:1 }}>
+        <div ref={bodyRef} style={{ padding:'18px 20px 28px', overflowY:'auto', flex:1, WebkitOverflowScrolling:'touch', overscrollBehavior:'contain' }}>
           {tab === 'mine' ? (
             loading ? (
               <BeeLoader label="Gathering your reports…" />
@@ -225,79 +173,7 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
               </div>
             )
           ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
-              {/* Type toggle. The label asks the question an owner can answer
-                  ("What is this?"), and each option is a thing they'd say —
-                  never a cold enum. 'question' joined so a how-do-I stops
-                  having to dress up as a bug (the mislabels were constant, and
-                  a question marked Fixed later is a false statement). */}
-              <div>
-                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'7px' }}>What is this?</label>
-                <div style={{ display:'flex', gap:'8px' }}>
-                  {[
-                    { k:'bug', icon:'🐛', label:'Something broken' },
-                    { k:'feature', icon:'✨', label:'An idea' },
-                    { k:'question', icon:'❓', label:'A question' },
-                  ].map(o => (
-                    <button key={o.k} onClick={() => setType(o.k)} style={{ flex:1, padding:'10px 6px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, border:'1.5px solid', borderColor: type === o.k ? '#1a2e2b' : 'rgba(0,0,0,0.1)', background: type === o.k ? '#1a2e2b' : 'white', color: type === o.k ? 'white' : '#4a5e5a' }}>
-                      {o.icon} {o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Title */}
-              <div>
-                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
-                  <span>Title</span>
-                  <span style={{ fontSize:'11px', fontWeight:500, color: title.length > 100 ? '#b91c1c' : '#8a9e9a' }}>{title.length}/100</span>
-                </label>
-                <input value={title} maxLength={100} onChange={e => setTitle(e.target.value)} placeholder="Short summary" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-              </div>
-              {/* Description */}
-              <div>
-                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
-                  <span>Description</span>
-                  <span style={{ fontSize:'11px', fontWeight:500, color: desc.length > 2000 ? '#b91c1c' : '#8a9e9a' }}>{desc.length}/2000</span>
-                </label>
-                <textarea value={desc} maxLength={2000} onChange={e => setDesc(e.target.value)} rows={6} placeholder="What happened (or what would you like)?" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }} />
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Be specific. Include steps to reproduce for bugs.</p>
-              {/* Attachments */}
-              <div>
-                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Attachments (optional)</label>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>Up to 5 files, 10MB each. Screenshots/videos especially helpful.</p>
-                <input ref={fileInputRef} type="file" multiple onChange={onPickFiles} style={{ display:'none' }} />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                  disabled={files.length >= FB_MAX_FILES || submitting}
-                  style={{ padding:'9px 14px', borderRadius:'10px', border:'1.5px dashed rgba(0,0,0,0.2)', background:'white', cursor: (files.length >= FB_MAX_FILES || submitting) ? 'default' : 'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, color: (files.length >= FB_MAX_FILES) ? '#8a9e9a' : '#1a2e2b', opacity: (files.length >= FB_MAX_FILES || submitting) ? 0.55 : 1 }}>
-                  📎 {files.length === 0 ? 'Add file' : files.length >= FB_MAX_FILES ? 'Maximum 5 files' : 'Add another file'}
-                </button>
-                {files.length > 0 && (
-                  <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px' }}>
-                    {files.map(f => (
-                      <div key={f.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', background:'white' }}>
-                        {f.preview ? (
-                          <img src={f.preview} alt="" style={{ width:'40px', height:'40px', objectFit:'cover', borderRadius:'6px', flexShrink:0, border:'1px solid rgba(0,0,0,0.08)' }} />
-                        ) : (
-                          <span style={{ width:'40px', height:'40px', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:'18px', background:'#f0efe9', borderRadius:'6px', flexShrink:0 }}>📄</span>
-                        )}
-                        <div style={{ minWidth:0, flex:1 }}>
-                          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.file.name}</p>
-                          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{feedbackFmtBytes(f.file.size)}</p>
-                        </div>
-                        <button type="button" onClick={() => removeFile(f.id)} disabled={submitting} aria-label={`Remove ${f.file.name}`} style={{ background:'none', border:'none', color:'#8a9e9a', cursor: submitting ? 'default' : 'pointer', fontSize:'20px', lineHeight:1, padding:'0 4px', flexShrink:0 }}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {submitError && <p style={{ fontSize:'12px', color:'#b91c1c' }}>{submitError}</p>}
-              <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding:'12px', borderRadius:'10px', border:'none', cursor: canSubmit ? 'pointer' : 'default', fontFamily:'inherit', fontSize:'14px', fontWeight:700, color:'white', background: canSubmit ? '#1a2e2b' : 'rgba(26,46,43,0.35)' }}>
-                {uploadProgress ? uploadProgress : submitting ? 'Submitting…' : 'Submit'}
-              </button>
-            </div>
+            <GuidedIntake key={intakeKey} seed={liveSeed} ambientContext={ambientContext} onSubmitted={afterSubmit} />
           )}
         </div>
         {toast && (
