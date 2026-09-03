@@ -151,14 +151,15 @@ describe('the BeeHub mount sites pass the shapes mounted in this file', () => {
     expect(BEEHUB_SRC).not.toContain("onReportFeedback={() => setShowFeedback('submit')}")
   })
 
-  it('the franchise nav mounts the owner screen instead, with view-as parity', () => {
-    expect(BEEHUB_SRC).toContain('import OwnerFeedbackScreen from "@/components/feedback/OwnerFeedbackScreen"')
-    expect(BEEHUB_SRC).toMatch(/<OwnerFeedbackScreen[\s\S]*?locationId=\{viewAsUser\?\.locationId \|\| null\}/)
+  // The nav swap: the owner screen is mounted by HelpScreen's My requests tab
+  // now, not by BeeHub, and the nav item is gone. BeeHub still passes the
+  // view-as location and the one composer to the Help mount.
+  it('the owner screen is reached through Help, with view-as parity, and the old nav item is gone', () => {
+    expect(BEEHUB_SRC).not.toContain('import OwnerFeedbackScreen')
+    expect(BEEHUB_SRC).toMatch(/<HelpScreen[\s\S]*?locationId=\{viewAsUser\?\.locationId \|\| null\}/)
     expect(BEEHUB_SRC).toContain("onReportSomething={() => setShowFeedback('submit')}")
-  })
-
-  it('the nav item is named for what it shows, not for the database table', () => {
-    expect(BEEHUB_SRC).toContain(`label:"What you've told us"`)
+    expect(BEEHUB_SRC).not.toContain(`label:"What you've told us"`)
+    expect(BEEHUB_SRC).not.toContain("key:'feedback', icon")
   })
 })
 

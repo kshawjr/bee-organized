@@ -37,10 +37,12 @@ const screenSrc = readFileSync(join(process.cwd(), 'components/admin/AdminFeedba
 const adminRoute = readFileSync(join(process.cwd(), 'app/api/admin/feedback/route.ts'), 'utf8')
 const userRoute = readFileSync(join(process.cwd(), 'app/api/feedback/route.ts'), 'utf8')
 
-// The franchise feedback mount (the activeNav==='feedback' branch inside screen()).
+// The franchise feedback mount is now the Help mount (the activeNav==='help'
+// branch inside screen()) — HelpScreen's My requests tab mounts the owner
+// screen with the same two props.
 const franchiseMount = beehub.slice(
-  beehub.indexOf("if (activeNav==='feedback') return ("),
-  beehub.indexOf("if (activeNav==='feedback') return (") + 600
+  beehub.indexOf("if (activeNav==='help') return ("),
+  beehub.indexOf("if (activeNav==='help') return (") + 1100
 )
 
 const stubFetch = () => {

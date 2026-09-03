@@ -1,7 +1,10 @@
 // components/feedback/OwnerFeedbackScreen.jsx
 // ─────────────────────────────────────────────────────────────
-// "What you've told us" — the franchise owner/manager view of their own
-// location's feedback. Issue 235.
+// Help › My requests — the franchise owner/manager view of their own
+// location's feedback. Issue 235. It was the "What you've told us" nav
+// screen until the nav swap; it is now only ever mounted inside the Help
+// tab, which already carries the heading, so `title` defaults to the tab's
+// name and null hides the h1 altogether.
 //
 // WHY THIS IS A SEPARATE COMPONENT AND NOT ANOTHER PROP ON THE TRIAGE SCREEN.
 // Until now owners mounted components/admin/AdminFeedbackScreen with one prop
@@ -474,6 +477,8 @@ export default function OwnerFeedbackScreen({
   // hard-scopes a real owner/manager to their own location and honors
   // ?location_id= only for elevated (impersonating) callers.
   locationId = null,
+  // The h1. null when the mount already has a heading (the Help tab).
+  title = 'My requests',
 }) {
   const [items, setItems]     = useState([])
   const [loading, setLoading] = useState(true)
@@ -601,9 +606,11 @@ export default function OwnerFeedbackScreen({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '22px', flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontFamily: 'Georgia,"Iowan Old Style",serif', fontWeight: 600, fontSize: '26px', lineHeight: 1.2, color: T.ink.primary, margin: '0 0 3px' }}>
-            What you&rsquo;ve told us
-          </h1>
+          {title && (
+            <h1 style={{ fontFamily: 'Georgia,"Iowan Old Style",serif', fontWeight: 600, fontSize: '26px', lineHeight: 1.2, color: T.ink.primary, margin: '0 0 3px' }}>
+              {title}
+            </h1>
+          )}
           <p style={{ color: T.ink.secondary, fontSize: '14px', margin: 0 }}>
             {loading || error ? '—' : subtitle}
           </p>

@@ -97,7 +97,11 @@ export default function AskBeeHubPanel({
   // handler hides its link rather than rendering a dead one.
   onOpenGuide = null,
   onOpenManual = null,
-  onOpenFeedback = null,
+  // The escalation link. It used to open the feedback composer; it now opens
+  // Help at the ask strip, because Help is the only door to the team. The
+  // label is one of the three fixed affordances the chat is licensed to name
+  // (lib/help-chat-prompt.ts) — change the two together.
+  onOpenHelpAsk = null,
 }) {
   const rootRef = useRef(null)
   const scrollRef = useRef(null)
@@ -551,15 +555,15 @@ export default function AskBeeHubPanel({
             )}
           </p>
         )}
-        {/* Escalation link — report a bug or request a feature. Wears the
+        {/* Escalation link — into Help, at the ask strip. Wears the
             small-action release so the floor doesn't inflate it mid-line. */}
-        {onOpenFeedback && (
+        {onOpenHelpAsk && (
           <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '4px', lineHeight: 1.5 }}>
             {/* 4px when stacked under the walkthrough line; the two rows read
                 as one footer block. */}
-            Something not working?{' '}
-            <button onClick={onOpenFeedback} className="bee-small-action" style={linkBtn}>
-              Report Bug or Feature
+            Still stuck?{' '}
+            <button onClick={onOpenHelpAsk} className="bee-small-action" style={linkBtn} data-ask-help>
+              Ask the team in Help
             </button>
           </p>
         )}

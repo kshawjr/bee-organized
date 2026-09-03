@@ -217,12 +217,13 @@ const feedbackItem = {
 }
 
 describe('My requests', () => {
-  it('for an owner is the "What you\'ve told us" screen — same route, same items, same thread', async () => {
+  it('for an owner is the owner screen — same route, same items, same thread, no second heading', async () => {
     const f = stubFetch({ '/api/help/entries': OWNER_TREE, '/api/admin/feedback': { items: [feedbackItem] }, '/api/feedback/seen': { marked: 1, supported: true } })
     const { host, unmount } = await mount(asUser('u1', <HelpScreen canEdit={false} role="franchise" franchiseRole="owner" />))
     await click(Array.from(host.querySelectorAll('[role="tab"]')).find(b => b.textContent === 'My requests') || null)
     await act(async () => { await Promise.resolve() })
-    expect(host.textContent).toContain('What you’ve told us')
+    expect(host.textContent).not.toContain('What you’ve told us')
+    expect(host.querySelector('h1')?.textContent).toBe('Help')
     expect(host.textContent).toContain('Alerts stopped')
     expect(host.textContent).toContain('The team replied')
     expect(host.textContent).toContain('Found it — a fix is queued.')
@@ -247,7 +248,6 @@ describe('My requests', () => {
     stubFetch({ '/api/help/entries': OWNER_TREE, '/api/admin/feedback': { items: [] }, '/api/feedback/seen': { marked: 0, supported: true } })
     const { host, unmount } = await mount(asUser('u1', <HelpScreen canEdit={false} role="franchise" franchiseRole="manager" />))
     await act(async () => { await Promise.resolve() })
-    expect(host.textContent).toContain('What you’ve told us')
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('My requests')
     await unmount()
   })

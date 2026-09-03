@@ -7,7 +7,7 @@ import { US_TIMEZONES, normalizeTimezoneLabel } from "@/lib/us-timezones"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
-import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buildAmbientContext } from "@/components/hive/shared/hubUrl"
+import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buildAmbientContext, legacyFeedbackRedirect } from "@/components/hive/shared/hubUrl"
 // Home redesign — read the SAME derivation/tokens the Clients surface uses so
 // Home can't drift from the views. Pure leaves (§8.5), imported statically.
 // Aliased where a local name already exists in this file (T, isTerminal,
@@ -20,11 +20,10 @@ import { useStoredState } from "@/components/hive/shared/useStoredControls"
 import BeeLoader from "@/components/hive/shared/BeeLoader"
 import ComingSoonPlaceholder from "@/components/hive/ComingSoonPlaceholder"
 import FeedbackModal from "@/components/feedback/FeedbackModal"
-// The owner/manager feedback screen (issue 235). Franchise roles no longer
-// mount AdminFeedbackScreen — see the activeNav==='feedback' branch.
-import OwnerFeedbackScreen from "@/components/feedback/OwnerFeedbackScreen"
-// The Help section (sections › topics › items + My requests). Built ALONGSIDE
-// "What you've told us" — the nav swap is a later, separate step.
+// The Help section (sections › topics › items + My requests). Help is the
+// only door now: the owner/manager "What you've told us" nav item is gone,
+// and its screen (OwnerFeedbackScreen) is mounted by HelpScreen's My requests
+// tab — same component, same route, same threads, at a different address.
 import HelpScreen from "@/components/help/HelpScreen"
 import { feedbackTimeAgo } from "@/components/feedback/feedbackShared"
 import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
@@ -36496,14 +36495,28 @@ export default function App({
   // the Feedback screen's composer button sets 'submit' (lands on the
   // Submit tab). One modal, one state, two entry intents.
   const [showFeedback, setShowFeedback]     = useState(false)
-  // Deep link from the reply email (issue 233): /?feedback=1 opens My Items on
-  // top of whatever screen the app restores. That tab is the one surface that
-  // renders a reply AS a reply, and it works for every role — the owner/manager
-  // Feedback nav does not exist for anyone else. Applied once, on mount.
+  // A one-shot instruction for HelpScreen while it may already be mounted:
+  // 'requests' (land on My requests) or 'ask' (land on the ask strip).
+  const [helpIntent, setHelpIntent] = useState(null)
+  // Go to Help with an intent. replaceState (not push) so the legacy URL
+  // does not linger in history; nav() would only push the bare /help.
+  function goToHelp(intent) {
+    if (typeof window !== 'undefined') {
+      try { window.history.replaceState({}, '', intent === 'requests' ? '/help?tab=requests' : '/help') } catch {}
+    }
+    setActiveNav('help')
+    setHelpIntent(intent)
+    window.scrollTo(0, 0)
+  }
+  // Legacy deep link (issue 233): every reply email sent before the nav swap
+  // says /?feedback=1, and a few team-facing Slack links still do. It used to
+  // open the composer's My Items list; it now lands on Help › My requests, the
+  // same items and threads at their new address. Applied once, on mount.
   useEffect(() => {
     try {
-      if (new URLSearchParams(window.location.search).get('feedback')) setShowFeedback(true)
+      if (legacyFeedbackRedirect(window.location.search)) goToHelp('requests')
     } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // Record-context seed for the feedback modal — set when the modal is opened
   // FROM a record (e.g. "Report a problem with this client"). Carries the
@@ -37154,15 +37167,9 @@ if (Array.isArray(initialPeople)) return
     // 'Manual' moved out of the nav — the Guide and the Manual both open
     // from the Ask Bee Hub panel footer (issue 132).
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
-    // Franchise owner + manager get their own read-only history of what they
-    // have reported (OwnerFeedbackScreen, server-scoped to their location_id).
-    // Elevated users reach the triage console via the Admin screen's Feedback
-    // tab instead. The label is the issue 235 point: nothing in the product was
-    // named for "what happened to the things I reported", so the one nav item
-    // that could have said it said "Feedback" and opened a triage queue.
-    ...(role==='franchise' && ['owner','manager'].includes(franchiseRole)
-      ? [{ key:'feedback', icon:'💬', label:"What you've told us" }]
-      : []),
+    // "What you've told us" (issue 235) is retired: an owner's own reports and
+    // their threads live under Help › My requests, for every role. Elevated
+    // users still reach the triage console via the Admin screen's Feedback tab.
   ]
 
   // Heights — the old top demo/super-admin strip is GONE (its identity,
@@ -37564,24 +37571,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {toast && <InlineToast {...toast} />}
       </div>
     )
-    // Franchise owner/manager: "What you've told us" (issue 235). This used to
-    // mount AdminFeedbackScreen — the corp triage console — with one prop
-    // flipped, so an owner saw our queue metrics and could mark their own bug
-    // Fixed. OwnerFeedbackScreen is read-only and built for the person who
-    // filed the report; the triage screen keeps every control this one drops.
-    //
-    // It reads the same location-scoped /api/admin/feedback list, which the
-    // server auto-scopes to the caller's location_id for owner/manager — so
-    // this view only ever shows their own location's items. Under view-as the
-    // session is still the super_admin (elevated → org-wide), so pass the
-    // IMPERSONATED owner's location for parity; the route honors
-    // ?location_id= for elevated callers and ignores it for real owners.
-    // onReportSomething opens the existing composer on its Submit tab — that
-    // entry point, and the record-menu "Report a problem" one, are unchanged.
-    // The Help section. canEdit mirrors the guide editor's gate — the two
-    // elevated roles, and never while impersonating an owner (view-as must
-    // show what the owner sees, plus buttons included in their absence).
-    // The ask strip seeds the SAME composer the record menus open, with the
+    // The Help section — how-tos, and My requests (issue 235's owner screen,
+    // OwnerFeedbackScreen, mounted inside the tab). canEdit mirrors the guide
+    // editor's gate — the two elevated roles, and never while impersonating an
+    // owner (view-as must show what the owner sees, plus buttons included in
+    // their absence). locationId is the IMPERSONATED owner's location for
+    // view-as parity: the route honors ?location_id= for elevated callers and
+    // ignores it for real owners. The ask strip and onReportSomething both
+    // open the SAME composer the record menus open (setShowFeedback), with the
     // type preselected and the Help breadcrumb + entry id as context.
     if (activeNav==='help') return (
       <div style={pageStyle}>
@@ -37591,15 +37588,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           franchiseRole={franchiseRole}
           locationId={viewAsUser?.locationId || null}
           viewAsUserId={viewAsUser?.id || null}
+          intent={helpIntent}
+          onIntentConsumed={() => setHelpIntent(null)}
           onAsk={(ask) => { setFeedbackSeed({ type: ask?.type || 'question', title: '', about: ask?.about || '', context: ask?.context || null }); setShowFeedback('submit') }}
-          onReportSomething={() => setShowFeedback('submit')}
-        />
-      </div>
-    )
-    if (activeNav==='feedback') return (
-      <div style={pageStyle}>
-        <OwnerFeedbackScreen
-          locationId={viewAsUser?.locationId || null}
           onReportSomething={() => setShowFeedback('submit')}
         />
       </div>
@@ -37729,7 +37720,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           {/* Arrow offsets account for the wider "? Help" pill (vs the old circle). */}
           <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'56px' } : { right:'30px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
           <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5, marginBottom:'12px', fontWeight:500 }}>
-            👋 New here? Tap Ask Bee Hub for instant help — plus the Quick Start Guide and Manual.
+            👋 New here? Tap Ask Bee Hub for instant help — plus the Quick Start Guide and Manual. How-tos and your requests live under Help.
           </p>
           <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
             <button onClick={dismissGuideHint} style={{ padding:'7px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Got it</button>
@@ -37788,7 +37779,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           onClose={() => setShowHelpChat(false)}
           onOpenGuide={() => { setShowHelpChat(false); openGuide() }}
           onOpenManual={() => { setShowHelpChat(false); setShowManual(true) }}
-          onOpenFeedback={() => { setShowHelpChat(false); setShowFeedback(true) }}
+          onOpenHelpAsk={() => { setShowHelpChat(false); goToHelp('ask') }}
         />
       )}
       <LocPickerDropdown />

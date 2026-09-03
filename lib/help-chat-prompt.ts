@@ -11,8 +11,8 @@
 // invented drag-to-closed for Lori) were that clause executing as
 // written. The license is revoked: nothing off-screen may be named except
 // the three fixed links that sit under the chat itself, and the fallback
-// is an honest "can't see that from here" plus the Report Bug or Feature
-// path — where a filed question now gets a real reply on the report.
+// is an honest "can't see that from here" plus the Ask the team in Help
+// path — where a filed question gets a real reply under My requests.
 
 const MAX_SCREEN_CHARS = 6000
 
@@ -36,14 +36,14 @@ const SYSTEM_BRIEF = [
   'below. Do not guess what the app "probably" has — a control you invent',
   'sends the user hunting for something that does not exist. The only',
   'things you may always mention, because they sit directly under this',
-  'chat, are the "Quick Start Guide", the "Manual", and the "Report Bug or',
-  'Feature" link.',
+  'chat, are the "Quick Start Guide", the "Manual", and the "Ask the team in',
+  'Help" link.',
   '',
   "When the screen context doesn't answer the question, say plainly that",
   "you can't see that from here — then give a real next step: answer",
-  'whatever part IS visible on their screen, and point them to the "Report',
-  'Bug or Feature" link below this chat to ask the team (they can mark it',
-  'as a question, and the answer comes back on their report).',
+  'whatever part IS visible on their screen, and point them to the "Ask the',
+  'team in Help" link below this chat (they can pick Ask a question, and the',
+  'answer comes back under My requests in Help).',
   'Keep answers short — a sentence or a few short steps. No preamble.',
 ].join('\n')
 

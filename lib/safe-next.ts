@@ -50,7 +50,10 @@ export function hubReturnTo(args: {
   if (initialSelectedLeadId) {
     return `/clients/${initialSelectedLeadId}${initialSelectedEngagementId ? `?e=${initialSelectedEngagementId}` : ''}`
   }
-  if (initialRoute && initialRoute !== 'home') return `/${initialRoute}`
+  // A route WITH a query keeps it: /help?tab=requests is the reply-email
+  // landing now, and dropping the tab at the login door would land the owner
+  // on the how-tos with no sign of the reply the email promised.
+  if (initialRoute && initialRoute !== 'home') return `/${initialRoute}${queryStringFrom(searchParams)}`
   // Home WITH a query string is a real destination; home without one is not.
   const search = queryStringFrom(searchParams)
   return search ? `/${search}` : null

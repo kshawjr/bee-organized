@@ -28,7 +28,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { T } from '@/components/hive/shared/tokens'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
 import useIsMobile from '@/components/hive/shared/useIsMobile'
@@ -90,7 +90,7 @@ function BackLink({ label, onClick }) {
 // where the owner was: the breadcrumb in words as `about` (stored as an
 // "About:" line under the answers, visible to triage today) and the entry
 // id in context (for a future resolver).
-export function AskStrip({ crumbs, onAsk }) {
+export function AskStrip({ crumbs, onAsk, stripRef = null }) {
   const where = helpBreadcrumb(crumbs) || 'Help'
   const deepest = [...crumbs].reverse().find(c => c && c.id) || null
   const ask = (type) => onAsk?.({
@@ -99,7 +99,7 @@ export function AskStrip({ crumbs, onAsk }) {
     context: { origin: 'help_ask_strip', screen: 'Help', ...(deepest ? { help_entry_id: deepest.id } : {}) },
   })
   return (
-    <div data-help-ask-strip style={{ marginTop: '28px', background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset, padding: '16px' }}>
+    <div ref={stripRef} data-help-ask-strip style={{ marginTop: '28px', background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset, padding: '16px' }}>
       <p style={{ margin: '0 0 10px', fontSize: '14.5px', color: T.ink.secondary, lineHeight: 1.5 }}>
         Still stuck on <b style={{ color: T.ink.primary }}>{where}</b>? A person reads every one and writes back — the reply lands under My requests.
       </p>
@@ -192,6 +192,11 @@ export default function HelpScreen({
   onAsk = null,             // ({ type, description, context }) → opens the composer
   onReportSomething = null, // the owner screen's own button
   initialTab = null,        // 'help' | 'requests' — else read from ?tab=
+  // A one-shot instruction from the shell while this screen may already be
+  // mounted: 'requests' (the legacy /?feedback=1 deep link) or 'ask' (the
+  // Ask Bee Hub footer — land on the ask strip). Consumed once.
+  intent = null,
+  onIntentConsumed = null,
 }) {
   const isMobile = useIsMobile()
   const [tab, setTab] = useState(() => {
@@ -206,6 +211,19 @@ export default function HelpScreen({
   const [view, setView] = useState({ sectionId: null, topicId: null, itemId: null })
   const [form, setForm] = useState(null) // { mode, kind, parentId, entry, breadcrumb }
   const [busy, setBusy] = useState(false)
+  const askStripRef = useRef(null)
+
+  useEffect(() => {
+    if (!intent) return
+    if (intent === 'requests') setTab('requests')
+    if (intent === 'ask') {
+      setTab('help')
+      setView({ sectionId: null, topicId: null, itemId: null })
+      // After the list has rendered, bring the strip up under their thumb.
+      setTimeout(() => { try { askStripRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch {} }, 60)
+    }
+    onIntentConsumed?.()
+  }, [intent, onIntentConsumed])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -300,7 +318,7 @@ export default function HelpScreen({
           ))}
         </div>
       )}
-      <AskStrip crumbs={[]} onAsk={onAsk} />
+      <AskStrip crumbs={[]} onAsk={onAsk} stripRef={askStripRef} />
     </>
   )
 
@@ -380,7 +398,7 @@ export default function HelpScreen({
 
       {tab === 'requests' ? (
         showOwnerScreen
-          ? <OwnerFeedbackScreen locationId={locationId} onReportSomething={onReportSomething} />
+          ? <OwnerFeedbackScreen locationId={locationId} onReportSomething={onReportSomething} title={null} />
           : <MyRequestsList viewAsUserId={viewAsUserId} />
       ) : loading ? (
         <BeeLoader size="screen" label="Opening Help…" />

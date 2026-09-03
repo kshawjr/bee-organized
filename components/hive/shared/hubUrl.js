@@ -142,6 +142,19 @@ export function buildAmbientContext({ nav, role, pathname, search } = {}) {
   return out
 }
 
+// Where an owner's own reports live now: Help › My requests. The reply
+// email links here; the old /?feedback=1 deep link is redirected here.
+export const HELP_REQUESTS_PATH = '/help?tab=requests'
+
+// The legacy deep link. Every reply email sent before the nav swap says
+// /?feedback=1, and so do a few team-facing Slack links; a bookmark of it
+// must keep landing on the reply it was written to show. Returns the new
+// address when the legacy param is present, else null.
+export function legacyFeedbackRedirect(search) {
+  if (!search || typeof search !== 'string') return null
+  try { return new URLSearchParams(search).get('feedback') ? HELP_REQUESTS_PATH : null } catch { return null }
+}
+
 // The canonical path for an open client record.
 export function clientPath(id) {
   return `/clients/${id}`

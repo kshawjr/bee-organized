@@ -35,12 +35,14 @@ describe('the license is gone', () => {
     expect(sys).toContain('Do not guess what the app "probably" has')
   })
 
-  it('the dead end is replaced with a real next step — the Report Bug or Feature link', () => {
+  it('the dead end is replaced with a real next step — the Ask the team in Help link', () => {
     const sys = buildSystem(SCREEN)
     expect(sys).toContain("say plainly that")
     expect(sys).toContain("you can't see that from here")
-    expect(sys).toContain('"Report Bug or\nFeature" link')
-    expect(sys).toContain('mark it\nas a question')
+    expect(sys).toContain('"Ask the\nteam in Help" link')
+    expect(sys).toContain('pick Ask a question')
+    // the retired affordance can no longer be named
+    expect(sys).not.toContain('Report Bug or')
   })
 })
 

@@ -47,14 +47,16 @@ describe('Guide entry point — Ask Bee Hub panel footer', () => {
     const onOpenManual = vi.fn()
     const { host, unmount } = await mount(
       <AskBeeHubPanel isMobile={false} screenName="Home" onClose={() => {}}
-        onOpenGuide={onOpenGuide} onOpenManual={onOpenManual} onOpenFeedback={() => {}} />
+        onOpenGuide={onOpenGuide} onOpenManual={onOpenManual} onOpenHelpAsk={() => {}} />
     )
     const guideLink = btn(host, 'Quick Start Guide')
     const manualLink = btn(host, 'Manual')
     expect(guideLink, 'Quick Start Guide link missing from panel footer').toBeTruthy()
     expect(manualLink, 'Manual link missing from panel footer').toBeTruthy()
     // The escalation link stays alongside them — the footer carries all three.
-    expect(btn(host, 'Report Bug or Feature')).toBeTruthy()
+    // It points into Help now (the nav swap); the label is one of the three
+    // affordances the chat may name, pinned in beta-help-chat-license.
+    expect(btn(host, 'Ask the team in Help')).toBeTruthy()
     await click(guideLink!)
     expect(onOpenGuide).toHaveBeenCalledTimes(1)
     await click(manualLink!)

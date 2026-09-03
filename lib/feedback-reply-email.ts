@@ -61,13 +61,15 @@ const REPLY_TO = process.env.INVITE_REPLY_TO_EMAIL || 'admin@beeorganized.com'
 
 export const FEEDBACK_REPLY_EMAIL_KIND = 'feedback_reply'
 
-// Where the link lands. `?feedback=1` opens the My Items list on top of
-// whatever screen the app restores — the one surface that already renders a
-// reply AS a reply, and the one that works for every role rather than only the
-// owner/manager nav. Absolute, because a relative href in an email is dead.
+// Where the link lands: Help › My requests, the one place an owner's own
+// reports live now that "What you've told us" is gone. It renders a reply AS
+// a reply, and it exists for every role. Absolute, because a relative href in
+// an email is dead. (Emails already sent say /?feedback=1; the app redirects
+// that to the same tab — see legacyFeedbackRedirect.)
+export const FEEDBACK_REPLY_PATH = '/help?tab=requests'
 export function feedbackReplyLink(env: NodeJS.ProcessEnv = process.env): string {
   const base = (env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')
-  return base ? `${base}/?feedback=1` : ''
+  return base ? `${base}${FEEDBACK_REPLY_PATH}` : ''
 }
 
 export function firstNameOf(name: string | null | undefined): string | null {
