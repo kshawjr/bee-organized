@@ -1,6 +1,6 @@
 // components/help/HelpScreen.jsx
 // ─────────────────────────────────────────────────────────────
-// The Help section. Two tabs:
+// The Help section. Three tabs:
 //
 //   Help         sections › topics › items, drilled one level at a time so a
 //                phone screen only ever shows one list. An item is a title, a
@@ -13,6 +13,11 @@
 //                screen for franchise owners and managers, and the composer's
 //                My Items list for everyone else. Nothing here is a copy —
 //                both are the same components mounted in a tab.
+//
+//   What's new   the weekly release note (components/help/WhatsNew): the
+//                published weeks, newest first, grouped New / Changed /
+//                Fixed; for editors the open draft above them, editable
+//                inline, with the Slack preview + post. ?tab=new lands here.
 //
 // AUTHORING is a set of plus buttons, pencils and chevrons that only render
 // when `canEdit` is true (super_admin / corporate, and never under view-as).
@@ -36,6 +41,7 @@ import { IconPlus, IconPencil, IconChevronRight } from '@/components/ui/icons'
 import OwnerFeedbackScreen from '@/components/feedback/OwnerFeedbackScreen'
 import { FeedbackItemCard } from '@/components/feedback/feedbackShared'
 import HelpEntryForm from '@/components/help/HelpEntryForm'
+import WhatsNew from '@/components/help/WhatsNew'
 import { helpBreadcrumb } from '@/lib/help-content'
 
 const FONT = '"DM Sans",system-ui,sans-serif'
@@ -191,7 +197,7 @@ export default function HelpScreen({
   viewAsUserId = null,
   onAsk = null,             // ({ type, description, context }) → opens the composer
   onReportSomething = null, // the owner screen's own button
-  initialTab = null,        // 'help' | 'requests' — else read from ?tab=
+  initialTab = null,        // 'help' | 'requests' | 'new' — else read from ?tab=
   // A one-shot instruction from the shell while this screen may already be
   // mounted: 'requests' (the legacy /?feedback=1 deep link) or 'ask' (the
   // Ask Bee Hub footer — land on the ask strip). Consumed once.
@@ -201,7 +207,10 @@ export default function HelpScreen({
   const isMobile = useIsMobile()
   const [tab, setTab] = useState(() => {
     if (initialTab) return initialTab
-    try { return new URLSearchParams(window.location.search).get('tab') === 'requests' ? 'requests' : 'help' } catch { return 'help' }
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab')
+      return t === 'requests' ? 'requests' : t === 'new' ? 'new' : 'help'
+    } catch { return 'help' }
   })
   const [sections, setSections] = useState([])
   const [deleted, setDeleted] = useState([])
@@ -384,7 +393,7 @@ export default function HelpScreen({
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <h1 style={{ fontFamily: 'Georgia,"Iowan Old Style",serif', fontWeight: 600, fontSize: '26px', lineHeight: 1.2, color: T.ink.primary, margin: 0 }}>Help</h1>
         <div style={{ display: 'flex', gap: '7px' }} role="tablist">
-          {[{ key: 'help', label: 'Help' }, { key: 'requests', label: 'My requests' }].map(t => {
+          {[{ key: 'help', label: 'Help' }, { key: 'new', label: 'What’s new' }, { key: 'requests', label: 'My requests' }].map(t => {
             const on = tab === t.key
             return (
               <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => setTab(t.key)}
@@ -396,7 +405,9 @@ export default function HelpScreen({
         </div>
       </div>
 
-      {tab === 'requests' ? (
+      {tab === 'new' ? (
+        <WhatsNew canEdit={canEdit} isMobile={isMobile} />
+      ) : tab === 'requests' ? (
         showOwnerScreen
           ? <OwnerFeedbackScreen locationId={locationId} onReportSomething={onReportSomething} title={null} />
           : <MyRequestsList viewAsUserId={viewAsUserId} />

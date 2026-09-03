@@ -98,6 +98,7 @@ import { sendFeedbackReplyEmail } from '@/lib/feedback-reply-email'
 import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 import { isInternalItem, withInternalFallback } from '@/lib/feedback-internal'
 import { isMissingRepliesTable } from '@/lib/feedback-replies'
+import { seedReleaseItemFromFeedback } from '@/lib/help-releases'
 
 export const runtime = 'nodejs'
 
@@ -253,6 +254,29 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
   if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+
+  // ─── THE WHAT'S NEW SEED ────────────────────────────────────────────
+  // Moving INTO shipped also drops one line into this week's release-note
+  // draft (lib/help-releases) — the entry's title verbatim, flagged "their
+  // words", the entry id as provenance. Seeded, not copied: nothing Kevin
+  // later types on that line reaches this row, the reply, or the email.
+  //
+  //   · the SAME transition test as the announcement (shippedNow), so a
+  //     re-save of a shipped item seeds nothing, and the unique index on
+  //     feedback_item_id makes any repeat a no-op regardless;
+  //   · ELEVATED callers only — an owner marking their own location's item
+  //     Fixed is not something Bee Organized shipped;
+  //   · never an internal item — those are invisible to owners everywhere;
+  //   · NEVER FATAL. The helper swallows every failure into a log line
+  //     (missing table, race, anything), so the save above stands and the
+  //     email decision below still runs exactly as it always has.
+  if (shippedNow && isElevatedCaller && !isInternalItem(target)) {
+    await seedReleaseItemFromFeedback(
+      supabaseService,
+      { id, type: patch.type ?? target.type, title: target.title },
+      caller!.id,
+    )
+  }
 
   // ─── THE THREAD ROW ─────────────────────────────────────────────────
   // A genuinely-new reply is ALSO appended to feedback_replies, with its author
