@@ -122,7 +122,7 @@ describe('every probe carries one plain sentence, and the cluster inherits it', 
 
   it('the cluster carries the probe summary and its paragraph, not a slice of the paragraph', () => {
     const returning = CLUSTERS.find(c => c.probe === 'returning-client-request-stage')!
-    expect(returning.summary).toBe('Returning clients leave the Inbox as soon as an enquiry creates an engagement.')
+    expect(returning.summary).toBe('Built: a returning website enquiry now shows in the Inbox, marked Back again.')
     expect(returning.what).toContain('OPENING_STAGE.request')
     expect(returning.itemIds.sort()).toEqual(['arlene', 'diane'])
   })
@@ -151,7 +151,7 @@ describe('one bar renders per cluster, with the count and a sentence', () => {
       expect(bar.style.minHeight).toBe('44px')
     }
     const texts = b.map(x => x.textContent || '')
-    expect(texts.some(t => t.includes('Returning clients leave the Inbox as soon as an enquiry creates an engagement.'))).toBe(true)
+    expect(texts.some(t => t.includes('Built: a returning website enquiry now shows in the Inbox, marked Back again.'))).toBe(true)
     expect(texts.some(t => t.includes('An archived job with no invoice freezes the engagement at Final Processing.'))).toBe(true)
     await unmount()
   })
@@ -174,7 +174,7 @@ describe('one bar renders per cluster, with the count and a sentence', () => {
 
 describe('the bar opens the modal', () => {
   const openReturning = async (host: Element) => {
-    const bar = bars(host).find(b => (b.textContent || '').includes('Returning clients'))!
+    const bar = bars(host).find(b => (b.textContent || '').includes('Back again'))!
     await click(bar)
     return modal(host)!
   }
@@ -194,7 +194,7 @@ describe('the bar opens the modal', () => {
     const { host, unmount } = await screenFor()
     const m = await openReturning(host)
     expect(m.textContent).toContain('What is happening')
-    expect(m.textContent).toContain('Returning clients leave the Inbox as soon as an enquiry creates an engagement.')
+    expect(m.textContent).toContain('Built: a returning website enquiry now shows in the Inbox, marked Back again.')
     expect(m.textContent).toContain('The 2 reports')
     expect(m.textContent).toContain('Nuturing 2')
     expect(m.textContent).toContain('Lynette Ewy · Kansas City · waiting 30 days')
@@ -241,7 +241,7 @@ describe('the bar opens the modal', () => {
 describe('the footer button selects the same items Show them did', () => {
   it('selects exactly the cluster members, closes the modal, and the verdict bar counts them', async () => {
     const { host, unmount } = await screenFor()
-    await click(bars(host).find(b => (b.textContent || '').includes('Returning clients'))!)
+    await click(bars(host).find(b => (b.textContent || '').includes('Back again'))!)
     await click(buttons(modal(host)!).find(b => (b.textContent || '').trim() === 'Select these 2 reports')!)
     expect(modal(host)).toBeNull()
     const checked = ([...host.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[])

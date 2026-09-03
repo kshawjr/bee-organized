@@ -237,6 +237,25 @@ function NoCoveragePill({ disabled, onClick }) {
 // past it, year added for prior years). Anchor in --text-secondary,
 // the '· hint' in --text-muted; ONE nowrap line that truncates
 // tail-first, so the hint drops before the date ever does.
+// The date an Inbox row's age is shown from. A "Back again" row (a returning
+// client's website resubmission — person.openEnquiry) ages from the ENQUIRY,
+// not from a lead row that may be years old. Everyone else: created.
+function inboxAgeAnchor(p) {
+  return p.openEnquiry?.foundedAt || p.created
+}
+
+// "Worked with you Apr 2025" — month + year of the last Closed Won engagement,
+// the one history line a "Back again" row shows when the form carried no
+// request details. Nothing else on that line (no value, no project type).
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function workedWithYouLine(p) {
+  const iso = p.wonEngagements?.lastClosedAt
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `Worked with you ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`
+}
+
 function AgeInline({ created, nowMs, style = {} }) {
   const { anchor, hint } = formatInboxAgeParts(created, nowMs)
   return (
@@ -550,7 +569,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       if (!passesInboxFilters(p)) continue
       transfer.push(p)
     }
-    const created = (p) => new Date(p.created || 0).getTime() || 0
+    // Row age = the enquiry date for a "Back again" row (the returning
+    // client's lead row is years old; what is new is the form they just
+    // filled in), the lead's created date for everyone else. Sort agrees.
+    const created = (p) => new Date(inboxAgeAnchor(p) || 0).getTime() || 0
     const cmp = inboxSort === 'oldest' ? (a, b) => created(a) - created(b)
       : inboxSort === 'name' ? (a, b) => (a.name || '').localeCompare(b.name || '')
       : inboxSort === 'last_touch' ? (a, b) => lastReach(b) - lastReach(a)
@@ -887,6 +909,11 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // placeholder in the same slot, so every row keeps the same height —
     // today's blanks are a legacy intake gap, not the steady state.
     const jobDetail = (p.jobDetail || '').trim()
+    // "Back again" rows (a returning client's website resubmission): when the
+    // form carried no details, the slot shows one short history line instead
+    // of the placeholder — "Worked with you Apr 2025". jobDetail still wins.
+    const backAgain = !isTransfer && !!p.openEnquiry
+    const historyLine = backAgain && !jobDetail ? workedWithYouLine(p) : ''
     // Assignee stack — who owns this lead (lead_assignees, plural). ids from the
     // sweep, initials from the roster. Up to 3 discs + '+N'; the whole set is the
     // hover title so no name is lost.
@@ -1037,6 +1064,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 here, where the hint tail truncates before the date. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', minWidth: 0 }}>
               <StatusChip label={isTransfer ? 'Needs transfer' : pill} styleKey={isTransfer ? 'amber' : (pill === 'New' ? 'New' : 'Attempting')} />
+              {/* "Back again" — a returning client's new website enquiry, on
+                  their existing card. Same 'repeat' chip style the Board uses
+                  for its Returning client chip; the Inbox's own wording. */}
+              {backAgain && <StatusChip label="Back again" styleKey="repeat" />}
               {/* Needs-transfer rows show the lead's ORIGIN (where the global
                   form said it was) instead of a tappable number. */}
               {isTransfer && (
@@ -1062,7 +1093,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                   <span title={phoneLabel} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phoneLabel}</span>
                 </a>
               )}
-              {isMobile && <AgeInline created={p.created} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}
+              {isMobile && <AgeInline created={inboxAgeAnchor(p)} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}
               {isMobile && assigneeStack}
             </div>
             {/* What they want — webform snippet (see jobDetail above), always
@@ -1077,6 +1108,11 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               <p className="bee-inbox-detail" title={jobDetail}
                 style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
                 {jobDetail}
+              </p>
+            ) : historyLine ? (
+              <p className="bee-inbox-detail bee-inbox-history"
+                style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
+                {historyLine}
               </p>
             ) : (
               <p className="bee-inbox-detail"
@@ -1093,7 +1129,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                to the row like any other text. */
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
               {assigneeStack}
-              <AgeInline created={p.created} nowMs={nowMs} />
+              <AgeInline created={inboxAgeAnchor(p)} nowMs={nowMs} />
               {/* Selection mode swaps the action cluster for checkboxes —
                   no per-row writes while a batch is being composed. */}
               {!selectMode && (

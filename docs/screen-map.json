@@ -51,7 +51,7 @@
       "note": "Every top-level route (/, /clients, /settings, ...) renders this same server component, which then mounts BeeHub. If a surface is empty for everyone, suspect the scoping here before the component.",
       "lines": [
         327,
-        1887
+        1902
       ]
     },
     {
@@ -472,8 +472,8 @@
         "the inbox is empty"
       ],
       "lines": [
-        343,
-        1452
+        362,
+        1488
       ]
     },
     {

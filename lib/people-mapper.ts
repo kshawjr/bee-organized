@@ -81,6 +81,11 @@ type JoinedData = {
   // deriveClientStatus reads it to keep an all-Closed-Lost client out of the
   // New/Attempting funnel (and thus the Inbox + nav badge).
   engagement_count?: number
+  // "Back again" (3 Sept 2026) — the client's ONLY open engagement is a
+  // website-form resubmission at Request (lib/engagement-rollup.ts
+  // rollUpOpenEnquiry). deriveClientStatus reads it to put the person in the
+  // Inbox as new work, anchored on foundedAt, instead of reading them Active.
+  open_enquiry?: { foundedAt: string; otherOpen: boolean } | null
 }
 
 function fmtCreatedShort(iso: string | null | undefined): string {
@@ -360,6 +365,10 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // 0 for a raw lead that never had one. deriveClientStatus uses "> 0, past
     // the open/won/paid checks" to mean "all-Closed-Lost" → settle, not New.
     engagementCount: joined.engagement_count || 0,
+    // "Back again" — { foundedAt, otherOpen } when the client's only open
+    // engagement is a website-form resubmission at Request; null otherwise
+    // (= today's derivation, unchanged). See clientStatus.js RULES.
+    openEnquiry: joined.open_enquiry || null,
     assessment,
     assessmentType,
     estimateSent,

@@ -142,7 +142,8 @@ export async function GET(
     // issue 187 follow-up — engagements key on client_id (= the lead id), like
     // the _hub-page.tsx sweep. Fetched so the refetch can ship the same
     // engagementCount / wonEngagements roll-ups full hydration does (parity).
-    supabaseService.from('engagements').select('stage, total_paid, total_invoiced, closed_at').eq('client_id', id),
+    // id + created_at feed the "Back again" open_enquiry roll-up (engagement-rollup.ts).
+    supabaseService.from('engagements').select('id, stage, total_paid, total_invoiced, closed_at, created_at').eq('client_id', id),
   ])
 
   // Resolve tag lookups
@@ -170,7 +171,9 @@ export async function GET(
     // issue 187 follow-up — same roll-ups the hydration sweep ships, so a
     // Realtime refetch (which REPLACES the person last-wins) keeps a settled-
     // lost / won client from reverting to a funnel status until a full reload.
-    ...rollUpEngagements(engagementRows),
+    // The touchpoints (label + engagement_id) are what identify a website
+    // resubmission's engagement — the "Back again" open_enquiry roll-up.
+    ...rollUpEngagements(engagementRows, touchpoints || []),
   })
 
   return NextResponse.json({ person }, { status: 200 })

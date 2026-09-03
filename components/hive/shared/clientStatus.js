@@ -19,6 +19,18 @@
 //   Active     — ≥1 OPEN engagement (currently being worked — beats the
 //                won-history read; when it closes they settle to Client
 //                or back to the funnel).
+//                EXCEPTION — "Back again" (returning website enquiry): a
+//                person whose ONLY open engagement sits at Request AND was
+//                founded by a website-form resubmission (person.openEnquiry,
+//                the hydration roll-up of the 'Webform resubmission'
+//                touchpoint that points at that engagement) is NEW WORK, not
+//                work in progress. They follow the fresh-lead funnel below,
+//                anchored on the ENQUIRY date instead of the lead's created
+//                date: a reach_out on/after the enquiry → Attempting; none and
+//                the enquiry is < 30 days old → New; enquiry ≥ 30 days old →
+//                Active again (still on the Board, off the worklist). Any
+//                second open engagement means they are being worked → Active.
+//                Absent openEnquiry = today's behaviour, unchanged.
 //   Client     — ≥1 CLOSED WON engagement, ever. A won client is a
 //                customer, not a lead being nurtured — this OUTRANKS the
 //                whole nurture funnel (won > funnel > raw lead). Fed by
@@ -61,7 +73,19 @@ export function deriveClientStatus(person, openClientIds, nowMs = Date.now(), wo
   const phone = (person.phone || '').trim()
   if (!email && !phone) return 'no_contact'
 
-  if (openClientIds && openClientIds.has(person.id)) return 'Active'
+  if (openClientIds && openClientIds.has(person.id)) {
+    // "Back again" — see the RULES header. openClientIds stays the session-live
+    // truth (the enquiry closing this session drops them to Client as before);
+    // openEnquiry is the hydration/refetch roll-up that says WHICH open
+    // engagement it is and whether it is the only one.
+    const enq = person.openEnquiry
+    if (!enq || enq.otherOpen) return 'Active'
+    const foundedAt = enq.foundedAt ? new Date(enq.foundedAt).getTime() || 0 : 0
+    if (foundedAt <= 0 || nowMs - foundedAt >= THIRTY_D) return 'Active'
+    const reachedSince = (person.outreachTimeline || []).some(t =>
+      t.type === 'reach_out' && (new Date(t.occurred_at || 0).getTime() || 0) >= foundedAt)
+    return reachedSince ? 'Attempting' : 'New'
+  }
 
   if ((wonClientIds && wonClientIds.has(person.id)) || (person.wonEngagements?.count > 0)) return 'Client'
 

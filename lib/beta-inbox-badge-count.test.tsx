@@ -209,3 +209,33 @@ describe('#89 Inbox badge count matches the list', () => {
     expect(host.textContent).not.toContain('Gone Junk')
   })
 })
+
+// ── "Back again" (3 Sept 2026): the badge counts a returning website enquiry ──
+describe('"Back again" — a returning client\'s website resubmission is counted and listed', () => {
+  const natalieRow = (o: any = {}) => newLead({
+    id: 'p-natalie', name: 'Natalie Miller', email: 'natalie@x.com', phone: '(206) 555-0142',
+    created: new Date(Date.now() - 514 * 86400000).toISOString(),
+    jobberRef: '105014594',
+    paidAmount: 1179.93,
+    wonEngagements: { count: 1, value: 1179.93, lastClosedAt: '2025-04-25T12:00:00Z' },
+    engagementCount: 2,
+    openEnquiry: { foundedAt: new Date(Date.now() - 2 * 86400000).toISOString(), otherOpen: false },
+    ...o,
+  })
+  const openReq = { id: 'e-req', client_id: 'p-natalie', stage: 'Request', location_uuid: KC, created_at: new Date(Date.now() - 2 * 86400000).toISOString() }
+
+  it('counted by the badge and listed with the Back again chip', async () => {
+    const host = await mount(base({ people: [natalieRow()], engagements: [openReq] }))
+    expect(badgeCount(host)).toBe(1)
+    await openInbox(host)
+    expect(host.textContent).toContain('Natalie Miller')
+    expect(host.textContent).toContain('Back again')
+  })
+
+  it('control: the same person without openEnquiry is Active — not counted, not listed', async () => {
+    const host = await mount(base({ people: [natalieRow({ openEnquiry: null })], engagements: [openReq] }))
+    expect(badgeCount(host)).toBe(0)
+    await openInbox(host)
+    expect(host.textContent).not.toContain('Natalie Miller')
+  })
+})

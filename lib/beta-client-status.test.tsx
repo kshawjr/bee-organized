@@ -26,6 +26,7 @@ import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import InboxScreen from '@/components/hive/InboxScreen'
+import { rollUpOpenEnquiry, rollUpEngagements } from '@/lib/engagement-rollup'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
@@ -197,5 +198,152 @@ describe('InboxScreen — won clients are not front-of-funnel', () => {
     )
     expect(html).toContain('Riley Fontaine') // control: real lead shows
     expect(html).not.toContain('Dana Whitfield')
+  })
+})
+
+// ─── "Back again" — a returning client's website resubmission (3 Sept 2026) ──
+//
+// Natalie Miller, Seattle: Jobber-imported Apr 2025, one Closed Won engagement
+// (paid), then the website form again on 1 Sept 2026 → a Request engagement
+// founded by the resubmission with a 'Webform resubmission' touchpoint pointing
+// at it. Every earlier rule (Active, Client, Past, engagementCount) would keep
+// her out of the Inbox; person.openEnquiry is the positive signal that wins.
+const natalie = (over: any = {}) => person({
+  id: 'p-natalie',
+  name: 'Natalie Miller',
+  created: daysAgo(514),          // the lead row is old — that is the point
+  paidAmount: 1179.93,
+  wonEngagements: { count: 1, value: 1179.93, lastClosedAt: '2025-04-25T12:00:00Z' },
+  engagementCount: 2,
+  jobberRef: '105014594',
+  openEnquiry: { foundedAt: daysAgo(2), otherOpen: false },
+  ...over,
+})
+const NATALIE_OPEN = new Set(['p-natalie'])
+
+describe('deriveClientStatus — "Back again": a returning website enquiry is new work', () => {
+  it('a reach-out on/after the enquiry → Attempting', () => {
+    const p = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(1) }] })
+    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Attempting')
+  })
+
+  it('no reach-out since the enquiry → New (anchored on the enquiry, not the 2025 lead row)', () => {
+    expect(deriveClientStatus(natalie(), NATALIE_OPEN, now)).toBe('New')
+    // a reach-out BEFORE the enquiry is old news — still New
+    const stale = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(10) }] })
+    expect(deriveClientStatus(stale, NATALIE_OPEN, now)).toBe('New')
+    // a system touchpoint (the resubmission marker itself) is not a reach-out
+    const sys = natalie({ outreachTimeline: [{ type: 'system', label: 'Webform resubmission', occurred_at: daysAgo(2) }] })
+    expect(deriveClientStatus(sys, NATALIE_OPEN, now)).toBe('New')
+  })
+
+  it('a second open engagement (otherOpen) → Active: she is being worked', () => {
+    const p = natalie({ openEnquiry: { foundedAt: daysAgo(2), otherOpen: true } })
+    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
+  })
+
+  it('an enquiry 31 days old → Active (aged out, back on the Board only)', () => {
+    const p = natalie({ openEnquiry: { foundedAt: daysAgo(31), otherOpen: false } })
+    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
+    const edge = natalie({ openEnquiry: { foundedAt: daysAgo(29), otherOpen: false } })
+    expect(deriveClientStatus(edge, NATALIE_OPEN, now)).toBe('New')
+  })
+
+  it('openEnquiry absent → Active: today\'s behaviour, unchanged', () => {
+    expect(deriveClientStatus(natalie({ openEnquiry: null }), NATALIE_OPEN, now)).toBe('Active')
+    expect(deriveClientStatus(natalie({ openEnquiry: undefined }), NATALIE_OPEN, now)).toBe('Active')
+  })
+
+  it('openClientIds stays the live truth: the enquiry closed this session → Client, as before', () => {
+    expect(deriveClientStatus(natalie(), new Set(), now)).toBe('Client')
+  })
+
+  it('a malformed foundedAt never puts anyone in the funnel', () => {
+    const p = natalie({ openEnquiry: { foundedAt: 'not a date', otherOpen: false } })
+    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
+  })
+})
+
+describe('rollUpOpenEnquiry — the touchpoint → person.openEnquiry roll-up', () => {
+  const REQ = { id: 'e-req', stage: 'Request', created_at: '2026-09-01T20:06:19Z' }
+  const WON = { id: 'e-won', stage: 'Closed Won', created_at: '2025-04-07T16:17:00Z', closed_at: '2025-04-25T00:00:00Z', total_paid: 1179.93 }
+  const MARK = { label: 'Webform resubmission', engagement_id: 'e-req' }
+
+  it('an open Request engagement with a resubmission touchpoint pointing at it → { foundedAt, otherOpen: false }', () => {
+    expect(rollUpOpenEnquiry([WON, REQ], [MARK])).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: false })
+  })
+
+  it('a second open engagement (Sue Gilmore: a Job in Progress alongside) → otherOpen: true', () => {
+    const job = { id: 'e-job', stage: 'Job in Progress', created_at: '2026-08-01T00:00:00Z' }
+    expect(rollUpOpenEnquiry([WON, REQ, job], [MARK])).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: true })
+  })
+
+  it('no resubmission touchpoint (a hand-started or Jobber-request engagement) → null', () => {
+    expect(rollUpOpenEnquiry([WON, REQ], [])).toBeNull()
+    expect(rollUpOpenEnquiry([WON, REQ], [{ label: 'Note', engagement_id: 'e-req' }])).toBeNull()
+    // a resubmission marker at LEAD level (no engagement_id) does not qualify
+    expect(rollUpOpenEnquiry([WON, REQ], [{ label: 'Webform resubmission', engagement_id: null }])).toBeNull()
+  })
+
+  it('the pointed-at engagement must be OPEN and at Request', () => {
+    expect(rollUpOpenEnquiry([WON, { ...REQ, stage: 'Quoted' }], [MARK])).toBeNull()
+    expect(rollUpOpenEnquiry([WON, { ...REQ, stage: 'Closed Lost' }], [MARK])).toBeNull()
+    expect(rollUpOpenEnquiry([], [MARK])).toBeNull()
+    expect(rollUpOpenEnquiry(null, null)).toBeNull()
+  })
+
+  it('rollUpEngagements carries open_enquiry alongside the existing roll-ups', () => {
+    const r = rollUpEngagements([WON, REQ], [MARK])
+    expect(r.engagement_count).toBe(2)
+    expect(r.won_summary?.count).toBe(1)
+    expect(r.open_enquiry).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: false })
+    // no touchpoints passed (the old call shape) → null, never undefined
+    expect(rollUpEngagements([WON, REQ]).open_enquiry).toBeNull()
+  })
+})
+
+describe('mapper — open_enquiry → person.openEnquiry', () => {
+  const row = { id: 'l1', location_uuid: 'loc', location_id: 'loc_x', name: 'N', created_at: '2025-04-07T00:00:00Z' } as any
+
+  it('joined.open_enquiry maps through; absent → null', () => {
+    const enq = { foundedAt: '2026-09-01T20:06:19Z', otherOpen: false }
+    expect(mapLeadToPerson(row, { open_enquiry: enq }).openEnquiry).toEqual(enq)
+    expect(mapLeadToPerson(row, {}).openEnquiry).toBeNull()
+    expect(mapLeadToPerson(row, { open_enquiry: null }).openEnquiry).toBeNull()
+  })
+})
+
+describe('InboxScreen — a "Back again" row', () => {
+  const OPEN_ENG = [{ id: 'e-req', client_id: 'p-natalie', stage: 'Request', created_at: daysAgo(2) } as any]
+
+  it('shows Natalie in Working with the Back again chip and the one history line', () => {
+    const p = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(1) }] })
+    const html = renderToString(
+      <InboxScreen people={[p as any]} engagements={OPEN_ENG} locFilter="all" />
+    )
+    expect(html).toContain('Natalie Miller')
+    expect(html).toContain('Back again')
+    expect(html).toContain('Worked with you Apr 2025')
+    expect(html).not.toContain('No request details yet')
+    // nothing else on that line: no value, no project type
+    expect(html).not.toContain('1,179')
+  })
+
+  it('a form message wins the request-detail slot over the history line', () => {
+    const p = natalie({ jobDetail: 'Garage and basement this time' })
+    const html = renderToString(
+      <InboxScreen people={[p as any]} engagements={OPEN_ENG} locFilter="all" />
+    )
+    expect(html).toContain('Garage and basement this time')
+    expect(html).not.toContain('Worked with you')
+    expect(html).toContain('Back again')
+  })
+
+  it('without openEnquiry the same person stays off the worklist (today\'s behaviour)', () => {
+    const html = renderToString(
+      <InboxScreen people={[natalie({ openEnquiry: null }) as any]} engagements={OPEN_ENG} locFilter="all" />
+    )
+    expect(html).not.toContain('Natalie Miller')
+    expect(html).not.toContain('Back again')
   })
 })

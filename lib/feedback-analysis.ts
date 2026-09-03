@@ -232,12 +232,18 @@ const stuckFinalProcessing: Probe = {
 //
 // THE MECHANISM: OPENING_STAGE.request and OPENING_STAGE.manual are BOTH
 // 'Request', so a returning client's new enquiry founds an engagement at
-// Request. deriveClientStatus returns 'Active' for anyone with ANY open
-// engagement, before age or nurturing is considered — so the person leaves the
-// Inbox the moment the engagement exists.
+// Request. deriveClientStatus used to return 'Active' for anyone with ANY open
+// engagement, before age or nurturing was considered — so the person never
+// reached the Inbox once the engagement existed.
 //
-// This is an unmade product decision rather than a defect, and the analysis
-// says so: nothing here is behaving other than as written.
+// DECIDED AND BUILT (3 Sept 2026): a returning WEBSITE enquiry is new work.
+// clientStatus.js now carries a "Back again" exception — the only open
+// engagement is at Request and a 'Webform resubmission' touchpoint points at
+// it → the person follows the fresh-lead funnel anchored on the enquiry date
+// (New / Attempting for 30 days, then Active). Reports that still match this
+// probe describe either an enquiry that came in some other way (a Jobber
+// request or a hand-started engagement, which stay on the Board only) or one
+// older than 30 days. The probe explains that, rather than an open question.
 const returningClientOutOfInbox: Probe = {
   key: 'returning-client-request-stage',
   run: (item, ev) => {
@@ -254,20 +260,24 @@ const returningClientOutOfInbox: Probe = {
     return {
       probe: 'returning-client-request-stage',
       confidence: named ? 'confident' : 'likely',
-      summary: 'Returning clients leave the Inbox as soon as an enquiry creates an engagement.',
+      summary: 'Built: a returning website enquiry now shows in the Inbox, marked Back again.',
       what:
         'A returning client\'s new enquiry founds an engagement at stage Request (OPENING_STAGE.request and ' +
-        '.manual are both \'Request\'), and deriveClientStatus returns \'Active\' for anyone with ANY open ' +
-        'engagement — before age or nurturing is considered. So the person leaves the Inbox as soon as the ' +
-        'engagement exists. Nothing is misbehaving: this is an unmade product decision about whether a repeat ' +
-        'enquiry should re-enter the Inbox.' +
+        '.manual are both \'Request\'). Decided and built on 3 Sept 2026: when that enquiry came through the ' +
+        'WEBSITE FORM, the person now appears in the Inbox as New or Attempting for 30 days, marked "Back ' +
+        'again", on their existing card — the "Back again" exception in deriveClientStatus keys on the ' +
+        '\'Webform resubmission\' touchpoint that points at their only open engagement. A returning enquiry ' +
+        'that arrived as a Jobber request or was started by hand in the app still reads Active and lives on ' +
+        'the Board only, as does a website enquiry older than 30 days. If this report is newer than that ' +
+        'date, check which door the enquiry came through before treating it as a defect.' +
         (named ? ` Checked: ${named.name} has an open Request-stage engagement and at least one prior closed one.` : ''),
       files: [
+        'components/hive/shared/clientStatus.js:64  (the "Back again" exception — website enquiry → funnel)',
+        'lib/engagement-rollup.ts  (rollUpOpenEnquiry — the touchpoint → person.openEnquiry roll-up)',
         'lib/engagements.ts:49   (OPENING_STAGE — request and manual are both Request)',
-        'components/hive/shared/clientStatus.js:64  (any open engagement wins → Active)',
       ],
       fleet: ev.fleet?.['returning-client-request-stage'] || null,
-      size: 'medium · a product decision first, then the Inbox predicate',
+      size: 'small · built; remaining reports are about the door the enquiry came through',
       question: null,
     }
   },
