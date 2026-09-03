@@ -260,6 +260,7 @@ export async function PATCH(
   // draft (lib/help-releases) — the entry's title verbatim, flagged "their
   // words", the entry id as provenance. Seeded, not copied: nothing Kevin
   // later types on that line reaches this row, the reply, or the email.
+  // Moving INTO answered does the same with a QUESTION line (see below).
   //
   //   · the SAME transition test as the announcement (shippedNow), so a
   //     re-save of a shipped item seeds nothing, and the unique index on
@@ -270,11 +271,26 @@ export async function PATCH(
   //   · NEVER FATAL. The helper swallows every failure into a log line
   //     (missing table, race, anything), so the save above stands and the
   //     email decision below still runs exactly as it always has.
-  if (shippedNow && isElevatedCaller && !isInternalItem(target)) {
+  //
+  // ANSWERED SEEDS A QUESTION LINE the same way (the transition INTO
+  // 'answered', same guards): the entry's title as the question, the latest
+  // reply — the one in this save if it wrote one, else the stored one — as
+  // the answer, both "their words" until Kevin rewrites them. No name, no
+  // email, no user id rides along: the seed is title + reply and nothing
+  // else. One line per entry ever, so answered-then-fixed seeds once.
+  const answeredNow = patch.status === 'answered' && target.status !== 'answered'
+  if ((shippedNow || answeredNow) && isElevatedCaller && !isInternalItem(target)) {
     await seedReleaseItemFromFeedback(
       supabaseService,
-      { id, type: patch.type ?? target.type, title: target.title },
+      {
+        id,
+        type: patch.type ?? target.type,
+        title: target.title,
+        answer: answeredNow ? (newReplyText ?? target.admin_response ?? null) : null,
+      },
       caller!.id,
+      new Date(),
+      { as: answeredNow && !shippedNow ? 'question' : 'change' },
     )
   }
 

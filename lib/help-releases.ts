@@ -25,7 +25,7 @@ import { isHelpEditorRole } from './help-content'
 export { isHelpEditorRole }
 
 export type ReleaseStatus = 'draft' | 'published'
-export type ReleaseGroup = 'new' | 'changed' | 'fixed'
+export type ReleaseGroup = 'new' | 'changed' | 'fixed' | 'question'
 
 export type ReleaseRow = {
   id: string
@@ -37,6 +37,9 @@ export type ReleaseRow = {
   slack_text?: string | null
   slack_posted_at?: string | null
   slack_error?: string | null
+  // sequential, assigned at publish, editors only — "that went out in 12".
+  // Owners never see it and the post never carries it.
+  number?: number | null
   created_by?: string | null
   updated_by?: string | null
   created_at?: string
@@ -137,9 +140,18 @@ export function isOverdue(publish_on: string, now: Date = new Date(), tz: string
 }
 
 // ── groups ────────────────────────────────────────────────────────
-export const GROUP_ORDER: ReleaseGroup[] = ['new', 'changed', 'fixed']
-export const GROUP_LABEL: Record<ReleaseGroup, string> = { new: 'New', changed: 'Changed', fixed: 'Fixed' }
-export const GROUP_EMOJI: Record<ReleaseGroup, string> = { new: '✨', changed: '🔧', fixed: '✅' }
+// The three CHANGE groups, then the questions. A question line is "what
+// was asked" (title) and "what we said" (body); it renders after the
+// changes in Help and as its own short section at the end of the post.
+export const CHANGE_GROUPS: ReleaseGroup[] = ['new', 'changed', 'fixed']
+export const GROUP_ORDER: ReleaseGroup[] = ['new', 'changed', 'fixed', 'question']
+export const GROUP_LABEL: Record<ReleaseGroup, string> = { new: 'New', changed: 'Changed', fixed: 'Fixed', question: 'You asked' }
+export const GROUP_EMOJI: Record<ReleaseGroup, string> = { new: '✨', changed: '🔧', fixed: '✅', question: '💬' }
+// The post carries at most this many questions, oldest first, so nothing
+// waits forever and the post stays short. The rest are in Help and the
+// preview names them. Kevin picks by what he rewrites: only edited lines
+// are ever in the post.
+export const WAGGLE_MAX_QUESTIONS = 3
 
 // bug → Fixed, feature → New, anything else → Changed. Always editable.
 export function groupForType(type: unknown): ReleaseGroup {
@@ -181,7 +193,7 @@ export function shapeRelease(
   items: ReleaseItemRow[],
   opts: { forOwner: boolean; sources?: Map<string, ReleaseItemSource> },
 ): ShapedRelease {
-  const groups: Record<ReleaseGroup, ShapedItem[]> = { new: [], changed: [], fixed: [] }
+  const groups: Record<ReleaseGroup, ShapedItem[]> = { new: [], changed: [], fixed: [], question: [] }
   let unedited = 0
   const ordered = items
     .filter(i => i.release_id === release.id && !i.deleted_at)
@@ -200,12 +212,12 @@ export function shapeRelease(
   const out: ShapedRelease = {
     ...rest,
     groups,
-    item_count: groups.new.length + groups.changed.length + groups.fixed.length,
+    item_count: GROUP_ORDER.reduce((n, g) => n + groups[g].length, 0),
     unedited_count: opts.forOwner ? 0 : unedited,
     week_label: formatWeekLabel(release.publish_on),
   }
   if (!opts.forOwner) out.slack_text = slack_text ?? null
-  else { delete (out as any).slack_error; delete (out as any).slack_posted_at; delete (out as any).created_by; delete (out as any).updated_by }
+  else { delete (out as any).slack_error; delete (out as any).slack_posted_at; delete (out as any).created_by; delete (out as any).updated_by; delete (out as any).number }
   return out
 }
 
@@ -235,35 +247,50 @@ export function slackEscape(s: string): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-export type WaggleLeftOut = { id: string; title: string; reason: 'their_words' | 'no_sentence' }
+export type WaggleLeftOut = { id: string; title: string; reason: 'their_words' | 'no_sentence' | 'over_cap' }
 
+// NO NAMES, NO NUMBER. The builder reads title, body and group — never a
+// submitter, never the release number. A question line is the question
+// and the answer, both in Kevin's rewrite; "a few of you asked" is his to
+// write, and the seed never carries who asked.
 export function buildWaggleMessage(
   release: Pick<ReleaseRow, 'publish_on' | 'summary'>,
-  items: Array<Pick<ReleaseItemRow, 'id' | 'group' | 'title' | 'body' | 'edited_at' | 'deleted_at'>>,
+  items: Array<Pick<ReleaseItemRow, 'id' | 'group' | 'title' | 'body' | 'edited_at' | 'deleted_at'> & { created_at?: string; position?: number }>,
   opts: { variant?: number } = {},
 ): { text: string; included: number; leftOut: WaggleLeftOut[]; variant: number } {
   const v = ((Number(opts.variant) || 0) % WAGGLE_VARIANTS + WAGGLE_VARIANTS) % WAGGLE_VARIANTS
-  const live = items.filter(i => !i.deleted_at)
+  const order = (a: { created_at?: string; position?: number }, b: { created_at?: string; position?: number }) =>
+    (Number(a.position ?? 0) - Number(b.position ?? 0)) || String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+  const live = items.filter(i => !i.deleted_at).slice().sort(order)
   const leftOut: WaggleLeftOut[] = []
-  const byGroup: Record<ReleaseGroup, typeof live> = { new: [], changed: [], fixed: [] }
+  const byGroup: Record<ReleaseGroup, typeof live> = { new: [], changed: [], fixed: [], question: [] }
   for (const i of live) {
     if (isUnedited(i)) { leftOut.push({ id: i.id, title: i.title, reason: 'their_words' }); continue }
     if (!String(i.body ?? '').trim()) { leftOut.push({ id: i.id, title: i.title, reason: 'no_sentence' }); continue }
     const g: ReleaseGroup = GROUP_ORDER.includes(i.group) ? i.group : 'changed'
+    if (g === 'question' && byGroup.question.length >= WAGGLE_MAX_QUESTIONS) { leftOut.push({ id: i.id, title: i.title, reason: 'over_cap' }); continue }
     byGroup[g].push(i)
   }
-  const included = byGroup.new.length + byGroup.changed.length + byGroup.fixed.length
+  const included = GROUP_ORDER.reduce((n, g) => n + byGroup[g].length, 0)
 
   const lines: string[] = []
   lines.push(`🐝 *The Waggle* · week ending ${formatWeekLabel(release.publish_on)}`)
   const summary = String(release.summary ?? '').trim()
   lines.push(slackEscape(summary || OPENERS[v % OPENERS.length]))
-  for (const g of GROUP_ORDER) {
+  for (const g of CHANGE_GROUPS) {
     if (byGroup[g].length === 0) continue
     lines.push('')
     lines.push(`${GROUP_EMOJI[g]} *${GROUP_LABEL[g]}*`)
     for (const i of byGroup[g]) {
       lines.push(`• *${slackEscape(i.title.trim())}* — ${slackEscape(String(i.body).trim())}`)
+    }
+  }
+  if (byGroup.question.length > 0) {
+    lines.push('')
+    lines.push(`${GROUP_EMOJI.question} *A few things you asked this week*`)
+    for (const i of byGroup.question) {
+      lines.push(`• *${slackEscape(i.title.trim())}*`)
+      lines.push(`  ${slackEscape(String(i.body).trim())}`)
     }
   }
   lines.push('')
@@ -309,12 +336,24 @@ export async function getOrCreateDraft(
 
 export type SeedResult = { added: true } | { added: false; reason: string }
 
+// TWO KINDS OF SEED, ONE LINE PER ENTRY EVER.
+//   'change'   (marked Fixed)    → group from the type, title verbatim, no body
+//   'question' (marked Answered) → group 'question', the entry's title as the
+//                                  question, our latest reply as the answer
+// Both land with edited_at NULL: "their words", hidden from owners and the
+// post until Kevin rewrites them. The reply is a STARTING POINT — it is in
+// Kevin's voice with hashes and personal detail — which is exactly why it
+// stays unpublished until edited. Neither seed carries who asked: no name,
+// no email, no user id. The unique index on feedback_item_id means an entry
+// answered and later fixed (or the reverse) seeds once, not twice.
 export async function seedReleaseItemFromFeedback(
   service: MinimalClient,
-  feedback: { id: string; type: unknown; title: unknown },
+  feedback: { id: string; type: unknown; title: unknown; answer?: unknown },
   userId: string | null,
   now: Date = new Date(),
+  opts: { as?: 'change' | 'question' } = {},
 ): Promise<SeedResult> {
+  const asQuestion = opts.as === 'question'
   try {
     const { draft, error } = await getOrCreateDraft(service, userId, now)
     if (!draft) {
@@ -322,14 +361,15 @@ export async function seedReleaseItemFromFeedback(
       console.warn('[whats-new seed] no draft:', (error as any)?.message ?? error)
       return { added: false, reason: 'no_draft' }
     }
-    const title = String(feedback.title ?? '').trim().slice(0, RELEASE_LIMITS.title) || 'Untitled report'
+    const title = String(feedback.title ?? '').trim().slice(0, RELEASE_LIMITS.title) || (asQuestion ? 'Untitled question' : 'Untitled report')
+    const answer = asQuestion ? (String(feedback.answer ?? '').trim().slice(0, RELEASE_LIMITS.body) || null) : null
     const { error: insErr } = await service
       .from('help_release_items')
       .insert({
         release_id: draft.id,
-        group: groupForType(feedback.type),
+        group: asQuestion ? 'question' : groupForType(feedback.type),
         title,
-        body: null,
+        body: answer,
         feedback_item_id: feedback.id,
         edited_at: null,
         created_by: userId,

@@ -4,7 +4,8 @@
 // Kevin edits it.
 //
 //   OWNERS see the published weeks, newest first, each grouped New /
-//   Changed / Fixed — a headline and one sentence per line. The server
+//   Changed / Fixed, then "You asked" — a headline and one sentence per
+//   line, a question and its answer per question line. The server
 //   never sends them the draft, a removed line, or a line still in the
 //   owner's words (GET /api/help/releases decides; this file only draws).
 //
@@ -14,7 +15,10 @@
 //   flagged, and a count at the top says how many are waiting. A pencil on
 //   every line opens a sheet (ReleaseItemForm) with the original report as
 //   reference; a plus row adds something that shipped with no report
-//   behind it; the summary line has its own pencil. "Preview the Slack
+//   behind it; the summary line has its own pencil. A line that arrived
+//   from the command line after a push (scripts/waggle-add.mjs — no
+//   hub_user wrote it, so created_by is NULL) wears a quiet "From a
+//   deploy" chip for editors and is otherwise an ordinary line. "Preview the Slack
 //   post" opens WagglePreview — the message as it will land, editable, and
 //   one button that posts it AND publishes the week to Help.
 //
@@ -51,17 +55,19 @@ function Chip({ family = 'amber', children, attr }) {
 // ── one line ──────────────────────────────────────────────────
 function ReleaseLine({ item, canEdit, onEdit }) {
   const grey = item.unedited
+  const isQ = item.group === 'question'
   return (
     <div data-whatsnew-item={item.id} data-whatsnew-unedited={grey ? 'true' : undefined}
       style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '8px 0', opacity: grey ? 0.55 : 1 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '15.5px', fontWeight: 600, color: T.ink.primary, lineHeight: 1.35 }}>{item.title}</span>
+          <span style={{ fontSize: '15.5px', fontWeight: 600, color: T.ink.primary, lineHeight: 1.35, fontStyle: isQ ? 'italic' : 'normal' }}>{isQ ? `“${item.title}”` : item.title}</span>
           {grey && <Chip attr={{ 'data-whatsnew-flag': item.id }}>Their words</Chip>}
+          {canEdit && !grey && !item.feedback_item_id && !item.created_by && <Chip family="teal" attr={{ 'data-whatsnew-auto': item.id }}>From a deploy</Chip>}
         </div>
         {item.body
           ? <p style={{ margin: '2px 0 0', fontSize: '14.5px', color: T.ink.secondary, lineHeight: 1.5 }}>{item.body}</p>
-          : (canEdit && <p style={{ margin: '2px 0 0', fontSize: '13px', color: T.ink.quiet, fontStyle: 'italic' }}>{grey ? 'Rewrite this in your words to include it.' : 'No sentence yet — it stays out of the Slack post.'}</p>)}
+          : (canEdit && <p style={{ margin: '2px 0 0', fontSize: '13px', color: T.ink.quiet, fontStyle: 'italic' }}>{grey ? (isQ ? 'Rewrite the question and the answer in your words to include it.' : 'Rewrite this in your words to include it.') : (isQ ? 'No answer yet — it stays out of the Slack post.' : 'No sentence yet — it stays out of the Slack post.')}</p>)}
       </div>
       {canEdit && (
         <button type="button" onClick={() => onEdit(item)} aria-label={`Edit ${item.title}`} style={iconBtn}><IconPencil size={16} /></button>
@@ -71,16 +77,17 @@ function ReleaseLine({ item, canEdit, onEdit }) {
 }
 
 function Groups({ release, canEdit, onEdit }) {
-  const any = GROUP_ORDER.some(g => release.groups[g].length > 0)
+  const lines = (g) => (release.groups && Array.isArray(release.groups[g])) ? release.groups[g] : []
+  const any = GROUP_ORDER.some(g => lines(g).length > 0)
   if (!any) return <p style={{ margin: '6px 0 0', fontSize: '14px', color: T.ink.quiet }}>Nothing in this week yet.</p>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {GROUP_ORDER.map(g => release.groups[g].length > 0 && (
+      {GROUP_ORDER.map(g => lines(g).length > 0 && (
         <div key={g} data-whatsnew-group={g}>
           <p style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted, margin: '0 0 2px' }}>
             {GROUP_EMOJI[g]} {GROUP_LABEL[g]}
           </p>
-          {release.groups[g].map(it => <ReleaseLine key={it.id} item={it} canEdit={canEdit} onEdit={onEdit} />)}
+          {lines(g).map(it => <ReleaseLine key={it.id} item={it} canEdit={canEdit} onEdit={onEdit} />)}
         </div>
       ))}
     </div>
@@ -98,8 +105,12 @@ function ReleaseCard({ release, canEdit, onEdit }) {
       {release.summary && <p style={{ margin: '0 0 10px', fontSize: '14.5px', color: T.ink.secondary, lineHeight: 1.5 }}>{release.summary}</p>}
       {!release.summary && <div style={{ height: '6px' }} />}
       <Groups release={release} canEdit={canEdit} onEdit={onEdit} />
-      {canEdit && release.slack_posted_at && (
-        <p style={{ margin: '10px 0 0', fontSize: '12.5px', color: T.ink.quiet }}>Posted to Slack.</p>
+      {canEdit && (release.slack_posted_at || release.number) && (
+        <p style={{ margin: '10px 0 0', fontSize: '12.5px', color: T.ink.quiet }}>
+          {release.number ? <span data-whatsnew-number={release.number}>No. {release.number}</span> : null}
+          {release.number && release.slack_posted_at ? ' · ' : ''}
+          {release.slack_posted_at ? 'Posted to Slack.' : ''}
+        </p>
       )}
       {canEdit && !release.slack_posted_at && release.slack_error && (
         <p style={{ margin: '10px 0 0', fontSize: '12.5px', color: T.state.warning.deep }}>Published to Help. The Slack post didn’t go: {release.slack_error}</p>

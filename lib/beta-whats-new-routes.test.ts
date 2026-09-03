@@ -42,6 +42,7 @@ const h = vi.hoisted(() => {
     b.eq = chain((c: string, v: any) => { ctx.filters[c] = v })
     b.in = chain((c: string, v: any) => { ctx.inFilters[c] = v })
     b.is = chain((c: string, v: any) => { ctx.isNull[c] = v })
+    b.not = chain(() => {})
     b.order = chain(() => {})
     b.limit = chain(() => {})
     const resolve = () => { state.calls.push(ctx); return Promise.resolve(state.respond(ctx)) }
@@ -75,7 +76,7 @@ const req = (method: string, body?: any, url = 'http://x/api/help/releases') =>
   new Request(url, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }) as any
 
 const RELEASES = [
-  { id: 'r-pub', week_start: '2026-08-21', publish_on: '2026-08-27', status: 'published', summary: 'A quieter week.', published_at: '2026-08-27T20:00:00Z', slack_text: 'posted words', slack_posted_at: '2026-08-27T20:00:01Z', slack_error: null },
+  { id: 'r-pub', week_start: '2026-08-21', publish_on: '2026-08-27', status: 'published', summary: 'A quieter week.', published_at: '2026-08-27T20:00:00Z', slack_text: 'posted words', slack_posted_at: '2026-08-27T20:00:01Z', slack_error: null, number: 11 },
   { id: 'r-draft', week_start: '2026-08-28', publish_on: '2026-09-03', status: 'draft', summary: null, published_at: null, slack_text: null, slack_posted_at: null, slack_error: null },
 ]
 const ITEMS = [
@@ -85,6 +86,12 @@ const ITEMS = [
   { id: 'i-d-1', release_id: 'r-draft', group: 'fixed', title: 'Archiving a quote in Jobber closes the deal as Closed Lost.', body: 'No more moving it by hand.', edited_at: '2026-09-01T10:00:00Z', feedback_item_id: 'fb-3', deleted_at: null, created_at: '2026-08-30T00:00:00Z' },
   { id: 'i-d-2', release_id: 'r-draft', group: 'fixed', title: 'Inbox has a circle 1', body: null, edited_at: null, feedback_item_id: 'fb-4', deleted_at: null, created_at: '2026-08-31T00:00:00Z' },
   { id: 'i-d-3', release_id: 'r-draft', group: 'new', title: 'Two addresses per client', body: null, edited_at: '2026-09-02T10:00:00Z', feedback_item_id: null, deleted_at: null, created_at: '2026-09-01T00:00:00Z' },
+  // four answered questions: three rewritten (one of them the oldest), one still in the owner's words
+  { id: 'q1', release_id: 'r-draft', group: 'question', title: 'Do archived Jobber quotes close the deal?', body: 'Yes — archive it in Jobber and the deal goes to Closed Lost on its own.', edited_at: '2026-09-02T11:00:00Z', feedback_item_id: 'fb-q1', deleted_at: null, created_at: '2026-08-29T00:00:00Z' },
+  { id: 'q2', release_id: 'r-draft', group: 'question', title: 'Can I see which drip emails went out?', body: 'Open the client and look at the Timeline — every send and stop is there now.', edited_at: '2026-09-02T11:00:00Z', feedback_item_id: 'fb-q2', deleted_at: null, created_at: '2026-08-30T00:00:00Z' },
+  { id: 'q3', release_id: 'r-draft', group: 'question', title: 'Why is there a 1 on my Inbox when it is empty?', body: 'A filter was hiding a lead. The Inbox now says so instead of counting in silence.', edited_at: '2026-09-02T11:00:00Z', feedback_item_id: 'fb-q3', deleted_at: null, created_at: '2026-08-31T00:00:00Z' },
+  { id: 'q4', release_id: 'r-draft', group: 'question', title: 'Where did the New Lead column go?', body: 'It is in the Inbox now. They are leads until Jobber has them.', edited_at: '2026-09-02T11:00:00Z', feedback_item_id: 'fb-q4', deleted_at: null, created_at: '2026-09-01T00:00:00Z' },
+  { id: 'q5', release_id: 'r-draft', group: 'question', title: 'Drip campaign not working?', body: "Shipped 7/30 (before this note): drip sends now write a Timeline touchpoint. One caveat for Janet specifically — her 7/27 send predates the change.", edited_at: null, feedback_item_id: 'fb-q5', deleted_at: null, created_at: '2026-09-02T00:00:00Z' },
 ]
 const FEEDBACK = [
   { id: 'fb-3', title: 'Jobber - Quote Archive = Job Lost', type: 'bug', description: 'When we Archive a quote in Jobber...', admin_response: 'Shipped — this now works.' },
@@ -97,6 +104,7 @@ function defaultRespond(ctx: any) {
   if (ctx.table === 'help_releases' && ctx.op === 'select') {
     if (ctx.filters.id) return { data: RELEASES.find(r => r.id === ctx.filters.id) || null, error: null }
     if (ctx.filters.status === 'draft') return { data: RELEASES.find(r => r.status === 'draft') || null, error: null }
+    if (ctx.filters.status === 'published') return { data: { number: 11 }, error: null } // the last number handed out
     return { data: RELEASES, error: null }
   }
   if (ctx.table === 'help_releases' && ctx.op === 'update') {
@@ -178,15 +186,42 @@ describe('the Slack post is assembled from the edited lines — nothing else', (
     expect(built.text.split('\n')[0]).toBe('🐝 *The Waggle* · week ending Thu, Sep 3')
     expect(built.text).toContain('✅ *Fixed*')
     expect(built.text).toContain('• *Archiving a quote in Jobber closes the deal as Closed Lost.* — No more moving it by hand.')
-    expect(built.included).toBe(1)
+    expect(built.included).toBe(4) // one change + three questions
     expect(built.text).not.toContain('Inbox has a circle 1')
     expect(built.text).not.toContain('Two addresses per client')
     expect(built.leftOut).toEqual([
       { id: 'i-d-2', title: 'Inbox has a circle 1', reason: 'their_words' },
       { id: 'i-d-3', title: 'Two addresses per client', reason: 'no_sentence' },
+      { id: 'q4', title: 'Where did the New Lead column go?', reason: 'over_cap' },
+      { id: 'q5', title: 'Drip campaign not working?', reason: 'their_words' },
     ])
     // no ✨ New heading when nothing is in it
     expect(built.text).not.toContain('*New*')
+  })
+  it('the questions come after the changes, capped at three, oldest first, question then answer', () => {
+    const built = buildWaggleMessage(release, draftItems())
+    const lines = built.text.split('\n')
+    const qHead = lines.indexOf('💬 *A few things you asked this week*')
+    const fixedHead = lines.indexOf('✅ *Fixed*')
+    expect(qHead).toBeGreaterThan(fixedHead)
+    expect(lines.slice(qHead + 1, qHead + 7)).toEqual([
+      '• *Do archived Jobber quotes close the deal?*',
+      '  Yes — archive it in Jobber and the deal goes to Closed Lost on its own.',
+      '• *Can I see which drip emails went out?*',
+      '  Open the client and look at the Timeline — every send and stop is there now.',
+      '• *Why is there a 1 on my Inbox when it is empty?*',
+      '  A filter was hiding a lead. The Inbox now says so instead of counting in silence.',
+    ])
+    // the fourth rewritten question is in Help but not the post; the raw one is in neither
+    expect(built.text).not.toContain('Where did the New Lead column go?')
+    expect(built.text).not.toContain('Janet')
+    expect(built.text).not.toContain('Drip campaign')
+  })
+  it('never carries the release number, and never a name the seed did not have', () => {
+    const numbered = { ...release, number: 12 } as any
+    const built = buildWaggleMessage(numbered, draftItems())
+    expect(built.text).not.toMatch(/\b12\b/)
+    expect(built.text).not.toMatch(/No\. ?\d|#\d|v\d/)
   })
   it('uses the summary as the lede when there is one, a stock opener when there is not', () => {
     expect(buildWaggleMessage({ ...release, summary: 'Two fixes and a faster Inbox.' }, draftItems()).text.split('\n')[1]).toBe('Two fixes and a faster Inbox.')
@@ -251,6 +286,8 @@ describe('GET /api/help/releases', () => {
     expect(text).not.toContain('fb-')
     expect(text).not.toContain('posted words')
     expect(text).not.toContain('slack_error')
+    expect(text).not.toContain('"number"') // the number nobody sees
+    expect(rel.groups.question).toEqual([])
     // no read of feedback_items on the owner path
     expect(h.state.calls.some((c: any) => c.table === 'feedback_items')).toBe(false)
   })
@@ -260,7 +297,14 @@ describe('GET /api/help/releases', () => {
     const body = await (await GET()).json()
     expect(body.canEdit).toBe(true)
     expect(body.draft.id).toBe('r-draft')
-    expect(body.draft.unedited_count).toBe(1)
+    expect(body.draft.unedited_count).toBe(2)
+    expect(body.releases[0].number).toBe(11) // editors see the number
+    expect(body.draft.groups.question.map((q: any) => q.id)).toEqual(['q1', 'q2', 'q3', 'q4', 'q5'])
+    // the reference block carries the report, never the person
+    for (const q of body.draft.groups.question) {
+      if (q.source) expect(Object.keys(q.source).sort()).toEqual(['admin_response', 'description', 'title', 'type'])
+    }
+    expect(JSON.stringify(body)).not.toMatch(/"user_id"|"submitter_[a-z]+"|"email"|"full_name"|"first_name"|"created_by":"owner/)
     expect(body.draft.week_label).toBe('Thu, Sep 3')
     const lines = [...body.draft.groups.fixed, ...body.draft.groups.new]
     const un = lines.find((i: any) => i.id === 'i-d-2')
@@ -274,7 +318,7 @@ describe('GET /api/help/releases', () => {
     // the feedback read is a plain select by id — never a write
     const fb = h.state.calls.filter((c: any) => c.table === 'feedback_items')
     expect(fb.map((c: any) => c.op)).toEqual(['select'])
-    expect(fb[0].inFilters.id.sort()).toEqual(['fb-3', 'fb-4'])
+    expect(fb[0].inFilters.id.sort()).toEqual(['fb-3', 'fb-4', 'fb-q1', 'fb-q2', 'fb-q3', 'fb-q4', 'fb-q5'])
   })
 
   it('a missing table reads as empty, never a 500', async () => {
@@ -389,18 +433,24 @@ describe('publishing', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.release.status).toBe('published')
-    expect(body.published_count).toBe(2)
-    expect(body.left_out).toBe(1)
+    expect(body.published_count).toBe(6)
+    expect(body.left_out).toBe(2)
     expect(body.carried_to).toEqual(expect.objectContaining({ week_start: expect.any(String), publish_on: expect.any(String) }))
     expect(body.slack).toEqual({ posted: false, problem: null, skipped: true })
-    // the writes, in order: publish, open next draft, move the unedited line
+    // the number: last published was 11, this one is 12 — a separate write, never part of the publish row
+    expect(body.number).toBe(12)
+    expect(body.release.number).toBe(12)
+    // the writes, in order: publish, number, open next draft, move the unedited lines
     const w = h.state.calls.filter((c: any) => c.op !== 'select')
-    expect(w.map((c: any) => `${c.table}:${c.op}`)).toEqual(['help_releases:update', 'help_releases:insert', 'help_release_items:update'])
+    expect(w.map((c: any) => `${c.table}:${c.op}`)).toEqual(['help_releases:update', 'help_releases:update', 'help_releases:insert', 'help_release_items:update'])
     expect(w[0].payload).toMatchObject({ status: 'published', slack_text: null })
+    expect(w[0].payload.number).toBeUndefined()
     expect(w[0].payload.published_at).toBeTruthy()
-    expect(w[1].payload.status).toBe('draft')
-    expect(w[2].payload.release_id).toBe('r-next')
-    expect(w[2].inFilters.id).toEqual(['i-d-2'])
+    expect(w[1].payload).toEqual({ number: 12 })
+    expect(w[1].isNull.number).toBeNull() // never renumbers
+    expect(w[2].payload.status).toBe('draft')
+    expect(w[3].payload.release_id).toBe('r-next')
+    expect(w[3].inFilters.id).toEqual(['i-d-2', 'q5'])
     expect(slackFetch).not.toHaveBeenCalled()
   })
 
@@ -408,7 +458,7 @@ describe('publishing', () => {
     const pv = await (await SLACK_PREVIEW(req('GET', undefined, 'http://x/api/help/releases/r-draft/slack?variant=1'), { params: { id: 'r-draft' } })).json()
     expect(pv.variant).toBe(1)
     expect(pv.channel).toEqual({ id: 'C0BTS6KGLNP', name: '#tech-updates-info' })
-    expect(pv.left_out.map((l: any) => l.id)).toEqual(['i-d-2', 'i-d-3'])
+    expect(pv.left_out.map((l: any) => l.id)).toEqual(['i-d-2', 'i-d-3', 'q4', 'q5'])
     h.state.calls = []
     const res = await PATCH_RELEASE(req('PATCH', { publish: true, post_slack: true, variant: 1 }), { params: { id: 'r-draft' } })
     const body = await res.json()
@@ -427,6 +477,7 @@ describe('publishing', () => {
     expect(JSON.parse(slackFetch.mock.calls[0][1].body)).toEqual({ text: mine })
     const w = h.state.calls.filter((c: any) => c.op !== 'select')
     expect(w[0].payload).toMatchObject({ status: 'published', slack_text: mine })
+    expect(JSON.parse(slackFetch.mock.calls[0][1].body).text).not.toMatch(/\b12\b/) // the number never rides along
     const last = w[w.length - 1]
     expect(last.table).toBe('help_releases')
     expect(last.payload.slack_posted_at).toBeTruthy()
@@ -455,6 +506,21 @@ describe('publishing', () => {
     expect(slackFetch).not.toHaveBeenCalled()
   })
 
+  it('the number column not yet migrated: the week still publishes, no number', async () => {
+    const base = h.state.respond
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'help_releases' && ctx.op === 'update' && 'number' in (ctx.payload || {}) && Object.keys(ctx.payload).length === 1) {
+        return { data: null, error: { code: 'PGRST204', message: "Could not find the 'number' column of 'help_releases' in the schema cache" } }
+      }
+      return base(ctx)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const body = await (await PATCH_RELEASE(req('PATCH', { publish: true, post_slack: false }), { params: { id: 'r-draft' } })).json()
+    expect(body.release.status).toBe('published')
+    expect(body.number).toBeNull()
+    warn.mockRestore()
+  })
+
   it('an already-published week cannot be published again', async () => {
     const res = await PATCH_RELEASE(req('PATCH', { publish: true }), { params: { id: 'r-pub' } })
     expect(res.status).toBe(409)
@@ -465,12 +531,19 @@ describe('publishing', () => {
 // ─── shaping + the migration ───────────────────────────────────────────
 
 describe('shapeRelease', () => {
-  it('for an owner drops unedited and deleted lines and every editor-only field', () => {
+  it('for an owner drops unedited and deleted lines and every editor-only field, the number included', () => {
     const s = shapeRelease(RELEASES[0] as any, ITEMS as any, { forOwner: true })
     expect(s.groups.fixed.map(i => i.id)).toEqual(['i-pub-1'])
+    expect(s.groups.question).toEqual([])
     expect(s.unedited_count).toBe(0)
     expect('slack_text' in s).toBe(false)
+    expect('number' in s).toBe(false)
     expect((s.groups.fixed[0] as any).feedback_item_id).toBeUndefined()
+  })
+  it('for an editor keeps the number and every question line, flagged', () => {
+    const s = shapeRelease(RELEASES[1] as any, ITEMS as any, { forOwner: false })
+    expect(s.groups.question.map(q => [q.id, q.unedited])).toEqual([['q1', false], ['q2', false], ['q3', false], ['q4', false], ['q5', true]])
+    expect(shapeRelease(RELEASES[0] as any, ITEMS as any, { forOwner: false }).number).toBe(11)
   })
 })
 
@@ -491,11 +564,20 @@ describe('the migration', () => {
     expect(sql).not.toMatch(/(update|insert into|delete from)\s+(public\.)?help_entries/i)
     expect(sql).toMatch(/references public\.feedback_items\(id\) on delete set null/)
   })
+  it('the second migration adds the question group and the number, and touches nothing else', () => {
+    const sql2 = fs.readFileSync(path.join(process.cwd(), 'migrations/help_releases_questions_and_numbers.sql'), 'utf8')
+    expect(sql2).toMatch(/check \("group" in \('new','changed','fixed','question'\)\)/)
+    expect(sql2).toMatch(/add column if not exists number integer/)
+    expect(sql2).toMatch(/help_releases_number_idx[\s\S]*\(number\) where number is not null/)
+    const statements = sql2.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
+    expect(statements).not.toMatch(/feedback_items|feedback_replies|help_entries/)
+  })
   it('the new code never writes to feedback_items', () => {
     const files = [
       'lib/help-releases.ts', 'lib/slack-waggle.ts',
       'app/api/help/releases/route.ts', 'app/api/help/releases/[id]/route.ts', 'app/api/help/releases/[id]/slack/route.ts',
-      'app/api/help/releases/items/route.ts', 'app/api/help/releases/items/[id]/route.ts',
+      'app/api/help/releases/items/route.ts', 'app/api/help/releases/items/[id]/route.ts', 'app/api/help/releases/lines/route.ts',
+      'lib/waggle-line-rules.mjs', 'scripts/waggle-add.mjs',
       'components/help/WhatsNew.jsx', 'components/help/ReleaseItemForm.jsx', 'components/help/WagglePreview.jsx',
     ]
     for (const f of files) {

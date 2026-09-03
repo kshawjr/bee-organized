@@ -121,7 +121,7 @@ export default function WagglePreview({ isMobile = false, release, onClose, onPu
                 </p>
                 <ul style={{ margin: 0, padding: '0 0 0 18px', fontSize: '13.5px', color: T.state.warning.deep, lineHeight: 1.5 }}>
                   {leftOut.map(l => (
-                    <li key={l.id}>{l.title} <span style={{ opacity: 0.8 }}>· {l.reason === 'their_words' ? 'still in the owner’s words' : 'no sentence yet'}</span></li>
+                    <li key={l.id}>{l.title} <span style={{ opacity: 0.8 }}>· {l.reason === 'their_words' ? 'still in the owner’s words' : l.reason === 'over_cap' ? 'in Help, but the post takes three questions' : 'no sentence yet'}</span></li>
                   ))}
                 </ul>
                 <p style={{ margin: '6px 0 0', fontSize: '12.5px', color: T.state.warning.deep, lineHeight: 1.45 }}>

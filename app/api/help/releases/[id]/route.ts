@@ -11,6 +11,11 @@
 // week's draft, which this route opens if it has to, so nothing Kevin
 // hasn't looked at is lost or shown. The response says how many moved.
 //
+// A NUMBER NOBODY SEES. Publishing also assigns the next sequential number
+// (max over published + 1) in a separate, best-effort write, so Kevin can
+// say "that went out in 12". Owners never receive it and the post never
+// carries it; before its migration runs the week still publishes.
+//
 // PUBLISH FIRST, POST SECOND. The release is marked published and the
 // carry-forward is done BEFORE the Slack call, and the Slack outcome is
 // recorded on the row (slack_posted_at or slack_error) and returned. A
@@ -90,6 +95,25 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .eq('id', id).select('*').single()
   if (pubErr || !published) return NextResponse.json({ error: pubErr?.message || 'publish_failed' }, { status: 500 })
 
+  // 1b. The number nobody sees. Sequential over PUBLISHED releases, assigned
+  // here and not at draft time so a week that never goes out burns nothing.
+  // Best-effort and separate from the publish write: before the column's
+  // migration runs this fails quietly and the week is still out. Editors
+  // see it on the card; owners never do and the post never carries it.
+  let number: number | null = null
+  try {
+    const { data: last } = await supabaseService
+      .from('help_releases').select('number').eq('status', 'published').not('number', 'is', null)
+      .order('number', { ascending: false }).limit(1).maybeSingle()
+    number = (Number((last as any)?.number) || 0) + 1
+    const { error: numErr } = await supabaseService
+      .from('help_releases').update({ number }).eq('id', id).is('number', null)
+    if (numErr) { console.warn('[help releases publish] number not assigned:', numErr.message); number = null }
+  } catch (err) {
+    console.warn('[help releases publish] number not assigned:', (err as any)?.message ?? err)
+    number = null
+  }
+
   // 2. Carry the unedited lines forward to the next draft.
   const carry = items.filter(isUnedited)
   let carriedTo: { week_start: string; publish_on: string } | null = null
@@ -125,7 +149,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   return NextResponse.json({
-    release: published,
+    release: { ...published, number: number ?? (published as any).number ?? null },
+    number,
     published_count: items.length - carry.length,
     left_out: carry.length,
     carried_to: carriedTo,

@@ -138,6 +138,60 @@ describe('into shipped seeds one line', () => {
   })
 })
 
+describe('into answered seeds a QUESTION line', () => {
+  it('title as the question, the latest reply as the answer, in their words — and no name anywhere', async () => {
+    h.state.rows.feedback_items = { ...ITEM, type: 'question', title: 'Do archived Jobber quotes close the deal?', admin_response: 'Yes — see 4b526e6, archiving now closes it. Told Janet on the phone too.' }
+    const { status, body } = await patch({ status: 'answered' })
+    expect(status).toBe(200)
+    expect(body.status).toBe('answered')
+    expect(seedInserts()).toHaveLength(1)
+    const arg = seedInserts()[0].arg
+    expect(arg).toEqual({
+      release_id: 'r-draft', group: 'question',
+      title: 'Do archived Jobber quotes close the deal?',
+      body: 'Yes — see 4b526e6, archiving now closes it. Told Janet on the phone too.',
+      feedback_item_id: 'fb-1', edited_at: null, created_by: 'admin-1', updated_by: 'admin-1',
+    })
+    // the reply is a STARTING POINT: it lands raw (edited_at null) so it is never shown or posted as-is
+    expect(arg.edited_at).toBeNull()
+    // no owner identity of any kind rides along
+    expect(Object.keys(arg).sort()).toEqual(['body', 'created_by', 'edited_at', 'feedback_item_id', 'group', 'release_id', 'title', 'updated_by'])
+    expect(JSON.stringify(arg)).not.toMatch(/owner-9|lynette|Lynette|kcbees|user_id/)
+    // answered sends no email on its own (issue 233 rule 2) — unchanged
+    expect(direct.fn).not.toHaveBeenCalled()
+  })
+  it('a reply written in the same save is the answer', async () => {
+    h.state.rows.feedback_items = { ...ITEM, type: 'question', title: 'Can I see which drips went out?', admin_response: null }
+    await patch({ status: 'answered', admin_response: 'Open the client and look at the Timeline.' })
+    expect(seedInserts()[0].arg).toMatchObject({ group: 'question', body: 'Open the client and look at the Timeline.' })
+    expect(direct.fn).toHaveBeenCalledTimes(1) // the reply email, exactly as before
+  })
+  it('re-saving an already-answered item seeds nothing', async () => {
+    h.state.rows.feedback_items = { ...ITEM, status: 'answered' }
+    await patch({ status: 'answered', admin_response: 'more words' })
+    expect(seedInserts()).toEqual([])
+  })
+  it('an owner marking their own location’s question Answered seeds nothing', async () => {
+    authUser.current = { id: 'owner-2' }
+    h.state.rows.hub_users = { id: 'owner-2', role: 'owner', location_id: 'loc-1', ...SUBMITTER }
+    const { status } = await patch({ status: 'answered' })
+    expect(status).toBe(200)
+    expect(seedInserts()).toEqual([])
+  })
+  it('an internal item marked Answered seeds nothing', async () => {
+    h.state.rows.feedback_items = { ...ITEM, is_internal: true }
+    await patch({ status: 'answered' })
+    expect(seedInserts()).toEqual([])
+  })
+  it('answered, then later fixed: the second seed is refused by the unique index and the save is fine', async () => {
+    h.state.rows.feedback_items = { ...ITEM, status: 'answered' }
+    h.state.insertError = { code: '23505', message: 'duplicate key value violates unique constraint "help_release_items_feedback_idx"' }
+    const { status, body } = await patch({ status: 'shipped' })
+    expect(status).toBe(200)
+    expect(body.reply_email.sent).toBe(true)
+  })
+})
+
 describe('nothing else seeds', () => {
   it('re-saving an already-shipped item', async () => {
     h.state.rows.feedback_items = { ...ITEM, status: 'shipped' }

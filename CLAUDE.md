@@ -49,6 +49,13 @@ Multi-tenant client web app — Next.js + Supabase, with Jobber integration.
   Preview). Generate with `openssl rand -hex 32`.
 - Without `CRON_SECRET`, the route returns 500 — fail-closed.
 
+## What's new — telling the owners
+- After a push to main lands, decide whether a franchise owner would NOTICE the change in their week. If they would, add one line to this week's What's new draft:
+  `node scripts/waggle-add.mjs <new|changed|fixed> "Headline in owner words" "One sentence on what changed for them."`
+- Say what changed FOR THEM, never what was committed. No commit hashes, file names, issue numbers, routes or functions, and never "improved reliability" or "various fixes" — the script refuses those. Light and plain; a little banter is fine.
+- If in doubt, skip it. Kevin adds lines by hand; a missing line costs a sentence, a wrong one costs his Thursday. Ops rails, prompt fixes, triage or admin screens, tests and refactors are never lines.
+- Needs `WAGGLE_WRITE_KEY` (env, or `~/.config/bee-hub/waggle-key`); without it the script says so and exits. Kevin can edit or remove the line under Help › What's new.
+
 ## Known issues / tech debt
 - Next.js 14.2.3 has a security vulnerability — planned upgrade to latest patched 14.x
 - npm audit shows 1 critical + 1 moderate — do not run `npm audit fix --force`, fix deliberately

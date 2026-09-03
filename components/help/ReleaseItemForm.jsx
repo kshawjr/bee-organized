@@ -34,6 +34,7 @@ const btnDanger = {
 }
 
 const TYPE_WORD = { bug: 'bug report', feature: 'idea', question: 'question' }
+const NO_NAMES = 'No names in a broadcast — “a few of you asked” is as specific as it gets.'
 
 export default function ReleaseItemForm({
   isMobile = false,
@@ -111,12 +112,12 @@ export default function ReleaseItemForm({
           <>
             <div>
               <span style={lbl}>What kind of change</span>
-              <div role="radiogroup" style={{ display: 'flex', gap: '8px' }}>
+              <div role="radiogroup" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {GROUP_ORDER.map(g => {
                   const on = group === g
                   return (
                     <button key={g} type="button" role="radio" aria-checked={on} onClick={() => setGroup(g)} data-whatsnew-group-pick={g}
-                      style={{ flex: 1, minHeight: '46px', border: on ? `1px solid ${T.ink.primary}` : T.border.control, background: on ? T.ink.primary : T.surface.raised, color: on ? T.ink.inverse : T.ink.primary, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, fontSize: '14px', cursor: 'pointer' }}>
+                      style={{ flex: '1 1 40%', minHeight: '46px', border: on ? `1px solid ${T.ink.primary}` : T.border.control, background: on ? T.ink.primary : T.surface.raised, color: on ? T.ink.inverse : T.ink.primary, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, fontSize: '14px', cursor: 'pointer' }}>
                       {GROUP_EMOJI[g]} {GROUP_LABEL[g]}
                     </button>
                   )
@@ -125,21 +126,22 @@ export default function ReleaseItemForm({
             </div>
 
             <div>
-              <label style={lbl} htmlFor="wn-title">Headline — what changed, in plain words</label>
+              <label style={lbl} htmlFor="wn-title">{group === 'question' ? 'The question, the way owners would ask it' : 'Headline — what changed, in plain words'}</label>
               <input id="wn-title" value={title} maxLength={RELEASE_LIMITS.title} onChange={e => setTitle(e.target.value)} style={inp}
-                placeholder="Archiving a quote in Jobber closes the deal as Closed Lost." autoFocus={!isMobile} />
+                placeholder={group === 'question' ? 'Do archived Jobber quotes close the deal?' : 'Archiving a quote in Jobber closes the deal as Closed Lost.'} autoFocus={!isMobile} />
             </div>
 
             <div>
-              <label style={lbl} htmlFor="wn-body">One sentence more (needed for the Slack post)</label>
+              <label style={lbl} htmlFor="wn-body">{group === 'question' ? 'The answer, short (needed for the Slack post)' : 'One sentence more (needed for the Slack post)'}</label>
               <textarea id="wn-body" value={body} maxLength={RELEASE_LIMITS.body} onChange={e => setBody(e.target.value)} rows={3} style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }}
-                placeholder="No more moving it by hand — and the ones that were already stuck have been closed too." />
+                placeholder={group === 'question' ? 'Yes — archive it in Jobber and the deal goes to Closed Lost on its own.' : 'No more moving it by hand — and the ones that were already stuck have been closed too.'} />
+              {group === 'question' && <p style={{ fontSize: '12px', color: T.ink.quiet, margin: '6px 0 0', lineHeight: 1.45 }}>{NO_NAMES}</p>}
             </div>
 
             {source && (
               <div data-whatsnew-source style={{ background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <p style={{ margin: 0, fontSize: '12px', fontWeight: 600, letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted }}>
-                  The {TYPE_WORD[source.type] || 'report'} this came from · {FEEDBACK_STATUS_PLAIN.shipped}
+                  The {TYPE_WORD[source.type] || 'report'} this came from · {group === 'question' ? FEEDBACK_STATUS_PLAIN.answered : FEEDBACK_STATUS_PLAIN.shipped}
                 </p>
                 <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: T.ink.primary, lineHeight: 1.4 }}>{source.title}</p>
                 {source.description && <p style={{ margin: 0, fontSize: '13.5px', color: T.ink.secondary, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{source.description}</p>}
@@ -149,7 +151,7 @@ export default function ReleaseItemForm({
                     <p style={{ margin: 0, fontSize: '13.5px', color: T.ink.secondary, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{source.admin_response}</p>
                   </div>
                 )}
-                <p style={{ margin: 0, fontSize: '12px', color: T.ink.quiet, lineHeight: 1.45 }}>Reference only. Nothing you write here changes their report, the reply, or the email they got.</p>
+                <p style={{ margin: 0, fontSize: '12px', color: T.ink.quiet, lineHeight: 1.45 }}>Reference only. Nothing you write here changes their report, the reply, or the email they got.{group === 'question' ? ` ${NO_NAMES}` : ''}</p>
               </div>
             )}
           </>

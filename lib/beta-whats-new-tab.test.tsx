@@ -31,14 +31,16 @@ const PUB = {
     new: [line({ id: 'p1', group: 'new', title: 'Two addresses per client', body: 'A move adds an address; it never edits history.' })],
     changed: [],
     fixed: [line({ id: 'p2', title: 'The Inbox badge no longer counts hidden leads.', body: 'If they disagree, the Inbox says so.' })],
+    question: [line({ id: 'p3', group: 'question', title: 'Do archived Jobber quotes close the deal?', body: 'Yes — archive it in Jobber and the deal goes to Closed Lost on its own.' })],
   },
-  item_count: 2, unedited_count: 0,
+  item_count: 3, unedited_count: 0,
 }
 const DRAFT = {
   id: 'r-draft', week_start: '2026-08-28', publish_on: '2026-09-03', status: 'draft', summary: null, published_at: null, week_label: 'Thu, Sep 3',
   groups: {
     new: [],
     changed: [],
+    question: [],
     fixed: [
       line({ id: 'd1', title: 'Archiving a quote in Jobber closes the deal as Closed Lost.', body: 'No more moving it by hand.', feedback_item_id: 'fb-3', source: { title: 'Jobber - Quote Archive = Job Lost', type: 'bug', description: 'When we Archive a quote in Jobber...', admin_response: 'Shipped — this now works.' } }),
       line({ id: 'd2', title: 'Inbox has a circle 1', body: null, edited_at: null, unedited: true, feedback_item_id: 'fb-4', source: { title: 'Inbox has a circle 1', type: 'bug', description: 'A circle one is appearing in my inbox but it is empty', admin_response: 'Fixed. That lonely "1" was a lead your filters were hiding.' } }),
@@ -108,7 +110,10 @@ describe('an owner', () => {
     const { host, unmount } = await mount(<WhatsNew canEdit={false} />)
     expect(qa(host, '[data-whatsnew-release]').map(r => r.getAttribute('data-whatsnew-release'))).toEqual(['r-pub'])
     expect(host.textContent).toContain('A quieter week.')
-    expect(qa(host, '[data-whatsnew-group]').map(g => g.getAttribute('data-whatsnew-group'))).toEqual(['new', 'fixed'])
+    expect(qa(host, '[data-whatsnew-group]').map(g => g.getAttribute('data-whatsnew-group'))).toEqual(['new', 'fixed', 'question'])
+    expect(host.textContent).toContain('💬 You asked')
+    expect(host.textContent).toContain('“Do archived Jobber quotes close the deal?”')
+    expect(host.querySelector('[data-whatsnew-number]')).toBeNull() // owners never see the number
     expect(host.textContent).toContain('Two addresses per client')
     expect(host.textContent).toContain('A move adds an address; it never edits history.')
     expect(q(host, '[data-whatsnew-draft]')).toBeNull()
