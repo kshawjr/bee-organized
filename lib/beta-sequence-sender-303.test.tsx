@@ -1,28 +1,28 @@
 // @vitest-environment happy-dom
 //
-// Issue 303 — THE EMAILS TAB SAYS WHO THESE EMAILS ACTUALLY COME FROM.
+// Issue 303, redone 2026-09-03 — THE EMAILS TAB SAYS WHO SENDS WHAT.
 //
-// THE DEFECT, in Kevin's words: "who is the email actually coming from on
-// move". He could not tell from the screen, and he built it.
+// THE FIRST DEFECT (issue 303): the card at the bottom of Settings › Emails
+// printed the LOCATION's sending identity under a per-sequence toggle, so at
+// loc_kc it said "Lynette Ewy" beneath the moving emails that go out as Carol.
 //
-// At loc_kc with MOVING selected, the tab read:
-//     Every email a client can receive   [Organizing | Moving]
-//     …the four moving emails…
-//     WHO THESE COME FROM
-//     Sending identity — Lynette Ewy, lynette@beeorganized.com
-// Carol Kern sends the moving emails. The card was a LOCATION-level default
-// rendered under a PER-SEQUENCE toggle: true about itself, false about its
-// context, with a section label pointing the falsehood straight at the four
-// emails above it. `view` was private state inside EmailsList and the card is a
-// SIBLING later in the same section, so it could not know a toggle existed.
+// THE SECOND DEFECT (this rewrite): the 303 fix made the card follow that
+// toggle — but the toggle sits at the TOP of "Every email a client can
+// receive" and the card sits BELOW the whole list, several screens down. An
+// owner reading "Every one of the organizing emails goes out as Lynette Ewy"
+// at the bottom of the page had no visible sign that a second answer existed.
+// Kansas City read it, concluded Lynette sends everything, and complained,
+// while Carol's moving emails were going out as Carol the whole time.
+//
+// THE RULE NOW: the card lists EVERY kind of job that has a sender of its own
+// — who it goes out as, and where replies go — then "Everything else". It
+// reads the same whatever the toggle says. One read, the whole answer.
 //
 // WHY A MOUNTING TEST AND NOT A TYPE. components/BeeHub.jsx is .jsx and
-// tsconfig's `include` is ["next-env.d.ts", "**/*.ts", "**/*.tsx",
-// ".next/types/**/*.ts"] — no .jsx. Nothing in that 37k-line file is
-// type-checked. A dropped `view` prop, a card that stops reading the payload,
-// a copy edit that reinstates "your default sending identity" — none of it
-// fails a compiler. Only a test that mounts the real screen can see it, which
-// is the same conclusion issue 296 reached.
+// tsconfig's `include` has no .jsx — nothing in that file is type-checked. A
+// dropped prop, a card that quietly starts following the toggle again, a copy
+// edit that reinstates "every one of these goes out as" — none of it fails a
+// compiler. Only a test that mounts the real screen can see it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -33,7 +33,7 @@ import { SettingsScreen } from '@/components/BeeHub'
 
 const LOC_UUID = '132b42c2-0000-4000-8000-000000000001'
 
-// loc_kc's location-level trio, as production holds it (verified 2026-08-15).
+// loc_kc's location-level trio, as production holds it (verified 2026-09-03).
 const selectedLoc = (over: any = {}) => ({
   id: LOC_UUID,
   name: 'Kansas City',
@@ -106,10 +106,10 @@ const mount = async (cfg: any = KC_CONFIG(), { sendersOk = true, loc = selectedL
 
 const card = () => container.querySelector('[data-sequence-sender-card]') as HTMLElement
 const cardText = () => (card()?.textContent || '').replace(/\s+/g, ' ')
-// The half that must track the toggle. The location's own identity lives in the
-// editable rows below and legitimately does NOT move, so "Lynette is gone under
-// Moving" is only a meaningful claim about this region.
-const answer = () => container.querySelector('[data-sequence-answer]') as HTMLElement
+// The half that reads the payload. The location's own identity lives in the
+// editable rows below and is legitimately always present, so "Lynette is not
+// the answer for Moving" is only a meaningful claim about this region.
+const answer = () => container.querySelector('[data-sender-answer]') as HTMLElement
 const answerText = () => (answer()?.textContent || '').replace(/\s+/g, ' ')
 const pill = (label: string) =>
   Array.from(container.querySelectorAll('button')).find(b => (b.textContent || '').trim() === label) as HTMLButtonElement
@@ -120,98 +120,69 @@ const clickPill = async (label: string) => {
   await act(async () => {})
 }
 const typeRow = (t: string) => card().querySelector(`[data-sender-for="${t}"]`) as HTMLElement
+const typeRowText = (t: string) => (typeRow(t)?.textContent || '').replace(/\s+/g, ' ')
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('THE DEFECT — the card answers for the sequence on screen', () => {
-  it('with MOVING selected, the card names Carol', async () => {
+describe('THE DEFECT — the card names every configured kind of job, not one family', () => {
+  it('names Carol for Moving with NO toggle touched', async () => {
     await mount()
-    await clickPill('Moving')
-    expect(cardText()).toContain('Carol Kern')
-    expect(cardText()).toContain('carol@beeorganized.com')
+    expect(typeRow('Moving/Relocation'), 'a line for Moving/Relocation').toBeTruthy()
+    expect(typeRowText('Moving/Relocation')).toContain('Carol Kern')
+    expect(typeRowText('Moving/Relocation')).toContain('carol@beeorganized.com')
   })
 
-  it('with ORGANIZING selected, the card names Lynette', async () => {
+  it('lists EVERY kind of job with its own sender — all four at loc_kc', async () => {
     await mount()
-    expect(cardText()).toContain('Lynette Ewy')
-    expect(cardText()).toContain('lynette@beeorganized.com')
-  })
-
-  it('SWITCHING THE TOGGLE UPDATES THE CARD', async () => {
-    // The assertion the whole issue is about. Before the fix the card was a
-    // sibling of the component holding `view`, so this text never changed.
-    await mount()
-    const organizing = answerText()
-    expect(organizing).toContain('Lynette Ewy')
-
-    await clickPill('Moving')
-    const moving = answerText()
-    expect(moving, 'the card must not be frozen across the toggle').not.toBe(organizing)
-    expect(moving).toContain('Carol Kern')
-    expect(moving, 'the location default must not be named as the answer').not.toContain('Lynette Ewy')
-
-    await clickPill('Organizing')
-    expect(answerText()).toContain('Lynette Ewy')
-    expect(answerText()).not.toContain('Carol Kern')
-  })
-
-  it('the section label names the sequence rather than pointing vaguely', async () => {
-    // "WHO THESE COME FROM" was accurate about the card and wrong about the
-    // page. Under a toggle, "these" has two possible referents.
-    await mount()
-    expect((container.textContent || '')).toContain('Who the organizing emails come from')
-    await clickPill('Moving')
-    expect((container.textContent || '')).toContain('Who the moving emails come from')
-  })
-})
-
-// ═══════════════════════════════════════════════════════════════════════════
-describe('A FAMILY IS ONE-TO-MANY — build for the list', () => {
-  it('a family whose types resolve to DIFFERENT senders LISTS them', async () => {
-    const cfg = KC_CONFIG()
-    cfg.assignments[2] = personRow('Concierge Services', 'Carol Kern', 'carol@beeorganized.com', 'u-carol')
-    await mount(cfg)
-
-    // Every type in the family is named, with its own answer beside it.
-    for (const t of ['Home or Office Organizing', 'Concierge Services', 'Other']) {
+    for (const t of ['Home or Office Organizing', 'Moving/Relocation', 'Concierge Services', 'Other']) {
       expect(typeRow(t), t).toBeTruthy()
     }
-    expect(typeRow('Concierge Services').textContent).toContain('Carol Kern')
-    expect(typeRow('Home or Office Organizing').textContent).toContain('Lynette Ewy')
-    expect(typeRow('Other').textContent).toContain('Lynette Ewy')
+    expect(typeRowText('Home or Office Organizing')).toContain('Lynette Ewy')
+    expect(typeRowText('Concierge Services')).toContain('Lynette Ewy')
+    expect(typeRowText('Other')).toContain('Lynette Ewy')
+    expect(typeRowText('Moving/Relocation')).toContain('Carol Kern')
   })
 
-  it('and does NOT present a single name when they disagree', async () => {
-    const cfg = KC_CONFIG()
-    cfg.assignments[2] = personRow('Concierge Services', 'Carol Kern', 'carol@beeorganized.com', 'u-carol')
-    await mount(cfg)
+  it('never claims one sender for everything', async () => {
+    await mount()
     const txt = cardText()
-    // No "every one of these goes out as X" sentence — that claim is false here.
     expect(txt).not.toContain('Every one of the organizing emails goes out as')
-    expect(txt).toContain('It depends on the kind of job')
-    // Neither name is dropped in favour of the other, and the location default
-    // is not substituted to avoid the list.
-    expect(txt).toContain('Carol Kern')
-    expect(txt).toContain('Lynette Ewy')
+    expect(txt).not.toContain('Every one of the moving emails goes out as')
+    expect(txt).not.toContain('Every one of these emails goes out as')
   })
 
-  it('a moving family with a second type stops having one answer', async () => {
-    // Move-In Organization is inactive today, drip_category 'move'. Switching
-    // it on must turn Moving into a list rather than keep naming Carol.
-    const cfg = KC_CONFIG()
-    cfg.project_type_groups.push({ label: 'Move-In Organization', drip_category: 'move' })
-    await mount(cfg)
+  it('the Organizing / Moving toggle at the top of the list does NOT change the card', async () => {
+    // The toggle still drives the sequence list above. The card is a whole
+    // page below it and must read the same either way.
+    await mount()
+    const before = answerText()
+    expect(before).toContain('Carol Kern')
     await clickPill('Moving')
-    expect(typeRow('Moving/Relocation').textContent).toContain('Carol Kern')
-    expect(typeRow('Move-In Organization')).toBeTruthy()
-    expect(typeRow('Move-In Organization').textContent).not.toContain('Carol Kern')
+    expect(answerText()).toBe(before)
+    await clickPill('Organizing')
+    expect(answerText()).toBe(before)
+  })
+
+  it('the section label no longer points at one family', async () => {
+    await mount()
+    const txt = container.textContent || ''
+    expect(txt).toContain('Who your emails come from')
+    expect(txt).not.toContain('Who the organizing emails come from')
+    expect(txt).not.toContain('Who the moving emails come from')
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('TYPED SENDERS (issue 296) — the mailbox, not the handler', () => {
-  it('a type in typed mode shows the typed address, not the handler’s', async () => {
-    // A row reading "Carol Kern" when the mail actually says
-    // moving@beeorganized-kc.com is issue 303's defect in a new place.
+describe('REPLIES — each line says where they go, and it is the sender', () => {
+  it('a person-mode sender gets the replies, not the location', async () => {
+    // Kevin, 2026-09-03: if an email sends as someone, replies come back to
+    // them. Before this every Moving email at loc_kc said "From: Carol Kern"
+    // and every reply landed with Lynette.
+    await mount()
+    expect(typeRowText('Moving/Relocation')).toContain('Replies go to carol@beeorganized.com')
+    expect(typeRowText('Moving/Relocation')).not.toContain('lynette@beeorganized.com')
+  })
+
+  it('a shared mailbox keeps its own reply-to, unchanged', async () => {
     const cfg = KC_CONFIG()
     cfg.assignments[1] = {
       ...personRow('Moving/Relocation', 'Bee Organized Moving', 'moving@beeorganized-kc.com', 'u-carol'),
@@ -219,49 +190,42 @@ describe('TYPED SENDERS (issue 296) — the mailbox, not the handler', () => {
       sender_reply_to: 'carol@beeorganized-kc.com',
     }
     await mount(cfg)
-    await clickPill('Moving')
-
-    const txt = cardText()
-    expect(txt).toContain('moving@beeorganized-kc.com')
+    const txt = typeRowText('Moving/Relocation')
     expect(txt).toContain('Bee Organized Moving')
-    expect(txt, 'the handler is not who the mail says it is from').not.toContain('Carol Kern,')
-    // Its own reply-to is shown where one is set.
-    expect(txt).toContain('carol@beeorganized-kc.com')
+    expect(txt).toContain('moving@beeorganized-kc.com')
+    expect(txt).toContain('a shared mailbox, not one person')
+    expect(txt).toContain('Replies go to carol@beeorganized-kc.com')
+    expect(txt, 'the handler is not who the mail says it is from').not.toContain('Carol Kern')
   })
 
-  it('says a shared mailbox is not a person', async () => {
+  it('a shared mailbox left blank still replies to the location, unchanged', async () => {
     const cfg = KC_CONFIG()
     cfg.assignments[1] = {
       ...personRow('Moving/Relocation', 'Bee Organized Moving', 'moving@beeorganized-kc.com', 'u-carol'),
       sender_is_custom: true, sender_reply_to: null,
     }
     await mount(cfg)
-    await clickPill('Moving')
-    expect(cardText()).toContain('a shared mailbox, not one person')
+    expect(typeRowText('Moving/Relocation')).toContain('Replies go to lynette@beeorganized.com')
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('THE FALLBACK — shown, labelled, and honest about when it applies', () => {
-  it('the location default is present and labelled as the fallback', async () => {
+describe('EVERYTHING ELSE — shown, labelled, and honest about when it applies', () => {
+  it('the location default is present, labelled, and still editable', async () => {
     await mount()
     const txt = cardText()
     expect(txt).toContain('Everything else')
-    expect(txt).toContain('go out under the name and address below')
-    // And it is still the editable location identity, unchanged.
+    expect(txt).toContain('under the name and address below')
     expect(txt).toContain('Send From Name')
     expect(txt).toContain('Send From Email')
     expect(txt).toContain('Reply-To Email')
   })
 
   it('does NOT claim the fallback is unused just because every type is handled', async () => {
-    // THE PREMISE THIS TEST EXISTS TO REFUTE. "At loc_kc it currently applies to
-    // nothing, since every type has a handler" is false. lib/resend.ts consults
-    // handler rows only `if (senderProjectType)`, so a lead carrying no job type
-    // — or one that canonicalizes to nothing, like the manual-create path's
-    // 'Client' — never reaches a handler row at all. At loc_kc that is 3,346 of
-    // 3,391 leads. The fallback is the location's MOST-used sender, and copy
-    // saying otherwise would be a fresh lie in the place we just fixed one.
+    // lib/resend.ts consults handler rows only `if (senderProjectType)`, so a
+    // lead carrying no job type — or one that canonicalizes to nothing, like
+    // the manual-create path's 'Client' — never reaches a handler row at all.
+    // That is most leads. The fallback is the location's MOST-used sender.
     await mount()
     const txt = cardText().toLowerCase()
     expect(txt).toContain('without a kind of job')
@@ -270,22 +234,32 @@ describe('THE FALLBACK — shown, labelled, and honest about when it applies', (
     }
   })
 
-  it('a type with no handler shows the location default for that type', async () => {
+  it('a location with NO per-type sender says so in one sentence and lists nothing', async () => {
+    const cfg = KC_CONFIG()
+    cfg.assignments = []
+    await mount(cfg)
+    expect(answerText()).toContain('Every email goes out as your own sending name and address, below')
+    expect(card().querySelectorAll('[data-sender-for]')).toHaveLength(0)
+  })
+
+  it('a kind of job with no handler is not listed — it is everything else', async () => {
     const cfg = KC_CONFIG()
     cfg.assignments = [cfg.assignments[1]]   // moving only; organizing unhandled
     await mount(cfg)
-    expect(cardText()).toContain('your own sending name and address, below')
+    expect(typeRow('Moving/Relocation')).toBeTruthy()
+    expect(typeRow('Home or Office Organizing')).toBeNull()
+    expect(typeRow('Concierge Services')).toBeNull()
+    expect(typeRow('Other')).toBeNull()
   })
 
-  it('a person-mode type whose handler is offboarded falls back, and does not name them', async () => {
+  it('an offboarded person-mode handler drops off the list and is not named', async () => {
     // The send path drops that row (lib/project-type-handlers.ts), so the mail
     // really does go out as the location. The config row still says "Carol".
     const cfg = KC_CONFIG()
     cfg.assignments[1] = personRow('Moving/Relocation', 'Carol Kern', 'carol@beeorganized.com', 'u-carol', false)
     await mount(cfg)
-    await clickPill('Moving')
+    expect(typeRow('Moving/Relocation')).toBeNull()
     expect(answerText()).not.toContain('Carol Kern')
-    expect(answerText()).toContain('your own sending name and address, below')
   })
 })
 
@@ -294,7 +268,6 @@ describe('IT REPORTS — New leads still DECIDES', () => {
   it('carries no per-type sender controls of its own', async () => {
     await mount()
     expect(card().querySelectorAll('select')).toHaveLength(0)
-    // The three location rows are edit-on-click and own the only inputs here.
     expect(cardText()).not.toContain('Who handles it')
     expect(cardText()).not.toContain('What it sends as')
   })
@@ -309,12 +282,12 @@ describe('IT REPORTS — New leads still DECIDES', () => {
 
   it('never guesses while the payload is in flight or after it fails', async () => {
     // Falling back to the location default on a failed read would print the
-    // exact sentence this issue exists to delete.
+    // exact sentence this card exists to never print.
     await mount(KC_CONFIG(), { sendersOk: false })
-    await clickPill('Moving')
     const txt = cardText()
     expect(txt).toContain('could not check')
-    expect(txt).not.toContain('Every one of the moving emails goes out as')
+    expect(txt).not.toContain('goes out as')
+    expect(card().querySelectorAll('[data-sender-for]')).toHaveLength(0)
   })
 })
 

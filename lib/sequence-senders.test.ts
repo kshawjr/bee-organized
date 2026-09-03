@@ -11,7 +11,7 @@
 // one answer are both accidents of today's production data. The list is the
 // general case.
 import { describe, it, expect } from 'vitest'
-import { resolveSequenceSenders, locationDefaultSender } from '@/lib/sequence-senders'
+import { resolveSequenceSenders, resolveConfiguredSenders, locationDefaultSender } from '@/lib/sequence-senders'
 
 const DEFAULT = { name: 'Lynette Ewy', email: 'lynette@beeorganized.com', replyTo: 'lynette@beeorganized.com' }
 
@@ -194,5 +194,81 @@ describe('degrades without inventing an answer', () => {
     const cfg = KC()
     cfg.assignments[1] = person('moving/relocation', 'Carol Kern', 'carol@beeorganized.com', 'u-carol')
     expect(resolveSequenceSenders(cfg, 'move', DEFAULT).uniform).toMatchObject({ name: 'Carol Kern' })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2026-09-03 — REPLIES GO TO WHOEVER THE EMAIL WENT OUT AS, and the card lists
+// WHO SENDS WHAT across both sequences rather than one family at a time.
+describe('reply-to follows the sender (2026-09-03)', () => {
+  it('a person-mode row with no reply-to of its own replies to THAT PERSON, not the location', () => {
+    const r = resolveSequenceSenders(KC(), 'move', DEFAULT)
+    expect(r.uniform).toMatchObject({ email: 'carol@beeorganized.com', replyTo: 'carol@beeorganized.com' })
+    expect(r.uniform!.replyTo).not.toBe(DEFAULT.replyTo)
+  })
+
+  it('a typed row keeps its own reply-to, unchanged', () => {
+    const cfg = KC()
+    cfg.assignments[1] = typed('Moving/Relocation', 'Bee Organized Moving', 'moving@beeorganized-kc.com', 'carol@beeorganized-kc.com')
+    expect(resolveSequenceSenders(cfg, 'move', DEFAULT).uniform!.replyTo).toBe('carol@beeorganized-kc.com')
+  })
+
+  it('a typed row left blank still follows the location, unchanged', () => {
+    const cfg = KC()
+    cfg.assignments[1] = typed('Moving/Relocation', 'Bee Organized Moving', 'moving@beeorganized-kc.com', null)
+    expect(resolveSequenceSenders(cfg, 'move', DEFAULT).uniform!.replyTo).toBe(DEFAULT.replyTo)
+  })
+
+  it('a type with no row is the location default, reply-to included, exactly as today', () => {
+    const cfg = KC()
+    cfg.assignments = []
+    const r = resolveSequenceSenders(cfg, 'move', DEFAULT)
+    expect(r.uniform).toMatchObject({ isDefault: true, email: DEFAULT.email, replyTo: DEFAULT.replyTo })
+  })
+})
+
+describe('resolveConfiguredSenders — who sends what, every kind of job at once', () => {
+  it('lists every kind of job with its own sender, across BOTH families, in lookups order', () => {
+    const r = resolveConfiguredSenders(KC(), DEFAULT)
+    expect(r.rows.map(x => x.projectType)).toEqual([
+      'Home or Office Organizing', 'Moving/Relocation', 'Concierge Services', 'Other',
+    ])
+    const moving = r.rows.find(x => x.projectType === 'Moving/Relocation')!
+    expect(moving.sender).toMatchObject({ name: 'Carol Kern', email: 'carol@beeorganized.com', replyTo: 'carol@beeorganized.com' })
+    const org = r.rows.find(x => x.projectType === 'Home or Office Organizing')!
+    expect(org.sender).toMatchObject({ name: 'Lynette Ewy', replyTo: 'lynette@beeorganized.com', isDefault: false })
+  })
+
+  it('a kind of job with no handler row is NOT listed — it is "everything else"', () => {
+    const cfg = KC()
+    cfg.assignments = [cfg.assignments[1]]   // moving only
+    const r = resolveConfiguredSenders(cfg, DEFAULT)
+    expect(r.rows.map(x => x.projectType)).toEqual(['Moving/Relocation'])
+    expect(r.locationDefault).toMatchObject({ isDefault: true, email: DEFAULT.email })
+  })
+
+  it('an offboarded person-mode handler drops off the list rather than being named', () => {
+    const cfg = KC()
+    cfg.assignments[1] = person('Moving/Relocation', 'Carol Kern', 'carol@beeorganized.com', 'u-carol', false)
+    const r = resolveConfiguredSenders(cfg, DEFAULT)
+    expect(r.rows.map(x => x.projectType)).not.toContain('Moving/Relocation')
+    expect(JSON.stringify(r.rows)).not.toContain('Carol Kern')
+  })
+
+  it('a typed row is listed as the mailbox with its own reply-to', () => {
+    const cfg = KC()
+    cfg.assignments[1] = typed('Moving/Relocation', 'Bee Organized Moving', 'moving@beeorganized-kc.com', 'carol@beeorganized-kc.com')
+    const row = resolveConfiguredSenders(cfg, DEFAULT).rows.find(x => x.projectType === 'Moving/Relocation')!
+    expect(row.sender).toMatchObject({ name: 'Bee Organized Moving', typed: true, replyTo: 'carol@beeorganized-kc.com' })
+  })
+
+  it('no rows at all → an empty list and the location default', () => {
+    const r = resolveConfiguredSenders({ project_type_groups: [], assignments: [] }, DEFAULT)
+    expect(r.rows).toEqual([])
+    expect(r.locationDefault.replyTo).toBe(DEFAULT.replyTo)
+  })
+
+  it('tolerates a missing payload', () => {
+    expect(resolveConfiguredSenders(null, DEFAULT).rows).toEqual([])
   })
 })

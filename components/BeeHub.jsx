@@ -37,7 +37,7 @@ import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
-import { resolveSequenceSenders } from "@/lib/sequence-senders"
+import { resolveConfiguredSenders } from "@/lib/sequence-senders"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
@@ -21555,71 +21555,59 @@ const CONTROL_W = {
   rail:   '196px',   // the settings section rail
 }
 
-// ─── Emails › what THIS sequence sends as (issue 303) ───────────────────────
+// ─── Emails › who sends what (issue 303, redone 2026-09-03) ─────────────────
 //
-// THE DEFECT. This card used to read the LOCATION's sending identity and print
-// it under the heading "who these come from", directly beneath four emails
-// chosen by a toggle it could not see. At loc_kc that meant "Lynette Ewy" above
-// the moving sequence, which goes out as Carol Kern. It was telling the truth
-// about itself and lying about its context, and the label pointed the lie
-// straight at the four emails. Kevin built the screen and still could not tell
-// from it who the moving emails came from.
+// THE SECOND DEFECT. Issue 303 made this card answer for the sequence chosen
+// by the Organizing / Moving toggle. That toggle sits at the TOP of "Every
+// email a client can receive"; this card sits BELOW the whole list — the
+// chosen sequence, the returning-client sequence, the after-a-job emails. An
+// owner who scrolled to the bottom read "Every one of the organizing emails
+// goes out as Lynette Ewy" with nothing nearby to say a second answer existed
+// behind a control several screens up. Kansas City read it, concluded Lynette
+// sends everything, and complained — while Carol's moving emails were going
+// out as Carol the whole time.
 //
-// IT REPORTS, IT DOES NOT DECIDE. The per-job-type sender controls live on New
-// leads and stay there — this tab answers "what goes out", that one answers
-// "who does it". Hence the read-only body and the single link out; duplicating
-// the editors here would give two screens the same job and no rule for which
-// wins. The location's own three fields are still editable here, unchanged,
-// because they are this card's own subject.
+// So the card no longer follows the toggle at all. It lists EVERY kind of job
+// that goes out as someone in particular — who, and where replies go — and
+// then "Everything else" for the rest. One read, the whole answer.
 //
-// A LIST IS THE NORMAL CASE. A sequence is a drip FAMILY and a family covers
-// however many job types carry its drip_category — see lib/sequence-senders.ts.
-// One name is only ever the degenerate answer, so the list is what this renders
-// and the single-sender sentence is the special case, not the reverse.
+// IT REPORTS, IT DOES NOT DECIDE. Unchanged from 303: the per-job-type sender
+// controls live on New leads; this card links there. The location's own three
+// fields stay editable here, because they are what "everything else" means.
 function SequenceSenderCard({
-  view, hasMoving, senderConfig, loading, failed, locationDefault,
+  senderConfig, loading, failed, locationDefault,
   senderAddressSet, onOpenNewLeads, children,
 }) {
-  const family = view === 'moving' ? 'move' : 'general'
-  const report = resolveSequenceSenders(senderConfig, family, locationDefault)
-  // What the toggle above is currently showing, in the owner's words. With no
-  // moving sequence there is no toggle, and naming a family the owner never
-  // chose would be answering a question they did not ask.
-  const noun = !hasMoving ? 'these emails' : view === 'moving' ? 'the moving emails' : 'the organizing emails'
-  const heading = !hasMoving ? 'These emails' : view === 'moving' ? 'Moving emails' : 'Organizing emails'
+  const report = resolveConfiguredSenders(senderConfig, locationDefault)
+  const rows = report.rows
 
   const addr = { fontSize:'12.5px', color:'#4a5f5b', lineHeight:1.5, wordBreak:'break-word' }
-  const oneSender = report.uniform
 
-  // One resolved sender, as prose. Reply-to is always stated: it is the half of
-  // "who does this come from" that an owner cannot guess, and person-mode rows
-  // carry none of their own so it silently follows the location.
-  const senderLine = s => {
-    if (s.isDefault) return <>your own sending name and address, below</>
-    return (
-      <>
-        <strong style={{ fontWeight:700, color:'#1a2e2b' }}>{s.name}</strong>, {s.email}
-        {s.typed && <span style={{ color:'#8a9e9a' }}> — a shared mailbox, not one person</span>}
-      </>
-    )
-  }
+  // One sender, as prose: the name in bold, the address beside it, and a note
+  // when it is a shared mailbox rather than a person.
+  const nameOf = s => (
+    <>
+      <strong style={{ fontWeight:700, color:'#1a2e2b' }}>{s.name}</strong>, {s.email}
+      {s.typed && <span style={{ color:'#8a9e9a' }}> — a shared mailbox, not one person</span>}
+    </>
+  )
 
   return (
     <>
-      <CommsLabel>Who {noun} come from</CommsLabel>
-      <div data-sequence-sender-card={family}
+      <CommsLabel>Who your emails come from</CommsLabel>
+      <div data-sequence-sender-card="all"
         style={{ margin:'0 12px', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
         <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
           <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
             <CommsIcon name="send" size={20} color="#4f46e5" />
           </div>
-          {/* data-sequence-answer marks the half that must change with the
-              toggle. The location's own name sits in the editable rows below
-              and legitimately does not move, so a test asserting "Lynette is
-              gone when Moving is selected" has to be able to say WHERE. */}
-          <div data-sequence-answer={family} style={{ flex:1, minWidth:0 }}>
+          {/* data-sender-answer marks the half that reads the payload. The
+              location's own name sits in the editable rows below and is
+              legitimately always present, so a test asserting "Carol is named
+              and Lynette is not the answer for Moving" has to say WHERE. */}
+          <div data-sender-answer="all" style={{ flex:1, minWidth:0 }}>
             <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
-              <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>{heading}</h2>
+              <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Who sends what</h2>
               {!senderAddressSet && (
                 <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
               )}
@@ -21629,35 +21617,32 @@ function SequenceSenderCard({
                 back to the location default to fill the gap — showing the
                 default in place of the real answer is the original defect. */}
             {loading && (
-              <p style={{ ...addr, marginTop:'4px' }}>Checking who these go out as…</p>
+              <p style={{ ...addr, marginTop:'4px' }}>Checking who your emails go out as…</p>
             )}
             {failed && (
-              <p style={{ ...addr, marginTop:'4px' }}>We could not check who these go out as just now. Reload to try again.</p>
+              <p style={{ ...addr, marginTop:'4px' }}>We could not check who your emails go out as just now. Reload to try again.</p>
             )}
 
-            {!loading && !failed && oneSender && (
+            {!loading && !failed && rows.length === 0 && (
               <p style={{ ...addr, marginTop:'4px' }}>
-                Every one of {noun} goes out as {senderLine(oneSender)}.
-                {!oneSender.isDefault && <> Replies come back to {oneSender.replyTo}.</>}
+                Every email goes out as your own sending name and address, below.
               </p>
             )}
 
-            {/* THE LIST. Types in one sequence disagreeing is normal, not an
-                error state, so it reads as an answer rather than a warning. */}
-            {!loading && !failed && !oneSender && report.rows.length > 0 && (
+            {/* THE LIST — every kind of job with a sender of its own, across
+                both sequences, in the order the website form offers them. */}
+            {!loading && !failed && rows.length > 0 && (
               <>
                 <p style={{ ...addr, marginTop:'4px' }}>
-                  It depends on the kind of job. {heading} go out as:
+                  These kinds of job have their own sender:
                 </p>
                 <div style={{ marginTop:'9px', display:'flex', flexDirection:'column', gap:'9px' }}>
-                  {report.rows.map(r => (
+                  {rows.map(r => (
                     <div key={r.projectType} data-sender-for={r.projectType}
                       style={{ paddingLeft:'11px', borderLeft:'2px solid rgba(99,102,241,0.22)' }}>
                       <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', margin:0 }}>{r.projectType}</p>
-                      <p style={{ ...addr, margin:'1px 0 0' }}>{senderLine(r.sender)}</p>
-                      {!r.sender.isDefault && (
-                        <p style={{ fontSize:'11.5px', color:'#8a9e9a', margin:'1px 0 0', wordBreak:'break-word' }}>Replies to {r.sender.replyTo}</p>
-                      )}
+                      <p style={{ ...addr, margin:'1px 0 0' }}>Goes out as {nameOf(r.sender)}</p>
+                      <p style={{ fontSize:'11.5px', color:'#8a9e9a', margin:'1px 0 0', wordBreak:'break-word' }}>Replies go to {r.sender.replyTo}</p>
                     </div>
                   ))}
                 </div>
@@ -21673,22 +21658,22 @@ function SequenceSenderCard({
           </div>
         </div>
 
-        {/* ── The location's own identity, still editable, now labelled for
-            what it actually is: the fallback.
+        {/* ── The location's own identity, still editable, labelled for what
+            it is: everything the list above does not cover.
 
-            AND HONEST ABOUT WHEN IT APPLIES. "Every job type has someone, so
-            this is never used" is the tempting sentence and it is false: a lead
-            that arrives with no kind of job on it, or one this location does
-            not run, never reaches a handler row at all — lib/resend.ts only
-            consults them `if (senderProjectType)`. At loc_kc that is 3,346 of
-            3,391 leads. This is the most-used sender at the location, not the
-            unused one, and the copy says so. ───────────────────────────── */}
+            HONEST ABOUT WHEN IT APPLIES. "Every kind of job has someone, so
+            this is never used" is the tempting sentence and it is false: a
+            lead that arrives with no kind of job on it, or one this location
+            does not run, never reaches a handler row at all — lib/resend.ts
+            only consults them `if (senderProjectType)`. At loc_kc that is most
+            leads. This is the most-used sender at the location, not the unused
+            one, and the copy says so. ────────────────────────────────── */}
         <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)', padding:'14px 17px 2px' }}>
           <h3 style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', margin:0 }}>Everything else</h3>
           <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>
-            Plenty of leads arrive without a kind of job on them, and those emails go out
-            under the name and address below. So does any kind of job you have not given
-            to someone.
+            Emails for any kind of job you have not given to someone, and for any lead
+            that arrives without a kind of job, go out under the name and address below.
+            Replies go to the Reply-To address below.
           </p>
         </div>
         <div>{children}</div>
@@ -23918,13 +23903,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 week and then never opens again. Above the list it would also
                 put its three SettingsEditRow "Edit" buttons ahead of every
                 row's Edit — same word, different job, first in the DOM. */}
-            {/* issue 303 — the card now answers for the sequence the toggle is
-                showing. The three location rows are unchanged and still save
-                exactly as they did; what changed is everything above them and
-                the label they sit under. */}
+            {/* issue 303, redone 2026-09-03 — the card lists every kind of job
+                with its own sender, across both sequences, and no longer
+                follows the toggle at the top of the list (which is a whole
+                page away from here). The three location rows are unchanged
+                and still save exactly as they did. */}
             <SequenceSenderCard
-              view={emailsView}
-              hasMoving={!!settings.paths.moveDefault}
               senderConfig={emailSenders}
               loading={emailSendersState === 'loading'}
               failed={emailSendersState === 'failed'}

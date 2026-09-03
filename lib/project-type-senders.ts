@@ -429,8 +429,11 @@ export async function setSenderIdentityForType(
       sender_is_custom: false,
       sender_name: p.full_name || fullName(p.first_name, p.last_name) || p.email,
       sender_email: p.email,
-      // Person mode has no reply-to of its own: replies follow the location's
-      // reply_to_email, which is what lib/resend.ts falls back to on null.
+      // Person mode stores no reply-to of its own. NULL here does NOT mean
+      // "the location default" any more (2026-09-03): lib/resend.ts resolves a
+      // blank person-mode reply-to to the person's own sender_email at send
+      // time, so replies come back to whoever the email went out as. The
+      // location default is only the fallback for a TYPED row left blank.
       sender_reply_to: null,
     }
   }

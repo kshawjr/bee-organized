@@ -59,11 +59,31 @@ export interface LogNotificationArgs extends NotificationContext {
   subject?: string | null
   resend_message_id?: string | null
   error?: string | null
+  // WHO IT WENT OUT AS and WHERE REPLIES GO (2026-09-03). The notebook recorded
+  // the recipient but not the sender, so "every client email still arrives
+  // from Lynette" took a code read to answer instead of one query. `sender` is
+  // the full From line as handed to Resend — "Carol Kern <carol@…>" — and
+  // `reply_to` the Reply-To address. Email rows only; Slack rows leave both
+  // NULL. Columns added by migrations/notification_log_sender.sql.
+  sender?: string | null
+  reply_to?: string | null
+}
+
+// The two columns migrations/notification_log_sender.sql adds. Until that
+// migration runs, PostgREST rejects an insert naming them (PGRST204, "Could
+// not find the 'sender' column"). Rather than lose every row until the SQL is
+// applied, the insert is retried once without them — the pre-migration row is
+// exactly what was logged before, no worse.
+const SENDER_COLUMNS = ['sender', 'reply_to'] as const
+
+function mentionsSenderColumn(message: string | null | undefined): boolean {
+  const m = String(message || '')
+  return SENDER_COLUMNS.some((c) => m.includes(`'${c}'`) || m.includes(`"${c}"`) || m.includes(` ${c} `))
 }
 
 export async function logNotification(args: LogNotificationArgs): Promise<void> {
   try {
-    const { error } = await supabaseService.from('notification_log').insert({
+    const row: Record<string, unknown> = {
       lead_id: args.lead_id ?? null,
       lead_name: args.lead_name ?? null,
       location_id: args.location_id ?? null,
@@ -79,8 +99,27 @@ export async function logNotification(args: LogNotificationArgs): Promise<void> 
       // entirely (not set to null) so this module keeps working against a
       // schema where those columns don't exist yet — the sync-log
       // landed_status idiom.
-    })
-    if (error) console.warn('[notification-log] insert failed:', error.message)
+    }
+    // sender / reply_to are carried only when the caller set them, so a Slack
+    // row or a pre-migration insert never names the columns needlessly.
+    const withSender = args.sender != null || args.reply_to != null
+    if (withSender) {
+      row.sender = args.sender ?? null
+      row.reply_to = args.reply_to ?? null
+    }
+
+    const { error } = await supabaseService.from('notification_log').insert(row)
+    if (!error) return
+
+    if (withSender && mentionsSenderColumn(error.message)) {
+      // Migration not run yet — keep the row, drop the two new columns.
+      const { sender: _s, reply_to: _r, ...bare } = row
+      const retry = await supabaseService.from('notification_log').insert(bare)
+      if (retry.error) console.warn('[notification-log] insert failed:', retry.error.message)
+      else console.warn('[notification-log] sender/reply_to columns missing — run migrations/notification_log_sender.sql; row logged without them')
+      return
+    }
+    console.warn('[notification-log] insert failed:', error.message)
   } catch (err) {
     console.warn('[notification-log] insert threw:', err)
   }

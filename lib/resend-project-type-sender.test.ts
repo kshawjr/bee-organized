@@ -95,15 +95,44 @@ describe('sendEmail — per-project-type sender', () => {
     })
   })
 
-  it('handler with null reply-to → reply-to falls back to base', async () => {
+  it('PERSON MODE with no reply-to → replies go to THAT PERSON, not the location', async () => {
+    // Kevin, 2026-09-03: if an email sends as someone, replies come back to
+    // them. Before this, a person-mode row (which never stores a reply-to)
+    // fell back to the location's reply_to_email — so every Moving email at
+    // loc_kc said "From: Carol Kern" and every reply landed with Lynette.
     enqueueBase(); enqueueVocab()
-    h.enqueue('location_project_type_senders', [{ ...movingSender, sender_reply_to: null }])
+    h.enqueue('location_project_type_senders', [{ ...movingSender, sender_reply_to: null, sender_is_custom: false }])
     h.enqueue('hub_users', BREE)
 
     await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
 
     expect(sendSpy.mock.calls[0][0]).toMatchObject({
       from: 'Bree Mover <bree@boulder.beeorganized.com>',
+      replyTo: 'bree@boulder.beeorganized.com',
+    })
+    expect(sendSpy.mock.calls[0][0].replyTo).not.toBe(base.reply_to_email)
+  })
+
+  it('a person-mode row whose sender_is_custom column is absent (pre-296 shape) is still person mode', async () => {
+    enqueueBase(); enqueueVocab()
+    const { sender_reply_to: _drop, ...noReplyTo } = movingSender
+    h.enqueue('location_project_type_senders', [noReplyTo])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0].replyTo).toBe('bree@boulder.beeorganized.com')
+  })
+
+  it('a location with NO per-type sender behaves exactly as today — base From AND base reply-to', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [])
+
+    const res = await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(res).toEqual({ success: true, id: 're-1' })
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: `${base.sender_name} <${base.send_from_email}>`,
       replyTo: base.reply_to_email,
     })
   })

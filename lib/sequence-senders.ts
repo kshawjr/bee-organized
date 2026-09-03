@@ -150,11 +150,64 @@ function senderForType(
   return {
     name: clean(assignment.sender_name) || email,
     email,
-    // Person mode stores no reply-to of its own; replies follow the location.
-    replyTo: clean(assignment.sender_reply_to) || fallback.replyTo,
+    // Person mode stores no reply-to of its own, and replies go to the person
+    // the email went out as (lib/resend.ts, 2026-09-03) — not the location.
+    replyTo: clean(assignment.sender_reply_to) || email,
     typed: false,
     isDefault: false,
   }
+}
+
+// ── WHO SENDS WHAT — every configured job type at once ─────────────────────
+//
+// The Settings › Emails card used to answer for ONE family, picked by the
+// Organizing / Moving toggle at the top of the sequence list. The toggle sits
+// above the list and the card sits below the whole list, so an owner reading
+// the card saw "Every one of the organizing emails goes out as Lynette Ewy"
+// with no visible sign that a second answer existed behind a control several
+// screens up. Kansas City read it and concluded Lynette sends everything.
+//
+// So the card now lists every job type that sends as someone in particular,
+// across both families, and one "Everything else" line for the rest. Same
+// per-type resolution as above; no family in the answer at all.
+export type ConfiguredSenderRow = { projectType: string; sender: SequenceSender }
+
+export type ConfiguredSendersReport = {
+  // Every active job type that resolves to a sender OTHER than the location
+  // default, in lookups order. A type with no handler row, or whose person-mode
+  // handler has been offboarded, is not here — it is "everything else".
+  rows: ConfiguredSenderRow[]
+  // The location's own identity — what "everything else" goes out as.
+  locationDefault: SequenceSender
+}
+
+export function resolveConfiguredSenders(
+  config: Partial<SenderConfig> | null | undefined,
+  locationDefault: LocationDefaultInput | SequenceSender,
+): ConfiguredSendersReport {
+  const fallback: SequenceSender =
+    'isDefault' in (locationDefault as SequenceSender)
+      ? (locationDefault as SequenceSender)
+      : locationDefaultSender(locationDefault as LocationDefaultInput)
+
+  const groups = config?.project_type_groups || []
+  const assignments = config?.assignments || []
+
+  const byType = new Map<string, SenderConfig['assignments'][number]>()
+  for (const a of assignments) {
+    const key = clean(a?.project_type).toLowerCase()
+    if (key) byType.set(key, a)
+  }
+
+  const rows: ConfiguredSenderRow[] = groups
+    .filter(g => g && clean(g.label))
+    .map(g => ({
+      projectType: clean(g.label),
+      sender: senderForType(byType.get(clean(g.label).toLowerCase()), fallback),
+    }))
+    .filter(r => !r.sender.isDefault)
+
+  return { rows, locationDefault: fallback }
 }
 
 // The full answer for one sequence. `config` is the /project-type-senders GET

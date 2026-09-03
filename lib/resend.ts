@@ -182,11 +182,26 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   }
 
   // Per-project-type sender routing. The base trio above IS the default sender.
-  // When this drip carries a project type AND the location has split enabled +
-  // an assignment for that type, send AS that sender; name/reply-to each fall
-  // back to base individually. Any miss (split off, unassigned, or the table /
-  // flag not present yet) → base sender: a drip NEVER fails to send for want of
-  // a per-type sender.
+  // When this drip carries a project type AND the location has a handler row
+  // for that type, send AS that sender. Any miss (unassigned, offboarded, or
+  // the table not present yet) → base sender: a drip NEVER fails to send for
+  // want of a per-type sender.
+  //
+  // REPLIES GO TO WHOEVER THE EMAIL WENT OUT AS (Kevin, 2026-09-03). Until now
+  // a person-mode row stored no reply-to and the send fell back to the
+  // location's reply_to_email — so every Moving email at loc_kc said "From:
+  // Carol Kern" and every reply landed with Lynette. The rule is now:
+  //
+  //   person mode ("their own address")  reply-to = that person's address.
+  //   typed mode  (a shared mailbox)     reply-to = the row's own reply-to,
+  //                                      or the location default if blank.
+  //                                      UNCHANGED.
+  //   no override                        the location's reply_to_email.
+  //                                      UNCHANGED.
+  //
+  // Resolved here at send time from the row's sender_email rather than stored
+  // on the row, so no data migration and no second copy of the address to
+  // drift. lib/sequence-senders.ts mirrors this rule for the Settings card.
   let from = send_from_email
   let fromName = sender_name
   let replyTo = reply_to_email
@@ -195,7 +210,8 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
     if (override?.sender_email) {
       from = override.sender_email
       fromName = override.sender_name ?? sender_name
-      replyTo = override.sender_reply_to ?? reply_to_email
+      replyTo = override.sender_reply_to
+        ?? (override.sender_is_custom ? reply_to_email : override.sender_email)
     }
   }
 
@@ -248,6 +264,9 @@ type ProjectTypeSenderOverride = {
   sender_name: string | null
   sender_email: string | null
   sender_reply_to: string | null
+  // Typed (shared-mailbox) identity vs the handler's own. Decides what a blank
+  // reply-to means: a person's own address, or the location default.
+  sender_is_custom: boolean
 }
 async function resolveProjectTypeSenderOverride(
   locationId: string,
@@ -260,6 +279,7 @@ async function resolveProjectTypeSenderOverride(
       sender_name: handler.name,
       sender_email: handler.email,
       sender_reply_to: handler.reply_to,
+      sender_is_custom: handler.is_custom === true,
     }
   } catch {
     return null
@@ -298,8 +318,12 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
   // genuinely sent email to a failure, and the caller would report a send that
   // actually happened as broken. The notebook must never be able to do that.
   // Pinned by lib/notification-log-fire-safety.test.ts.
+  // WHO IT WENT OUT AS + WHERE REPLIES GO, on every email row this function
+  // writes (2026-09-03). Stamped here, once, so accepted and failed rows agree
+  // and no caller can forget. Same shape Resend receives: "Name <address>".
+  const senderLine = from ? (fromName ? `${fromName} <${from}>` : from) : null
   const safeLog = (base: Parameters<typeof logNotificationFanout>[1], addrs: (string | null)[] = recipients) =>
-    logNotificationFanout(addrs as string[], base).catch(err =>
+    logNotificationFanout(addrs as string[], { sender: senderLine, reply_to: replyTo ?? null, ...base }).catch(err =>
       console.warn('[notification-log] fanout rejected — send result unaffected:', err),
     )
 
