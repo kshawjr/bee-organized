@@ -10,6 +10,9 @@ const TZ_ALIASES: Record<string, string> = {
   'eastern time (et)':  'America/New_York',
   'central time (ct)':  'America/Chicago',
   'mountain time (mt)': 'America/Denver',
+  // Arizona never observes DST — Denver is an hour off there Mar–Nov. Own
+  // entry, paired with lib/us-timezones.ts (the dropdown list).
+  'arizona time (az)':  'America/Phoenix',
   'pacific time (pt)':  'America/Los_Angeles',
   'alaska time (akt)':  'America/Anchorage',
   'hawaii time (ht)':   'Pacific/Honolulu',

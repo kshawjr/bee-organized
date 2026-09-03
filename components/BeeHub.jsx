@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
+import { US_TIMEZONES, normalizeTimezoneLabel } from "@/lib/us-timezones"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
@@ -13152,12 +13153,10 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           <select value={locationForm.timezone} onChange={e=>setLocationForm(f=>({...f,timezone:e.target.value}))}
             style={{ ...inp, background:'white', cursor:'pointer', color:locationForm.timezone?'#1a2e2b':'#8a9e9a' }}>
             <option value="">Select your timezone…</option>
-            <option value="Eastern Time (ET)">Eastern Time (ET) - New York, Miami</option>
-            <option value="Central Time (CT)">Central Time (CT) - Chicago, Dallas, Kansas City</option>
-            <option value="Mountain Time (MT)">Mountain Time (MT) - Denver, Phoenix</option>
-            <option value="Pacific Time (PT)">Pacific Time (PT) - Los Angeles, Seattle</option>
-            <option value="Alaska Time (AKT)">Alaska Time (AKT)</option>
-            <option value="Hawaii Time (HT)">Hawaii Time (HT)</option>
+            {/* One list for every timezone control — lib/us-timezones.ts. */}
+            {US_TIMEZONES.map(tz=>(
+              <option key={tz.value} value={tz.value}>{tz.label}</option>
+            ))}
           </select>
         </div>
 
@@ -20952,15 +20951,26 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
   )
 }
 
-function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', required=false, validate=null, trailing=null }) {
+function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', required=false, validate=null, trailing=null, options=null, invalidHint=null }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(value)
+
+  // `options` ([{ value, label }]) turns the editor into a <select>, so the
+  // row can only ever save one of the listed values — the timezone row uses
+  // the same list onboarding offers. A stored value OUTSIDE the list (typed in
+  // back when this was a text box, e.g. "Phoenix AZ") is still SHOWN, in
+  // place, with `invalidHint` under it — never blanked or silently swapped
+  // for the first option — and Save stays disabled until a real choice is
+  // made. Blank counts as invalid for an options row: "Not set" is flagged too.
+  const optionFor = (v) => (options ? options.find(o => o.value === v) : null)
+  const currentInvalid = !!options && !optionFor(value)
+  const draftInvalid   = !!options && !optionFor(val)
 
   // Inline validation — `validate(v)` returns null on success or an error
   // string. Used by the "Google Reviews" row so owners can't blank/break
   // the required URL post-onboarding.
   const errorMsg = validate ? validate(val) : null
-  const saveDisabled = errorMsg !== null || (required && !val.trim())
+  const saveDisabled = errorMsg !== null || (required && !val.trim()) || draftInvalid
 
   function save() {
     if (saveDisabled) return
@@ -20978,16 +20988,40 @@ function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', re
             {label}{required && <span style={{ color:'#ef4444', marginLeft:'4px' }}>*</span>}
           </p>
           {editing ? (
-            <input
-              autoFocus type={type} value={val}
-              onChange={e=>setVal(e.target.value)}
-              onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') cancel() }}
-              style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'6px 8px', border:`1.5px solid ${errorMsg ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
-            />
+            options ? (
+              <select
+                autoFocus value={val}
+                onChange={e=>setVal(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Escape') cancel() }}
+                style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'6px 8px', border:`1.5px solid ${draftInvalid ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white', cursor:'pointer' }}
+              >
+                {/* The stored-but-invalid value stays visible as the selected
+                    entry so the owner sees what is there now; it cannot be
+                    re-chosen (disabled) and Save is off until a real option is picked. */}
+                {draftInvalid && (
+                  <option value={val} disabled>{val ? `${val} (current — not valid)` : 'Not set — choose one'}</option>
+                )}
+                {options.map(o=>(
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                autoFocus type={type} value={val}
+                onChange={e=>setVal(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') cancel() }}
+                style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'6px 8px', border:`1.5px solid ${errorMsg ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
+              />
+            )
           ) : (
-            <p style={{ fontSize:'14px', color:readOnly?'#8a9e9a':'#1a2e2b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value||<span style={{ color:'#c8d8d4' }}>Not set</span>}</p>
+            <p style={{ fontSize:'14px', color:readOnly?'#8a9e9a':(currentInvalid?'#b91c1c':'#1a2e2b'), fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {options && optionFor(value) ? optionFor(value).label : (value||<span style={{ color:currentInvalid?'#b91c1c':'#c8d8d4' }}>Not set</span>)}
+            </p>
           )}
           {editing && errorMsg && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{errorMsg}</p>}
+          {(editing ? draftInvalid : currentInvalid) && (
+            <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px', whiteSpace:'normal' }}>⚠ {invalidHint || 'Not a valid choice — pick one from the list.'}</p>
+          )}
           {hint&&!editing&&<p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'2px' }}>{hint}</p>}
         </div>
         {trailing&&!editing&&<div style={{ flexShrink:0 }}>{trailing}</div>}
@@ -23381,7 +23415,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <SettingsEditRow label="State"           value={settings.location.state}         onSave={v=>persistLocationField('state','state',v,'state')} />
               <SettingsEditRow label="ZIP"             value={settings.location.zip}           onSave={v=>persistLocationField('zip','zip',v,'ZIP code')} type="tel" />
               <SettingsEditRow label="Phone"           value={settings.location.phone}         onSave={v=>persistLocationField('phone','phone',v,'phone number')} type="tel" />
-              <SettingsEditRow label="Timezone"        value={settings.location.timezone}      onSave={v=>persistLocationField('timezone','timezone',v,'timezone')} />
+              {/* Dropdown, not free text — the same list onboarding offers.
+                  This row WAS a text box, which is how "Phoenix AZ" got into
+                  Scottsdale and broke every assessment send there. A stored
+                  IANA alias ('America/New_York', the DB default) displays as
+                  its label; anything else is shown as-is and flagged, never
+                  silently blanked. */}
+              <SettingsEditRow label="Timezone"
+                value={normalizeTimezoneLabel(settings.location.timezone) || settings.location.timezone || ''}
+                options={US_TIMEZONES}
+                invalidHint="Not a valid timezone — pick one from the list. Until it is fixed, assessment scheduling and Send to Jobber will fail for this location."
+                hint="Used to schedule your lead emails and Jobber assessments at the right local time."
+                onSave={v=>persistLocationField('timezone','timezone',v,'timezone')} />
               <SettingsEditRow label="Location ID"     value={settings.location.locId||'—'}   readOnly hint="Your unique franchise location identifier" />
             </div>
 
@@ -33302,19 +33347,11 @@ function AdminWebhookLogScreen() {
   )
 }
 
-// Timezone options for the Create Location form. Mirrors the friendly-label
-// list the Settings → Location step offers; locations.timezone is stored as
-// these labels app-wide and lib/drip-time.ts normalizes them to IANA for
-// scheduling. "Eastern Time (ET)" is the label equivalent of the DB default
+// Timezone options for the Create Location form. US_TIMEZONES is imported
+// from lib/us-timezones.ts — the ONE list shared with the onboarding step,
+// the Settings › Timezone row, and both routes that write locations.timezone.
+// "Eastern Time (ET)" is the label equivalent of the DB default
 // 'America/New_York', so it's our default selection.
-const US_TIMEZONES = [
-  { value:'Eastern Time (ET)',  label:'Eastern Time (ET) — New York, Miami' },
-  { value:'Central Time (CT)',  label:'Central Time (CT) — Chicago, Dallas, Kansas City' },
-  { value:'Mountain Time (MT)', label:'Mountain Time (MT) — Denver, Phoenix' },
-  { value:'Pacific Time (PT)',  label:'Pacific Time (PT) — Los Angeles, Seattle' },
-  { value:'Alaska Time (AKT)',  label:'Alaska Time (AKT)' },
-  { value:'Hawaii Time (HT)',   label:'Hawaii Time (HT)' },
-]
 
 function slugify(s) {
   return String(s)

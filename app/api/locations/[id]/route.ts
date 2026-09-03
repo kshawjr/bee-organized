@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
+import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
@@ -73,6 +74,25 @@ export async function PATCH(
       if (typeof v === 'string') {
         patch[field] = v.trim() || null
       }
+    }
+
+    // timezone is the ONE field that is NOT free text and NOT clearable.
+    // lib/drip-time.ts's requireIanaTimezone throws on any value outside
+    // lib/us-timezones.ts — and Send to Jobber runs that check AFTER the
+    // Jobber client + request exist (the 2026-09-01 "Phoenix AZ" duplicate).
+    // The Settings row is a dropdown now; this closes the API door too, and
+    // stores the canonical label even if a caller sends the IANA alias.
+    if ('timezone' in patch) {
+      if (!isValidTimezoneValue(patch.timezone)) {
+        return NextResponse.json(
+          {
+            error: 'invalid timezone',
+            detail: 'Timezone must be one of the standard US labels (e.g. "Mountain Time (MT)"). It cannot be blank.',
+          },
+          { status: 400 },
+        )
+      }
+      patch.timezone = normalizeTimezoneLabel(patch.timezone)
     }
 
     if (Object.keys(patch).length === 1) {

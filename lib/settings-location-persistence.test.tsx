@@ -94,19 +94,24 @@ const rowFor = (label: string) => {
   return p!.parentElement!.parentElement as HTMLElement
 }
 
-const setNativeValue = (el: HTMLInputElement, value: string) => {
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+// Works for the text rows (<input>) AND the dropdown rows (<select> — the
+// Timezone row is one). React listens for 'input' on inputs and 'change' on
+// selects; both go through the prototype setter so React sees the change.
+const setNativeValue = (el: HTMLInputElement | HTMLSelectElement, value: string) => {
+  const isSelect = el.tagName === 'SELECT'
+  const proto = isSelect ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
   setter.call(el, value)
-  el.dispatchEvent(new Event('input', { bubbles: true }))
+  el.dispatchEvent(new Event(isSelect ? 'change' : 'input', { bubbles: true }))
 }
 
-// Open the row, type `value`, click Save, and flush the awaited PATCH + paint.
+// Open the row, type/pick `value`, click Save, and flush the awaited PATCH + paint.
 const editAndSave = async (label: string, value: string) => {
   const row = rowFor(label)
   await act(async () => {
     (Array.from(row.querySelectorAll('button')).find(b => b.textContent === 'Edit') as HTMLElement).click()
   })
-  const input = rowFor(label).querySelector('input') as HTMLInputElement
+  const input = rowFor(label).querySelector('input, select') as HTMLInputElement | HTMLSelectElement
   expect(input, `input for "${label}"`).toBeTruthy()
   await act(async () => { setNativeValue(input, value) })
   await act(async () => {
@@ -134,7 +139,9 @@ const FIELDS: Array<{ label: string; column: string; value: string }> = [
   { label: 'State',          column: 'state',        value: 'OR' },
   { label: 'ZIP',            column: 'zip',          value: '98004' },
   { label: 'Phone',          column: 'phone',        value: '(425) 555-0199' },
-  { label: 'Timezone',       column: 'timezone',     value: 'America/Denver' },
+  // Timezone is a dropdown (lib/us-timezones.ts) — the value must be a listed
+  // label. The row displays the option's label, which contains the value.
+  { label: 'Timezone',       column: 'timezone',     value: 'Mountain Time (MT)' },
   { label: 'Booking Link',   column: 'calendar_link', value: 'https://book.example.com/new' },
   { label: 'Google Reviews', column: 'reviews_link', value: 'https://g.page/r/newreview' },
 ]

@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
 
 export const runtime = 'nodejs'
 
@@ -36,25 +37,10 @@ const ALLOWED_ROLES = ['super_admin', 'admin']
 // trailing/double hyphens, no uppercase, underscores, spaces, or punctuation.
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
-// Timezones the Create Location form offers — the same friendly-label list the
-// Settings → Location step uses. locations.timezone is stored as these labels
-// app-wide (lib/drip-time.ts normalizes them to IANA for scheduling), so we
-// validate against the labels and also accept the IANA equivalents defensively
-// (e.g. the DB default 'America/New_York').
-const VALID_TIMEZONES = new Set([
-  'Eastern Time (ET)',
-  'Central Time (CT)',
-  'Mountain Time (MT)',
-  'Pacific Time (PT)',
-  'Alaska Time (AKT)',
-  'Hawaii Time (HT)',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'America/Anchorage',
-  'Pacific/Honolulu',
-])
+// Timezones the Create Location form offers — validated against the ONE list
+// in lib/us-timezones.ts (labels, plus their IANA equivalents accepted as
+// aliases, e.g. the DB default 'America/New_York'). The same list drives the
+// onboarding dropdown, the Settings › Timezone row, and PATCH /api/locations.
 
 function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
@@ -124,7 +110,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (timezone !== undefined && timezone !== null && timezone !== '') {
-    if (typeof timezone !== 'string' || !VALID_TIMEZONES.has(timezone)) {
+    if (!isValidTimezoneValue(timezone)) {
       return NextResponse.json(
         { error: 'invalid timezone' },
         { status: 400 }
@@ -184,7 +170,8 @@ export async function POST(request: NextRequest) {
     slug: trimmedSlug,
     lifecycle_status: 'onboarding',
   }
-  if (timezone) insertRow.timezone = timezone
+  // Store the canonical label even when an IANA alias was sent.
+  if (timezone) insertRow.timezone = normalizeTimezoneLabel(timezone as string)
   const addr = optionalText(address)
   if (addr) insertRow.address = addr
   const cityVal = optionalText(city)
