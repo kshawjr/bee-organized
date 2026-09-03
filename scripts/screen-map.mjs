@@ -24,7 +24,7 @@ export const MAP_PATH = path.join(REPO_ROOT, 'docs', 'screen-map.json')
 
 export const NAV_SURFACES = [
   'Home', 'Clients', 'Network', 'Inbox', 'Reports', 'Back Office',
-  'Settings', 'Admin', 'Feedback', 'Onboarding', 'Auth', 'Public',
+  'Settings', 'Admin', 'Feedback', 'Help', 'Onboarding', 'Auth', 'Public',
 ]
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']

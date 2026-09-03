@@ -23,6 +23,9 @@ import FeedbackModal from "@/components/feedback/FeedbackModal"
 // The owner/manager feedback screen (issue 235). Franchise roles no longer
 // mount AdminFeedbackScreen — see the activeNav==='feedback' branch.
 import OwnerFeedbackScreen from "@/components/feedback/OwnerFeedbackScreen"
+// The Help section (sections › topics › items + My requests). Built ALONGSIDE
+// "What you've told us" — the nav swap is a later, separate step.
+import HelpScreen from "@/components/help/HelpScreen"
 import { feedbackTimeAgo } from "@/components/feedback/feedbackShared"
 import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
@@ -37145,6 +37148,9 @@ if (Array.isArray(initialPeople)) return
     // surface, everyone else gets the shared ComingSoonPlaceholder.
     { key:'backoffice', icon:'🗂️', label:'Back Office' },
     { key:'settings', icon:'⚙️', label:'Settings'},
+    // Help is for EVERY role — owners read it, super_admin/corporate write it
+    // (the plus buttons are gated inside HelpScreen and on the server).
+    { key:'help',     icon:'❓', label:'Help'    },
     // 'Manual' moved out of the nav — the Guide and the Manual both open
     // from the Ask Bee Hub panel footer (issue 132).
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
@@ -37209,6 +37215,7 @@ if (Array.isArray(initialPeople)) return
       if (activeNav === 'reports') return 'Reports'
       if (activeNav === 'backoffice') return 'Back Office' // issue 140
       if (activeNav === 'settings') return 'Settings'
+      if (activeNav === 'help') return 'Help'
       if (activeNav === 'admin') return role === 'super_admin' ? 'Admin' : 'Corp'
       return 'Bee Hub'
     })()
@@ -37290,7 +37297,9 @@ if (Array.isArray(initialPeople)) return
               // issue 140: Back Office is exempt from the onboarding lock too —
               // it's meant to build anticipation, so it stays clickable (never
               // dimmed) for every role, even mid-setup.
-              const isLocked = (isOnboardingState && !isElevated && !['home','backoffice'].includes(item.key))
+              // Help is exempt from the onboarding lock too — mid-setup is
+              // exactly when someone needs it.
+              const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
               const isActive = activeNav===item.key
               return (
                 <button
@@ -37569,6 +37578,24 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     // ?location_id= for elevated callers and ignores it for real owners.
     // onReportSomething opens the existing composer on its Submit tab — that
     // entry point, and the record-menu "Report a problem" one, are unchanged.
+    // The Help section. canEdit mirrors the guide editor's gate — the two
+    // elevated roles, and never while impersonating an owner (view-as must
+    // show what the owner sees, plus buttons included in their absence).
+    // The ask strip seeds the SAME composer the record menus open, with the
+    // type preselected and the Help breadcrumb + entry id as context.
+    if (activeNav==='help') return (
+      <div style={pageStyle}>
+        <HelpScreen
+          canEdit={(role === 'super_admin' || role === 'corporate') && !viewAsUser}
+          role={role}
+          franchiseRole={franchiseRole}
+          locationId={viewAsUser?.locationId || null}
+          viewAsUserId={viewAsUser?.id || null}
+          onAsk={(ask) => { setFeedbackSeed({ type: ask?.type || 'question', title: '', description: ask?.description || '', context: ask?.context || null }); setShowFeedback('submit') }}
+          onReportSomething={() => setShowFeedback('submit')}
+        />
+      </div>
+    )
     if (activeNav==='feedback') return (
       <div style={pageStyle}>
         <OwnerFeedbackScreen
@@ -37754,6 +37781,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             : activeNav === 'reports' ? 'Reports'
             : activeNav === 'backoffice' ? 'Back Office' /* issue 140 */
             : activeNav === 'settings' ? 'Settings'
+            : activeNav === 'help' ? 'Help'
             : activeNav === 'admin' ? (role === 'super_admin' ? 'Admin' : 'Corp')
             : 'Home'
           }
@@ -37799,7 +37827,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             // never "onboarding."
             // issue 140: Back Office is exempt from the onboarding lock (see the
             // sidebar block above) — always clickable for every role.
-            const isLocked = (isOnboardingState && !isElevated && !['home','backoffice'].includes(item.key))
+            const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
             const isActive = activeNav===item.key
             return (
               <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
