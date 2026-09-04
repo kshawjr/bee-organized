@@ -279,11 +279,11 @@ describe('Dismiss', () => {
     await dir.unmount()
   })
 
-  it('restore semantics: a dismissed lead past 30d derives Nurturing, not New (no Inbox promise)', () => {
+  it('restore semantics: dismiss is a HOLD, not an exit — un-dismissed at 35 days the lead is New again (Inbox rule, no clock)', () => {
     // Dismissed day 25, restored day 35 — clearing inbox_dismissed_at
-    // does NOT re-enter the Inbox; the derived status decides.
+    // re-enters the Inbox because nothing ever took the enquiry out.
     const aged = person({ created: daysAgo(35), inboxDismissedAt: null })
-    expect(deriveClientStatus(aged, new Set(), now)).toBe('Nurturing')
+    expect(deriveClientStatus(aged, new Set(), now)).toBe('New')
   })
 })
 
@@ -308,9 +308,10 @@ describe('wiring', () => {
     expect(drip).not.toMatch(/inbox_dismissed/) // dismiss keeps nurturing
   })
 
-  it('deriveClientStatus stays blind to all three soft-removal signals', () => {
+  it('deriveClientStatus stays blind to the two soft-removal HOLDS (dismiss, snooze); junk is exit 3 of the Inbox rule and is read', () => {
     const cs = src('components/hive/shared/clientStatus.js')
-    expect(cs).not.toMatch(/inboxDismissed|snoozeUntil|isJunk/)
+    expect(cs).not.toMatch(/inboxDismissed|snoozeUntil/)
+    expect(cs).toMatch(/isJunk/)
   })
 
   it('the BeeHub toast host honors an explicit duration (destructive undos get 6s, default stays 3s)', () => {

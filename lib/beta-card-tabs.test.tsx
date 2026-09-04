@@ -371,7 +371,9 @@ describe('metric band', () => {
     // paid history on the lead row must still win the Past existence test.
     const base = profilePayload()
     profileOver = {
-      client: { ...base.client, paid_amount: 500 },
+      // A paid client came through Jobber (not an open enquiry — the Inbox
+      // rule reads import_source), so the band falls through to Past.
+      client: { ...base.client, paid_amount: 500, import_source: 'jobber_initial' },
       engagements: [], touchpoints: [],
       aggregates: { lifetime_paid: 0, open_pipeline: 0, owing: 0, open_count: 0, total_count: 0 },
     }

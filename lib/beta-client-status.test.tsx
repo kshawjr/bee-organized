@@ -21,12 +21,12 @@
 import { describe, it, expect } from 'vitest'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from '@/components/hive/shared/clientStatus'
+import { deriveClientStatus, enquiryDateOf, isBackAgain, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from '@/components/hive/shared/clientStatus'
 import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import InboxScreen from '@/components/hive/InboxScreen'
-import { rollUpOpenEnquiry, rollUpEngagements } from '@/lib/engagement-rollup'
+import { rollUpEngagements } from '@/lib/engagement-rollup'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
@@ -61,12 +61,14 @@ describe('deriveClientStatus — Client (won) status', () => {
   it('the live wonClientIds set alone flips to Client (no roll-up, no backfill)', () => {
     const p = person() // wonEngagements null
     expect(deriveClientStatus(p, new Set(), now, new Set([p.id]))).toBe('Client')
-    expect(deriveClientStatus(p, new Set(), now)).toBe('Nurturing') // control
+    expect(deriveClientStatus(p, new Set(), now)).toBe('New') // control: an open enquiry, no exit, no clock
   })
 
   it('won beats the whole nurture funnel: New, Attempting, and NULL-everything', () => {
-    // would-be New (recent, no outreach)
-    const fresh = person({ created: daysAgo(3), wonEngagements: WON })
+    // would-be New (recent, no outreach) — the win closed AFTER the enquiry,
+    // which is exit 3. (A win that predates a NEW enquiry is old history: that
+    // person is back in the Inbox, by the rule.)
+    const fresh = person({ created: daysAgo(3), wonEngagements: { ...WON, lastClosedAt: daysAgo(1) } })
     expect(deriveClientStatus(fresh, new Set(), now)).toBe('Client')
     // would-be Attempting (recent reach_out)
     const worked = person({
@@ -88,15 +90,14 @@ describe('deriveClientStatus — Client (won) status', () => {
     expect(deriveClientStatus(dark, new Set(), now)).toBe('no_contact')
   })
 
-  it('a RAW lead (no engagement on record) still derives by age, unchanged', () => {
-    // engagementCount 0 — the issue-187 settled-lost rule does NOT apply, so a
-    // fresh/worked/cold raw lead buckets exactly as before (Sarah Watts stays
-    // a real Inbox lead — no engagement to close).
+  it('a RAW lead (no engagement on record) is an open enquiry at any age: New, or Attempting once called', () => {
+    // No clock (Inbox rule, 2026-09-03): a 200-day-old untouched lead is still
+    // New — nothing ever took it out (Sarah Watts stays a real Inbox lead).
     expect(deriveClientStatus(person({ created: daysAgo(3) }), new Set(), now)).toBe('New')
     expect(deriveClientStatus(person({
       outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(5) }],
     }), new Set(), now)).toBe('Attempting')
-    expect(deriveClientStatus(person(), new Set(), now)).toBe('Nurturing')
+    expect(deriveClientStatus(person(), new Set(), now)).toBe('New')
   })
 
   it('Client is a first-class status: in the order, the meta, and the green chip family', () => {
@@ -155,9 +156,9 @@ describe('ClientGroupedList — Client band', () => {
 describe('ClientGroupedList — status definitions (issue 207)', () => {
   it('renders the four owner-facing definitions under their bands', () => {
     // one client in each of New, Nurturing, Active, Client
-    const fresh   = person({ id: 'c-new',  name: 'Ada New',    created: daysAgo(2) })                 // New (recent, untouched)
-    const aged    = person({ id: 'c-nurt', name: 'Bo Nurture', created: daysAgo(200) })               // Nurturing (aged, never booked)
-    const active  = person({ id: 'c-act',  name: 'Cy Active',  created: daysAgo(200) })               // Active (open engagement below)
+    const fresh   = person({ id: 'c-new',  name: 'Ada New',    created: daysAgo(2) })                 // New (an open enquiry)
+    const aged    = person({ id: 'c-nurt', name: 'Bo Nurture', created: daysAgo(200), importSource: 'jobber_initial' }) // Nurturing (a Jobber client, never booked)
+    const active  = person({ id: 'c-act',  name: 'Cy Active',  created: daysAgo(200), importSource: 'jobber_initial', jobberRef: '77' }) // Active (open engagement below)
     const wonC    = person({ id: 'c-won',  name: 'Di Client',  created: daysAgo(200), wonEngagements: WON }) // Client
     const html = renderToString(
       <ClientGroupedList
@@ -175,7 +176,7 @@ describe('ClientGroupedList — status definitions (issue 207)', () => {
   })
 
   it('the Active definition rides the Active band, not Nurturing', () => {
-    const active = person({ id: 'c-act', name: 'Cy Active', created: daysAgo(200) })
+    const active = person({ id: 'c-act', name: 'Cy Active', created: daysAgo(200), importSource: 'jobber_initial', jobberRef: '77' })
     const html = renderToString(
       <ClientGroupedList
         people={[active] as any}
@@ -190,8 +191,8 @@ describe('ClientGroupedList — status definitions (issue 207)', () => {
 })
 
 describe('InboxScreen — won clients are not front-of-funnel', () => {
-  it('a recently-created won client does not appear in the worklist', () => {
-    const wonFresh = person({ created: daysAgo(2), wonEngagements: WON })
+  it('a won client (the win closed AFTER their enquiry) does not appear in the worklist', () => {
+    const wonFresh = person({ created: daysAgo(200), wonEngagements: WON })
     const lead = person({ id: 'p-lead-1', name: 'Riley Fontaine', created: daysAgo(2) })
     const html = renderToString(
       <InboxScreen people={[wonFresh as any, lead as any]} engagements={[]} locFilter="all" />
@@ -201,115 +202,98 @@ describe('InboxScreen — won clients are not front-of-funnel', () => {
   })
 })
 
-// ─── "Back again" — a returning client's website resubmission (3 Sept 2026) ──
+// ─── "Back again" under the Inbox rule (2026-09-04) ─────────────────────────
 //
 // Natalie Miller, Seattle: Jobber-imported Apr 2025, one Closed Won engagement
-// (paid), then the website form again on 1 Sept 2026 → a Request engagement
-// founded by the resubmission with a 'Webform resubmission' touchpoint pointing
-// at it. Every earlier rule (Active, Client, Past, engagementCount) would keep
-// her out of the Inbox; person.openEnquiry is the positive signal that wins.
+// (paid), then the website form again → a 'Webform resubmission' touchpoint.
+// The rule: the form is a new ENQUIRY; she is in the Inbox from the form until
+// Send to Jobber, a Network move, or a close — no clock, and the Request
+// engagement the intake founds does not remove her. The chip keys on the
+// resubmission touchpoint itself (isBackAgain), not on any derivation.
+const RESUB_AT = daysAgo(2)
 const natalie = (over: any = {}) => person({
   id: 'p-natalie',
   name: 'Natalie Miller',
   created: daysAgo(514),          // the lead row is old — that is the point
+  importSource: 'jobber_initial',
   paidAmount: 1179.93,
   wonEngagements: { count: 1, value: 1179.93, lastClosedAt: '2025-04-25T12:00:00Z' },
   engagementCount: 2,
   jobberRef: '105014594',
-  openEnquiry: { foundedAt: daysAgo(2), otherOpen: false },
+  outreachTimeline: [{ id: 't-resub', type: 'system', label: 'Webform resubmission', occurred_at: RESUB_AT }],
   ...over,
 })
 const NATALIE_OPEN = new Set(['p-natalie'])
 
-describe('deriveClientStatus — "Back again": a returning website enquiry is new work', () => {
-  it('a reach-out on/after the enquiry → Attempting', () => {
-    const p = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(1) }] })
+describe('deriveClientStatus — "Back again": a returning website enquiry is in the Inbox until an exit', () => {
+  it('no reach-out since the form → New, anchored on the ENQUIRY (the resubmission), not the 2025 lead row', () => {
+    expect(deriveClientStatus(natalie(), NATALIE_OPEN, now)).toBe('New')
+    expect(enquiryDateOf(natalie())).toBe(RESUB_AT)
+    // a reach-out BEFORE the form is old news — still New
+    const stale = natalie({ outreachTimeline: [...natalie().outreachTimeline, { type: 'reach_out', occurred_at: daysAgo(10) }] })
+    expect(deriveClientStatus(stale, NATALIE_OPEN, now)).toBe('New')
+  })
+
+  it('a reach-out on/after the form → Attempting', () => {
+    const p = natalie({ outreachTimeline: [...natalie().outreachTimeline, { type: 'reach_out', occurred_at: daysAgo(1) }] })
     expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Attempting')
   })
 
-  it('no reach-out since the enquiry → New (anchored on the enquiry, not the 2025 lead row)', () => {
+  it('the founded Request engagement does not remove her; a second open engagement does not either (no clock, no exception)', () => {
     expect(deriveClientStatus(natalie(), NATALIE_OPEN, now)).toBe('New')
-    // a reach-out BEFORE the enquiry is old news — still New
-    const stale = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(10) }] })
-    expect(deriveClientStatus(stale, NATALIE_OPEN, now)).toBe('New')
-    // a system touchpoint (the resubmission marker itself) is not a reach-out
-    const sys = natalie({ outreachTimeline: [{ type: 'system', label: 'Webform resubmission', occurred_at: daysAgo(2) }] })
-    expect(deriveClientStatus(sys, NATALIE_OPEN, now)).toBe('New')
+    expect(deriveClientStatus(natalie(), new Set(), now)).toBe('New')
   })
 
-  it('a second open engagement (otherOpen) → Active: she is being worked', () => {
-    const p = natalie({ openEnquiry: { foundedAt: daysAgo(2), otherOpen: true } })
-    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
+  it('an enquiry 31 days old is still New — there is no 30-day window', () => {
+    const old = natalie({ outreachTimeline: [{ id: 't', type: 'system', label: 'Webform resubmission', occurred_at: daysAgo(31) }] })
+    expect(deriveClientStatus(old, NATALIE_OPEN, now)).toBe('New')
   })
 
-  it('an enquiry 31 days old → Active (aged out, back on the Board only)', () => {
-    const p = natalie({ openEnquiry: { foundedAt: daysAgo(31), otherOpen: false } })
-    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
-    const edge = natalie({ openEnquiry: { foundedAt: daysAgo(29), otherOpen: false } })
-    expect(deriveClientStatus(edge, NATALIE_OPEN, now)).toBe('New')
+  it('a close this session (the live wonClientIds set) is exit 3 → Client, before the refetch', () => {
+    expect(deriveClientStatus(natalie(), new Set(), now, new Set(['p-natalie']))).toBe('Client')
   })
 
-  it('openEnquiry absent → Active: today\'s behaviour, unchanged', () => {
-    expect(deriveClientStatus(natalie({ openEnquiry: null }), NATALIE_OPEN, now)).toBe('Active')
-    expect(deriveClientStatus(natalie({ openEnquiry: undefined }), NATALIE_OPEN, now)).toBe('Active')
+  it('a send this session (optimistic REQ- ref) is exit 1 → she leaves the funnel and reads Active with the engagement open', () => {
+    expect(deriveClientStatus(natalie({ jobberRef: 'REQ-1' }), NATALIE_OPEN, now)).toBe('Active')
   })
 
-  it('openClientIds stays the live truth: the enquiry closed this session → Client, as before', () => {
-    expect(deriveClientStatus(natalie(), new Set(), now)).toBe('Client')
+  it('the same Jobber client WITHOUT a resubmission is not an enquiry: Active on the Board only', () => {
+    expect(deriveClientStatus(natalie({ outreachTimeline: [] }), NATALIE_OPEN, now)).toBe('Active')
+    expect(deriveClientStatus(natalie({ outreachTimeline: [] }), new Set(), now)).toBe('Client')
   })
 
-  it('a malformed foundedAt never puts anyone in the funnel', () => {
-    const p = natalie({ openEnquiry: { foundedAt: 'not a date', otherOpen: false } })
-    expect(deriveClientStatus(p, NATALIE_OPEN, now)).toBe('Active')
+  it('isBackAgain keys on the resubmission touchpoint plus history with us — a fresh lead\'s duplicate form is not Back again', () => {
+    expect(isBackAgain(natalie())).toBe(true)
+    expect(isBackAgain(natalie({ outreachTimeline: [] }))).toBe(false)
+    const fresh = person({ id: 'p-fresh', importSource: 'manual', wonEngagements: null, paidAmount: null,
+      outreachTimeline: [{ type: 'system', label: 'Webform resubmission', occurred_at: daysAgo(1) }] })
+    expect(isBackAgain(fresh)).toBe(false)
   })
 })
 
-describe('rollUpOpenEnquiry — the touchpoint → person.openEnquiry roll-up', () => {
+describe('rollUpEngagements — last_closed_at (exit 3) alongside the existing roll-ups', () => {
   const REQ = { id: 'e-req', stage: 'Request', created_at: '2026-09-01T20:06:19Z' }
-  const WON = { id: 'e-won', stage: 'Closed Won', created_at: '2025-04-07T16:17:00Z', closed_at: '2025-04-25T00:00:00Z', total_paid: 1179.93 }
-  const MARK = { label: 'Webform resubmission', engagement_id: 'e-req' }
+  const WON_E = { id: 'e-won', stage: 'Closed Won', created_at: '2025-04-07T16:17:00Z', closed_at: '2025-04-25T00:00:00Z', total_paid: 1179.93 }
+  const LOST = { id: 'e-lost', stage: 'Closed Lost', created_at: '2026-07-01T00:00:00Z', closed_at: '2026-08-10T21:29:04Z' }
 
-  it('an open Request engagement with a resubmission touchpoint pointing at it → { foundedAt, otherOpen: false }', () => {
-    expect(rollUpOpenEnquiry([WON, REQ], [MARK])).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: false })
-  })
-
-  it('a second open engagement (Sue Gilmore: a Job in Progress alongside) → otherOpen: true', () => {
-    const job = { id: 'e-job', stage: 'Job in Progress', created_at: '2026-08-01T00:00:00Z' }
-    expect(rollUpOpenEnquiry([WON, REQ, job], [MARK])).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: true })
-  })
-
-  it('no resubmission touchpoint (a hand-started or Jobber-request engagement) → null', () => {
-    expect(rollUpOpenEnquiry([WON, REQ], [])).toBeNull()
-    expect(rollUpOpenEnquiry([WON, REQ], [{ label: 'Note', engagement_id: 'e-req' }])).toBeNull()
-    // a resubmission marker at LEAD level (no engagement_id) does not qualify
-    expect(rollUpOpenEnquiry([WON, REQ], [{ label: 'Webform resubmission', engagement_id: null }])).toBeNull()
-  })
-
-  it('the pointed-at engagement must be OPEN and at Request', () => {
-    expect(rollUpOpenEnquiry([WON, { ...REQ, stage: 'Quoted' }], [MARK])).toBeNull()
-    expect(rollUpOpenEnquiry([WON, { ...REQ, stage: 'Closed Lost' }], [MARK])).toBeNull()
-    expect(rollUpOpenEnquiry([], [MARK])).toBeNull()
-    expect(rollUpOpenEnquiry(null, null)).toBeNull()
-  })
-
-  it('rollUpEngagements carries open_enquiry alongside the existing roll-ups', () => {
-    const r = rollUpEngagements([WON, REQ], [MARK])
-    expect(r.engagement_count).toBe(2)
+  it('carries the newest terminal close, whichever way it closed', () => {
+    const r = rollUpEngagements([WON_E, REQ, LOST])
+    expect(r.engagement_count).toBe(3)
     expect(r.won_summary?.count).toBe(1)
-    expect(r.open_enquiry).toEqual({ foundedAt: '2026-09-01T20:06:19Z', otherOpen: false })
-    // no touchpoints passed (the old call shape) → null, never undefined
-    expect(rollUpEngagements([WON, REQ]).open_enquiry).toBeNull()
+    expect(r.last_closed_at).toBe('2026-08-10T21:29:04Z')
+    expect(rollUpEngagements([REQ]).last_closed_at).toBeNull()
+    expect(rollUpEngagements(null).last_closed_at).toBeNull()
   })
 })
 
-describe('mapper — open_enquiry → person.openEnquiry', () => {
-  const row = { id: 'l1', location_uuid: 'loc', location_id: 'loc_x', name: 'N', created_at: '2025-04-07T00:00:00Z' } as any
+describe('mapper — joined.last_closed_at / network_moved → person.enquiryFacts', () => {
+  const row = { id: 'l1', location_uuid: 'loc', location_id: 'loc_x', name: 'N', created_at: '2025-04-07T00:00:00Z', import_source: 'jobber_initial' } as any
 
-  it('joined.open_enquiry maps through; absent → null', () => {
-    const enq = { foundedAt: '2026-09-01T20:06:19Z', otherOpen: false }
-    expect(mapLeadToPerson(row, { open_enquiry: enq }).openEnquiry).toEqual(enq)
-    expect(mapLeadToPerson(row, {}).openEnquiry).toBeNull()
-    expect(mapLeadToPerson(row, { open_enquiry: null }).openEnquiry).toBeNull()
+  it('the facts ride the person; absent joins read as no exit', () => {
+    const p = mapLeadToPerson(row, { last_closed_at: '2026-08-10T21:29:04Z', network_moved: true })
+    expect(p.enquiryFacts).toMatchObject({ importSource: 'jobber_initial', closedAts: ['2026-08-10T21:29:04Z'], networkMoved: true })
+    expect(mapLeadToPerson(row, {}).enquiryFacts).toMatchObject({ closedAts: [], networkMoved: false })
+    expect((mapLeadToPerson(row, {}) as any).openEnquiry).toBeUndefined()
   })
 })
 
@@ -317,7 +301,7 @@ describe('InboxScreen — a "Back again" row', () => {
   const OPEN_ENG = [{ id: 'e-req', client_id: 'p-natalie', stage: 'Request', created_at: daysAgo(2) } as any]
 
   it('shows Natalie in Working with the Back again chip and the one history line', () => {
-    const p = natalie({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(1) }] })
+    const p = natalie({ outreachTimeline: [...natalie().outreachTimeline, { type: 'reach_out', occurred_at: daysAgo(1) }] })
     const html = renderToString(
       <InboxScreen people={[p as any]} engagements={OPEN_ENG} locFilter="all" />
     )
@@ -339,9 +323,9 @@ describe('InboxScreen — a "Back again" row', () => {
     expect(html).toContain('Back again')
   })
 
-  it('without openEnquiry the same person stays off the worklist (today\'s behaviour)', () => {
+  it('without a resubmission the same Jobber client stays off the worklist', () => {
     const html = renderToString(
-      <InboxScreen people={[natalie({ openEnquiry: null }) as any]} engagements={OPEN_ENG} locFilter="all" />
+      <InboxScreen people={[natalie({ outreachTimeline: [] }) as any]} engagements={OPEN_ENG} locFilter="all" />
     )
     expect(html).not.toContain('Natalie Miller')
     expect(html).not.toContain('Back again')

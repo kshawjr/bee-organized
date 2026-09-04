@@ -51,7 +51,7 @@ describe('isInboxCountable — the shared badge/strip count predicate', () => {
     const sets = { junkedIds: new Set(['x']) }
     expect(isInboxCountable(p(), noOpen, noWon, NOW, sets)).toBe(false)
   })
-  it('a no-contact lead (no email AND no phone) is not New/Attempting → does not count', () => {
+  it('a no-contact enquiry (no email AND no phone) does not count — exit 4 of the Inbox rule: nobody can work someone they cannot reach', () => {
     expect(isInboxCountable(p({ email: '', phone: '' }), noOpen, noWon, NOW)).toBe(false)
   })
 })

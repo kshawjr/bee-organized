@@ -259,6 +259,12 @@ describe('findStaleEnquiries — who closes', () => {
     expect(asked).toEqual(['L1'])
   })
 
+  it('a lead with no email and no phone still closes at 35 days (exit 4 keeps them out of the worklist, not out of the close)', async () => {
+    world({ leads: [lead({ id: 'DARK', created_at: daysAgo(48), email: '', phone: null } as any)] })
+    const r = await scan()
+    expect(r.toClose.map(x => x.leadId)).toEqual(['DARK'])
+  })
+
   it('junk and archived leads are never candidates', async () => {
     world({
       leads: [

@@ -1256,12 +1256,11 @@ export default async function HubPage({
       // fetch below AND of the stored leads.client_status column.
       const repeatCounts: Record<string, number> = {}
       const wonByClient: Record<string, { count: number; value: number; lastClosedAt: string | null }> = {}
-      // "Back again" — the OPEN engagements per client, so the open_enquiry
-      // roll-up (a website resubmission's Request engagement, and whether it is
-      // the client's only open work) can be computed from this sweep plus the
-      // touchpoints already in hand — no extra fetch. Same stage test as the
-      // open-engagements board load below.
-      const openByClient: Record<string, Array<{ id: string; stage: string | null; created_at: string | null }>> = {}
+      // Inbox rule (2026-09-03) — the newest Closed Won / Closed Lost close per
+      // client. Exit 3: a close AFTER the enquiry takes the person out of the
+      // Inbox (lib/enquiry-exit.ts). Same math as rollUpEngagements in the
+      // single-lead refetch, so Realtime can't drift.
+      const lastClosedByClient: Record<string, string> = {}
       // Debut detection for the "Returning client" chip: the earliest
       // engagement per client is their debut, every later one is a return.
       const sweptForReturn: Array<{ id: string; client_id: string; created_at: string | null }> = []
@@ -1282,8 +1281,8 @@ export default async function HubPage({
         for (const r of data || []) {
           repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
           sweptForReturn.push({ id: r.id, client_id: r.client_id, created_at: r.created_at })
-          if (r.stage !== 'Closed Won' && r.stage !== 'Closed Lost') {
-            ;(openByClient[r.client_id] || (openByClient[r.client_id] = [])).push({ id: r.id, stage: r.stage, created_at: r.created_at })
+          if ((r.stage === 'Closed Won' || r.stage === 'Closed Lost') && r.closed_at) {
+            if (!lastClosedByClient[r.client_id] || r.closed_at > lastClosedByClient[r.client_id]) lastClosedByClient[r.client_id] = r.closed_at
           }
           if (r.stage === 'Closed Won') {
             const w = wonByClient[r.client_id] || (wonByClient[r.client_id] = { count: 0, value: 0, lastClosedAt: null })
@@ -1296,8 +1295,21 @@ export default async function HubPage({
       }
       const debutEngIds = originalEngagementIds(sweptForReturn)
 
+      // Inbox rule exit 2 — a Network MOVE: a partners row pointing at the lead
+      // with is_customer false (an "add" keeps them a live enquiry). One small
+      // read keyed on the leads in hand; partners.customer_lead_id is text.
+      const networkMoved = new Set<string>()
+      for (let i = 0; i < leadIds.length; i += 200) {
+        const { data: moved, error: movedErr } = await supabaseService
+          .from('partners')
+          .select('customer_lead_id, is_customer')
+          .is('deleted_at', null)
+          .in('customer_lead_id', leadIds.slice(i, i + 200))
+        if (movedErr) { console.error('[hub-page] partners (network move) read failed:', movedErr.message); break }
+        for (const p of moved || []) if (p.is_customer !== true && p.customer_lead_id) networkMoved.add(String(p.customer_lead_id))
+      }
+
       const { mapLeadToPerson } = await import('@/lib/people-mapper')
-      const { rollUpOpenEnquiry } = await import('@/lib/engagement-rollup')
       initialPeople = leadsRaw.map((row: any) =>
         mapLeadToPerson(row, {
           lead_notes:       notesByLead[row.id]       || [],
@@ -1313,14 +1325,13 @@ export default async function HubPage({
           tag_lookups,
           won_summary:      wonByClient[row.id]       || null,
           // issue 187 — all-engagements count (open + closed) from the sweep
-          // above; deriveClientStatus reads it to keep an all-Closed-Lost
-          // client out of the New/Attempting funnel (Inbox + nav badge).
+          // above (directory data).
           engagement_count: repeatCounts[row.id]      || 0,
-          // "Back again" — a website resubmission's open Request engagement
-          // (the 'Webform resubmission' touchpoint points at it) and whether
-          // it is the client's only open work. Same math as the single-lead
-          // refetch (lib/engagement-rollup.ts), so Realtime can't drift.
-          open_enquiry:     rollUpOpenEnquiry(openByClient[row.id] || [], touchByLead[row.id] || []),
+          // Inbox rule — exits 3 and 2 (lib/enquiry-exit.ts). Same values the
+          // single-lead refetch ships (lib/engagement-rollup.ts + its partners
+          // read), so Realtime can't drift.
+          last_closed_at:   lastClosedByClient[row.id] || null,
+          network_moved:    networkMoved.has(row.id),
         })
       )
       console.log(`[hub-page] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)

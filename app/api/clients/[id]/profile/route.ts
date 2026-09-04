@@ -15,6 +15,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { profileAggregates } from '@/lib/profile-aggregates'
+import { factsFromRows } from '@/lib/enquiry-exit'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
@@ -48,7 +49,7 @@ export async function GET(
   // retry drops it while migrations/lead_former_addresses.sql is pending —
   // the profile must never 500 over a column that only adds history.
   const PROFILE_COLS =
-    'id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type'
+    'id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type, import_source, jobber_request_id, jobber_job_id, is_junk'
   let { data: lead, error: leadError } = await supabaseService
     .from('leads')
     .select(`${PROFILE_COLS}, former_addresses`)
@@ -246,9 +247,32 @@ export async function GET(
     assessments: assessByEng[e.id] ?? [],
   }))
 
+  // Inbox rule (2026-09-03) — the profile chip must agree with the Inbox, so
+  // the same exit facts the hub page ships ride the payload: every Jobber
+  // child row by lead (exit 1 — the open-engagement children above are not
+  // enough, a closed engagement's request still counts), Network moves
+  // (exit 2), and the closes from the full engagement list (exit 3). Built by
+  // the one shared assembler (lib/enquiry-exit.ts factsFromRows).
+  const [srAll, quotesAll, jobsAll, partnersAll] = await Promise.all([
+    supabaseService.from('service_requests').select('requested_at, created_at').eq('lead_id', id),
+    supabaseService.from('quotes').select('created_at').eq('lead_id', id),
+    supabaseService.from('jobs').select('created_at').eq('lead_id', id),
+    supabaseService.from('partners').select('customer_lead_id, is_customer').is('deleted_at', null).eq('customer_lead_id', id),
+  ])
+  const enquiry_facts = factsFromRows({
+    lead,
+    touchpoints,
+    service_requests: srAll.data ?? [],
+    quotes: quotesAll.data ?? [],
+    jobs: jobsAll.data ?? [],
+    engagements,
+    networkMoved: (partnersAll.data ?? []).some((p: any) => p.is_customer !== true),
+  })
+
   return NextResponse.json({
     client: {
       ...lead,
+      enquiry_facts,
       location_name: locRes.data?.name ?? null,
       referred_by_name: referrerRes.data?.name ?? null,
       referred_by_missing: referredByMissing,

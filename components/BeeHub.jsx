@@ -13,7 +13,7 @@ import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buil
 // Aliased where a local name already exists in this file (T, isTerminal,
 // daysSince, fmtMoney).
 import { T as HT } from "@/components/hive/shared/tokens"
-import { deriveClientStatus } from "@/components/hive/shared/clientStatus"
+import { deriveClientStatus, enquiryDateOf } from "@/components/hive/shared/clientStatus"
 import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagementStatus"
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
@@ -24524,15 +24524,15 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const openClientIdsH = new Set(openEngsH.map(e=>e.client_id))
   const wonClientIdsH  = new Set(scopedEngsH.filter(e=>e.stage==='Closed Won').map(e=>e.client_id))
 
-  // RED · New leads not contacted — deriveClientStatus 'New' (has contact info,
-  // no open engagement, no won/paid, NO reach-out in 30d, created <30d). This IS
-  // the Inbox "New / No Contact Yet" section, so Home and Inbox agree by
-  // construction. loc_other leads are the transfer card, not this.
+  // RED · New leads not contacted — deriveClientStatus 'New' (an open enquiry
+  // with no reach-out since the enquiry; no clock — Inbox rule 2026-09-03).
+  // This IS the Inbox "New / No Contact Yet" section, so Home and Inbox agree
+  // by construction. Oldest = days since the ENQUIRY. loc_other = transfer card.
   const newUncontacted = scopedPeopleH.filter(p =>
     isLivePersonH(p) && !p.atLocOther &&
     deriveClientStatus(p, openClientIdsH, nowHome, wonClientIdsH) === 'New')
   const newUncontactedOldest = newUncontacted.reduce((m,p)=>{
-    const d = p.created ? sharedDaysSince(p.created, nowHome) : 0; return d>m?d:m }, 0)
+    const a = enquiryDateOf(p) || p.created; const d = a ? sharedDaysSince(a, nowHome) : 0; return d>m?d:m }, 0)
 
   // RED · Estimates awaiting follow-up — open Estimate-stage engagements whose
   // latest quote was SENT more than ESTIMATE_FOLLOWUP_DAYS ago (Jobber tracks no

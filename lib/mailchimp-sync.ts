@@ -200,27 +200,49 @@ export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise
   const openIds = new Set<string>()
   const wonIds = new Set<string>()
   const engagementCounts: Record<string, number> = {}
+  // Inbox rule (2026-09-03): the status tag must agree with the Inbox, so the
+  // derivation gets the same exit inputs the hub page ships — the newest close
+  // (exit 3), the Jobber child rows (exit 1) and Network moves (exit 2).
+  const lastClosedByLead: Record<string, string> = {}
+  const srByLead: Record<string, any[]> = {}
+  const quotesByLead: Record<string, any[]> = {}
+  const jobsByLead: Record<string, any[]> = {}
+  const networkMoved = new Set<string>()
   const touchByLead: Record<string, any[]> = {}
   const leadTagRows: Array<{ lead_id: string; tag_lookup_id: string }> = []
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200)
-    const [engRes, touchRes, tagRes] = await Promise.all([
-      supabaseService.from('engagements').select('client_id, stage').in('client_id', chunk),
+    const [engRes, touchRes, tagRes, srRes, quoteRes, jobRes, partnerRes] = await Promise.all([
+      supabaseService.from('engagements').select('client_id, stage, closed_at').in('client_id', chunk),
       // ⚠️ `kind`, not `type` — the COLUMN is touchpoints.kind; the mapper
-      // renames it on the timeline entry the derivation reads.
-      supabaseService.from('touchpoints').select('lead_id, kind, occurred_at').in('lead_id', chunk),
+      // renames it on the timeline entry the derivation reads. `label` is
+      // what identifies a 'Webform resubmission' (the enquiry date).
+      supabaseService.from('touchpoints').select('lead_id, kind, label, occurred_at').in('lead_id', chunk),
       supabaseService.from('lead_tags').select('lead_id, tag_lookup_id').in('lead_id', chunk),
+      supabaseService.from('service_requests').select('lead_id, requested_at, created_at').in('lead_id', chunk),
+      supabaseService.from('quotes').select('lead_id, created_at').in('lead_id', chunk),
+      supabaseService.from('jobs').select('lead_id, created_at').in('lead_id', chunk),
+      supabaseService.from('partners').select('customer_lead_id, is_customer').is('deleted_at', null).in('customer_lead_id', chunk),
     ])
     if (engRes.error) throw new Error(`engagements read failed: ${engRes.error.message}`)
     if (touchRes.error) throw new Error(`touchpoints read failed: ${touchRes.error.message}`)
     if (tagRes.error) throw new Error(`lead_tags read failed: ${tagRes.error.message}`)
+    if (srRes.error) throw new Error(`service_requests read failed: ${srRes.error.message}`)
+    if (quoteRes.error) throw new Error(`quotes read failed: ${quoteRes.error.message}`)
+    if (jobRes.error) throw new Error(`jobs read failed: ${jobRes.error.message}`)
+    if (partnerRes.error) throw new Error(`partners read failed: ${partnerRes.error.message}`)
     for (const e of engRes.data || []) {
       engagementCounts[e.client_id] = (engagementCounts[e.client_id] || 0) + 1
       if (e.stage === 'Closed Won') wonIds.add(e.client_id)
       if (e.stage !== 'Closed Won' && e.stage !== 'Closed Lost') openIds.add(e.client_id)
+      else if (e.closed_at && (!lastClosedByLead[e.client_id] || e.closed_at > lastClosedByLead[e.client_id])) lastClosedByLead[e.client_id] = e.closed_at
     }
     for (const t of touchRes.data || []) (touchByLead[t.lead_id] ||= []).push(t)
     leadTagRows.push(...(tagRes.data || []))
+    for (const s of srRes.data || []) (srByLead[s.lead_id] ||= []).push(s)
+    for (const q of quoteRes.data || []) (quotesByLead[q.lead_id] ||= []).push(q)
+    for (const j of jobRes.data || []) (jobsByLead[j.lead_id] ||= []).push(j)
+    for (const p of partnerRes.data || []) if (p.is_customer !== true && p.customer_lead_id) networkMoved.add(String(p.customer_lead_id))
   }
 
   // Resolve tag definitions ONCE for the whole run — the distinct
@@ -256,6 +278,11 @@ export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise
       const person = mapLeadToPerson(row, {
         touchpoints: touchByLead[row.id] || [],
         engagement_count: engagementCounts[row.id] || 0,
+        service_requests: srByLead[row.id] || [],
+        quotes: quotesByLead[row.id] || [],
+        jobs: jobsByLead[row.id] || [],
+        last_closed_at: lastClosedByLead[row.id] || null,
+        network_moved: networkMoved.has(row.id),
       })
       const status = deriveClientStatus(person, openIds, nowMs, wonIds)
       const tags = buildMemberTags({

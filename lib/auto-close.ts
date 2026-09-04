@@ -48,6 +48,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { enquiryState, WEBFORM_RESUBMISSION_LABEL } from './enquiry-exit'
 import { stopActiveDripsForLead } from './drip-lifecycle'
 import { cancelStageEmails } from './stage-emails'
 import { cancelPendingWelcomeEmail } from './welcome-email'
@@ -57,13 +58,10 @@ export const AUTO_CLOSE_DAYS = 35
 export const AUTO_CLOSE_REASON = 'No response'
 export const AUTO_CLOSE_TOUCHPOINT_LABEL = `Closed automatically: no response after ${AUTO_CLOSE_DAYS} days`
 export const EXCLUDED_LOCATION_SLUGS = ['loc_other', 'loc_test'] as const
-export const RESUBMISSION_LABEL = 'Webform resubmission'
+export const RESUBMISSION_LABEL = WEBFORM_RESUBMISSION_LABEL
 
 const TERMINAL = new Set(['Closed Won', 'Closed Lost'])
 const DAY_MS = 24 * 60 * 60 * 1000
-// A request the send-to-jobber route writes lands a few hundred ms after the
-// enquiry it answers; the minute of slack keeps that from reading as "before".
-const SLACK_MS = 60 * 1000
 const CHUNK = 200
 const PAGE = 1000
 
@@ -117,10 +115,12 @@ type LeadRow = {
   archived_at: string | null
   jobber_request_id: string | null
   jobber_job_id: string | null
+  email?: string | null
+  phone?: string | null
 }
 
 const LEAD_COLS =
-  'id, name, location_id, location_uuid, created_at, import_source, is_junk, archived_at, jobber_request_id, jobber_job_id'
+  'id, name, location_id, location_uuid, created_at, import_source, is_junk, archived_at, jobber_request_id, jobber_job_id, email, phone'
 
 const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() || 0 : 0)
 const chunks = <T,>(xs: T[]): T[][] => {
@@ -272,20 +272,33 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
   const toClose: StaleEnquiry[] = []
   const spared: SparedEnquiry[] = []
 
-  for (const { lead, enquiryMs, hadResub } of candidates) {
-    const since = enquiryMs - SLACK_MS
+  for (const { lead, enquiryMs } of candidates) {
     const rows = work.get(lead.id) ?? []
-
-    // Exit 1 — sent to Jobber after the enquiry.
-    const jobberAfter =
-      rows.some((w) => w.at >= since) ||
-      (!hadResub && (!!lead.jobber_request_id || !!lead.jobber_job_id))
-    if (jobberAfter) continue
-    // Exit 2 — moved to the Network.
-    if (networkMove.has(lead.id)) continue
-    // Exit 3 — closed after the enquiry.
     const engs = engagements.get(lead.id) ?? []
-    if (engs.some((e) => TERMINAL.has(e.stage) && ms(e.closed_at) >= since)) continue
+
+    // The three exits come from the ONE shared helper the Inbox uses
+    // (lib/enquiry-exit.ts), so the auto-close and the Inbox can never
+    // disagree about who is closed. The candidate filter above already
+    // proved isEnquiry and the enquiry date; this re-derives both from the
+    // same facts and must agree.
+    const state = enquiryState({
+      createdAt: lead.created_at,
+      importSource: lead.import_source,
+      jobberRequestId: lead.jobber_request_id,
+      jobberJobId: lead.jobber_job_id,
+      resubmissionAts: lastResub.has(lead.id) ? [new Date(lastResub.get(lead.id) as number).toISOString()] : [],
+      reachOutAts: [],
+      jobberWorkAts: rows.map((w) => new Date(w.at).toISOString()),
+      networkMoved: networkMove.has(lead.id),
+      closedAts: engs.filter((e) => TERMINAL.has(e.stage) && e.closed_at).map((e) => e.closed_at as string),
+      isJunk: lead.is_junk,
+      email: lead.email,
+      phone: lead.phone,
+    })
+    // `open`, not `inbox`: a lead with no email and no phone has left the
+    // WORKLIST (exit 4 — nobody can work them) but the enquiry is still
+    // unanswered, so it closes at 35 days like any other.
+    if (!state.open) continue
 
     const lastActivityMs = Math.max(enquiryMs, lastReach.get(lead.id) ?? 0, lastReopen.get(lead.id) ?? 0)
     const base = {

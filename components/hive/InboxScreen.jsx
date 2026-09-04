@@ -52,7 +52,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { deriveClientStatus } from './shared/clientStatus'
+import { deriveClientStatus, enquiryDateOf, isBackAgain } from './shared/clientStatus'
 import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
 import { isInboxCountable } from './shared/inboxCountable'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
@@ -237,11 +237,12 @@ function NoCoveragePill({ disabled, onClick }) {
 // past it, year added for prior years). Anchor in --text-secondary,
 // the '· hint' in --text-muted; ONE nowrap line that truncates
 // tail-first, so the hint drops before the date ever does.
-// The date an Inbox row's age is shown from. A "Back again" row (a returning
-// client's website resubmission — person.openEnquiry) ages from the ENQUIRY,
-// not from a lead row that may be years old. Everyone else: created.
+// The date an Inbox row's age is shown from: the ENQUIRY date — the lead's
+// created date, or the latest website resubmission when later (a returning
+// client's lead row may be years old; what is new is the form they just
+// filled in). Sort uses the same anchor, so "oldest first" is oldest enquiry.
 function inboxAgeAnchor(p) {
-  return p.openEnquiry?.foundedAt || p.created
+  return enquiryDateOf(p) || p.created
 }
 
 // "Worked with you Apr 2025" — month + year of the last Closed Won engagement,
@@ -435,8 +436,12 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [confirmRemove, setConfirmRemove] = useState(false) // bulk remove confirm step (any N)
-  const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
-  const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
+  // Default OLDEST first (Kevin, 2026-09-03): the Inbox rule has no clock, so
+  // the people it surfaces are the ones waiting longest — newest-first would
+  // sink them to the bottom and leave them unseen in a different way. A sort
+  // the owner has chosen by hand is still honoured.
+  const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'oldest' })
+  const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'oldest'
   // Inbox filters are namespaced per location scope (issue 123). The `sources`
   // filter is drawn from each location's OWN leads, so under a single shared
   // key a source set at one location emptied every other location's Inbox
@@ -518,7 +523,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       if (filters.touchBand === '1-2' && !(n >= 1 && n <= 2)) return false
       if (filters.touchBand === '3+' && n < 3) return false
     }
-    if (filters.age && (nowMs - (new Date(p.created || 0).getTime() || 0)) < filters.age * 86400000) return false
+    if (filters.age && (nowMs - (new Date(inboxAgeAnchor(p) || 0).getTime() || 0)) < filters.age * 86400000) return false
     return true
   }
 
@@ -552,7 +557,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       // The section IS the derivation now: a call logged this session is in
       // the timeline, so the person derives Attempting here and everywhere
       // else — no Inbox-local reassignment papering over a stale snapshot.
-      const status = deriveClientStatus(p, openClientIds, nowMs, wonClientIds)
+      const status = deriveClientStatus(p, openClientIds, nowMs, wonClientIds, { closedIds: closedLostIds })
       if (status === 'New') fresh.push(p)
       else if (status === 'Attempting') working.push(p)
     }
@@ -891,7 +896,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // chevron just shows a lead that has since left the list.
     const sectionRows = isTransfer ? transfer : pill === 'New' ? fresh : working
     const sent = freshlySent(p)
-    const canSend = !p.jobberRef
+    // Send to Jobber is offered on every open enquiry, linked clients included
+    // (Kevin, 2026-09-03): a returning client's new enquiry needs the same door
+    // out of the Inbox as a stranger's. Only a send already made this session
+    // hides it (the waiting state takes the slot). The send route matches the
+    // existing Jobber client by email, so a linked person gets their request
+    // on their own Jobber record.
+    const canSend = !sent
     // Jobber-owns-deletion rule: ANY jobberRef (imported/linked client,
     // or this session's optimistic send) means the record's lifecycle
     // belongs to Jobber — excluded from selection, no junk affordance.
@@ -912,7 +923,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // "Back again" rows (a returning client's website resubmission): when the
     // form carried no details, the slot shows one short history line instead
     // of the placeholder — "Worked with you Apr 2025". jobDetail still wins.
-    const backAgain = !isTransfer && !!p.openEnquiry
+    const backAgain = !isTransfer && isBackAgain(p)
     const historyLine = backAgain && !jobDetail ? workedWithYouLine(p) : ''
     // Assignee stack — who owns this lead (lead_assignees, plural). ids from the
     // sweep, initials from the roster. Up to 3 discs + '+N'; the whole set is the

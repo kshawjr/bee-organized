@@ -210,21 +210,24 @@ describe('#89 Inbox badge count matches the list', () => {
   })
 })
 
-// ── "Back again" (3 Sept 2026): the badge counts a returning website enquiry ──
+// ── "Back again" under the Inbox rule (2026-09-04): the badge counts a
+// returning website enquiry from the form until an exit ──
 describe('"Back again" — a returning client\'s website resubmission is counted and listed', () => {
+  const RESUB_AT = new Date(Date.now() - 2 * 86400000).toISOString()
   const natalieRow = (o: any = {}) => newLead({
     id: 'p-natalie', name: 'Natalie Miller', email: 'natalie@x.com', phone: '(206) 555-0142',
     created: new Date(Date.now() - 514 * 86400000).toISOString(),
+    importSource: 'jobber_initial',
     jobberRef: '105014594',
     paidAmount: 1179.93,
     wonEngagements: { count: 1, value: 1179.93, lastClosedAt: '2025-04-25T12:00:00Z' },
     engagementCount: 2,
-    openEnquiry: { foundedAt: new Date(Date.now() - 2 * 86400000).toISOString(), otherOpen: false },
+    outreachTimeline: [{ id: 't-resub', type: 'system', label: 'Webform resubmission', occurred_at: RESUB_AT }],
     ...o,
   })
-  const openReq = { id: 'e-req', client_id: 'p-natalie', stage: 'Request', location_uuid: KC, created_at: new Date(Date.now() - 2 * 86400000).toISOString() }
+  const openReq = { id: 'e-req', client_id: 'p-natalie', stage: 'Request', location_uuid: KC, created_at: RESUB_AT }
 
-  it('counted by the badge and listed with the Back again chip', async () => {
+  it('counted by the badge and listed with the Back again chip — the founded engagement does not remove her', async () => {
     const host = await mount(base({ people: [natalieRow()], engagements: [openReq] }))
     expect(badgeCount(host)).toBe(1)
     await openInbox(host)
@@ -232,8 +235,15 @@ describe('"Back again" — a returning client\'s website resubmission is counted
     expect(host.textContent).toContain('Back again')
   })
 
-  it('control: the same person without openEnquiry is Active — not counted, not listed', async () => {
-    const host = await mount(base({ people: [natalieRow({ openEnquiry: null })], engagements: [openReq] }))
+  it('control: the same person without a resubmission is not an enquiry — not counted, not listed', async () => {
+    const host = await mount(base({ people: [natalieRow({ outreachTimeline: [] })], engagements: [openReq] }))
+    expect(badgeCount(host)).toBe(0)
+    await openInbox(host)
+    expect(host.textContent).not.toContain('Natalie Miller')
+  })
+
+  it('an exit removes her from both: sent to Jobber this session (optimistic REQ- ref)', async () => {
+    const host = await mount(base({ people: [natalieRow({ jobberRef: 'REQ-1' })], engagements: [openReq] }))
     expect(badgeCount(host)).toBe(0)
     await openInbox(host)
     expect(host.textContent).not.toContain('Natalie Miller')

@@ -131,7 +131,7 @@ describe('T2d — collapsible info lists; hero never collapses', () => {
 
 describe('T3a/T3b — shared machinery + one threshold source', () => {
   it('Home imports the shared derivations + tone families (no private copy)', () => {
-    expect(beehub).toContain('import { deriveClientStatus } from "@/components/hive/shared/clientStatus"')
+    expect(beehub).toContain('import { deriveClientStatus, enquiryDateOf } from "@/components/hive/shared/clientStatus"')
     expect(beehub).toContain('from "@/components/hive/shared/engagementStatus"')
     expect(beehub).toContain('CHIP_STYLES as HIVE_CHIP_STYLES')
   })

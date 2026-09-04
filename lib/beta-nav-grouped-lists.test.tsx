@@ -54,7 +54,7 @@ const person = (over: any = {}) => ({
 })
 const PEOPLE = [
   person({ id: 'new-1', name: 'Nora New', created: daysAgo(2) }),        // New
-  person({ id: 'past-1', name: 'Pete Past', paidAmount: 900, created: daysAgo(400) }), // Past
+  person({ id: 'past-1', name: 'Pete Past', paidAmount: 900, created: daysAgo(400), importSource: 'jobber_initial' }), // Past
 ]
 const LOCATIONS = [{ id: 'loc-uuid-1', name: 'Portland' }]
 
@@ -303,7 +303,7 @@ describe('ClientGroupedList — per-group prev/next siblings (#134)', () => {
   // "raw filtered order" and "displayed order" disagree everywhere.
   const NAV_PEOPLE = [
     person({ id: 'new-zed', name: 'Zed Newman', created: daysAgo(1) }),                     // New
-    person({ id: 'past-pete', name: 'Pete Past', paidAmount: 900, created: daysAgo(400) }), // Past client
+    person({ id: 'past-pete', name: 'Pete Past', paidAmount: 900, created: daysAgo(400), importSource: 'jobber_initial' }), // Past client
     person({ id: 'new-ann', name: 'Ann Field', created: daysAgo(2) }),                      // New — displays BEFORE Zed
   ]
 

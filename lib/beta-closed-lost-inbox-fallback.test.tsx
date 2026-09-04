@@ -1,23 +1,18 @@
 // @vitest-environment happy-dom
-// issue 187 — Closed Lost clients fall back into the Inbox.
+// issue 187 — Closed Lost clients must not fall back into the Inbox.
 //
-// THE BUG: deriveClientStatus decided Inbox membership from lead AGE and
-// recent outreach, not engagement outcome. Closing a client's only engagement
-// to Closed Lost dropped them from openClientIds (the non-terminal set) but,
-// with no won/paid history and a recent created_at, they derived straight back
-// to 'New' — reappearing in the Inbox and the nav badge (both read the SAME
-// derivation, via isInboxCountable → deriveClientStatus).
+// THE ORIGINAL BUG: deriveClientStatus decided Inbox membership from lead AGE
+// and recent outreach, not engagement outcome. Closing a client's only
+// engagement dropped them from openClientIds but, with no won/paid history and
+// a recent created_at, they derived straight back to 'New'.
 //
-// THE FIX: person.engagementCount (all-engagements hydration roll-up). Past the
-// open/won/paid checks, engagementCount > 0 means every engagement is a Closed
-// Lost one — a decision someone made — so age must not re-derive them into
-// New/Attempting. They settle to Nurturing instead: off the front-of-funnel,
-// uncounted by the badge, still on the board in the marketable pool.
-//
-// Distinguishing closed-until-something-new from closed-FOREVER:
-//   · engagementCount 0 (raw lead, no engagement — Sarah Watts) → untouched.
-//   · a NEW/reopened engagement is OPEN → openClientIds → 'Active' first.
-//   · Closed Won → 'Client' first; some-open-some-closed → 'Active' first.
+// UNDER THE INBOX RULE (Kevin, 2026-09-03; lib/enquiry-exit.ts): a close AFTER
+// the enquiry is exit 3. The person leaves the Inbox and the badge because the
+// enquiry was closed — not because of an engagement count, and never because
+// of age. person.enquiryFacts.closedAts (from the hub-page sweep's
+// last_closed_at, or the single-lead refetch's rollUpEngagements) is what the
+// derivation reads. A reopen clears the close, so the enquiry is open again
+// and the person is back in the Inbox — closed-until-something-new.
 import { describe, it, expect } from 'vitest'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
@@ -38,7 +33,8 @@ const person = (over: any = {}) => ({
   email: 'mary@email.com',
   phone: '(561) 555-0148',
   locationId: 'loc-uuid-pb',
-  created: daysAgo(2), // fresh → would derive 'New' by age
+  created: daysAgo(2),
+  importSource: 'manual',
   paidAmount: null,
   outreachTimeline: [],
   jobs: [],
@@ -50,120 +46,113 @@ const person = (over: any = {}) => ({
   engagementCount: 0,
   ...over,
 })
+// The facts the mapper ships: a Closed Lost AFTER the enquiry.
+const closedLost = (over: any = {}) => person({
+  engagementCount: 1,
+  enquiryFacts: {
+    createdAt: daysAgo(2), importSource: 'manual', jobberRequestId: null, jobberJobId: null,
+    resubmissionAts: [], jobberWorkAts: [], networkMoved: false, closedAts: [daysAgo(1)],
+  },
+  ...over,
+})
 
 const noOpen = new Set<string>()
 const noWon = new Set<string>()
 
-describe('issue 187 — settled-lost derivation', () => {
+describe('issue 187 — a close after the enquiry is exit 3', () => {
   it('a client whose only engagement is Closed Lost does NOT derive New or Attempting', () => {
-    // engagementCount 1, not in openClientIds, no won, no paid → all-Closed-Lost.
-    const lost = person({ engagementCount: 1 })
-    expect(deriveClientStatus(lost, noOpen, now, noWon)).toBe('Nurturing')
+    expect(deriveClientStatus(closedLost(), noOpen, now, noWon)).toBe('Nurturing')
   })
 
-  it('age does not override the close: fresh created_at still settles', () => {
-    const freshlyLost = person({ created: daysAgo(1), engagementCount: 1 })
-    const s = deriveClientStatus(freshlyLost, noOpen, now, noWon)
+  it('age is irrelevant: a close one day after a fresh enquiry still settles', () => {
+    const s = deriveClientStatus(closedLost({ created: daysAgo(1) }), noOpen, now, noWon)
     expect(s).not.toBe('New')
     expect(s).toBe('Nurturing')
   })
 
-  it('recent outreach does not override the close either (settled beats Attempting)', () => {
-    const lostButCalled = person({
-      engagementCount: 1,
-      outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(3) }],
-    })
+  it('outreach after the close does not reopen the enquiry (a call is not an exit and not an entry)', () => {
+    const lostButCalled = closedLost({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(0.5) }] })
     const s = deriveClientStatus(lostButCalled, noOpen, now, noWon)
     expect(s).not.toBe('Attempting')
     expect(s).toBe('Nurturing')
   })
 
-  it('the nav badge / Inbox count does NOT count a settled-lost client', () => {
-    const lost = person({ engagementCount: 1 })
-    // isInboxCountable is the shared predicate behind BOTH the HiveShell badge
-    // and the "N hidden by filters" strip — one assertion covers both surfaces.
-    expect(isInboxCountable(lost, noOpen, noWon, now)).toBe(false)
-    // control: the same row with no engagement on record IS countable (New).
-    expect(isInboxCountable(person({ engagementCount: 0 }), noOpen, noWon, now)).toBe(true)
+  it('the nav badge / Inbox count does NOT count a closed client', () => {
+    expect(isInboxCountable(closedLost(), noOpen, noWon, now)).toBe(false)
+    expect(isInboxCountable(person(), noOpen, noWon, now)).toBe(true) // control
+  })
+
+  it('a close this session (before the refetch) settles through the Inbox\'s closedIds', () => {
+    expect(deriveClientStatus(person(), noOpen, now, noWon, { closedIds: new Set(['p-lost-1']) })).toBe('Nurturing')
   })
 })
 
 describe('issue 187 — closed-UNTIL-something-new, never closed-forever', () => {
-  it('a NEW/reopened engagement (OPEN) returns them to the worklist as Active', () => {
-    const lost = person({ engagementCount: 1 })
-    // Something new happened: an open engagement now exists for this client, so
-    // openClientIds carries them → 'Active' (in motion), out of the settled band.
-    const openIds = new Set([lost.id])
-    expect(deriveClientStatus(lost, openIds, now, noWon)).toBe('Active')
+  it('a reopen clears the close: the enquiry is open again and the person is back in the Inbox as New', () => {
+    // reopen/route.ts nulls closed_at, so the refetched facts carry no close.
+    const reopened = closedLost({ enquiryFacts: { ...closedLost().enquiryFacts, closedAts: [] } })
+    expect(deriveClientStatus(reopened, new Set(['p-lost-1']), now, noWon)).toBe('New')
+  })
+
+  it('a new website enquiry AFTER the close is a new enquiry: New, the old close does not count', () => {
+    const backAgain = closedLost({
+      enquiryFacts: { ...closedLost().enquiryFacts, resubmissionAts: [daysAgo(0.5)] },
+      outreachTimeline: [{ type: 'system', label: 'Webform resubmission', occurred_at: daysAgo(0.5) }],
+    })
+    expect(deriveClientStatus(backAgain, noOpen, now, noWon)).toBe('New')
   })
 
   it('a genuinely NEW lead (no engagement) still lands in the Inbox as New', () => {
-    // The other comeback path: a brand-new lead row has engagementCount 0, so
-    // the settled rule never applies and age derives 'New' — a real Inbox item.
-    const brandNew = person({ engagementCount: 0, created: daysAgo(1) })
-    expect(deriveClientStatus(brandNew, noOpen, now, noWon)).toBe('New')
-    expect(isInboxCountable(brandNew, noOpen, noWon, now)).toBe(true)
+    expect(deriveClientStatus(person(), noOpen, now, noWon)).toBe('New')
+    expect(isInboxCountable(person(), noOpen, noWon, now)).toBe(true)
   })
 })
 
-describe('issue 187 — cases that must stay exactly as they are', () => {
-  it('Closed Won is unchanged (won outranks the settled rule)', () => {
-    // via the live wonClientIds set...
-    const wonLive = person({ engagementCount: 1 })
-    expect(deriveClientStatus(wonLive, noOpen, now, new Set([wonLive.id]))).toBe('Client')
-    // ...and via the hydrated roll-up.
-    const wonRollup = person({ engagementCount: 1, wonEngagements: { count: 1, value: 0, lastClosedAt: daysAgo(20) } })
-    expect(deriveClientStatus(wonRollup, noOpen, now, noWon)).toBe('Client')
+describe('issue 187 — the other bands are unchanged for an exited person', () => {
+  it('Closed Won → Client (won outranks the pool)', () => {
+    const won = closedLost({ wonEngagements: { count: 1, value: 900, lastClosedAt: daysAgo(1) } })
+    expect(deriveClientStatus(won, noOpen, now, noWon)).toBe('Client')
+    expect(deriveClientStatus(closedLost(), noOpen, now, new Set(['p-lost-1']))).toBe('Client')
   })
 
-  it('some terminal + some open → still Active (only ALL-terminal settles)', () => {
-    // Two engagements on record, one still open → openClientIds carries them.
-    const mixed = person({ engagementCount: 2 })
-    expect(deriveClientStatus(mixed, new Set([mixed.id]), now, noWon)).toBe('Active')
+  it('a closed enquiry with another engagement open → Active', () => {
+    expect(deriveClientStatus(closedLost(), new Set(['p-lost-1']), now, noWon)).toBe('Active')
   })
 
   it('a lost client with paid history is Past, not Nurturing (Past outranks)', () => {
-    const lostButPaid = person({ engagementCount: 1, paidAmount: 900 })
-    expect(deriveClientStatus(lostButPaid, noOpen, now, noWon)).toBe('Past')
+    expect(deriveClientStatus(closedLost({ paidAmount: 450 }), noOpen, now, noWon)).toBe('Past')
   })
 
-  it('a client with NO engagement is unaffected by the settled rule', () => {
-    // Sarah Watts: raw lead, nothing to close. Derives New/Attempting/Nurturing
-    // by age+activity exactly as before the fix.
-    expect(deriveClientStatus(person({ engagementCount: 0, created: daysAgo(2) }), noOpen, now, noWon)).toBe('New')
-    expect(deriveClientStatus(person({ engagementCount: 0, created: daysAgo(200) }), noOpen, now, noWon)).toBe('Nurturing')
+  it('an open enquiry with paid history is still New — history is not an exit', () => {
+    expect(deriveClientStatus(person({ paidAmount: 450 }), noOpen, now, noWon)).toBe('New')
   })
 })
 
-describe('issue 187 — the mapper carries engagement_count → engagementCount', () => {
-  const row: any = { id: 'l-9', location_id: 'loc-1', name: 'Jay Brunker', created_at: daysAgo(2) }
-  it('maps the sweep count through, defaulting to 0 when absent', () => {
-    expect(mapLeadToPerson(row, { engagement_count: 3 }).engagementCount).toBe(3)
+describe('issue 187 — the mapper carries the close', () => {
+  const row: any = { id: 'l-1', location_id: 'loc-1', name: 'Mary', email: 'mary@email.com', phone: '', created_at: daysAgo(2), import_source: 'manual' }
+  it('joined.last_closed_at → enquiryFacts.closedAts; engagement_count still maps through', () => {
+    const p = mapLeadToPerson(row, { engagement_count: 1, last_closed_at: daysAgo(1) })
+    expect(p.engagementCount).toBe(1)
+    expect(p.enquiryFacts.closedAts).toEqual([daysAgo(1)])
     expect(mapLeadToPerson(row, {}).engagementCount).toBe(0)
+    expect(deriveClientStatus(p, noOpen, now, noWon)).toBe('Nurturing')
   })
 })
 
 describe('issue 187 — board + Inbox agree with the derivation', () => {
-  // The closed engagement is NOT in the open-only engagements prop (it settled
-  // in a prior session / server-side auto-close — Lynette's KC cases). The
-  // durable signal is person.engagementCount, so both surfaces read correctly
-  // from person alone.
-  it('the board buckets a settled-lost client under Nurturing, not New', () => {
-    const lost = person({ engagementCount: 1 })
+  it('the board buckets a closed client under Nurturing, not New', () => {
     const html = renderToString(
-      <ClientGroupedList people={[lost as any]} engagements={[]} locFilter="all" />
+      <ClientGroupedList people={[closedLost() as any]} engagements={[]} locFilter="all" />
     )
     expect(html).toContain('aria-label="Nurturing group"')
     expect(html).not.toContain('aria-label="New group"')
   })
 
-  it('the Inbox worklist does not show a settled-lost client', () => {
-    const lost = person({ engagementCount: 1 })
-    const rawLead = person({ id: 'p-raw-1', name: 'Sarah Watts', engagementCount: 0, created: daysAgo(1) })
+  it('the Inbox worklist does not show a closed client', () => {
     const html = renderToString(
-      <InboxScreen people={[lost as any, rawLead as any]} engagements={[]} locFilter="all" />
+      <InboxScreen people={[closedLost() as any, person({ id: 'p-live', name: 'Riley Fontaine' }) as any]} engagements={[]} locFilter="all" />
     )
-    expect(html).toContain('Sarah Watts')   // control: a real raw lead still shows
-    expect(html).not.toContain('Mary Sifain') // the settled-lost client is gone
+    expect(html).toContain('Riley Fontaine') // control: a live lead shows
+    expect(html).not.toContain('Mary Sifain')
   })
 })

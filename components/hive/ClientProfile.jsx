@@ -185,8 +185,15 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       // denorm for the Past existence test (paidAmount > 0).
       id: c.id, email: c.email, phone: c.phone, paidAmount: agg?.lifetime_paid || c.paid_amount,
       created: c.created_at,
-      outreachTimeline: touches.map(t => ({ type: t.kind, occurred_at: t.occurred_at })),
+      outreachTimeline: touches.map(t => ({ type: t.kind, label: t.label, occurred_at: t.occurred_at })),
       wonEngagements: wonSummary,
+      // Inbox rule — the profile's exit facts (lib/enquiry-exit.ts), built
+      // server-side from EVERY Jobber child row, Network moves and closes, so
+      // this chip agrees with the Inbox row. isJunk rides the row.
+      enquiryFacts: c.enquiry_facts || null,
+      importSource: c.import_source ?? null,
+      isJunk: !!c.is_junk,
+      jobberRef: c.jobber_client_id || null,
     },
     new Set(open.length > 0 ? [c.id] : []),
     nowMs,

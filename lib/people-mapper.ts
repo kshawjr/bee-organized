@@ -4,12 +4,19 @@
 // components/BeeHub.jsx consumes. Centralized here so both initial-hydration
 // (in app/page.tsx) and any future refetch path can use the same logic.
 
+import { factsFromRows } from './enquiry-exit'
+
 type LeadRow = {
   id: string
   location_uuid: string | null
   location_id: string
   assigned_to: string | null
   name: string | null
+  // Inbox rule inputs (lib/enquiry-exit.ts): where the lead came from, and
+  // the request / job ids a Send to Jobber stamps on the row.
+  import_source?: string | null
+  jobber_request_id?: string | null
+  jobber_job_id?: string | null
   first_name: string | null
   last_name: string | null
   email: string | null
@@ -78,14 +85,14 @@ type JoinedData = {
   won_summary?: { count: number; value: number; lastClosedAt: string | null } | null
   // issue 187 — total engagements on record for this client (open + closed),
   // from the same _hub-page.tsx all-engagements sweep that builds won_summary.
-  // deriveClientStatus reads it to keep an all-Closed-Lost client out of the
-  // New/Attempting funnel (and thus the Inbox + nav badge).
+  // Kept for the directory; the status derivation no longer reads it.
   engagement_count?: number
-  // "Back again" (3 Sept 2026) — the client's ONLY open engagement is a
-  // website-form resubmission at Request (lib/engagement-rollup.ts
-  // rollUpOpenEnquiry). deriveClientStatus reads it to put the person in the
-  // Inbox as new work, anchored on foundedAt, instead of reading them Active.
-  open_enquiry?: { foundedAt: string; otherOpen: boolean } | null
+  // Inbox rule (2026-09-03) — the two exit facts that do not ride a child row:
+  // the newest Closed Won / Closed Lost close (exit 3) from the engagement
+  // sweep / roll-up, and whether a partners row records a Network MOVE
+  // (exit 2). Both feed person.enquiryFacts (lib/enquiry-exit.ts).
+  last_closed_at?: string | null
+  network_moved?: boolean | null
 }
 
 function fmtCreatedShort(iso: string | null | undefined): string {
@@ -362,13 +369,24 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // deriveClientStatus reads .count; the directory reads .value/.lastClosedAt.
     wonEngagements: joined.won_summary || null,
     // issue 187 — count of ALL engagements (open + closed) for this client.
-    // 0 for a raw lead that never had one. deriveClientStatus uses "> 0, past
-    // the open/won/paid checks" to mean "all-Closed-Lost" → settle, not New.
+    // 0 for a raw lead that never had one. Directory data; the status
+    // derivation no longer reads it (the Inbox rule has no settle-by-history).
     engagementCount: joined.engagement_count || 0,
-    // "Back again" — { foundedAt, otherOpen } when the client's only open
-    // engagement is a website-form resubmission at Request; null otherwise
-    // (= today's derivation, unchanged). See clientStatus.js RULES.
-    openEnquiry: joined.open_enquiry || null,
+    // Inbox rule (2026-09-03) — everything lib/enquiry-exit.ts needs to say
+    // whether this person's enquiry is still open: the enquiry date inputs,
+    // the three exits. Reach-outs are deliberately NOT frozen here; the
+    // derivation reads them live from outreachTimeline so a call logged this
+    // session flips New → Attempting without a reload.
+    importSource: row.import_source ?? null,
+    enquiryFacts: factsFromRows({
+      lead: row,
+      touchpoints: allTouchpoints,
+      service_requests: joined.service_requests || [],
+      quotes: joined.quotes || [],
+      jobs: joined.jobs || [],
+      closedAts: joined.last_closed_at ? [joined.last_closed_at] : [],
+      networkMoved: !!joined.network_moved,
+    }),
     assessment,
     assessmentType,
     estimateSent,

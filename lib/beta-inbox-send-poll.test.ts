@@ -135,9 +135,14 @@ describe('the injection corrects the Inbox list AND the badge (same row, both su
     expect(injected.stage).toBe('Request')
 
     const openClientIds = new Set(injects.map(r => r.client_id))
-    // List: the lead now derives Active → out of New/Attempting → leaves the Inbox.
-    expect(deriveClientStatus(person, openClientIds)).toBe('Active')
+    // Inbox rule (2026-09-03): the founded engagement ALONE does not remove
+    // anyone — the SEND is the exit. HiveShell stamps the optimistic 'REQ-…'
+    // ref on the person at send time, and that is what both surfaces read.
+    expect(deriveClientStatus(person, openClientIds)).toBe('New')
+    const sent = PERSON({ id: 'c1', jobberRef: 'REQ-optimistic' })
+    // List: exit 1 → out of New/Attempting; with the engagement open → Active.
+    expect(deriveClientStatus(sent, openClientIds)).toBe('Active')
     // Badge: the shared countable rule agrees → the count drops with the row.
-    expect(isInboxCountable(person, openClientIds, null)).toBe(false)
+    expect(isInboxCountable(sent, openClientIds, null)).toBe(false)
   })
 })

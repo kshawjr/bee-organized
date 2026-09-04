@@ -96,6 +96,8 @@ const lead = (over: any = {}) => ({
   paid_amount: 0,
   is_junk: false,
   created_at: new Date().toISOString(),
+  // A website lead is an ENQUIRY (Inbox rule): import_source 'manual'.
+  import_source: 'manual',
   // The STALE snapshot — present on every row so a test that reads it by
   // mistake produces a visibly wrong tag.
   client_status: 'StaleColumnValue',

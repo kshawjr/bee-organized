@@ -1,118 +1,126 @@
 // components/hive/shared/clientStatus.js
 // ─────────────────────────────────────────────────────────────
-// PURE module — client status DERIVATION (doc §2), resolving the open
-// 'stored vs derived' question as DERIVED-for-now. When a stored
-// client_status column lands (later step-4 item), THIS module is the
-// single place to swap: readers keep calling deriveClientStatus.
+// PURE module — client status DERIVATION. The one place every surface asks
+// "what is this person to us": the Inbox list and badge, the hidden-by-
+// filters strip, the Home tile, the People directory bands, the profile chip,
+// the Mailchimp tag and the corporate Home tile all call deriveClientStatus.
 //
-// Inputs are what's already client-side: the mapped Person (leads row +
-// joined children + the hydration-time Closed Won roll-up), the set of
-// client_ids with OPEN engagements, and (optional) the set of client_ids
-// with a Closed Won engagement — session-derived, so a close-as-Won this
-// session flips the person to Client without a reload.
+// THE INBOX RULE (Kevin, 2026-09-03 — replaces the 30-day clock and the
+// "Back again" exception):
 //
-// RULES (checked in order):
-//   no_contact — no email AND no phone. (True is_junk leads are already
-//                excluded upstream — they live in the Recycle Bin, not
-//                the directory — so this catches reachability, the §2
-//                junk PRECONDITION, on not-yet-junked rows.)
-//   Active     — ≥1 OPEN engagement (currently being worked — beats the
-//                won-history read; when it closes they settle to Client
-//                or back to the funnel).
-//                EXCEPTION — "Back again" (returning website enquiry): a
-//                person whose ONLY open engagement sits at Request AND was
-//                founded by a website-form resubmission (person.openEnquiry,
-//                the hydration roll-up of the 'Webform resubmission'
-//                touchpoint that points at that engagement) is NEW WORK, not
-//                work in progress. They follow the fresh-lead funnel below,
-//                anchored on the ENQUIRY date instead of the lead's created
-//                date: a reach_out on/after the enquiry → Attempting; none and
-//                the enquiry is < 30 days old → New; enquiry ≥ 30 days old →
-//                Active again (still on the Board, off the worklist). Any
-//                second open engagement means they are being worked → Active.
-//                Absent openEnquiry = today's behaviour, unchanged.
-//   Client     — ≥1 CLOSED WON engagement, ever. A won client is a
-//                customer, not a lead being nurtured — this OUTRANKS the
-//                whole nurture funnel (won > funnel > raw lead). Fed by
-//                person.wonEngagements (hydration roll-up) OR the live
-//                wonClientIds set, so it does NOT depend on the stored
-//                client_status column or any backfill having run.
+//   An enquiry is in the Inbox until one of four things happens, and
+//   nothing else: Send to Jobber, a Network move, a close, or having no
+//   way to reach them (no email and no phone). No clock. Founding an
+//   engagement does not remove anyone. A logged call does not.
+//
+// The exits live in ONE shared helper, lib/enquiry-exit.ts, which the 35-day
+// auto-close reads too — so the Inbox and the auto-close can never disagree
+// about who is closed. person.enquiryFacts (lib/people-mapper.ts) carries
+// everything that helper needs except the live reach-outs, which are read
+// from outreachTimeline here so a call logged this session flips the row
+// without a reload.
+//
+// STATUSES, checked in order:
+//   New        — an open enquiry with no reach-out logged since the enquiry.
+//   Attempting — an open enquiry with a reach-out since the enquiry.
+//                (Together these ARE the Inbox: isInboxCountable is this
+//                test plus the soft-removal holds — dismiss and snooze hide a
+//                row without changing its status.)
+//   no_contact — no email AND no phone: exit 4 (Kevin, 2026-09-04). Never
+//                New/Attempting; the auto-close still closes it at 35 days.
+//   Active     — ≥1 OPEN engagement (being worked, after an exit).
+//   Client     — ≥1 CLOSED WON engagement, ever (the live wonClientIds set
+//                OR person.wonEngagements) — a customer, not a lead.
 //   Past       — no won engagement AND paid history (paidAmount > 0).
-//                CAVEAT: leads.paid_amount is a single-slot denorm (last
-//                paid invoice / import roll-up), not a lifetime sum —
-//                fine as an existence test, do not render it as an
-//                exact lifetime without that caveat.
-//   Settled    — issue 187: no won, no paid, but ≥1 engagement ON RECORD
-//                (person.engagementCount) and none of them OPEN (the Active
-//                check already passed). Every engagement is therefore a
-//                Closed Lost one — a decision someone made — so AGE must
-//                not re-derive them into New/Attempting and drop them back
-//                into the Inbox. They settle to Nurturing (below), off the
-//                front-of-funnel and uncounted by the nav badge, until
-//                something new happens (see the two guards on that rule).
-//   Attempting — none of the above AND a human reach_out touchpoint
-//                within the last 30 days (being actively worked).
-//   New        — none of the above AND created < 30 days ago.
-//   Nurturing  — everyone else: inquired/imported, never booked or went
-//                cold, OR settled-lost (issue 187). This is the marketable
-//                pool (§5) — re-marketable, but not front-of-funnel work.
+//   Nurturing  — everyone else: exited and not won. The marketable pool.
 //
-// FUTURE (re-engage seam): person.wonEngagements carries { count, value,
-// lastClosedAt } and person.jobs is already client-side — a "quiet won
-// client" flag is one predicate over those (lastClosedAt/last job older
-// than a threshold), NOT a new data path. Needs a quiet-threshold policy
-// decision before building.
+// Session-live inputs: openClientIds / wonClientIds are the session's truth
+// for engagements (a close this session drops Active → Client immediately);
+// session.closedIds marks a lead closed this session before the refetch
+// lands (the Inbox passes its closedLostIds); a fresh Send to Jobber shows
+// as an optimistic 'REQ-…' / 'JOB-…' jobberRef and counts as exit 1.
 // ─────────────────────────────────────────────────────────────
+
+import { enquiryState, enquiryDateMs, WEBFORM_RESUBMISSION_LABEL } from '@/lib/enquiry-exit'
 
 export const CLIENT_STATUS_ORDER = ['New', 'Attempting', 'Nurturing', 'Active', 'Client', 'Past', 'no_contact']
 
-const THIRTY_D = 30 * 24 * 60 * 60 * 1000
+const SENT_THIS_SESSION = /^(REQ|JOB)-/
 
-export function deriveClientStatus(person, openClientIds, nowMs = Date.now(), wonClientIds = null) {
-  const email = (person.email || '').trim()
-  const phone = (person.phone || '').trim()
-  if (!email && !phone) return 'no_contact'
+function reachOutAtsOf(person) {
+  return (person.outreachTimeline || [])
+    .filter(t => t.type === 'reach_out' && t.occurred_at)
+    .map(t => t.occurred_at)
+}
 
-  if (openClientIds && openClientIds.has(person.id)) {
-    // "Back again" — see the RULES header. openClientIds stays the session-live
-    // truth (the enquiry closing this session drops them to Client as before);
-    // openEnquiry is the hydration/refetch roll-up that says WHICH open
-    // engagement it is and whether it is the only one.
-    const enq = person.openEnquiry
-    if (!enq || enq.otherOpen) return 'Active'
-    const foundedAt = enq.foundedAt ? new Date(enq.foundedAt).getTime() || 0 : 0
-    if (foundedAt <= 0 || nowMs - foundedAt >= THIRTY_D) return 'Active'
-    const reachedSince = (person.outreachTimeline || []).some(t =>
-      t.type === 'reach_out' && (new Date(t.occurred_at || 0).getTime() || 0) >= foundedAt)
-    return reachedSince ? 'Attempting' : 'New'
+// person.enquiryFacts is the mapper's roll-up. A caller that builds a person
+// by hand (older tests, fixtures) may omit it: the timeline still carries the
+// resubmission touchpoints, and a won roll-up is itself a close, so the
+// enquiry date and exit 3 survive without it.
+function factsOf(person) {
+  const base = person.enquiryFacts || {
+    createdAt: person.created || null,
+    importSource: person.importSource ?? 'manual',
+    jobberRequestId: null,
+    jobberJobId: null,
+    resubmissionAts: (person.outreachTimeline || [])
+      .filter(t => t.label === WEBFORM_RESUBMISSION_LABEL && t.occurred_at)
+      .map(t => t.occurred_at),
+    jobberWorkAts: [],
+    networkMoved: false,
+    closedAts: person.wonEngagements?.lastClosedAt ? [person.wonEngagements.lastClosedAt] : [],
   }
+  return { ...base, reachOutAts: reachOutAtsOf(person), isJunk: !!person.isJunk, email: person.email || null, phone: person.phone || null }
+}
+
+/**
+ * The enquiry state for a person — exported for the Inbox row and tests.
+ * A Closed Won this session (the live wonClientIds set) is a close this
+ * session: exit 3 before the refetch lands, same as the Inbox's closedIds.
+ */
+export function enquiryStateOf(person, session = {}) {
+  return enquiryState(factsOf(person), {
+    sentThisSession: SENT_THIS_SESSION.test(person.jobberRef || ''),
+    closedThisSession: !!(
+      (session.closedIds && session.closedIds.has(person.id)) ||
+      (session.wonIds && session.wonIds.has(person.id))
+    ),
+  })
+}
+
+/** ISO of the enquiry date (created, or the latest website resubmission). */
+export function enquiryDateOf(person) {
+  const t = enquiryDateMs(factsOf(person))
+  return t > 0 ? new Date(t).toISOString() : (person.created || null)
+}
+
+/**
+ * "Back again" — a past client's new website enquiry. Keyed on the
+ * resubmission touchpoint (not on any derivation): the person filled in the
+ * form again AND has history with us (came from Jobber, won, or paid).
+ */
+export function isBackAgain(person) {
+  const f = factsOf(person)
+  if ((f.resubmissionAts || []).length === 0) return false
+  return f.importSource !== 'manual'
+    || (person.wonEngagements?.count > 0)
+    || (Number(person.paidAmount) || 0) > 0
+}
+
+export function deriveClientStatus(person, openClientIds, nowMs = Date.now(), wonClientIds = null, session = {}) {
+  const st = enquiryStateOf(person, { ...session, wonIds: wonClientIds })
+  // inbox = open AND reachable. Exit 4 (no email, no phone) keeps a person
+  // out of the worklist — nobody can work someone they cannot reach — while
+  // the auto-close still reads them as open and closes them at 35 days.
+  if (st.inbox) return st.reachedSince ? 'Attempting' : 'New'
+
+  if (!st.reachable) return 'no_contact'
+
+  if (openClientIds && openClientIds.has(person.id)) return 'Active'
 
   if ((wonClientIds && wonClientIds.has(person.id)) || (person.wonEngagements?.count > 0)) return 'Client'
 
   if ((Number(person.paidAmount) || 0) > 0) return 'Past'
-
-  // issue 187 — settled-lost. Reaching here already means not Active (no OPEN
-  // engagement, else openClientIds returned above), not Client (no won), not
-  // Past (no paid). So if the client has ANY engagement on record, every one
-  // of them is a Closed Lost engagement — a decision someone made. Age must
-  // not override that decision by re-deriving them into New/Attempting and
-  // back into the Inbox/badge. Settle them into the Nurturing pool instead.
-  // Two guards keep this closed-UNTIL-something-new, never closed-forever:
-  //   · engagementCount is 0 for a lead that never had an engagement (a raw
-  //     Inbox lead — untouched, still derives New/Attempting by age below).
-  //   · a NEW or reopened engagement is OPEN, so it lands in openClientIds and
-  //     returns 'Active' above, before this line ever runs.
-  // (engagementCount is the hydration roll-up — the all-engagements sweep in
-  // _hub-page.tsx, same durability profile as person.wonEngagements.)
-  if ((Number(person.engagementCount) || 0) > 0) return 'Nurturing'
-
-  const lastReachOut = Math.max(0, ...(person.outreachTimeline || [])
-    .filter(t => t.type === 'reach_out')
-    .map(t => new Date(t.occurred_at || 0).getTime() || 0))
-  if (lastReachOut > 0 && nowMs - lastReachOut < THIRTY_D) return 'Attempting'
-
-  const created = person.created ? new Date(person.created).getTime() : 0
-  if (created > 0 && nowMs - created < THIRTY_D) return 'New'
 
   return 'Nurturing'
 }

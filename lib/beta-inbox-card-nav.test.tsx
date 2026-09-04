@@ -109,14 +109,14 @@ afterEach(() => {
 
 // ── siblings: displayed order, per section ─────────────────────
 describe('InboxScreen — row click hands the section displayed order as siblings', () => {
-  it('a New row passes the New section in DISPLAYED (newest-first) order, not raw array order', async () => {
+  it('a New row passes the New section in DISPLAYED (oldest-first, the Inbox-rule default) order, not raw array order', async () => {
     const onOpen = vi.fn()
     const m = await mount(<InboxScreen people={PEOPLE} engagements={[]} locFilter="all" onOpenPerson={onOpen} />)
     await click(rowByName(m.host, 'Cleo Middle'))
     expect(onOpen).toHaveBeenCalledTimes(1)
     expect(onOpen.mock.calls[0][0].id).toBe('new-cleo')
-    // raw order starts with Bev; the screen (and so the walk) starts with Amy
-    expect(onOpen.mock.calls[0][1]).toEqual(['new-amy', 'new-cleo', 'new-bev'])
+    // raw order is Bev, Amy, Cleo; the screen (and so the walk) is waiting-longest first: Bev 5d → Cleo 3d → Amy 1d
+    expect(onOpen.mock.calls[0][1]).toEqual(['new-bev', 'new-cleo', 'new-amy'])
     await m.unmount()
   })
 
@@ -127,7 +127,7 @@ describe('InboxScreen — row click hands the section displayed order as sibling
     )
     await click(rowByName(m.host, 'Amy Newest'))
     const sibs = onOpen.mock.calls[0][1]
-    expect(sibs).toEqual(['new-amy', 'new-cleo', 'new-bev'])
+    expect(sibs).toEqual(['new-bev', 'new-cleo', 'new-amy'])
     expect(sibs).not.toContain('att-walt')
     expect(sibs).not.toContain('tr-ann')
     await m.unmount()
@@ -150,8 +150,8 @@ describe('InboxScreen — row click hands the section displayed order as sibling
       <InboxScreen people={PEOPLE} transferPeople={TRANSFER_PEOPLE} engagements={[]} locFilter="all" onOpenPerson={onOpen} />
     )
     await click(rowByName(m.host, 'Ann Unrouted'))
-    // transfer queue displayed newest-first: Zoe (1d) → Ann (2d)
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'tr-ann' }), ['tr-zoe', 'tr-ann'])
+    // transfer queue displayed oldest-first too: Ann (2d) → Zoe (1d)
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'tr-ann' }), ['tr-ann', 'tr-zoe'])
     expect(onOpen.mock.calls[0][1]).not.toContain('new-amy')
     await m.unmount()
   })
@@ -168,36 +168,36 @@ describe('HiveShell — mid-walk disposition (capture-at-open, the decided behav
     await click(inboxTab)
     await act(async () => { await Promise.resolve() })
 
-    // open Amy (first of New: Amy 1d → Cleo 3d) — siblings captured here
-    await click(rowByName(m.host, 'Amy Newest'))
+    // open Cleo (first of New, oldest first: Cleo 3d → Amy 1d) — siblings captured here
+    await click(rowByName(m.host, 'Cleo Middle'))
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
     const next = m.host.querySelector('button[aria-label="Next client"]') as HTMLButtonElement
     expect(next, 'chevrons should render for a 2-row section').toBeTruthy()
     expect(next.disabled).toBe(false)
 
-    // dismiss Cleo through her row's ··· menu (the list is mounted under the overlay)
-    const cleoRow = rowByName(m.host, 'Cleo Middle')
-    await click(cleoRow.querySelector('button[aria-label="More"]')!)
+    // dismiss Amy through her row's ··· menu (the list is mounted under the overlay)
+    const amyRow = rowByName(m.host, 'Amy Newest')
+    await click(amyRow.querySelector('button[aria-label="More"]')!)
     const dismiss = [...document.querySelectorAll('[data-bee-row-menu] button')]
       .find(b => (b.textContent || '').trim() === 'Dismiss')!
     expect(dismiss).toBeTruthy()
     await click(dismiss)
     await act(async () => { await Promise.resolve() })
     // the dismissal really soft-removed her row from the list…
-    expect(rowByName(m.host, 'Cleo Middle')).toBeFalsy()
+    expect(rowByName(m.host, 'Amy Newest')).toBeFalsy()
 
-    // …but the captured walk still reaches her: Next opens Cleo's profile
+    // …but the captured walk still reaches her: Next opens Amy's profile
     await click(m.host.querySelector('button[aria-label="Next client"]')!)
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
     expect((globalThis.fetch as any).mock.calls.some(
-      (c: any[]) => String(c[0]).includes('/api/clients/new-cleo/profile'),
+      (c: any[]) => String(c[0]).includes('/api/clients/new-amy/profile'),
     )).toBe(true)
     // renders the lead — the accepted failure mode is "shows a lead no longer
     // in the list", asserted here as real content, not a blank card
     const overlay = m.host.querySelector('.bee-overlay-modal') as HTMLElement
-    expect(overlay?.textContent).toContain('Cleo Middle')
+    expect(overlay?.textContent).toContain('Amy Newest')
     await m.unmount()
   })
 })

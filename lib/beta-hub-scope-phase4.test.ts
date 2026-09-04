@@ -52,6 +52,7 @@ function makeDb(tables: Record<string, any[]>) {
         return b
       },
       eq(col: string, val: any) { rows = rows.filter(r => r[col] === val); return b },
+      is(col: string, val: any) { rows = rows.filter(r => val === null ? r[col] == null : r[col] === val); return b },
       gt(col: string, val: any) { rows = rows.filter(r => Number(r[col]) > Number(val)); return b },
       gte(col: string, val: any) { rows = rows.filter(r => String(r[col]) >= String(val)); return b },
       lt(col: string, val: any) { rows = rows.filter(r => String(r[col]) < String(val)); return b },
@@ -74,7 +75,9 @@ const lead = (o: any = {}) => ({
   id: o.id || `l-${Math.random().toString(36).slice(2, 8)}`,
   name: 'A Lead', email: 'a@b.com', phone: '5615550199',
   created_at: ago(3), is_junk: false, location_id: 'loc_kc',
-  location_uuid: 'kc', paid_amount: 0, ...o,
+  location_uuid: 'kc', paid_amount: 0,
+  // A website / hand-entered lead is an ENQUIRY (Inbox rule): import_source 'manual'.
+  import_source: 'manual', ...o,
 })
 
 describe('Phase 4 — the overview computes REAL numbers', () => {
@@ -82,23 +85,27 @@ describe('Phase 4 — the overview computes REAL numbers', () => {
     const { db } = makeDb({
       leads: [
         lead({ id: 'n1', created_at: ago(2) }),                       // New
-        lead({ id: 'n2', created_at: ago(29) }),                      // New (inside 30d)
-        lead({ id: 'active', created_at: ago(1) }),                   // has an open engagement → Active
-        lead({ id: 'won', created_at: ago(1) }),                      // has a won engagement → Client
-        lead({ id: 'paid', created_at: ago(1), paid_amount: 500 }),   // paid → Past
-        lead({ id: 'nocontact', created_at: ago(1), email: null, phone: null }), // no_contact
+        lead({ id: 'n2', created_at: ago(90) }),                      // New — no clock: 90 days, still New
+        lead({ id: 'active', created_at: ago(1) }),                   // sent to Jobber (request row) → exit 1 → Active
+        lead({ id: 'won', created_at: ago(1) }),                      // closed Won after the enquiry → exit 3 → Client
+        lead({ id: 'paid', created_at: ago(1), paid_amount: 500, import_source: 'jobber_initial' }), // Jobber client → Past
+        lead({ id: 'moved', created_at: ago(1) }),                    // Network move → exit 2
+        lead({ id: 'nocontact', created_at: ago(1), email: null, phone: null }), // exit 4: unreachable → not in the worklist
         lead({ id: 'other', created_at: ago(1), location_id: 'loc_other' }),     // transfer card, not this
         lead({ id: 'junk', created_at: ago(1), is_junk: true }),      // excluded by the query
+        lead({ id: 'jobber', created_at: ago(1), import_source: 'jobber_webhook' }), // not an enquiry
       ],
       touchpoints: [],
-      engagements: [{ client_id: 'won', stage: 'Closed Won' }],
+      engagements: [{ client_id: 'won', stage: 'Closed Won', closed_at: ago(0.5) }],
+      service_requests: [{ lead_id: 'active', created_at: ago(0.5) }],
+      partners: [{ customer_lead_id: 'moved', is_customer: false }],
       invoices: [],
     })
     const ov = await buildAllOverview(db, [{ id: 'e1', client_id: 'active', stage: 'Request' }], NOW)
-    // n1 + n2 only. Every other row is excluded by a REAL rule, not a filter
-    // written twice.
+    // n1 + n2 only. Every other row is excluded by a REAL rule (one of the
+    // four exits, or not an enquiry), not a filter written twice.
     expect(ov.newUncontacted.count).toBe(2)
-    expect(ov.newUncontacted.oldestDays).toBe(29)
+    expect(ov.newUncontacted.oldestDays).toBe(90)
   })
 
   it('an Attempting lead (recent reach-out) is NOT counted as New', async () => {
@@ -176,8 +183,8 @@ describe('Phase 4 — the overview computes REAL numbers', () => {
     // accumulator stays empty, and every Attempting lead counts as New. A
     // WRONG headline number, not a missing one.
     const src = readFileSync('lib/hub-all-overview.ts', 'utf8')
-    expect(src).toContain(`.select('lead_id, kind, occurred_at')`)
-    expect(src).not.toContain(`.select('lead_id, type, occurred_at')`)
+    expect(src).toContain(`read('touchpoints', 'lead_id', 'lead_id, kind, label, occurred_at')`)
+    expect(src).not.toContain(`'lead_id, type, occurred_at'`)
   })
 
   it('a failed derivation input marks the overview truncated rather than inflating', () => {
@@ -186,12 +193,14 @@ describe('Phase 4 — the overview computes REAL numbers', () => {
     expect(src).toContain('|| !derivationInputsComplete,')
   })
 
-  it('never reads the whole leads table — candidates are recency-bounded', async () => {
-    // The regression that would undo the phase: dropping the created_at bound
-    // and paging every lead again.
+  it('never reads the whole leads table — candidates are ENQUIRIES (import_source manual + resubmitters), not every lead', async () => {
+    // The regression that would undo the phase: dropping the bound and paging
+    // every lead again. The Inbox rule (2026-09-03) replaced the 30-day bound
+    // with the enquiry bound: ~800 manual leads, never 20,000 Jobber clients.
     const src = readFileSync('lib/hub-all-overview.ts', 'utf8')
-    expect(src).toContain(`.gte('created_at', since30)`)
+    expect(src).toContain(`.eq('import_source', 'manual')`)
     expect(src).toContain(`.not('is_junk', 'is', true)`)
+    expect(src).not.toContain(`.gte('created_at', since30)`)
   })
 })
 

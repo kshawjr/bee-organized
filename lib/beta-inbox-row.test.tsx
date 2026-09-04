@@ -121,7 +121,7 @@ describe('ghost icon actions', () => {
     await m.unmount()
   })
 
-  it('Send still hands the person to onSendToJobber; hidden when jobber-linked', async () => {
+  it('Send still hands the person to onSendToJobber; offered on jobber-linked people too, hidden only after a send this session', async () => {
     const p = person()
     const onSendToJobber = vi.fn()
     const m = await mount(inbox([p], { onSendToJobber }))
@@ -129,9 +129,14 @@ describe('ghost icon actions', () => {
     expect(onSendToJobber).toHaveBeenCalledWith(p)
     await m.unmount()
 
+    // Kevin (2026-09-03): a linked client's enquiry needs the same door out.
     const linked = await mount(inbox([person({ jobberRef: '12345' })]))
-    expect(byLabel(linked.host, 'Send to Jobber')).toBeFalsy()
+    expect(byLabel(linked.host, 'Send to Jobber')).toBeTruthy()
     await linked.unmount()
+
+    const sent = await mount(inbox([person({ jobberRef: 'REQ-1' })]))
+    expect(byLabel(sent.host, 'Send to Jobber')).toBeFalsy()
+    await sent.unmount()
   })
 
   it('More opens the existing overflow — Junk / Snooze / Dismiss intact (portaled past the card clip)', async () => {

@@ -129,6 +129,7 @@ export async function GET(
     { data: jobs },
     { data: invoices },
     { data: engagementRows },
+    { data: partnerRows },
   ] = await Promise.all([
     supabaseService.from('lead_notes').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('*').eq('lead_id', id).order('occurred_at', { ascending: false }),
@@ -142,8 +143,10 @@ export async function GET(
     // issue 187 follow-up — engagements key on client_id (= the lead id), like
     // the _hub-page.tsx sweep. Fetched so the refetch can ship the same
     // engagementCount / wonEngagements roll-ups full hydration does (parity).
-    // id + created_at feed the "Back again" open_enquiry roll-up (engagement-rollup.ts).
+    // closed_at feeds last_closed_at — exit 3 of the Inbox rule (engagement-rollup.ts).
     supabaseService.from('engagements').select('id, stage, total_paid, total_invoiced, closed_at, created_at').eq('client_id', id),
+    // Inbox rule exit 2 — a Network MOVE (partners row, is_customer false).
+    supabaseService.from('partners').select('customer_lead_id, is_customer').is('deleted_at', null).eq('customer_lead_id', id),
   ])
 
   // Resolve tag lookups
@@ -170,10 +173,9 @@ export async function GET(
     tag_lookups,
     // issue 187 follow-up — same roll-ups the hydration sweep ships, so a
     // Realtime refetch (which REPLACES the person last-wins) keeps a settled-
-    // lost / won client from reverting to a funnel status until a full reload.
-    // The touchpoints (label + engagement_id) are what identify a website
-    // resubmission's engagement — the "Back again" open_enquiry roll-up.
-    ...rollUpEngagements(engagementRows, touchpoints || []),
+    // lost / won client from reverting to an open enquiry until a full reload.
+    ...rollUpEngagements(engagementRows),
+    network_moved: (partnerRows || []).some((p: any) => p.is_customer !== true),
   })
 
   return NextResponse.json({ person }, { status: 200 })

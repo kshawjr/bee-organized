@@ -136,10 +136,10 @@ describe('age/icon alignment — one center line', () => {
     await m.unmount()
   })
 
-  it('Attempting (linked) row: age aligns to the lone ···', async () => {
+  it('Attempting (linked) row: age aligns to Send + ··· (Send is offered on linked people since the Inbox rule; Log call stays New-only)', async () => {
     const m = await mount(inbox([attemptingLinked()]))
     expect(m.host.textContent).toContain('Attempting')
-    expectAligned(m.host, ['More'], ['Log call', 'Send to Jobber'])
+    expectAligned(m.host, ['Send to Jobber', 'More'], ['Log call'])
     await m.unmount()
   })
 

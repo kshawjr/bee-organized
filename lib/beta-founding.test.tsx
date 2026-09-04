@@ -211,15 +211,20 @@ describe('NewClientSheet — decoupled founding (frames B/D → F)', () => {
 
 // ═══ people-world gates stay ═══════════════════════════════
 describe('canSend — surgical unlock, not a blanket removal', () => {
-  it('Inbox still hides people-world Send on Jobber-linked people', async () => {
-    const linked = person({ jobberRef: '12345', created: daysAgo(2) }) // status New → Inbox row
+  it('Inbox offers Send on Jobber-linked people too (Kevin, 2026-09-03: a linked client\'s enquiry needs the same door out)', async () => {
+    const linked = person({ jobberRef: '12345', created: daysAgo(2) }) // an open enquiry → Inbox row
     const { host, unmount } = await mount(
       <InboxScreen people={[linked]} engagements={[]} locFilter="all" />
     )
     expect(host.textContent).toContain('Sarah Mitchell')
     // Ghost icon trigger — icon-only, so the gate reads off aria-label.
-    expect(host.querySelector('button[aria-label="Send to Jobber"]')).toBeFalsy()
+    expect(host.querySelector('button[aria-label="Send to Jobber"]')).toBeTruthy()
+    // A send already made this session (optimistic REQ- ref) is the one thing that hides it.
     await unmount()
+    const sent = person({ jobberRef: 'REQ-1', created: daysAgo(2) })
+    const m2 = await mount(<InboxScreen people={[sent]} engagements={[]} locFilter="all" />)
+    expect(m2.host.querySelector('button[aria-label="Send to Jobber"]')).toBeFalsy()
+    await m2.unmount()
   })
 
   it('Inbox still offers Send on unlinked people (unchanged path)', async () => {
@@ -276,10 +281,13 @@ describe('EngagementPanel — Send to Jobber on founded-not-sent only', () => {
 
 // ═══ surfacing ═════════════════════════════════════════════
 describe('Founded engagement surfacing — Active person, board row, no new status', () => {
-  it('an open engagement makes the person derive Active — the intended founded-not-sent signal', () => {
+  it('founding does not remove an open enquiry (Inbox rule): still New with the engagement open; Active only once exit 1 lands', () => {
     const p = person()
-    expect(deriveClientStatus(p, new Set([p.id]))).toBe('Active')
-    expect(deriveClientStatus(p, new Set())).not.toBe('Active')
+    expect(deriveClientStatus(p, new Set([p.id]))).toBe('New')
+    // Sent to Jobber this session → exit 1 → the open engagement now reads Active.
+    const sent = { ...p, jobberRef: 'REQ-1' }
+    expect(deriveClientStatus(sent, new Set([p.id]))).toBe('Active')
+    expect(deriveClientStatus(sent, new Set())).not.toBe('Active')
   })
 
   it('HiveShell: founding via the sheet puts the engagement on the Board in Request without a reload', async () => {

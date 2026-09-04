@@ -34,10 +34,15 @@
 // clientStatus.js is an untyped pure JS module, so TS infers its
 // `wonClientIds = null` default as `null | undefined`. Typed here at the
 // boundary rather than cast at the call site, so the arguments stay checked.
-import { deriveClientStatus as deriveClientStatusUntyped } from '@/components/hive/shared/clientStatus'
+import {
+  deriveClientStatus as deriveClientStatusUntyped,
+  enquiryDateOf as enquiryDateOfUntyped,
+} from '@/components/hive/shared/clientStatus'
+import { WEBFORM_RESUBMISSION_LABEL } from '@/lib/enquiry-exit'
 const deriveClientStatus = deriveClientStatusUntyped as (
   person: any, openClientIds: Set<string> | null, nowMs?: number, wonClientIds?: Set<string> | null
 ) => string
+const enquiryDateOf = enquiryDateOfUntyped as (person: any) => string | null
 import {
   ESTIMATE_FOLLOWUP_DAYS,
   INVOICE_AGING_DAYS,
@@ -122,117 +127,109 @@ export async function buildAllOverview(
   const openIds = new Set(openEngagements.map((e: any) => e.client_id).filter(Boolean))
 
   // ── RED · new leads not contacted ────────────────────────────────────────
-  // deriveClientStatus returns 'New' only for a lead created <30d ago, so the
-  // candidate set is bounded by recency. Everything the derivation reads is
-  // fetched for those candidates ONLY: the lead row (email/phone/paid_amount/
-  // created_at), their reach-out touchpoints, and whether they have ever won.
-  const { rows: recentLeads, truncated: leadsTrunc } = await pageAll(
-    db, 'leads',
-    (q: any) => q.not('is_junk', 'is', true).gte('created_at', since30),
+  // Inbox rule (2026-09-03): the candidates are ENQUIRIES — website / hand-
+  // entered leads (import_source 'manual') plus any lead that filled in the
+  // website form again — with NO age bound: an enquiry stays New until an
+  // exit, however old. The resubmission touchpoints are read first (a few
+  // dozen rows) so the Jobber-client resubmitters can be pulled by id.
+  let leadsTrunc = false
+  const { rows: resubTouches, truncated: resubTrunc } = await pageAll(
+    db, 'touchpoints',
+    (q: any) => q.eq('kind', 'system').eq('label', WEBFORM_RESUBMISSION_LABEL),
     CANDIDATE_MAX,
   )
+  if (resubTrunc) leadsTrunc = true
+  const { rows: manualLeads, truncated: manualTrunc } = await pageAll(
+    db, 'leads',
+    (q: any) => q.not('is_junk', 'is', true).is('archived_at', null).eq('import_source', 'manual'),
+    CANDIDATE_MAX,
+  )
+  if (manualTrunc) leadsTrunc = true
+  const manualIds = new Set(manualLeads.map((l: any) => l.id))
+  const resubOnlyIds = Array.from(new Set(resubTouches.map((t: any) => t.lead_id).filter((id: string) => id && !manualIds.has(id))))
+  const resubLeads: any[] = []
+  for (let i = 0; i < resubOnlyIds.length; i += 200) {
+    const { data, error } = await db.from('leads').select('*').not('is_junk', 'is', true).is('archived_at', null).in('id', resubOnlyIds.slice(i, i + 200))
+    if (error) { console.error(`[all-overview] resubmitter leads read failed: ${error.message}`); leadsTrunc = true; break }
+    resubLeads.push(...(data || []))
+  }
   // loc_other rows are the transfer card, not this one — same exclusion the
   // scoped Home applies.
-  const candidates = recentLeads.filter((l: any) => l.location_id !== 'loc_other')
+  const candidates = [...manualLeads, ...resubLeads].filter((l: any) => l.location_id !== 'loc_other')
   const candidateIds = candidates.map((l: any) => l.id)
 
-  let touchByLead: Record<string, any[]> = {}
-  let wonIds = new Set<string>()
-  // issue 187 — client_ids with ANY engagement on record (open or closed).
-  // A fresh Closed-Lost lead (<30d) is a New-count candidate by age, but
-  // deriveClientStatus settles it to Nurturing when engagementCount > 0, so
-  // this lookup keeps it OUT of the headline just like the won lookup does.
-  let engagedIds = new Set<string>()
-  // A FAILED read here does not make the count zero — it makes it WRONG in a
-  // specific direction. With no touchpoints every Attempting lead derives as
-  // New, with no won-lookup every won client does too, and with no engagement
-  // lookup every settled-lost lead does too — so the headline number silently
-  // inflates. All three mark the overview truncated so the page says so rather
-  // than presenting an inflated count as fact.
+  // Everything the derivation reads — the SAME inputs the hub page ships on a
+  // Person, so this count agrees with every location's Inbox: touchpoints
+  // (reach-outs + resubmissions), the three Jobber child tables (exit 1),
+  // partners (exit 2), and every engagement's stage + closed_at (exit 3 and
+  // the won read). A FAILED read does not make the count zero — it makes it
+  // WRONG in a specific direction (a missing exit reads as an open enquiry,
+  // so the headline inflates) — so each failure marks the overview truncated.
+  const touchByLead: Record<string, any[]> = {}
+  const srByLead: Record<string, any[]> = {}
+  const quotesByLead: Record<string, any[]> = {}
+  const jobsByLead: Record<string, any[]> = {}
+  const engByLead: Record<string, any[]> = {}
+  const networkMoved = new Set<string>()
   let derivationInputsComplete = true
   if (candidateIds.length > 0) {
-    const [touchRes, wonRes, engagedRes] = await Promise.all([
-      (async () => {
-        const acc: any[] = []
-        for (let i = 0; i < candidateIds.length; i += 200) {
-          // ⚠️ `kind`, NOT `type`. The COLUMN is touchpoints.kind; the mapper
-          // renames it to `type` on the Person-shaped timeline entry, and
-          // deriveClientStatus reads that renamed field. Selecting `type` here
-          // errors ("column touchpoints.type does not exist"), the accumulator
-          // stays empty, and every Attempting lead counts as New — a wrong
-          // headline number, not a missing one. Caught by
-          // lib/beta-hub-scope-phase4.test.ts.
-          const { data, error } = await db.from('touchpoints')
-            .select('lead_id, kind, occurred_at')
-            .in('lead_id', candidateIds.slice(i, i + 200))
-          if (error) {
-            console.error(`[all-overview] touchpoints read failed: ${error.message} — new-lead count would OVER-count; marking truncated`)
-            derivationInputsComplete = false
-            break
-          }
-          acc.push(...(data || []))
+    const read = async (table: string, col: string, select: string, extra?: (q: any) => any) => {
+      const acc: any[] = []
+      for (let i = 0; i < candidateIds.length; i += 200) {
+        let q = db.from(table).select(select).in(col, candidateIds.slice(i, i + 200))
+        if (extra) q = extra(q)
+        const { data, error } = await q
+        if (error) {
+          console.error(`[all-overview] ${table} read failed: ${error.message} — new-lead count would OVER-count; marking truncated`)
+          derivationInputsComplete = false
+          break
         }
-        return acc
-      })(),
-      (async () => {
-        const acc: any[] = []
-        for (let i = 0; i < candidateIds.length; i += 200) {
-          const { data, error } = await db.from('engagements')
-            .select('client_id')
-            .eq('stage', 'Closed Won')
-            .in('client_id', candidateIds.slice(i, i + 200))
-          if (error) {
-            console.error(`[all-overview] won lookup failed: ${error.message} — new-lead count would OVER-count; marking truncated`)
-            derivationInputsComplete = false
-            break
-          }
-          acc.push(...(data || []))
-        }
-        return acc
-      })(),
-      (async () => {
-        const acc: any[] = []
-        for (let i = 0; i < candidateIds.length; i += 200) {
-          // Any stage — presence, not outcome. issue 187: a client with ≥1
-          // engagement, none open, none won, no paid history is all-Closed-
-          // Lost and must NOT count as a new lead awaiting contact.
-          const { data, error } = await db.from('engagements')
-            .select('client_id')
-            .in('client_id', candidateIds.slice(i, i + 200))
-          if (error) {
-            console.error(`[all-overview] engagement lookup failed: ${error.message} — new-lead count would OVER-count; marking truncated`)
-            derivationInputsComplete = false
-            break
-          }
-          acc.push(...(data || []))
-        }
-        return acc
-      })(),
+        acc.push(...(data || []))
+      }
+      return acc
+    }
+    const [touchRes, srRes, quoteRes, jobRes, partnerRes, engRes] = await Promise.all([
+      read('touchpoints', 'lead_id', 'lead_id, kind, label, occurred_at'),
+      read('service_requests', 'lead_id', 'lead_id, requested_at, created_at'),
+      read('quotes', 'lead_id', 'lead_id, created_at'),
+      read('jobs', 'lead_id', 'lead_id, created_at'),
+      read('partners', 'customer_lead_id', 'customer_lead_id, is_customer', (q: any) => q.is('deleted_at', null)),
+      read('engagements', 'client_id', 'client_id, stage, closed_at, total_paid, total_invoiced'),
     ])
     for (const t of touchRes) (touchByLead[t.lead_id] ||= []).push(t)
-    wonIds = new Set(wonRes.map((e: any) => e.client_id))
-    engagedIds = new Set(engagedRes.map((e: any) => e.client_id))
+    for (const s of srRes) (srByLead[s.lead_id] ||= []).push(s)
+    for (const q of quoteRes) (quotesByLead[q.lead_id] ||= []).push(q)
+    for (const j of jobRes) (jobsByLead[j.lead_id] ||= []).push(j)
+    for (const p of partnerRes) if (p.is_customer !== true && p.customer_lead_id) networkMoved.add(String(p.customer_lead_id))
+    for (const e of engRes) (engByLead[e.client_id] ||= []).push(e)
   }
 
   const { mapLeadToPerson } = await import('@/lib/people-mapper')
+  const { rollUpEngagements } = await import('@/lib/engagement-rollup')
+  const wonIds = new Set<string>()
   let newCount = 0
   let newOldest = 0
   for (const row of candidates) {
     // Through the REAL mapper and the REAL derivation — not a re-implementation
-    // of "what New means". touchpoints are the only child rows the 'New' branch
-    // reads (outreachTimeline), so they are the only ones fetched.
+    // of "what New means". Same joined shape the hub page builds.
+    const rollup = rollUpEngagements(engByLead[row.id] || [])
+    if (rollup.won_summary) wonIds.add(row.id)
     const person = mapLeadToPerson(row, {
       touchpoints: touchByLead[row.id] || [],
-      // issue 187 — presence flips a settled-lost lead to Nurturing in the
-      // derivation, so it drops out of the New count (matches Inbox + badge).
-      engagement_count: engagedIds.has(row.id) ? 1 : 0,
+      service_requests: srByLead[row.id] || [],
+      quotes: quotesByLead[row.id] || [],
+      jobs: jobsByLead[row.id] || [],
+      won_summary: rollup.won_summary,
+      engagement_count: rollup.engagement_count,
+      last_closed_at: rollup.last_closed_at,
+      network_moved: networkMoved.has(row.id),
     })
     if (person.isJunk) continue
     if (person.snoozeUntil && new Date(person.snoozeUntil).getTime() > nowMs) continue
     if (person.inboxDismissedAt) continue
     if (deriveClientStatus(person, openIds, nowMs, wonIds) !== 'New') continue
     newCount++
-    const age = daysSince(row.created_at, nowMs)
+    const age = daysSince(enquiryDateOf(person) || row.created_at, nowMs)
     if (age > newOldest) newOldest = age
   }
 
