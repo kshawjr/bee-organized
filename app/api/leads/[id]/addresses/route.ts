@@ -158,6 +158,12 @@ export async function POST(
         locationSlug: existing.location_id,
         jobberClientId: String(existing.jobber_client_id),
         target: { street, city, state, zip },
+        // The client's BILLING address must not follow an added address.
+        // Adding a second home, an office or a storage unit does not change
+        // where their invoices go — and Jobber would give no sign it had.
+        // (A move keeps the old behaviour; a move is now add-then-retire,
+        // and the retire step touches Jobber not at all.)
+        updateBilling: false,
       })
       if (res.created && res.propertyId) {
         jobberPropertyId = res.propertyId
@@ -184,7 +190,7 @@ export async function POST(
       `Address added → ${entry.display}`,
       [
         addressLabelText(v.label, v.note) ? `labelled ${addressLabelText(v.label, v.note)}` : null,
-        jobberOutcome === 'created'  ? `new Jobber property ${jobberPropertyId} created` : null,
+        jobberOutcome === 'created'  ? `new Jobber property ${jobberPropertyId} created; billing address unchanged` : null,
         jobberOutcome === 'failed'   ? 'Jobber property NOT created — sync failed, address saved here only' : null,
         jobberOutcome === 'not_linked' ? 'not connected to Jobber — saved here only' : null,
       ].filter(Boolean) as string[])

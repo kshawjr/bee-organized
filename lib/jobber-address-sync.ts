@@ -280,8 +280,21 @@ export async function createPropertyForMove(opts: {
   locationSlug: string
   jobberClientId: string
   target: AddressTarget
+  // Should the client's Jobber BILLING address follow this address?
+  //
+  // It did unconditionally when a MOVE was the only caller, and that was
+  // right: someone who moves house takes their invoices with them. It is
+  // WRONG for an ADD. A client keeping two live homes, or gaining an office
+  // or a storage unit, has not changed where their bills go — silently
+  // re-pointing billing to the second address would send invoices to the
+  // wrong place, and Jobber gives no sign it happened.
+  //
+  // Defaults TRUE so the documented move semantics are unchanged for any
+  // caller that wants them; the add path passes false.
+  updateBilling?: boolean
 }): Promise<MovePropertyResult> {
   const { leadId, locationSlug, jobberClientId, target } = opts
+  const updateBilling = opts.updateBilling !== false
   let billing: AddressWritebackOutcome = 'unchanged'
 
   const fail = async (error: string): Promise<MovePropertyResult> => {
@@ -302,11 +315,17 @@ export async function createPropertyForMove(opts: {
     const clientGlobalId = globalId('Client', jobberClientId)
 
     // ── billing follows the person (never fatal to the property step) ──
-    const bres = await jobberGraphQL(locationSlug, GET_BILLING_QUERY, { clientId: clientGlobalId })
-    if (bres.errors?.length || !bres.data?.client) {
+    // Skipped entirely on an ADD: not fetched, not diffed, not written, so
+    // there is no path by which adding an address can move the invoices.
+    const bres = updateBilling
+      ? await jobberGraphQL(locationSlug, GET_BILLING_QUERY, { clientId: clientGlobalId })
+      : null
+    if (!updateBilling) {
+      billing = 'unchanged'
+    } else if (bres!.errors?.length || !bres!.data?.client) {
       billing = 'failed'
     } else {
-      const plan = buildBillingAddressInput(target, bres.data.client.billingAddress)
+      const plan = buildBillingAddressInput(target, bres!.data.client.billingAddress)
       billing = resolveAddressWriteback(plan.plan, false)
       if (plan.input) {
         const bedit = await jobberMutation(locationSlug, CLIENT_ADDRESS_EDIT_MUTATION, {

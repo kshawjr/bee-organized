@@ -212,6 +212,21 @@ describe('adding a second address', () => {
   it('the route refuses an address the client already has', () => {
     expect(addrSrc).toContain('address_already_on_client')
   })
+
+  it('adding does NOT move the client\u2019s Jobber BILLING address', () => {
+    // createPropertyForMove updates billing by default — right for a move
+    // (invoices follow the person), wrong for an add: a second home, an
+    // office or a storage unit does not change where the bills go, and
+    // Jobber gives no sign it happened.
+    expect(addrSrc).toContain('updateBilling: false')
+    const syncSrc = readFileSync('lib/jobber-address-sync.ts', 'utf8')
+    // and the skip is total — not fetched, not diffed, not written
+    expect(syncSrc).toContain('const updateBilling = opts.updateBilling !== false')
+    expect(syncSrc).toMatch(/const bres = updateBilling\s*\n\s*\? await jobberGraphQL/)
+    expect(syncSrc).toContain("if (!updateBilling) {")
+    // default stays true, so the documented move semantics are unchanged
+    expect(syncSrc).toContain('opts.updateBilling !== false')
+  })
 })
 
 // ═══ 4) retiring ═══════════════════════════════════════════════
