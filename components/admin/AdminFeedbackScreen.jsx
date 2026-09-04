@@ -666,7 +666,18 @@ function AdminFeedbackDetailModal({
       setResult(updated.reply_email ?? { sent: false, skipped: 'no_reply_written' })
       onSaved(updated)
     } catch (e) {
-      setError('Could not save — please try again.')
+      // A REPORT THAT IS NO LONGER THERE. An owner may now delete their own
+      // entry (DELETE /api/feedback/[id]), and the row really goes — so a save
+      // on one that has been withdrawn mid-triage answers 404, not a hiccup.
+      // "Please try again" would be a lie: trying again cannot work, and the
+      // words typed in the reply box are about something that no longer exists.
+      // Say so, and say the reply was not sent, because that is the question the
+      // person at this screen is about to ask.
+      if (String(e?.message) === 'not_found') {
+        setError('This report is gone — the person who filed it deleted it. Nothing was saved and no reply was sent.')
+      } else {
+        setError('Could not save — please try again.')
+      }
     } finally {
       setSaving(false)
     }

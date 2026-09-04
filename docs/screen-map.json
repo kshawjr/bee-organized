@@ -2326,8 +2326,8 @@
         "logging an internal issue"
       ],
       "lines": [
-        1145,
-        1660
+        1156,
+        1671
       ],
       "note": "Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
     },
@@ -3054,8 +3054,8 @@
         "my requests"
       ],
       "lines": [
-        472,
-        705
+        746,
+        1005
       ],
       "note": "Mounted only by components/help/HelpScreen.jsx (the My requests tab). The reply email links to /help?tab=requests; the legacy /?feedback=1 is redirected there by BeeHub."
     },

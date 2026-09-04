@@ -38,8 +38,27 @@
 // other direction. Done stays a tab — the evidence still matters, it just
 // should not be the first thing in the way.
 //
-// READS ONLY. The one write in the whole file is POST /api/feedback/seen, which
-// stamps "I have seen this reply" and exists solely to turn the banner off.
+// THE WRITES IT HAS. It was read-only apart from POST /api/feedback/seen (the
+// stamp that turns the banner off) until entry ede746a9 — "I submitted a couple
+// because I thought they were bugs, but after taking a minute or two navigating
+// around the CRM, I was just looking in the wrong place." There was no way to
+// take one back. Now there is, and it is the person's OWN report only:
+//
+//   · EDIT (title + description) until the team replies. The control is on the
+//     card, it is not there on anyone else's card, and PATCH /api/feedback/[id]
+//     refuses the same cases the screen hides — the button is the convenience,
+//     the route is the rule.
+//   · DELETE, any time, and it is a real delete: the entry and its whole thread
+//     are gone, not flagged. So the confirmation says so in those words, and
+//     names the screenshots when there are screenshots to lose.
+//
+// WHAT AN OWNER SEES WHEN EDIT LOCKS: the Edit control is simply not there any
+// more, and "Reply to the team" is — the two swap, because they are decided by
+// the same test (lib/feedback-edit). Nothing announces the lock, on purpose: a
+// permanent "you can no longer edit this" line on fifty-eight answered reports
+// is a scold nobody needed, and the thing to do instead is right there. The one
+// place it is spelled out is the stale-tab case, where the route answers 409 and
+// the open form says why in a sentence.
 'use client'
 
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react'
@@ -58,6 +77,11 @@ import { isReplyUnseen, hasFeedbackReply } from '@/lib/feedback-queues'
 // merge, and the "may THIS viewer write back?" rule. One home for both — the
 // triage modal renders the same thread from the same builder.
 import { buildFeedbackThread, ownerCanReply } from '@/lib/feedback-replies'
+// "May I still change this, and may I take it back?" — one home for both, so
+// the button and the route cannot disagree about where the line is. Editing is
+// open until the team replies and locks exactly when the reply box opens; a
+// delete has no such gate (lib/feedback-edit).
+import { ownerCanEdit, ownerCanDelete } from '@/lib/feedback-edit'
 
 // ── THE FOUR PLAIN WORDS ──────────────────────────────────────
 // Six database statuses, four words an owner would actually use. The mapping
@@ -320,9 +344,200 @@ function ReplyComposer({ item, onReplied }) {
   )
 }
 
+// ── changing your own words ───────────────────────────────────
+// Only ever rendered for the person who filed the report, and only while the
+// team has not replied (ownerCanEdit). Title and description, which are the
+// two things Ankur's entry is about — not the type, because reclassifying is
+// triage's job and the triage route already refuses it to owners, and a second
+// door with different rules on the same field is how the two drift apart.
+//
+// The form replaces the card body rather than opening a modal: the thing being
+// changed should stay where it lives, and this screen has never had a modal.
+function EditForm({ item, onCancel, onSaved }) {
+  const [title, setTitle] = useState(String(item.title || ''))
+  const [description, setDescription] = useState(String(item.description || ''))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const changed =
+    title.trim() !== String(item.title || '').trim() ||
+    description.trim() !== String(item.description || '').trim()
+  const valid = title.trim().length > 0 && description.trim().length > 0
+
+  const save = async () => {
+    if (!valid || !changed || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/feedback/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim(), description: description.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        // THE STALE-TAB CASE, and the one place the lock is spelled out. A reply
+        // landed while this form was open; retrying will never work, so the
+        // words say what to do instead of "please try again".
+        if (res.status === 409 || err.error === 'edit_locked_after_reply') {
+          throw new Error('The team replied while you were editing, so this report is locked now. Your original is safe — reply to them instead and tell them what changed.')
+        }
+        throw new Error('Couldn’t save your changes. Please try again.')
+      }
+      const row = await res.json()
+      onSaved(row)
+    } catch (e) {
+      // The typing is still in the boxes — the one failure that must not lose it.
+      setError(e?.message || 'Couldn’t save your changes. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field = {
+    width: '100%', padding: '10px 12px', border: T.border.thin,
+    borderRadius: '8px', fontSize: '15px', fontFamily: 'inherit',
+    color: T.ink.primary, background: T.surface.raised, boxSizing: 'border-box',
+    outline: 'none', lineHeight: 1.5,
+  }
+  const label = { display: 'block', fontSize: '12px', fontWeight: 700, color: T.ink.primary, marginBottom: '5px' }
+
+  return (
+    <div style={{ marginTop: '4px', marginBottom: '11px' }}>
+      <label style={label} htmlFor={`fb-title-${item.id}`}>What’s it about</label>
+      <input
+        id={`fb-title-${item.id}`}
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        maxLength={100}
+        style={field}
+      />
+      <label style={{ ...label, marginTop: '11px' }} htmlFor={`fb-desc-${item.id}`}>What happened</label>
+      <textarea
+        id={`fb-desc-${item.id}`}
+        value={description}
+        onChange={e => setDescription(e.target.value)}
+        rows={5}
+        maxLength={2000}
+        style={{ ...field, resize: 'vertical' }}
+      />
+      {error && <p style={{ fontSize: '13px', color: T.state.danger.strong, margin: '8px 0 0', lineHeight: 1.5 }}>{error}</p>}
+      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !valid || !changed}
+          style={{
+            padding: '8px 16px', background: T.ink.primary, color: T.ink.inverse,
+            border: 'none', borderRadius: T.radius.control, fontSize: '13.5px',
+            fontFamily: 'inherit', fontWeight: 600,
+            cursor: (saving || !valid || !changed) ? 'default' : 'pointer',
+            opacity: (saving || !valid || !changed) ? 0.6 : 1,
+          }}
+        >
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            padding: '8px 12px', background: 'transparent', border: 'none',
+            color: T.ink.muted, fontFamily: 'inherit', fontSize: '13.5px',
+            fontWeight: 500, cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── taking it back ────────────────────────────────────────────
+// DELETING IS IRREVERSIBLE AND THE CONFIRMATION SAYS THE IRREVERSIBLE PART, not
+// "are you sure?". Three facts, in the order they matter to the person holding
+// the mouse: it is gone for good, we cannot get it back, and — only when there
+// are any — the screenshots go with it. If we have already replied it says that
+// too, because deleting an answered report also deletes the answer, and that is
+// not obvious from a button.
+//
+// Inline, not a browser confirm(): a native dialog would say "localhost says"
+// and could not name the screenshots.
+export function deleteConfirmSentence(item) {
+  const atts = Array.isArray(item?.attachments) ? item.attachments.length : 0
+  const bits = ['This deletes your report for good — we can’t get it back']
+  if (atts > 0) bits.push(atts === 1 ? 'and the file you sent goes with it' : `and the ${atts} files you sent go with them`)
+  if (hasFeedbackReply(item) || (Array.isArray(item?.replies) && item.replies.some(r => r?.author_role === 'team'))) {
+    bits.push('along with what the team wrote back')
+  }
+  return `${bits.join(', ')}.`
+}
+
+function DeleteConfirm({ item, onCancel, onDeleted }) {
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState(null)
+
+  const go = async () => {
+    if (deleting) return
+    setDeleting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/feedback/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      onDeleted(item.id)
+    } catch {
+      setError('Couldn’t delete it. Please try again.')
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div style={{
+      marginTop: '11px', background: T.state.danger.soft, borderRadius: '9px',
+      padding: '13px 15px',
+    }}>
+      <p style={{ margin: 0, fontSize: '14px', color: T.state.danger.strong, lineHeight: 1.55, fontWeight: 600 }}>
+        {deleteConfirmSentence(item)}
+      </p>
+      {error && <p style={{ fontSize: '13px', color: T.state.danger.strong, margin: '7px 0 0' }}>{error}</p>}
+      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+        <button
+          type="button"
+          onClick={go}
+          disabled={deleting}
+          style={{
+            padding: '8px 16px', background: T.state.danger.strong, color: T.ink.inverse,
+            border: 'none', borderRadius: T.radius.control, fontSize: '13.5px',
+            fontFamily: 'inherit', fontWeight: 600,
+            cursor: deleting ? 'default' : 'pointer', opacity: deleting ? 0.6 : 1,
+          }}
+        >
+          {deleting ? 'Deleting…' : 'Yes, delete it'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            padding: '8px 12px', background: 'transparent', border: 'none',
+            color: T.ink.secondary, fontFamily: 'inherit', fontSize: '13.5px',
+            fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          Keep it
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── one card ──────────────────────────────────────────────────
-function ItemCard({ item, myId, expanded, onToggle, onReplied }) {
+function ItemCard({ item, myId, expanded, onToggle, onReplied, onEdited, onDeleted }) {
+  // 'edit' and 'delete' are mutually exclusive on a card — you are either
+  // changing it or taking it back, never both mid-gesture.
+  const [mode, setMode] = useState(null)
   const mine = !!myId && item.user_id === myId
+  const canEdit = ownerCanEdit(item, myId)
+  const canDelete = ownerCanDelete(item, myId)
   const atts = Array.isArray(item.attachments) ? item.attachments : []
   const thread = buildFeedbackThread(item)
   const replied = thread.length > 0 || hasReply(item)
@@ -362,7 +577,7 @@ function ItemCard({ item, myId, expanded, onToggle, onReplied }) {
             Reported by {item.submitter_name}
           </span>
         )}
-        {item.description && (
+        {item.description && mode !== 'edit' && (
           <span style={{
             display: '-webkit-box', WebkitBoxOrient: 'vertical',
             WebkitLineClamp: expanded ? 'unset' : 2,
@@ -374,6 +589,18 @@ function ItemCard({ item, myId, expanded, onToggle, onReplied }) {
           </span>
         )}
       </button>
+
+      {/* The form lives OUTSIDE the header button — a textarea inside a button
+          is not a thing, and clicking into it would collapse the card. */}
+      {mode === 'edit' && (
+        <div style={{ padding: '0 18px' }}>
+          <EditForm
+            item={item}
+            onCancel={() => setMode(null)}
+            onSaved={(row) => { setMode(null); onEdited(row) }}
+          />
+        </div>
+      )}
 
       <div style={{ padding: '0 18px 16px' }}>
         {replied
@@ -412,9 +639,56 @@ function ItemCard({ item, myId, expanded, onToggle, onReplied }) {
             )}
           </div>
         )}
+
+        {/* YOUR OWN REPORT, YOUR OWN CONTROLS — and only yours. A colleague's
+            card never shows either of these, and neither does a card the team
+            has answered (Edit; Delete has no such gate). They sit at the FOOT
+            of the card, quiet and small: the reason someone opens this screen
+            is to read what happened to their report, not to manage it. */}
+        {(canEdit || canDelete) && mode === null && (
+          <div style={{ display: 'flex', gap: '14px', marginTop: '13px' }}>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setMode('edit')}
+                style={quietAction(T.ink.secondary)}
+              >
+                Edit
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => setMode('delete')}
+                style={quietAction(T.ink.muted)}
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
+
+        {mode === 'delete' && (
+          <DeleteConfirm
+            item={item}
+            onCancel={() => setMode(null)}
+            onDeleted={onDeleted}
+          />
+        )}
       </div>
     </div>
   )
+}
+
+// Both foot controls are text, not buttons-that-look-like-buttons. A filled
+// Delete button on every card would make the screen look like a management
+// console, which is the thing this screen was split off from the triage one to
+// stop being.
+function quietAction(color) {
+  return {
+    padding: 0, background: 'none', border: 'none', color,
+    fontFamily: 'inherit', fontSize: '13.5px', fontWeight: 600, cursor: 'pointer',
+  }
 }
 
 // ── empty states ──────────────────────────────────────────────
@@ -593,6 +867,30 @@ export default function OwnerFeedbackScreen({
       : i))
   }, [])
 
+  // An edit lands in place too, and for the same reason. The saved row is the
+  // route's own copy, so the card renders what was actually stored rather than
+  // what was typed — if the server trimmed it, the card shows the trim.
+  const applyEdit = useCallback((row) => {
+    if (!row?.id) return
+    setItems(prev => prev.map(i => (i.id === row.id ? { ...i, ...row } : i)))
+  }, [])
+
+  // A delete drops the card and nothing else moves: no refetch, no scroll jump,
+  // no "deleted" toast sitting where the report was. The counts on the tabs are
+  // derived from `items`, so they fall by one on their own — and the unread
+  // snapshot is pruned too, or the banner would go on naming a report that is
+  // no longer on the screen to click.
+  const applyDelete = useCallback((itemId) => {
+    setItems(prev => prev.filter(i => i.id !== itemId))
+    setUnreadIds(prev => prev.filter(id => id !== itemId))
+    setExpanded(prev => {
+      if (!prev.has(itemId)) return prev
+      const next = new Set(prev)
+      next.delete(itemId)
+      return next
+    })
+  }, [])
+
   const subtitle = counts.total === 0
     ? 'Nothing sent in yet'
     : `${counts.open} thing${counts.open === 1 ? '' : 's'} · ${counts.answered} answered · ${counts.waiting} still with the team`
@@ -695,6 +993,8 @@ export default function OwnerFeedbackScreen({
               expanded={expanded.has(it.id)}
               onToggle={() => toggle(it.id)}
               onReplied={appendReply}
+              onEdited={applyEdit}
+              onDeleted={applyDelete}
             />
           ))}
         </div>

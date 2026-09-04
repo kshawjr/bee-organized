@@ -386,11 +386,14 @@ describe('no other owner-facing count reads feedback rows', () => {
 
   it('the owner screen computes every count from the scoped GET, not a second read', () => {
     const owner = read('components/feedback/OwnerFeedbackScreen.jsx')
-    // Its only fetches are the scoped list and two writes — the read-receipt
-    // and the submitter's reply into the thread. Neither write reads rows, so
-    // the counts still have exactly one source.
+    // Its only fetches are the scoped list and FOUR writes — the read-receipt,
+    // the submitter's reply into the thread, and the owner's own edit and
+    // delete of their own report. Not one of the four reads rows back into the
+    // list, so the counts still have exactly one source: an edit merges the
+    // route's echo of the row it just wrote, and a delete drops a row it
+    // already had. Neither refetches, and there is still no second read.
     const fetches = owner.match(/fetch\(\s*[`'"][^`'"]+/g) || []
-    for (const f of fetches) expect(f).toMatch(/\/api\/admin\/feedback|\/api\/feedback\/seen|\/api\/feedback\/\$\{item\.id\}\/replies/)
+    for (const f of fetches) expect(f).toMatch(/\/api\/admin\/feedback|\/api\/feedback\/seen|\/api\/feedback\/\$\{item\.id\}/)
     // Counts are derived from `items` — the response — not fetched separately.
     expect(owner).toMatch(/const counts = useMemo\(\(\) => \{/)
     expect(owner).not.toContain('summarizeFeedbackQueues')
