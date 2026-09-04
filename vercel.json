@@ -8,7 +8,8 @@
     { "path": "/api/cron/failure-alerts", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/zoho-recipient-topup", "schedule": "0 5 * * *" },
     { "path": "/api/cron/sync-log-purge", "schedule": "0 8 * * *" },
-    { "path": "/api/cron/gmail-sync", "schedule": "*/5 * * * *" }
+    { "path": "/api/cron/gmail-sync", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/auto-close", "schedule": "0 7 * * *" }
   ],
   "functions": {
     "app/api/import/jobber-clients/route.ts": {
