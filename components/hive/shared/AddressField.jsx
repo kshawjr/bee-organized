@@ -285,15 +285,23 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     )
   }
 
-  // Read-only history: the addresses they moved away from, newest last.
-  // Never editable from the card, absent entirely in the common
-  // one-address case — the screen with one address is unchanged.
+  // The client's OTHER addresses. Read-only here, never editable from the
+  // card, absent entirely in the common one-address case — the screen with
+  // one address is unchanged.
+  //
+  // These arrive via the move flow, so the column is named former_addresses
+  // and the first wording was "Previously: … · moved Sep 2026". That reads
+  // as history, and history is exactly what it often isn't: Jobber keeps
+  // every property live and bookable, so a client who moves can have work
+  // running at both houses (Heather Popelka, North Pittsburgh, with an open
+  // quote at the address filed as former). "Other address" is true either
+  // way — moved out, or keeping both — and the "moved" date goes with it,
+  // since it dated a departure that may not have happened.
   const formerBlock = Array.isArray(formerAddresses) && formerAddresses.length > 0 ? (
     <div data-meta-row="former-addresses" style={{ paddingLeft: '20px' }}>
       {formerAddresses.map((f, i) => (
         <p key={`${f.display}-${i}`} style={{ fontSize: '11.5px', color: T.ink.quiet, margin: '1px 0 0', lineHeight: 1.5 }}>
-          Previously: <span title={f.display}>{f.display}</span>
-          {f.moved_at ? ` · moved ${new Date(f.moved_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : ''}
+          Other address: <span title={f.display}>{f.display}</span>
         </p>
       ))}
     </div>

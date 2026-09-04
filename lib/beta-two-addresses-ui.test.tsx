@@ -132,19 +132,25 @@ describe('the question appears exactly when it matters', () => {
 })
 
 describe('the card with history, and without', () => {
-  it('former addresses render as read-only history', async () => {
+  it('the second address renders read-only, as "Other address" — not as history', async () => {
     stubFetch()
     const { host, unmount } = await mountField({
       formerAddresses: [{ display: '10 Old Rd, Fairway, KS, 66205', moved_at: '2026-08-30T00:00:00Z' }],
     })
-    expect(host.textContent).toContain('Previously: 10 Old Rd, Fairway, KS, 66205')
+    // Wording deliberately changed with the address picker: a client who
+    // moved can still have live work at the old house (Jobber keeps both
+    // properties bookable), so 'Previously' — and its 'moved' date — read
+    // as history the record cannot actually vouch for.
+    expect(host.textContent).toContain('Other address: 10 Old Rd, Fairway, KS, 66205')
+    expect(host.textContent).not.toContain('Previously:')
+    expect(host.textContent).not.toContain('moved Aug')
     await unmount()
   })
 
   it('one address renders exactly as before — no history block, no question machinery visible', async () => {
     stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: true })
-    expect(host.textContent).not.toContain('Previously:')
+    expect(host.textContent).not.toContain('Other address:')
     expect(host.textContent).not.toContain('Did they move?')
     await unmount()
   })

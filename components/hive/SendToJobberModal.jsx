@@ -37,6 +37,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { buildAddressChoices, CURRENT_CHOICE_KEY } from '@/lib/address-choice'
 import OverlayShell from './OverlayShell'
 import useIsMobile from './shared/useIsMobile'
 import { inp, lbl } from './shared/formKit'
@@ -140,6 +141,33 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
 
+  // Which address this send is for. A client who has moved keeps the address
+  // they moved from as a live, bookable property in Jobber — work can be
+  // happening at both. With ONE address there is no question and no step:
+  // addressChoices has a single entry, 'address' never enters `steps`, and
+  // the body carries no property_choice, so the send is byte-for-byte today's.
+  // The mapper keeps the part columns as originCity/originState/originZip
+  // (people-mapper) and flattens the street into `address`; a jsonb-addressed
+  // lead carries them on addresses[0] instead. formatLeadAddress de-dupes
+  // whichever way they arrive, so the line reads the same as the card's.
+  // The property id is server-side only — the wizard sends a KEY, and the
+  // route resolves it against the lead row.
+  const addr0 = (Array.isArray(person.addresses) ? person.addresses[0] : null) || {}
+  const addressChoices = buildAddressChoices(
+    {
+      address: person.address || '',
+      city:  person.originCity  || addr0.city  || '',
+      state: person.originState || addr0.state || '',
+      zip:   person.originZip   || addr0.zip   || '',
+    },
+    null,
+    person.formerAddresses,
+  )
+  const multiAddress = addressChoices.length > 1
+  // Default to the current address — always choices[0] by construction.
+  const [addressKey, setAddressKey] = useState(CURRENT_CHOICE_KEY)
+  const chosenAddress = addressChoices.find(c => c.key === addressKey) || addressChoices[0] || null
+
   // Esc — OverlayShell gives the backdrop tap and the X, not this.
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
@@ -227,6 +255,9 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
       }
     }
     if (engagementId) body.engagement_id = engagementId
+    // Only when there was a question to answer. A one-address client sends
+    // the same body it always did — no key, no new server branch.
+    if (multiAddress && addressKey) body.property_choice = addressKey
 
     setSubmitting(true)
     let json
@@ -260,6 +291,12 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
     const entries = [
       { id: `o${stamp}`, type: 'system', method: 'system', label: matchLabel, ts: 'Just now', status: 'done' },
     ]
+    // The choice itself is deliberately NOT stored on the lead — Jobber's
+    // property holds it. This line is how "which house was that job at?"
+    // stays answerable inside Bee Hub, without a column to keep true.
+    if (multiAddress && chosenAddress) {
+      entries.push({ id: `o${stamp + 5}`, type: 'system', method: 'system', label: `Sent to ${chosenAddress.display}`, ts: 'Just now', status: 'done' })
+    }
     if (json.jobber_request_id) {
       entries.push({ id: `o${stamp + 1}`, type: 'system', method: 'system', label: `Request created in Jobber — REQ-${json.jobber_request_id}`, ts: 'Just now', status: 'done' })
     }
@@ -303,9 +340,16 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   // action — Job routes through 'job-details', everything else through
   // 'request-details'.
   const detailStep = action === 'job' ? 'job-details' : 'request-details'
-  const steps = person.jobberClient
-    ? ['history', 'action', detailStep, 'confirm']
-    : ['action', detailStep, 'confirm']
+  // 'address' sits between the action and its details, so it is asked once
+  // for both paths. It exists ONLY when the client holds more than one
+  // address — with one, the step list is identical to before.
+  const steps = [
+    ...(person.jobberClient ? ['history'] : []),
+    'action',
+    ...(multiAddress ? ['address'] : []),
+    detailStep,
+    'confirm',
+  ]
   const stepIdx = steps.indexOf(step)
 
   const head = [person.name, person.locationName].filter(Boolean).join(' · ')
@@ -366,7 +410,49 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button type="button" onClick={onClose} style={ghostBtn}>Cancel</button>
-              <button type="button" disabled={!action} onClick={() => action && setStep(action === 'job' ? 'job-details' : 'request-details')} style={primaryBtn(!!action)}>Continue →</button>
+              <button type="button" disabled={!action} onClick={() => action && setStep(multiAddress ? 'address' : (action === 'job' ? 'job-details' : 'request-details'))} style={primaryBtn(!!action)}>Continue →</button>
+            </div>
+          </>
+        )}
+
+        {step === 'address' && (
+          <>
+            <p style={{ fontSize: '13px', color: T.ink.muted }}>Which address is this for?</p>
+            <div role="radiogroup" aria-label="Which address is this for?" data-address-picker="1"
+              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {addressChoices.map(c => (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={addressKey === c.key}
+                  data-address-choice={c.key}
+                  onClick={() => setAddressKey(c.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '9px', width: '100%',
+                    padding: '10px 12px', textAlign: 'left', cursor: 'pointer',
+                    background: addressKey === c.key ? T.accent.soft : T.surface.raised,
+                    border: `1px solid ${addressKey === c.key ? T.accent.fg : T.hairline.line}`,
+                    borderRadius: T.radius.control, fontFamily: 'inherit',
+                  }}
+                >
+                  <span style={{ flexShrink: 0, color: addressKey === c.key ? T.accent.fg : T.ink.muted }}>
+                    <IconMapPin size={15} />
+                  </span>
+                  <span style={{ fontSize: '13px', color: T.ink.primary, minWidth: 0, wordBreak: 'break-word' }}>
+                    {c.display}
+                  </span>
+                  {c.isCurrent && (
+                    <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '10px', fontWeight: 600, color: T.ink.muted, background: T.surface.sunken, padding: '2px 7px', borderRadius: T.radius.pill }}>
+                      Current
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(action === 'job' ? 'job-details' : 'request-details')} style={primaryBtn(true)}>Continue →</button>
             </div>
           </>
         )}
@@ -429,7 +515,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(multiAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
               <button type="button" onClick={() => setStep('confirm')} style={primaryBtn(true)}>Review →</button>
             </div>
           </>
@@ -501,7 +587,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(multiAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
               <button type="button" disabled={!jobDetailsComplete} onClick={() => jobDetailsComplete && setStep('confirm')} style={primaryBtn(jobDetailsComplete)}>Review →</button>
             </div>
           </>
@@ -523,7 +609,14 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
                 {action === 'job' ? (
                   <>
                     {/* Job path — honest itemization. NO request, NO estimate. */}
-                    <CreateRow title="Property" detail="Uses the client's service address" Glyph={IconMapPin} />
+                    {/* With a second address on file the confirm must name the
+                        one it will actually use — the generic sentence would
+                        be the last place the wrong house could hide. */}
+                    <CreateRow
+                      title="Property"
+                      detail={multiAddress && chosenAddress ? chosenAddress.display : "Uses the client's service address"}
+                      Glyph={IconMapPin}
+                    />
                     <CreateRow
                       title="Job"
                       detail={`${jobWork.trim() || 'Work'} · $${(jobPriceValid ? jobPriceNum : 0).toFixed(2)} — moves this deal to Job in Progress`}
@@ -535,6 +628,9 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
                   </>
                 ) : (
                   <>
+                    {multiAddress && chosenAddress && (
+                      <CreateRow title="Address" detail={chosenAddress.display} Glyph={IconMapPin} />
+                    )}
                     <CreateRow title="Request" detail="Moves this deal to the Request stage" />
                     {includeAssessment && date && (
                       <CreateRow

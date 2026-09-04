@@ -53,6 +53,12 @@ import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } fro
 import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
 import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
+import {
+  buildAddressChoices,
+  resolveAddressChoice,
+  isFormerChoiceKey,
+  type AddressChoice,
+} from '@/lib/address-choice'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -325,6 +331,12 @@ export async function POST(
   }
   const scheduled_assessment_at: string | undefined = body.scheduled_assessment_at
   const assessment_type: 'in-person' | 'virtual' | undefined = body.assessment_type
+  // Which of the client's addresses this send is for. Absent (every caller
+  // before the picker shipped) and 'current' are the SAME path — the raw key
+  // is only resolved once the lead row is in hand, against that row's own
+  // addresses, so nothing here trusts the string.
+  const property_choice: string | undefined =
+    typeof body.property_choice === 'string' ? body.property_choice : undefined
   if (creation_type === 'request_with_assessment') {
     if (!scheduled_assessment_at) {
       return fail(
@@ -526,7 +538,37 @@ export async function POST(
   let assessmentTeamShortfall: string | null = null // set to the human summary on a team mismatch
 
   // ── Address ─────────────────────────────────────────────────────
-  const address = pickPrimaryAddress(lead)
+  // A client with a second address on file (the two-address feature) can
+  // have live work at either one — Jobber keeps both properties bookable,
+  // and Heather Popelka has an open quote at the address Bee Hub filed as
+  // former. So the send asks WHICH address, defaulting to the current one.
+  //
+  // Default and unchanged: with one address (or no property_choice in the
+  // body — every caller before the picker shipped), sendChoice is the
+  // current address and `address` is pickPrimaryAddress(lead) exactly as
+  // before, including the jsonb-first / legacy-column fallback that
+  // formatLeadAddress does not replicate.
+  const addressChoices = buildAddressChoices(
+    { address: lead.address, city: lead.city, state: lead.state, zip: lead.zip },
+    lead.jobber_property_id,
+    lead.former_addresses,
+  )
+  const sendChoice: AddressChoice | null = resolveAddressChoice(addressChoices, property_choice)
+  // A key naming an address this lead does not hold is a hard stop, not a
+  // silent fall back to the current address: the owner asked for a specific
+  // house and sending to the other one is the exact mistake being fixed.
+  if (isFormerChoiceKey(property_choice) && !sendChoice) {
+    return fail(
+      'validation',
+      'Cannot send to Jobber: that address is no longer on this client. ' +
+      'Close and reopen the send to pick again.',
+      400,
+    )
+  }
+  const usingFormerAddress = !!sendChoice && !sendChoice.isCurrent
+  const address = usingFormerAddress
+    ? { street: sendChoice!.street, city: sendChoice!.city, state: sendChoice!.state, zip: sendChoice!.zip }
+    : pickPrimaryAddress(lead)
   if (!address && addressRequired) {
     return fail(
       'validation',
@@ -643,10 +685,37 @@ export async function POST(
       }
       const existing: any[] = propsRes.data?.client?.clientProperties?.nodes || []
       const wantedStreet = address.street.toLowerCase()
-      const matchedProp = existing.find((p: any) =>
-        (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
+      // A former address is a property that ALREADY EXISTS in Jobber — the
+      // move flow created the new one and left the old one, with its jobs,
+      // quotes and invoices, untouched. So prefer the id captured at the
+      // move (exact, survives a re-typed street) and fall back to the street
+      // match only when the entry predates that capture.
+      if (usingFormerAddress && sendChoice?.jobberPropertyId) {
+        const wantedId = String(sendChoice.jobberPropertyId)
+        const byId = existing.find((p: any) => extractJobberId(p.id) === wantedId)
+        if (byId) jobberPropertyGlobalId = byId.id
+      }
+      if (!jobberPropertyGlobalId) {
+        const matchedProp = existing.find((p: any) =>
+          (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
+        )
+        if (matchedProp) jobberPropertyGlobalId = matchedProp.id
+      }
+    }
+
+    // The one thing a former-address send must NEVER do is create a
+    // property. Falling through to propertyCreate here would add a THIRD
+    // property duplicating the old house, and the live quote sitting on
+    // the real one would be orphaned from every job sent after it. If the
+    // property genuinely isn't on the client any more, say so and stop.
+    if (!jobberPropertyGlobalId && usingFormerAddress) {
+      return fail(
+        'property_lookup',
+        `Cannot send to Jobber: ${sendChoice!.display} is not one of this ` +
+        `client's addresses in Jobber any more. Send to the current address, ` +
+        `or re-add that property in Jobber first.`,
+        400,
       )
-      if (matchedProp) jobberPropertyGlobalId = matchedProp.id
     }
 
     if (!jobberPropertyGlobalId) {
@@ -1013,7 +1082,18 @@ export async function POST(
 
   const writeback: Record<string, any> = {
     jobber_client_id:     jobberClientId,
-    jobber_property_id:   jobberPropertyId,
+    // leads.jobber_property_id means "the property this lead's CURRENT
+    // address is". A send to the other address must not move it: three
+    // paths match a lead by this column — PROPERTY_DESTROY nulls the link
+    // on a match (jobber-webhook-handlers), the landed-webhook check
+    // (webhook-landed), and the correction flow's targeted propertyEdit
+    // (jobber-address-sync). Re-pointing it at the old house would let a
+    // destroy of that property null the live link, and would aim the next
+    // address correction at the wrong property. The job still lands on the
+    // chosen property in Jobber — that is where the answer lives.
+    jobber_property_id:   usingFormerAddress
+      ? (lead.jobber_property_id ?? null)
+      : jobberPropertyId,
     jobber_request_id:    jobberRequestId    ?? lead.jobber_request_id ?? null,
     jobber_assessment_id: jobberAssessmentId ?? lead.jobber_assessment_id ?? null,
     jobber_job_id:        jobberJobId        ?? lead.jobber_job_id ?? null,
@@ -1124,6 +1204,10 @@ export async function POST(
     message:
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
+      // Name the address on a second-address send. The lead row deliberately
+      // does not store the choice (Jobber's property holds it), so this row
+      // is where "which house was that job at?" is answerable from Bee Hub.
+      (usingFormerAddress ? `; property=${jobberPropertyId} (${sendChoice!.display})` : '') +
       (jobberRequestId    ? `; request=${jobberRequestId}`    : '') +
       (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
       (jobberJobId        ? `; job=${jobberJobId}`            : '') +
