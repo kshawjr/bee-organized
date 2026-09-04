@@ -143,55 +143,46 @@ describe('one address, no flag — exactly today', () => {
   })
 })
 
-describe('a move adds and never edits', () => {
-  it('creates the new property, keeps the old address with its old link, re-points the lead', async () => {
+// THE MOVE BRANCH IS GONE. It served one control doing three jobs, and in
+// eight weeks it ran ZERO times — every owner answered "just fixing the
+// address" to "Did they move?", and former_addresses stayed empty on all
+// 21,055 rows. A move is now ADD-then-RETIRE, two explicit actions on
+// /api/leads/:id/addresses (lib/beta-address-model.test.tsx). What survives
+// here is the refusal, so a caller still sending the old flag is told where
+// it went rather than having its intent silently dropped.
+describe("the move flag is refused, and says where moving went", () => {
+  it("address_change:'move' is a 400 naming add-then-retire; nothing is written", async () => {
     seed(LEAD, { former: { former_addresses: [] } })
     const { status, body } = await patchLead({ ...NEW_COLS, address_change: 'move' })
-    expect(status).toBe(200)
-    expect(jm.move).toHaveBeenCalledTimes(1)
-    // The in-place editor is NEVER invoked on a move — nothing historical is touched.
-    expect(jm.sync).not.toHaveBeenCalled()
-    const p = leadUpdatePatch()
-    expect(p.address).toBe('99 New Ave')
-    expect(p.jobber_property_id).toBe('999') // the NEW property
-    expect(p.former_addresses).toHaveLength(1)
-    expect(p.former_addresses[0]).toMatchObject({
-      display: '10 Old Rd, Fairway, KS, 66205',
-      jobber_property_id: '111', // the old address still knows its property
-    })
-    expect(body.address_move).toMatchObject({ created: true, propertyId: '999', kept: true })
-  })
-
-  it('an unlinked client moves locally — zero Jobber calls, history still kept', async () => {
-    seed({ ...LEAD, jobber_client_id: null, jobber_property_id: null }, { former: { former_addresses: [] } })
-    const { status } = await patchLead({ ...NEW_COLS, address_change: 'move' })
-    expect(status).toBe(200)
-    expect(jm.move).not.toHaveBeenCalled()
-    expect(jm.sync).not.toHaveBeenCalled()
-    const p = leadUpdatePatch()
-    expect(p.former_addresses).toHaveLength(1)
-    expect(p.jobber_property_id).toBeNull()
-  })
-
-  it('a move without a real new address is refused, and nothing is written', async () => {
-    seed()
-    const { status, body } = await patchLead({ address: '10 OLD RD, Fairway, KS, 66205', address_change: 'move' })
     expect(status).toBe(400)
-    expect(body.error).toBe('move_requires_a_new_address')
+    expect(body.error).toBe('move_is_now_add_then_retire')
+    expect(body.detail).toContain('/api/leads/:id/addresses')
     expect(updateLead).not.toHaveBeenCalled()
-  })
-
-  it('pre-migration the move fails calm — 503, no write, the old address never silently dropped', async () => {
-    h.enqueue('hub_users', { id: 'hub-1', role: 'owner', location_id: 'loc-uuid-1' })
-    h.enqueue('leads', LEAD)
-    h.enqueue('leads', null, { code: '42703', message: 'column leads.former_addresses does not exist' })
-    const { status, body } = await patchLead({ ...NEW_COLS, address_change: 'move' })
-    expect(status).toBe(503)
-    expect(body.error).toBe('moves_not_available_yet')
-    expect(updateLead).not.toHaveBeenCalled()
+    // and crucially NO Jobber call — the old branch created a property here
     expect(jm.move).not.toHaveBeenCalled()
+    expect(jm.sync).not.toHaveBeenCalled()
   })
 
+  it('an unknown address_change value is still refused, now listing only correction', async () => {
+    seed()
+    const { status, body } = await patchLead({ ...NEW_COLS, address_change: 'sideways' })
+    expect(status).toBe(400)
+    expect(body.error).toBe('invalid_address_change')
+    expect(body.allowed).toEqual(['correction'])
+    expect(updateLead).not.toHaveBeenCalled()
+  })
+
+  it('a correction still lands, unchanged — the pencil path is untouched', async () => {
+    seed(LEAD, { former: { former_addresses: [] } })
+    const { status } = await patchLead({ ...NEW_COLS, address_change: 'correction' })
+    expect(status).toBe(200)
+    expect(jm.sync).toHaveBeenCalledTimes(1)
+    expect(jm.move).not.toHaveBeenCalled()
+    expect(leadUpdatePatch().address).toBe('99 New Ave')
+  })
+})
+
+describe('the legacy blast radius, unchanged for corrections', () => {
   it('several Jobber properties + one Bee Hub address: correction keeps the legacy path (no link → the managed blast radius decides)', async () => {
     seed({ ...LEAD, jobber_property_id: null })
     await patchLead(NEW_COLS)

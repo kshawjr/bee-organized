@@ -50,6 +50,19 @@ export interface AddressWriteback {
   billing: AddressWritebackOutcome
   property: PropertyWritebackOutcome
   upcoming_visits: boolean
+  // The property this lead's address IS, as resolved during this push.
+  //
+  // The sync has always KNOWN this and thrown it away, which is why 20,201
+  // of 20,558 linked leads carry no jobber_property_id and every edit had to
+  // re-guess via the blast radius (one property → edit it; two or more →
+  // skip the service address entirely). That skip is what left Maggie Yost
+  // in Fremont here and Omaha in Jobber. Surfacing the id lets the caller
+  // persist it, so the guess becomes a fact on first touch and every later
+  // edit addresses the right property however many the client holds.
+  //
+  // Null when nothing identified one (zero properties, or the deliberate
+  // multiple-property skip — we still never guess).
+  property_id: string | null
 }
 
 export interface JobberBillingAddress {

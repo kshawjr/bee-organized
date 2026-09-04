@@ -258,12 +258,20 @@ describe('ContactField — toast reflects the whole contact_writeback truth', ()
 
 // ── C) mounts + propagation ────────────────────────────────────
 describe('two mounts, one implementation + cross-view propagation', () => {
-  it('source pin: ClientProfile mounts shared/ContactField; the panel does NOT (build-2 person-vs-deal — contact is person-scoped, one View-profile tap away)', () => {
+  it('source pin: PHONE/EMAIL stay person-scoped (no ContactField in the panel); the ADDRESS is now editable there', () => {
     const profile = readFileSync('components/hive/ClientProfile.jsx', 'utf8')
     const panel = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
     expect(profile).toContain("from './shared/ContactField'")
+    // Unchanged: a person's phone and email are edited on the person record,
+    // one View-profile tap away (build-2 person-vs-deal).
     expect(panel).not.toContain('ContactField')
-    expect(panel).not.toContain('AddressField')
+    // CHANGED with the address model. The address is the one contact fact
+    // tied to the WORK this panel is about, and the engagement is a surface
+    // an owner is on when they discover a second address — so AddressField
+    // takes the second mount it was always written for. Same component, same
+    // endpoints as the client card: there is no second behaviour to keep in
+    // step, which is what the original pin was protecting.
+    expect(panel).toContain("from './shared/AddressField'")
   })
 
   it('ClientProfile: phone edit PATCHes, prepends the audit row into Recent activity, hands cols up', async () => {

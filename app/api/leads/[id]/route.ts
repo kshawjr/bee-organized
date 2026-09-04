@@ -327,68 +327,32 @@ export async function PATCH(
       : arr.map((a, i) => (i === idx ? { ...a, value: addrDiff.display } : a))
   }
 
-  // ─── MOVE OR CORRECTION (the two-address feature) ─────────────
-  // body.address_change: 'move' | 'correction' (absent = correction — the
-  // default is EXACTLY today's behavior, so no other caller changes).
-  // A MOVE keeps the vacated address: it is appended to former_addresses
-  // with the Jobber property it IS, a NEW property is created in Jobber
-  // for the new address (the old property — and every job and invoice on
-  // it — is never touched), and the lead's current columns + property
-  // link move to the new one. Billing follows the person (clientEdit),
-  // proposed as the sensible default pending Kevin's veto.
+  // ─── THE PENCIL IS ALWAYS A CORRECTION ────────────────────────
+  // "Did they move?" is gone. It existed only because one control had to
+  // serve three intents, and it never earned that: in eight weeks it fired
+  // roughly 75 times and produced ZERO moves — every owner answered "just
+  // fixing the address", every time. A question that has never once changed
+  // an outcome is a toll on the common case.
   //
-  // ORDER IS LOAD-BEARING: the column guard and the Jobber create run
-  // BEFORE the row write, so a failure can never overwrite the current
-  // address having silently dropped the old one, and the row write is a
-  // single update carrying the new columns, the new link and the
-  // appended history together.
+  // The three intents are now three controls. The pencil corrects, in place,
+  // and pushes that correction to Jobber (below). Adding an address and
+  // retiring one live on /api/leads/:id/addresses. A MOVE is add-then-retire
+  // — two things the owner actually did, each undoable on its own.
+  //
+  // 'correction' is still accepted so nothing that sends it breaks; it is
+  // also the default, and the default is byte-for-byte today's behaviour.
+  // 'move' is refused rather than silently downgraded: a caller asking to
+  // keep the old address must be told where that now happens, not quietly
+  // have it dropped.
   const rawAddressChange = (body as any).address_change
-  if (rawAddressChange !== undefined && rawAddressChange !== 'move' && rawAddressChange !== 'correction') {
-    return NextResponse.json({ error: 'invalid_address_change', allowed: ['move', 'correction'] }, { status: 400 })
+  if (rawAddressChange === 'move') {
+    return NextResponse.json({
+      error: 'move_is_now_add_then_retire',
+      detail: 'Add the new address on /api/leads/:id/addresses, then retire the old one.',
+    }, { status: 400 })
   }
-  const isMove = rawAddressChange === 'move'
-  if (isMove && (!addrDiff.changed || addrDiff.cleared)) {
-    // A "move" with no real new address is meaningless; clearing is never a move.
-    return NextResponse.json({ error: 'move_requires_a_new_address' }, { status: 400 })
-  }
-  let addressMove: (MovePropertyResult & { kept: boolean }) | null = null
-  if (isMove) {
-    // Pre-migration guard: if former_addresses isn't there yet, refuse the
-    // move CALMLY before anything is written — the old address must never
-    // be silently dropped. Corrections are unaffected.
-    const fem = await supabaseService
-      .from('leads')
-      .select('former_addresses')
-      .eq('id', id)
-      .single()
-    if (fem.error) {
-      if (isMissingFormerAddressesColumn(fem.error)) {
-        console.warn('[leads PATCH] former_addresses column missing — move refused (migration pending)')
-        return NextResponse.json({ error: 'moves_not_available_yet' }, { status: 503 })
-      }
-      return NextResponse.json({ error: fem.error.message }, { status: 500 })
-    }
-
-    // Jobber first: the new property's id goes into the same row write.
-    let jm: MovePropertyResult = { created: false, propertyId: null, billing: 'unchanged', error: null }
-    if (existing.jobber_client_id && existing.location_id) {
-      jm = await createPropertyForMove({
-        leadId: id,
-        locationSlug: existing.location_id,
-        jobberClientId: String(existing.jobber_client_id),
-        target: { street: addrDiff.street, city: addrDiff.city, state: addrDiff.state, zip: addrDiff.zip },
-      })
-    }
-
-    const entry = buildFormerAddress(existing as any, (existing as any).jobber_property_id, new Date().toISOString())
-    if (entry) {
-      patch.former_addresses = [...parseFormerAddresses(fem.data?.former_addresses), entry]
-    }
-    // The current address now IS the new property — or unlinked, when the
-    // client isn't in Jobber or the create failed (the old link must not
-    // masquerade as the new address's property).
-    patch.jobber_property_id = jm.propertyId
-    addressMove = { ...jm, kept: !!entry }
+  if (rawAddressChange !== undefined && rawAddressChange !== 'correction') {
+    return NextResponse.json({ error: 'invalid_address_change', allowed: ['correction'] }, { status: 400 })
   }
 
   // ─── Write ────────────────────────────────────────────────────
@@ -531,7 +495,7 @@ export async function PATCH(
   // pushes (we don't erase Jobber-side data). Awaited but non-fatal;
   // per-target outcomes ride the response.
   let addressWriteback: AddressWriteback | null = null
-  if (!isMove && addrDiff.changed && !addrDiff.cleared && existing.jobber_client_id && existing.location_id) {
+  if (addrDiff.changed && !addrDiff.cleared && existing.jobber_client_id && existing.location_id) {
     addressWriteback = await syncLeadAddressToJobber({
       leadId: id,
       locationSlug: existing.location_id,
@@ -542,6 +506,19 @@ export async function PATCH(
       // link → the legacy single-property blast radius decides.
       linkedPropertyId: (existing as any).jobber_property_id || null,
     })
+    // CAPTURE THE LINK. The push just resolved which property this address
+    // is; persisting it turns the blast-radius guess into a fact, so the
+    // NEXT edit addresses that property by id however many the client holds
+    // — and the deliberate multiple-property skip stops applying to anyone
+    // we have touched once. Costs no extra Jobber call. Only ever fills a
+    // blank: an existing link is never re-pointed from here.
+    if (addressWriteback?.property_id && !(existing as any).jobber_property_id) {
+      const { error: linkErr } = await supabaseService
+        .from('leads')
+        .update({ jobber_property_id: addressWriteback.property_id })
+        .eq('id', id)
+      if (linkErr) console.warn('[leads PATCH] property link capture failed', linkErr.message)
+    }
   }
 
   // ─── Address audit touchpoint (after sync — the note tells the ──
@@ -553,13 +530,10 @@ export async function PATCH(
   if (addrDiff.changed) {
     const noteParts: string[] = []
     if (addrDiff.prevDisplay) noteParts.push(`was ${addrDiff.prevDisplay}`)
-    if (addressMove) {
-      noteParts.push(addressMove.kept ? 'moved — old address kept on file' : 'moved')
-      if (addressMove.created) noteParts.push(`new Jobber property created; old property untouched`)
-      else if (existing.jobber_client_id) noteParts.push('Jobber property NOT created — sync failed, address saved here only')
-      if (addressMove.billing === 'updated') noteParts.push('Jobber billing address updated')
-      else if (addressMove.billing === 'failed') noteParts.push('Jobber billing address update failed')
-    }
+    // A correction on a client who isn't in Jobber yet went nowhere but
+    // here. Say so in the audit rather than letting the silence imply it
+    // synced — the same honesty the toast carries (address_writeback: null).
+    if (!existing.jobber_client_id) noteParts.push('not connected to Jobber — saved here only')
     if (addressWriteback?.property === 'skipped_multiple') {
       noteParts.push('synced to Jobber billing — client has multiple properties, service address not changed')
     }
@@ -573,7 +547,7 @@ export async function PATCH(
         location_uuid: existing.location_uuid,
         kind: 'system',
         label: addrDiff.display
-          ? `${addressMove ? 'Client moved' : 'Address updated'} → ${addrDiff.display}`
+          ? `Address updated → ${addrDiff.display}`
           : 'Address removed',
         notes: noteParts.length ? noteParts.join(' · ') : null,
         user_id: hubUser.id,
@@ -601,7 +575,6 @@ export async function PATCH(
       lead: fresh,
       ...(contactWriteback ? { contact_writeback: contactWriteback } : {}),
       ...(addressWriteback ? { address_writeback: addressWriteback } : {}),
-      ...(addressMove ? { address_move: addressMove } : {}),
       ...(contactActivity.length ? { contact_activity: contactActivity } : {}),
     },
     { status: 200 },

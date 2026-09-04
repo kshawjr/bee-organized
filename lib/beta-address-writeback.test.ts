@@ -460,7 +460,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'updated', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'updated', upcoming_visits: false })
 
     expect(jobberGraphQL).toHaveBeenCalledTimes(1)
     const [, query, vars] = (jobberGraphQL as any).mock.calls[0]
@@ -500,7 +500,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
 
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'skipped_multiple', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'skipped_multiple', upcoming_visits: false })
     expect(mutationCalls('propertyEdit')).toHaveLength(0)
     expect(mutationCalls('clientEdit')).toHaveLength(1)
 
@@ -514,7 +514,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
 
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'none', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'none', upcoming_visits: false })
     expect(mutationCalls('propertyEdit')).toHaveLength(0)
     const audit = touchpointInserts.filter(t => String(t.label || '').startsWith('Address'))
     expect(audit[0].notes).toBe('was 29659 Calle Violeta, Temecula, California, 92592')
@@ -527,7 +527,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
 
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'updated', upcoming_visits: true })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'updated', upcoming_visits: true })
     expect(mutationCalls('propertyEdit')).toHaveLength(1) // update, never a skip
     const audit = touchpointInserts.filter(t => String(t.label || '').startsWith('Address'))
     expect(audit[0].notes).toBe(
@@ -542,14 +542,14 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
 
     expect(res.status).toBe(200)
     expect(body.lead).toBeDefined()
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'failed', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'failed', upcoming_visits: false })
   })
 
   it('clientEdit fails, propertyEdit lands → per-target truth (billing failed, property updated)', async () => {
     wireJobber({ clientEditErrors: [{ message: 'nope' }] })
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
-    expect(body.address_writeback).toEqual({ billing: 'failed', property: 'updated', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'failed', property: 'updated', upcoming_visits: false })
   })
 
   it('ECHO GUARD (property): single property already carries the target → clientEdit only, property unchanged', async () => {
@@ -561,7 +561,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     })
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
-    expect(body.address_writeback).toEqual({ billing: 'updated', property: 'unchanged', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'unchanged', upcoming_visits: false })
     expect(mutationCalls('propertyEdit')).toHaveLength(0)
   })
 
@@ -620,7 +620,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     })
     const res = await patchLead(AUSTIN_PATCH)
     const body = await res.json()
-    expect(body.address_writeback).toEqual({ billing: 'unchanged', property: 'unchanged', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'unchanged', property: 'unchanged', upcoming_visits: false })
     expect(jobberMutation).not.toHaveBeenCalled()
   })
 
@@ -633,7 +633,7 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const body = await res.json()
     expect(res.status).toBe(200)
     expect(body.lead).toBeDefined()
-    expect(body.address_writeback).toEqual({ billing: 'failed', property: 'failed', upcoming_visits: false })
+    expect(body.address_writeback).toMatchObject({ billing: 'failed', property: 'failed', upcoming_visits: false })
   })
 
   it('addresses-jsonb coherence: a hive edit rewrites the Service entry so people-mapper cannot shadow it', async () => {

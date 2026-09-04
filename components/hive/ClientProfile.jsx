@@ -161,6 +161,14 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   }, [clientId])
 
   const c = data?.client
+
+  // The client's other addresses, held locally so an add / retire updates the
+  // card without a refetch (the jobberLinks idiom). Seeded from the loaded
+  // profile and re-seeded whenever a different client is loaded in.
+  const [otherAddresses, setOtherAddresses] = useState([])
+  useEffect(() => {
+    setOtherAddresses(c?.former_addresses || c?.formerAddresses || [])
+  }, [c?.id, c?.former_addresses, c?.formerAddresses])
   const agg = data?.aggregates
   const engagements = data?.engagements ?? []
   const open = engagements.filter(e => e.stage !== 'Closed Won' && e.stage !== 'Closed Lost')
@@ -416,7 +424,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             is the person-scoped first-touch — its ONE edit home. */}
         <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
         <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
-        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} jobberLinked={!!effJobberClientId} formerAddresses={c.former_addresses || c.formerAddresses || []} />
+        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} jobberLinked={!!effJobberClientId}
+          formerAddresses={otherAddresses}
+          addressLabel={c.address_label || null}
+          addressLabelNote={c.address_label_note || null}
+          onAddressesChanged={setOtherAddresses} />
         <SourceField
           leadId={c.id}
           value={c.source}

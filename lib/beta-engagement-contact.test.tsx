@@ -91,15 +91,15 @@ const leafByText = (root: Element, text: string) =>
 const mountPanel = async (over: any = {}) => {
   panelPayload = { engagement: eng(), children: emptyChildren(), client: client(over.client || {}) }
   const container = mount(
-    <EngagementPanel engagementId="e-1" seed={eng()}
+    <EngagementPanel engagementId="e-1" seed={eng()} readOnly={!!over.readOnly}
       onClose={() => {}} onChanged={() => {}} setToast={() => {}} onReportProblem={() => {}} />
   )
   await settle()
   return container
 }
 
-// ── EngagementPanel — the display-only Contact block ──────────
-describe('EngagementPanel — Contact block (display-only, above Description)', () => {
+// ── EngagementPanel — the Contact block ───────────────────────
+describe('EngagementPanel — Contact block (phone/email display-only, address editable, above Description)', () => {
   it('renders phone/email/address rows from client, as live tel:/mailto: anchors', async () => {
     const c = await mountPanel()
     const phone = c.querySelector('[data-contact-row="phone"] a') as HTMLAnchorElement
@@ -114,16 +114,23 @@ describe('EngagementPanel — Contact block (display-only, above Description)', 
     expect(c.querySelector('[data-contact-row] input')).toBeNull()
   })
 
-  it('a null field renders NO row — no empty row, no dash', async () => {
+  it('a null PHONE/EMAIL renders NO row — no empty row, no dash', async () => {
     const c = await mountPanel({ client: { email: null, address: null, city: null, state: null, zip: null } })
     expect(c.querySelector('[data-contact-row="phone"]')).toBeTruthy()
     expect(c.querySelector('[data-contact-row="email"]')).toBeNull()
-    expect(c.querySelector('[data-contact-row="address"]')).toBeNull()
-    expect(c.querySelectorAll('[data-contact-row]').length).toBe(1)
+    // The ADDRESS row now always renders when the panel is editable — it is
+    // the affordance for adding one, and an engagement is a surface an owner
+    // is on when they discover a second address. It shows AddressField's own
+    // "add address" empty state rather than an empty row or a dash.
+    expect(c.querySelector('[data-contact-row="address"]')).toBeTruthy()
+    expect(c.textContent).toContain('add address')
   })
 
-  it('the whole block is absent when the client has no phone/email/address', async () => {
-    const c = await mountPanel({ client: { phone: null, email: null, address: null, city: null, state: null, zip: null } })
+  it('read-only: no phone/email/address means no Contact block at all', async () => {
+    const c = await mountPanel({
+      readOnly: true,
+      client: { phone: null, email: null, address: null, city: null, state: null, zip: null },
+    })
     expect(c.querySelectorAll('[data-contact-row]').length).toBe(0)
     expect(leafByText(c, 'Contact')).toBeNull()
   })

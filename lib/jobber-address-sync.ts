@@ -110,6 +110,10 @@ const globalId = (type: 'Client' | 'Property', numeric: string) =>
 
 const numericFromGlobal = (gid: string | null | undefined): string | null => {
   if (!gid) return null
+  // Already numeric — the leads.jobber_property_id convention, and what a
+  // linked id round-trips as. Passthrough matches extractJobberId, which
+  // every other caller in the codebase uses.
+  if (/^\d+$/.test(String(gid))) return String(gid)
   try {
     const decoded = Buffer.from(String(gid), 'base64').toString('utf8')
     const tail = decoded.split('/').pop()
@@ -143,7 +147,7 @@ export async function syncLeadAddressToJobber(opts: {
         (detail ? `; ${detail}` : ''),
     })
 
-  const failedBoth: AddressWriteback = { billing: 'failed', property: 'failed', upcoming_visits: false }
+  const failedBoth: AddressWriteback = { billing: 'failed', property: 'failed', upcoming_visits: false, property_id: null }
 
   try {
     const clientGlobalId = globalId('Client', jobberClientId)
@@ -210,6 +214,10 @@ export async function syncLeadAddressToJobber(opts: {
     const outcome: AddressWriteback = {
       billing,
       property,
+      // Numeric, matching the leads.jobber_property_id convention. Set
+      // whenever the push identified exactly one property — whether it
+      // needed editing or was already converged.
+      property_id: propPlan.propertyId ? numericFromGlobal(propPlan.propertyId) : null,
       // Annotation, not a gate: only meaningful when the service address
       // actually moved under a scheduled future visit.
       upcoming_visits:

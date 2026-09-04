@@ -73,45 +73,29 @@ async function editStreetAndSave(host: HTMLElement, street: string) {
 
 afterEach(() => { vi.restoreAllMocks() })
 
-describe('the question appears exactly when it matters', () => {
-  it('linked client + real change → the question, with the approved wording, and NO fetch yet', async () => {
+// THE QUESTION IS GONE. "Did they move?" fired ~75 times in eight weeks and
+// produced zero moves — every owner picked "just fixing the address". Three
+// intents now have three controls: the pencil corrects, "+ Add address" adds,
+// "Stop using" retires. What is pinned here is that the pencil is now
+// unconditional and silent about intent, on both linked and unlinked clients.
+describe('the pencil saves straight through — no question, ever', () => {
+  it('linked client + real change → ONE save, no question, no interstitial', async () => {
     const f = stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: true })
     await editStreetAndSave(host, '99 New Ave')
     const text = host.textContent || ''
-    expect(text).toContain('Did they move?')
-    expect(text).toContain('This client is connected to Jobber')
-    expect(text).toContain('They moved')
-    expect(text).toContain('Keeps the old address and its job history in Jobber. The new address starts fresh.')
-    expect(text).toContain('Just fixing the address')
-    expect(text).toContain('Corrects it everywhere, including Jobber. Nothing extra is kept.')
-    expect(f).not.toHaveBeenCalled()
-    await unmount()
-  })
-
-  it('"They moved" sends the save with address_change: move', async () => {
-    const f = stubFetch()
-    const { host, unmount } = await mountField({ jobberLinked: true })
-    await editStreetAndSave(host, '99 New Ave')
-    await click(buttonByText(host, 'They moved')!)
+    expect(text).not.toContain('Did they move?')
+    expect(text).not.toContain('They moved')
+    expect(text).not.toContain('Just fixing the address')
     expect(f).toHaveBeenCalledTimes(1)
     const body = JSON.parse(f.mock.calls[0][1].body)
-    expect(body.address_change).toBe('move')
     expect(body.address).toContain('99 New Ave')
+    // no intent flag is sent at all — the default IS the correction
+    expect(body.address_change).toBeUndefined()
     await unmount()
   })
 
-  it('"Just fixing the address" sends a correction', async () => {
-    const f = stubFetch()
-    const { host, unmount } = await mountField({ jobberLinked: true })
-    await editStreetAndSave(host, '99 New Ave')
-    await click(buttonByText(host, 'Just fixing the address')!)
-    const body = JSON.parse(f.mock.calls[0][1].body)
-    expect(body.address_change).toBe('correction')
-    await unmount()
-  })
-
-  it('an UNLINKED client is never asked — straight save, no flag', async () => {
+  it('an UNLINKED client saves the same way — one call, no flag', async () => {
     const f = stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: false })
     await editStreetAndSave(host, '99 New Ave')
@@ -121,11 +105,10 @@ describe('the question appears exactly when it matters', () => {
     await unmount()
   })
 
-  it('a formatting-only edit asks nothing and fetches nothing', async () => {
+  it('a formatting-only edit still fetches nothing', async () => {
     const f = stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: true })
     await editStreetAndSave(host, '10 OLD RD') // same address, different case
-    expect(host.textContent).not.toContain('Did they move?')
     expect(f).not.toHaveBeenCalled()
     await unmount()
   })
@@ -141,7 +124,11 @@ describe('the card with history, and without', () => {
     // moved can still have live work at the old house (Jobber keeps both
     // properties bookable), so 'Previously' — and its 'moved' date — read
     // as history the record cannot actually vouch for.
-    expect(host.textContent).toContain('Other address: 10 Old Rd, Fairway, KS, 66205')
+    // The per-row "Other address:" prefix became one quiet heading over the
+    // list, because each row now carries its own label pill. An UNLABELLED
+    // entry like this one still reads correctly under the heading.
+    expect(host.textContent).toContain('Other addresses')
+    expect(host.textContent).toContain('10 Old Rd, Fairway, KS, 66205')
     expect(host.textContent).not.toContain('Previously:')
     expect(host.textContent).not.toContain('moved Aug')
     await unmount()
@@ -150,7 +137,7 @@ describe('the card with history, and without', () => {
   it('one address renders exactly as before — no history block, no question machinery visible', async () => {
     stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: true })
-    expect(host.textContent).not.toContain('Other address:')
+    expect(host.textContent).not.toContain('Other addresses')
     expect(host.textContent).not.toContain('Did they move?')
     await unmount()
   })

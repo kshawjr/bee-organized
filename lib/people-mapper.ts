@@ -41,6 +41,8 @@ type LeadRow = {
   referred_by_id: string | null
   addresses: any
   former_addresses?: any
+  address_label?: string | null
+  address_label_note?: string | null
   jobber_client_id: string | null
   jobber_synced_at: string | null
   paid_amount?: number | null
@@ -347,6 +349,9 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     jobberSearchStatus: row.jobber_client_id ? 'found' : 'not_found',
     // Addresses this client moved away from (the two-address feature) —
     // read-only history on the card; tolerant of pre-migration rows.
+    // The primary address's label, so a row/card can say which house this is.
+    addressLabel: row.address_label || null,
+    addressLabelNote: row.address_label_note || null,
     formerAddresses: Array.isArray(row.former_addresses)
       ? row.former_addresses.filter((e: any) => !!e && typeof e === 'object' && !!e.display)
       : [],

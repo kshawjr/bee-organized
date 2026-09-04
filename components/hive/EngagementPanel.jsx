@@ -75,6 +75,7 @@ import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
+import AddressField from './shared/AddressField'
 import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -242,6 +243,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const eng = data?.engagement ?? seed
   const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [], touchpoints: [] }
   const client = data?.client ?? null
+  // Local mirror so an add / retire from the engagement updates in place,
+  // exactly as it does on the client card.
+  const [engOtherAddresses, setEngOtherAddresses] = useState([])
+  useEffect(() => {
+    setEngOtherAddresses(client?.former_addresses || client?.formerAddresses || [])
+  }, [client?.id, client?.former_addresses, client?.formerAddresses])
   const assignees = data?.assignees ?? []
 
   async function patchEngagement(body, okMsg) {
@@ -666,15 +673,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // the full stored `address` with only the missing city/state/zip parts
   // appended) — never re-parsed back into a unit (the issue 93 lesson).
   const contactAddress = client ? formatLeadAddress(client) : ''
-  const hasContact = !!(client && (client.phone || client.email || contactAddress))
+  // Also show when the panel is editable but empty — otherwise a client with
+  // no contact details on file has nowhere to ADD an address from here.
+  const hasContact = !!(client && (client.phone || client.email || contactAddress || !readOnly))
   const rightCol = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
       {/* Contact (issue 129) — the client's phone/email/address surfaced on
           the deal so a rep can reach them without leaving the card.
-          DISPLAY-ONLY: the values are live tel:/mailto: anchors, but editing a
-          person's contact stays on the person record (ClientProfile). A null
-          field renders NO row — no empty row, no dash. The footer Call button
-          stays as-is; the phone row is a second path to the same action. */}
+          Phone and email stay DISPLAY-ONLY here (live tel:/mailto: anchors);
+          editing those stays on the person record. The ADDRESS is editable,
+          because that is the one contact fact tied to the work this panel is
+          about — and it is the surface an owner is on when they discover a
+          second address. A null phone/email renders NO row. The footer Call
+          button stays as-is; the phone row is a second path to the same
+          action. */}
       {hasContact && (
         <div>
           <MicroLabel>Contact</MicroLabel>
@@ -699,12 +711,26 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                   style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{client.email}</a>
               </p>
             )}
-            {contactAddress && (
-              <p data-contact-row="address" style={{ ...metaRowStyle(), fontSize: '14px' }}>
-                <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
-                <span title={contactAddress} style={{ ...metaValueStyle, color: T.ink.primary }}>{contactAddress}</span>
-              </p>
-            )}
+            {/* The SAME editable address row the client card mounts — the
+                second mount AddressField was always written for. An owner
+                working an engagement can correct the address or add another
+                without leaving for the record, which is where Kevin says it
+                actually happens. Same component, same endpoints, so there is
+                no second behaviour to keep in step. */}
+            <div data-contact-row="address" style={{ fontSize: '14px' }}>
+              <AddressField
+                leadId={client.id}
+                value={{ address: client.address, city: client.city, state: client.state, zip: client.zip }}
+                onSaved={(cols) => onLeadPatched(client.id, cols)}
+                setToast={setToast}
+                readOnly={readOnly}
+                jobberLinked={!!(client.jobber_client_id || jobberLinks[client.id]?.jobber_client_id)}
+                formerAddresses={engOtherAddresses}
+                addressLabel={client.address_label || null}
+                addressLabelNote={client.address_label_note || null}
+                onAddressesChanged={setEngOtherAddresses}
+              />
+            </div>
           </div>
         </div>
       )}

@@ -99,13 +99,16 @@ const installFetch = ({
   }))
 }
 
-const mountField = (value: any = WENDY) => {
+// jobberLinked defaults TRUE here: every toast-truth case below is about a
+// client that IS in Jobber, which is the only way a sync outcome exists to
+// report. The unlinked copy has its own coverage in beta-address-model.
+const mountField = (value: any = WENDY, props: any = {}) => {
   toasts = []
   savedCols = []
   return mount(
-    <AddressField leadId="lead-1" value={value}
+    <AddressField leadId="lead-1" value={value} jobberLinked
       onSaved={(cols: any, j: any) => savedCols.push({ cols, j })}
-      setToast={(t: any) => toasts.push(t)} />
+      setToast={(t: any) => toasts.push(t)} {...props} />
   )
 }
 

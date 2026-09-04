@@ -146,15 +146,36 @@ export function diffAddressPatch(
   }
 }
 
-// ─── FORMER ADDRESSES (the two-address feature) ───────────────────────
+// ─── THE CLIENT'S OTHER ADDRESSES ─────────────────────────────────────
 //
-// A client's CURRENT address stays in the four columns above, with its
-// Jobber property link in leads.jobber_property_id. When an owner answers
-// "They moved" on an address edit, the address they moved FROM is appended
-// to leads.former_addresses (migrations/lead_former_addresses.sql) —
-// strictly additive history, never edited from the card, each entry
-// carrying the Jobber property it IS so inbound property events can route
-// to it instead of stomping the current address.
+// A client's PRIMARY address stays in the four columns above, with its
+// Jobber property link in leads.jobber_property_id and its label in
+// leads.address_label. Every OTHER address the client holds lives as an
+// entry in leads.former_addresses.
+//
+// THE COLUMN NAME IS A FOSSIL. It was written for a MOVE — one current
+// address, the rest history — and that model was wrong twice over. Jobber
+// keeps every property live and bookable, so a client can have work running
+// at two houses at once (Heather Popelka, North Pittsburgh). And in eight
+// weeks and ~106 address edits the move branch ran ZERO times: the column is
+// empty on all 21,055 rows. So the shape is now a plain list of the client's
+// other addresses, each one live unless retired. The column keeps its name
+// because renaming it would touch the inbound webhook's jsonb containment
+// filter for no owner-visible gain; the meaning is here, in the type.
+//
+// Each entry carries the Jobber property it IS, so inbound property events
+// route to it instead of stomping the primary address.
+//
+// status: 'active' — offered at send time, shown on the card
+//         'retired' — Bee Hub stops offering it; JOBBER IS UNCHANGED. There
+//                     is no archive in Jobber (deletion is the only option
+//                     and it takes the property's quotes and jobs with it),
+//                     so retiring is our opinion about what to offer next,
+//                     never a change to the other system.
+// Legacy entries carry neither status nor label; they read as active and
+// unlabelled, so nothing written before this is lost or hidden.
+
+export type AddressStatus = 'active' | 'retired'
 
 export interface FormerAddress {
   street: string
@@ -164,6 +185,17 @@ export interface FormerAddress {
   display: string
   jobber_property_id: string | null
   moved_at: string
+  // Added with the address model. All optional on read — see above.
+  label?: string | null
+  label_note?: string | null
+  status?: AddressStatus
+  added_at?: string
+}
+
+// An entry is live unless it explicitly says otherwise. A missing status is
+// the legacy case and must read as active — never as hidden.
+export function isRetiredAddress(e: { status?: unknown } | null | undefined): boolean {
+  return String((e as any)?.status ?? '') === 'retired'
 }
 
 // The entry the "They moved" branch appends — built from the lead's
@@ -185,6 +217,35 @@ export function buildFormerAddress(
     display,
     jobber_property_id: jobberPropertyId ? String(jobberPropertyId) : null,
     moved_at: nowIso,
+  }
+}
+
+// The entry the ADD path appends — an address the client also has, built
+// from typed parts rather than from the lead's before-state. jobberPropertyId
+// is the property just created for it (null when the client isn't in Jobber
+// yet; the send creates it later).
+export function buildAddedAddress(
+  parts: { street: string; city: string; state: string; zip: string },
+  jobberPropertyId: string | null | undefined,
+  label: string | null,
+  labelNote: string | null,
+  nowIso: string,
+): FormerAddress | null {
+  const street = String(parts.street ?? '').trim()
+  if (!street) return null
+  const city = String(parts.city ?? '').trim()
+  const state = String(parts.state ?? '').trim()
+  const zip = String(parts.zip ?? '').trim()
+  const display = composeLeadAddress({ street, city, state, zip })
+  if (!display) return null
+  return {
+    street, city, state, zip, display,
+    jobber_property_id: jobberPropertyId ? String(jobberPropertyId) : null,
+    moved_at: nowIso,
+    added_at: nowIso,
+    label: label ?? null,
+    label_note: labelNote ?? null,
+    status: 'active',
   }
 }
 

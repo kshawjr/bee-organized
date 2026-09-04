@@ -25,8 +25,9 @@
 // thing most likely to be re-typed, and positional keys can be
 // validated against the row without trusting anything the client sent.
 
-import { formatLeadAddress, deriveStreet, parseFormerAddresses } from './lead-address'
+import { formatLeadAddress, deriveStreet, parseFormerAddresses, isRetiredAddress } from './lead-address'
 import type { LeadAddressParts, FormerAddress } from './lead-address'
+import { addressLabelText } from './address-labels'
 
 export const CURRENT_CHOICE_KEY = 'current'
 
@@ -43,6 +44,9 @@ export interface AddressChoice {
   // rows — the server falls back to a street match.
   jobberPropertyId: string | null
   isCurrent: boolean
+  // Label for the wizard's picker row, already resolved to display text
+  // ('Second home', or an Other entry's note). Null when unlabelled.
+  labelText: string | null
 }
 
 // The current address, as a choice. Returns null when the lead has no
@@ -51,6 +55,8 @@ export interface AddressChoice {
 function currentChoice(
   current: LeadAddressParts | null | undefined,
   jobberPropertyId: string | null | undefined,
+  label: unknown,
+  labelNote: unknown,
 ): AddressChoice | null {
   const display = formatLeadAddress(current ?? {})
   if (!display) return null
@@ -63,6 +69,7 @@ function currentChoice(
     zip: String(current?.zip ?? '').trim(),
     jobberPropertyId: jobberPropertyId ? String(jobberPropertyId) : null,
     isCurrent: true,
+    labelText: addressLabelText(label, labelNote),
   }
 }
 
@@ -77,13 +84,24 @@ export function buildAddressChoices(
   current: LeadAddressParts | null | undefined,
   jobberPropertyId: string | null | undefined,
   formerRaw: unknown,
+  label?: unknown,
+  labelNote?: unknown,
 ): AddressChoice[] {
   const out: AddressChoice[] = []
-  const cur = currentChoice(current, jobberPropertyId)
+  const cur = currentChoice(current, jobberPropertyId, label, labelNote)
   if (cur) out.push(cur)
   parseFormerAddresses(formerRaw).forEach((f: FormerAddress, i: number) => {
     const display = String(f.display ?? '').trim()
     if (!display) return
+    // A RETIRED address is not offered at send time — that is the entire
+    // meaning of retiring it. The picker component is untouched; it simply
+    // receives a shorter list, so a client left with one live address goes
+    // back to the no-picker, no-extra-click path.
+    //
+    // The KEY stays positional over the FULL stored array (index i, not the
+    // output position), so a key the wizard sends still names the same entry
+    // after something ahead of it is retired.
+    if (isRetiredAddress(f)) return
     out.push({
       key: `former:${i}`,
       display,
@@ -95,6 +113,7 @@ export function buildAddressChoices(
       zip: String(f.zip ?? '').trim(),
       jobberPropertyId: f.jobber_property_id ? String(f.jobber_property_id) : null,
       isCurrent: false,
+      labelText: addressLabelText(f.label, f.label_note),
     })
   })
   return out
