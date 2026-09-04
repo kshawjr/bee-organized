@@ -69,6 +69,7 @@ import {
   getManageableRecipients,
   resolveLeadRecipients,
   locationHasActiveHubUser,
+  locationHasOperationalStaff,
   DEFAULT_CATEGORY,
   RECIPIENT_CATEGORIES,
 } from '@/lib/notification-recipients'
@@ -558,5 +559,83 @@ describe('locationHasActiveHubUser — #91 location Bee Hub branch', () => {
       })
     expect(await locationHasActiveHubUser('locA')).toBe(false)
     spy.mockRestore()
+  })
+})
+
+// ── The staffless-location path the transfer reuses ─────────────────────────
+//
+// Kevin's ruling (2026-09-04): a transfer to a location with no staff is
+// deliberate, and it must notify that location's EXTERNALS the same way an
+// unonboarded location is notified today — reusing this path, not a new one.
+// These pin that the path already does it, so the transfer needs no special
+// case, and pin the new staff predicate the transfer's DRIP gate reads.
+
+describe('a staffless location with externals — the path the transfer reuses', () => {
+  beforeEach(() => {
+    seed()
+    // loc-staffless: nobody employed, one outside address configured.
+    tableData.current.lead_notification_externals.push({
+      id: 'e-sl', location_id: 'loc-staffless', first_name: 'Outside',
+      last_name: 'Address', email: 'outside@x.com', phone: null,
+      category: 'all', subscribed: true, created_at: '2026-01-01',
+    })
+  })
+
+  it('resolves to its externals — no hub_users needed, no Zoho fallback', async () => {
+    const eff = await resolveLeadRecipients('loc-staffless')
+    expect(eff.map(r => r.email)).toEqual(['outside@x.com'])
+    expect(eff[0].source).toBe('external')
+    expect(eff[0].hub_user_id).toBeNull()
+    // an external alone makes it interface-managed, so Zoho is NOT consulted
+    expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
+  })
+
+  it('a muted external at a staffless location resolves to nobody', async () => {
+    tableData.current.lead_notification_externals =
+      tableData.current.lead_notification_externals.map((e: any) =>
+        e.id === 'e-sl' ? { ...e, subscribed: false } : e)
+    const eff = await resolveLeadRecipients('loc-staffless')
+    expect(eff).toEqual([])
+    // still interface-managed (the row exists), so it does NOT silently fall
+    // back to Zoho behind a deliberate mute
+    expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
+  })
+})
+
+describe('locationHasOperationalStaff — the transfer drip gate', () => {
+  beforeEach(() => {
+    seed()
+    // seed() predates the is_active/disabled_at columns both staff predicates
+    // filter on; production has is_active=true on all 49 rows and no nulls.
+    tableData.current.hub_users = tableData.current.hub_users.map(
+      (u: any) => ({ is_active: true, disabled_at: null, ...u }),
+    )
+  })
+
+  it('true when an active owner or manager is there', async () => {
+    expect(await locationHasOperationalStaff('loc1')).toBe(true)
+    expect(await locationHasOperationalStaff('loc2')).toBe(true)
+  })
+
+  it('false for a location with nobody at all', async () => {
+    expect(await locationHasOperationalStaff('loc-staffless')).toBe(false)
+  })
+
+  it('a lite_user alone is NOT staff — read-only, cannot answer a reply', async () => {
+    tableData.current.hub_users = [
+      { id: 'u-lite2', email: 'lite@x.com', role: 'lite_user', location_id: 'loc-lite', is_active: true, disabled_at: null },
+    ]
+    expect(await locationHasOperationalStaff('loc-lite')).toBe(false)
+    // …but the broader "is this location on Bee Hub" question still says yes
+    expect(await locationHasActiveHubUser('loc-lite')).toBe(true)
+  })
+
+  it('a disabled or deactivated owner is NOT staff', async () => {
+    tableData.current.hub_users = [
+      { id: 'u-off', email: 'off@x.com', role: 'owner', location_id: 'loc-off', is_active: false, disabled_at: null },
+      { id: 'u-dis', email: 'dis@x.com', role: 'owner', location_id: 'loc-dis', is_active: true, disabled_at: '2026-08-01' },
+    ]
+    expect(await locationHasOperationalStaff('loc-off')).toBe(false)
+    expect(await locationHasOperationalStaff('loc-dis')).toBe(false)
   })
 })

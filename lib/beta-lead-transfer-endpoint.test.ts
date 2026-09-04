@@ -58,6 +58,9 @@ vi.mock('@/lib/supabase-server', () => ({
 vi.mock('@/lib/lead-notification-email', () => ({
   notifyNewLead: vi.fn(async () => ({ sent: true, recipientCount: 2 })),
 }))
+vi.mock('@/lib/notification-recipients', () => ({
+  locationHasOperationalStaff: vi.fn(async () => true),
+}))
 vi.mock('@/lib/drip-lifecycle', () => ({
   stopActiveDripsForLead: vi.fn(async () => {}),
   startDripForLead: vi.fn(async () => {}),
@@ -66,6 +69,7 @@ vi.mock('@/lib/drip-lifecycle', () => ({
 import { POST } from '@/app/api/leads/[id]/transfer/route'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
+import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 
 const LEAD = (over: any = {}) => ({
   id: 'lead-1',
@@ -98,7 +102,10 @@ const arm = (opts: {
   dest?: any
   moveError?: any
   activeRow?: any
+  /** false = the destination has no active owner or manager. */
+  staffed?: boolean
 } = {}) => {
+  vi.mocked(locationHasOperationalStaff).mockResolvedValue(opts.staffed ?? true)
   h.enqueue('hub_users', { id: 'u1', role: opts.role ?? 'admin', location_id: null })
   h.enqueue('leads', opts.lead ?? LEAD())
   h.enqueue('locations', opts.dest ?? DEST())
@@ -124,6 +131,8 @@ beforeEach(() => {
   vi.mocked(notifyNewLead).mockClear()
   vi.mocked(stopActiveDripsForLead).mockClear()
   vi.mocked(startDripForLead).mockClear()
+  vi.mocked(locationHasOperationalStaff).mockClear()
+  vi.mocked(locationHasOperationalStaff).mockResolvedValue(true)
 })
 
 describe('transfer endpoint — gate', () => {
@@ -238,5 +247,138 @@ describe('transfer endpoint — collision', () => {
     // move failed → no notify / drip
     expect(notifyNewLead).not.toHaveBeenCalled()
     expect(startDripForLead).not.toHaveBeenCalled()
+  })
+})
+
+// ── The two transfer-path fixes, plus the regressions that an ORDINARY
+//    transfer and a STAFFED destination are untouched.
+
+describe('fix 1 — dismiss does not carry over', () => {
+  it('a lead dismissed at the old location arrives VISIBLE at the new one', async () => {
+    arm({ lead: LEAD({ inbox_dismissed_at: '2026-08-27T10:00:00Z' }) })
+    const res = await call({ destination_location_id: 'dest-uuid' })
+    expect(res.status).toBe(200)
+
+    // ONE update, and it clears both holds in the same write that moves the
+    // location — no window where the lead is at the new location and hidden.
+    const moves = h.state.updates.filter(u => u.table === 'leads')
+    expect(moves.length).toBe(1)
+    expect(moves[0].arg).toMatchObject({
+      location_id:        'boulder-01',
+      location_uuid:      'dest-uuid',
+      inbox_dismissed_at: null,
+      snoozed_until:      null,
+    })
+  })
+
+  it('a snoozed lead arrives visible too', async () => {
+    arm({ lead: LEAD({ snoozed_until: '2026-12-01T00:00:00Z' }) })
+    await call({ destination_location_id: 'dest-uuid' })
+    expect(h.state.updates.find(u => u.table === 'leads')?.arg.snoozed_until).toBeNull()
+  })
+
+  it('clearing is unconditional — a never-dismissed lead is unharmed', async () => {
+    arm({})
+    const res = await call({ destination_location_id: 'dest-uuid' })
+    expect(h.state.updates.find(u => u.table === 'leads')?.arg)
+      .toMatchObject({ inbox_dismissed_at: null, snoozed_until: null })
+    expect((await res.json()).warnings).toBeUndefined()
+  })
+})
+
+describe('fix 2 — a transfer to a staffless location', () => {
+  it('notifies the destination through the SAME path, and starts no drip', async () => {
+    // Active destination, but nobody on it. The notify call is unchanged and
+    // unconditional — resolveLeadRecipients is what reaches the externals, and
+    // the route does not second-guess it.
+    arm({ staffed: false })
+    const res = await call({ destination_location_id: 'dest-uuid' })
+    expect(res.status).toBe(200)
+    const j = await res.json()
+
+    // the move still lands
+    expect(h.state.updates.find(u => u.table === 'leads')?.arg)
+      .toMatchObject({ location_id: 'boulder-01', location_uuid: 'dest-uuid' })
+
+    // NOTIFIED — same single call, same destination uuid, no special casing
+    expect(notifyNewLead).toHaveBeenCalledTimes(1)
+    expect(notifyNewLead).toHaveBeenCalledWith(
+      expect.objectContaining({ location: { id: 'dest-uuid', name: 'Boulder' } }),
+    )
+    expect(j.notified).toBe(2)
+
+    // NO DRIP — nobody is there to answer a reply
+    expect(stopActiveDripsForLead).not.toHaveBeenCalled()
+    expect(startDripForLead).not.toHaveBeenCalled()
+    expect(j.drip_enrolled).toBe(false)
+    expect(j.drip_skipped_reason).toBe('destination_has_no_staff')
+    expect(j.destination_staffed).toBe(false)
+  })
+
+  it('an onboarding destination is still reported as not-active, not as unstaffed', async () => {
+    // Both are true of every staffless location today; the reason must name
+    // the lifecycle, which is the older and more specific fact.
+    arm({ dest: DEST({ lifecycle_status: 'onboarding' }), staffed: false })
+    const j = await (await call({ destination_location_id: 'dest-uuid' })).json()
+    expect(j.drip_skipped_reason).toBe('destination_not_active')
+    expect(startDripForLead).not.toHaveBeenCalled()
+    expect(notifyNewLead).toHaveBeenCalledTimes(1)
+  })
+
+  it('no externals either → notifyNewLead reports it, the transfer still succeeds', async () => {
+    // resolveLeadRecipients resolved nobody. notifyNewLead already logs a
+    // `zero_recipients` row and returns sent:false — it does NOT throw and it
+    // does NOT go quiet. The route must surface that, not swallow it.
+    vi.mocked(notifyNewLead).mockResolvedValueOnce({
+      sent: false, recipientCount: 0, error: 'zero_recipients',
+    } as any)
+    arm({ staffed: false })
+    const res = await call({ destination_location_id: 'dest-uuid' })
+    expect(res.status).toBe(200)
+    const j = await res.json()
+
+    expect(j.success).toBe(true)              // the move is the primary goal
+    expect(j.notified).toBe(0)                // and it is honest about the send
+    expect(j.warnings).toContain('lead_notification_failed: zero_recipients')
+    expect(j.drip_skipped_reason).toBe('destination_has_no_staff')
+    expect(startDripForLead).not.toHaveBeenCalled()
+  })
+
+  it('the staff check is only consulted for an ACTIVE destination', async () => {
+    arm({ dest: DEST({ lifecycle_status: 'onboarding' }) })
+    await call({ destination_location_id: 'dest-uuid' })
+    expect(locationHasOperationalStaff).not.toHaveBeenCalled()
+  })
+})
+
+describe('regression — a staffed destination still starts the right drip', () => {
+  it('active + staffed: move, notify, touchpoint, stop-then-start, enrolled, no noise', async () => {
+    arm({ staffed: true })
+    const res = await call({ destination_location_id: 'dest-uuid' })
+    expect(res.status).toBe(200)
+    const j = await res.json()
+
+    expect(j.success).toBe(true)
+    expect(j.destination_staffed).toBe(true)
+    expect(j.from).toEqual({ uuid: 'loc-other-uuid', slug: 'loc_other' })
+    expect(j.to).toMatchObject({ uuid: 'dest-uuid', slug: 'boulder-01' })
+
+    // exactly one leads update, one notify, one touchpoint
+    expect(h.state.updates.filter(u => u.table === 'leads').length).toBe(1)
+    expect(notifyNewLead).toHaveBeenCalledTimes(1)
+    const tps = h.state.inserts.filter(i => i.table === 'touchpoints')
+    expect(tps.length).toBe(1)
+    expect(tps[0].arg).toMatchObject({ kind: 'system', label: 'Transferred in' })
+
+    // the drip: stop THEN start, against the DESTINATION uuid
+    expect(stopActiveDripsForLead).toHaveBeenCalledTimes(1)
+    expect(startDripForLead).toHaveBeenCalledWith('lead-1', 'dest-uuid')
+    expect(startDripForLead).not.toHaveBeenCalledWith('lead-1', 'loc-other-uuid')
+    expect(vi.mocked(stopActiveDripsForLead).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(startDripForLead).mock.invocationCallOrder[0])
+
+    expect(j.drip_enrolled).toBe(true)
+    expect(j.drip_skipped_reason).toBeUndefined()
+    expect(j.warnings).toBeUndefined()
   })
 })

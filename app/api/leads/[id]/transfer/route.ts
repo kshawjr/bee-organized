@@ -17,8 +17,20 @@
 //     resolves by UUID) with the standard new-lead email — the new owner
 //     learns a lead just landed in their inbox.
 //   • Write a 'system' touchpoint recording the move.
+//   • CLEAR the Inbox holds — inbox_dismissed_at and snoozed_until. A dismiss
+//     means "handled in MY inbox"; the lead is now in someone ELSE's inbox,
+//     where nobody has handled it. Carrying the hold over would deliver a lead
+//     the receiving owner can never see.
 //
-// Only when the destination is lifecycle_status === 'active':
+// A transfer to a location with NO STAFF is allowed and deliberate (Kevin,
+// 2026-09-04). It needs no special notification path: notifyNewLead above
+// already reaches such a location's EXTERNALS, because resolveLeadRecipients
+// counts a location as interface-managed on `users.length > 0 || externals
+// .length > 0` — the same path, unchanged, that notifies an unonboarded
+// location today. What it must NOT do is drip: nobody is there to answer the
+// client's reply. See the drip gate below.
+//
+// Only when the destination is active AND STAFFED:
 //   • Re-enroll the drip. Ordering is load-bearing: stop the OLD drip FIRST,
 //     THEN start the DESTINATION's (never against existing.location_uuid —
 //     the pre-transfer value is the known trap). startDripForLead SCHEDULES
@@ -43,6 +55,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 
 export const runtime = 'nodejs'
 
@@ -125,6 +138,11 @@ export async function POST(
     .update({
       location_id: dest.location_id,   // slug string
       location_uuid: dest.id,          // NOT-NULL FK
+      // A dismiss/snooze is a hold on the OLD owner's inbox, not a property of
+      // the lead. Cleared in the SAME write that moves the location, so there
+      // is no window where the lead sits at its new location still hidden.
+      inbox_dismissed_at: null,
+      snoozed_until: null,
       updated_at: now,
     })
     .eq('id', id)
@@ -207,10 +225,18 @@ export async function POST(
     warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
   }
 
-  // ─── Drip re-enroll — ONLY for an active destination ──────────
+  // ─── Drip re-enroll — ONLY for an active, STAFFED destination ──
+  // Two independent conditions that happen to coincide in today's data (every
+  // staffless location is also still onboarding). They are checked separately
+  // on purpose: the moment a location activates before its owner accepts the
+  // invite, `active` alone would start dripping a client whose reply lands in
+  // an office with nobody in it.
   let dripEnrolled = false
   let dripSkippedReason: string | null = null
-  if (dest.lifecycle_status === 'active') {
+  const destinationStaffed = dest.lifecycle_status === 'active'
+    ? await locationHasOperationalStaff(dest.id)
+    : false
+  if (dest.lifecycle_status === 'active' && destinationStaffed) {
     // resolveDripCategory (inside startDripForLead) reads project_type to
     // pick the move vs organizing path; a null project_type still routes —
     // it falls back to the organizing default — but report it rather than
@@ -245,10 +271,12 @@ export async function POST(
       warnings.push('drip_not_enrolled_after_start')
     }
   } else {
-    // Non-active destination: skip the drip ENTIRELY. Do NOT seed a row that
-    // would auto-fire when the location later activates — that's a manual
-    // start per product rule. The owner was still notified above.
-    dripSkippedReason = 'destination_not_active'
+    // Skip the drip ENTIRELY. Do NOT seed a row that would auto-fire when the
+    // location later activates or hires — that's a manual start per product
+    // rule. The destination's recipients were still notified above.
+    dripSkippedReason = dest.lifecycle_status === 'active'
+      ? 'destination_has_no_staff'
+      : 'destination_not_active'
   }
 
   return NextResponse.json({
@@ -262,6 +290,7 @@ export async function POST(
       lifecycle_status: dest.lifecycle_status ?? null,
     },
     notified:      notifiedCount,
+    destination_staffed: destinationStaffed,
     drip_enrolled: dripEnrolled,
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(warnings.length ? { warnings } : {}),

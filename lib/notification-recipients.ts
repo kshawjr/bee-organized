@@ -523,6 +523,48 @@ async function resolveZohoRecipients(
 // the worst case the other way is a non-hub office getting the confusing email,
 // which is strictly worse. The miss is logged loudly, and the email sends
 // either way — this only ever picks WHICH body, never whether to send.
+// Does anyone at this location actually WORK leads — an active owner or
+// manager? Deliberately the same RECIPIENT_INTERFACE_ROLES pair the send list
+// treats as the operational team: a lite_user is read-only and a corporate
+// admin is not the local office, so neither can answer a client's reply.
+//
+// Distinct from locationHasActiveHubUser above, which asks the broader "is
+// this location on Bee Hub at all" question (any role) to pick the email
+// variant. Two different questions; keeping them separate stops a lite_user
+// from reading as staff.
+//
+// FAILS TO false, like its neighbour, and the caller must want that: the one
+// caller is the transfer's drip gate, where a wrong `true` sends drip email
+// into an office with nobody to answer it (an email cannot be recalled) and a
+// wrong `false` merely withholds a drip that can be started by hand. Same
+// unequal-harms reasoning as lib/notifications-live.
+export async function locationHasOperationalStaff(
+  locationId: string,
+): Promise<boolean> {
+  try {
+    const res = await supabaseService
+      .from('hub_users')
+      .select('id')
+      .eq('location_id', locationId)
+      .in('role', RECIPIENT_INTERFACE_ROLES as unknown as string[])
+      .eq('is_active', true)
+      .is('disabled_at', null)
+      .limit(1)
+    if ((res as any)?.error) {
+      console.warn(
+        `[notification-recipients] staff check failed for location ${locationId} (${(res as any).error.message}) — treating as NO staff`,
+      )
+      return false
+    }
+    return ((res.data as any[]) || []).length > 0
+  } catch (err: any) {
+    console.warn(
+      `[notification-recipients] staff check threw for location ${locationId} (${err?.message}) — treating as NO staff`,
+    )
+    return false
+  }
+}
+
 export async function locationHasActiveHubUser(
   locationId: string,
 ): Promise<boolean> {
