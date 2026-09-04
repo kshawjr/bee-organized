@@ -42,6 +42,20 @@
 
 export const WEBFORM_RESUBMISSION_LABEL = 'Webform resubmission'
 
+// The 'system' touchpoint the transfer route writes when a lead is routed to
+// another location. Exported HERE, next to the resubmission label, so the ONE
+// writer (app/api/leads/[id]/transfer) and the ONE reader (the 35-day clock in
+// lib/auto-close) can never drift apart on the string.
+//
+// DELIBERATELY NOT an enquiry exit and NOT part of the enquiry date. A transfer
+// does not answer the enquiry and does not restart it — the person asked once,
+// on the day they asked. Feeding it into enquiryDateMs would move the date the
+// Inbox rule compares every exit against ("a close AFTER the enquiry"), so a
+// close that happened BEFORE a later transfer would stop counting and a closed
+// lead would walk back into the Inbox. The transfer belongs in the auto-close
+// CLOCK (last activity), which is a different quantity — see lib/auto-close.
+export const TRANSFER_IN_LABEL = 'Transferred in'
+
 // A request the send-to-jobber route writes lands a few hundred ms after the
 // enquiry it answers; the minute of slack keeps that from reading as "before".
 export const EXIT_SLACK_MS = 60 * 1000

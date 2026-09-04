@@ -16,7 +16,12 @@
 //   • Notify the DESTINATION's effective recipients (resolveLeadRecipients
 //     resolves by UUID) with the standard new-lead email — the new owner
 //     learns a lead just landed in their inbox.
-//   • Write a 'system' touchpoint recording the move.
+//   • Write a 'system' touchpoint recording the move. Its label is the SHARED
+//     TRANSFER_IN_LABEL constant, because the 35-day auto-close reads exactly
+//     this row to start the receiving owner's clock (lib/auto-close): if the
+//     writer and the reader ever drifted on the string, a routed lead would
+//     silently go back to counting from the original enquiry, and nothing
+//     would fail.
 //   • CLEAR the Inbox holds — inbox_dismissed_at and snoozed_until. A dismiss
 //     means "handled in MY inbox"; the lead is now in someone ELSE's inbox,
 //     where nobody has handled it. Carrying the hold over would deliver a lead
@@ -56,6 +61,7 @@ import { isAdmin } from '@/lib/auth'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
+import { TRANSFER_IN_LABEL } from '@/lib/enquiry-exit'
 
 export const runtime = 'nodejs'
 
@@ -176,7 +182,7 @@ export async function POST(
       location_uuid: dest.id,
       kind:          'system',
       method:        'system',
-      label:         'Transferred in',
+      label:         TRANSFER_IN_LABEL,
       notes:         `Routed from ${existing.location_id || 'global form'} to ${dest.name}`,
       status:        'done',
       occurred_at:   now,

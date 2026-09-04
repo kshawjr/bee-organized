@@ -5,7 +5,13 @@
 // An enquiry — a website or hand-entered lead, or a Jobber client who filled
 // in the website form again — that has had NO EXIT for AUTO_CLOSE_DAYS closes
 // itself as Closed Lost, reason "No response". The clock runs from the latest
-// of: the enquiry date, the last logged reach-out, the last reopen. The exits
+// of: the enquiry date, the last logged reach-out, the last reopen, and the
+// last TRANSFER IN. The transfer is on that list because a routed lead is a
+// lead its new owner has only just been handed: counting from the original
+// enquiry would close it on someone who had no chance to answer it, and a lead
+// routed on day 34 would close the next night. The transfer moves the CLOCK
+// only — it is not an exit and it does not move the enquiry date, so the Inbox
+// rule (lib/enquiry-exit) sees exactly what it saw before. The exits
 // are the SAME three the Inbox rule will use, so the two can never disagree
 // about who is closed:
 //
@@ -48,7 +54,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
-import { enquiryState, WEBFORM_RESUBMISSION_LABEL } from './enquiry-exit'
+import { enquiryState, WEBFORM_RESUBMISSION_LABEL, TRANSFER_IN_LABEL } from './enquiry-exit'
 import { stopActiveDripsForLead } from './drip-lifecycle'
 import { cancelStageEmails } from './stage-emails'
 import { cancelPendingWelcomeEmail } from './welcome-email'
@@ -59,6 +65,7 @@ export const AUTO_CLOSE_REASON = 'No response'
 export const AUTO_CLOSE_TOUCHPOINT_LABEL = `Closed automatically: no response after ${AUTO_CLOSE_DAYS} days`
 export const EXCLUDED_LOCATION_SLUGS = ['loc_other', 'loc_test'] as const
 export const RESUBMISSION_LABEL = WEBFORM_RESUBMISSION_LABEL
+export const TRANSFER_LABEL = TRANSFER_IN_LABEL
 
 const TERMINAL = new Set(['Closed Won', 'Closed Lost'])
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -70,6 +77,7 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 export type SpareReason =
   | 'reach_out_recent'
   | 'reopened_recent'
+  | 'transferred_recent'
   | 'location_paused'
   | 'drip_send_due'
   | 'open_jobber_work'
@@ -217,6 +225,7 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
   const ids = candidates.map((c) => c.lead.id)
   const lastReach = new Map<string, number>()
   const lastReopen = new Map<string, number>()
+  const lastTransfer = new Map<string, number>()
   const work = new Map<string, { at: number; engagementId: string | null }[]>() // SR / quote / job per lead
   const networkMove = new Set<string>()
   const engagements = new Map<string, { id: string; stage: string; closed_at: string | null; founded_by: string | null }[]>()
@@ -229,9 +238,10 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
   }
 
   for (const chunk of chunks(ids)) {
-    const [reach, reopen, srs, quotes, jobs, partners, engs, drips] = await Promise.all([
+    const [reach, reopen, transfers, srs, quotes, jobs, partners, engs, drips] = await Promise.all([
       supabaseService.from('touchpoints').select('lead_id, occurred_at').eq('kind', 'reach_out').in('lead_id', chunk),
       supabaseService.from('touchpoints').select('lead_id, occurred_at').eq('kind', 'stage_change').like('label', 'Reopened%').in('lead_id', chunk),
+      supabaseService.from('touchpoints').select('lead_id, occurred_at').eq('kind', 'system').eq('label', TRANSFER_LABEL).in('lead_id', chunk),
       supabaseService.from('service_requests').select('lead_id, requested_at, created_at, engagement_id').in('lead_id', chunk),
       supabaseService.from('quotes').select('lead_id, created_at, engagement_id').in('lead_id', chunk),
       supabaseService.from('jobs').select('lead_id, created_at, engagement_id').in('lead_id', chunk),
@@ -239,10 +249,11 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
       supabaseService.from('engagements').select('id, client_id, stage, closed_at, founded_by').in('client_id', chunk),
       supabaseService.from('lead_drip_progress').select('lead_id, paused_at').is('stopped_at', null).is('completed_at', null).in('lead_id', chunk),
     ])
-    for (const r of [reach, reopen, srs, quotes, jobs, partners, engs, drips]) if (r.error) throw r.error
+    for (const r of [reach, reopen, transfers, srs, quotes, jobs, partners, engs, drips]) if (r.error) throw r.error
 
     for (const t of reach.data ?? []) maxInto(lastReach, t.lead_id, ms(t.occurred_at))
     for (const t of reopen.data ?? []) maxInto(lastReopen, t.lead_id, ms(t.occurred_at))
+    for (const t of transfers.data ?? []) maxInto(lastTransfer, t.lead_id, ms(t.occurred_at))
     for (const s of srs.data ?? []) push(s.lead_id, ms(s.requested_at ?? s.created_at), s.engagement_id ?? null)
     for (const q of quotes.data ?? []) push(q.lead_id, ms(q.created_at), q.engagement_id ?? null)
     for (const j of jobs.data ?? []) push(j.lead_id, ms(j.created_at), j.engagement_id ?? null)
@@ -300,7 +311,14 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
     // unanswered, so it closes at 35 days like any other.
     if (!state.open) continue
 
-    const lastActivityMs = Math.max(enquiryMs, lastReach.get(lead.id) ?? 0, lastReopen.get(lead.id) ?? 0)
+    // The clock. A transfer counts as activity like a reach-out or a reopen:
+    // the receiving owner's 35 days start when the lead reached them.
+    const lastActivityMs = Math.max(
+      enquiryMs,
+      lastReach.get(lead.id) ?? 0,
+      lastReopen.get(lead.id) ?? 0,
+      lastTransfer.get(lead.id) ?? 0,
+    )
     const base = {
       leadId: lead.id,
       name: lead.name,
@@ -312,8 +330,13 @@ export async function findStaleEnquiries(opts: { now?: Date; days?: number } = {
 
     // Guards, in the order a reader would ask about them.
     if (lastActivityMs > cutoffMs) {
+      const tAt = lastTransfer.get(lead.id) ?? 0
+      const oAt = lastReopen.get(lead.id) ?? 0
+      const rAt = lastReach.get(lead.id) ?? 0
       const reason: SpareReason =
-        (lastReopen.get(lead.id) ?? 0) >= (lastReach.get(lead.id) ?? 0) ? 'reopened_recent' : 'reach_out_recent'
+        tAt > 0 && tAt >= oAt && tAt >= rAt ? 'transferred_recent'
+          : oAt >= rAt ? 'reopened_recent'
+            : 'reach_out_recent'
       spared.push({ ...base, reason })
       continue
     }
