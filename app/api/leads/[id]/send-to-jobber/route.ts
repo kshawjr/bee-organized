@@ -517,12 +517,26 @@ export async function POST(
     // jobber_user_id) out of the Jobber push — an all-internal set yields an
     // empty list, applyTeamToSchedule omits teamMemberIdsToAssign, and the
     // assessment ships unassigned in Jobber while the assignment stays recorded
-    // internally. The terminal sync_log then reports assignment=none, which is
-    // correct and honest — we do NOT fabricate a Jobber assignment. The request/
-    // job salesperson is deliberately left unset on this path (the team model
-    // assigns the actual work, not pre-work — see engagement-assignee-sync).
+    // internally. The terminal sync_log then reports the shortfall honestly —
+    // we do NOT fabricate a Jobber assignment.
+    //
+    // issue 158 — the salesperson IS set on this path now. It used to be left
+    // unset, citing the 7/11 team model ("assignees do the work, not sales").
+    // That model stands and is untouched: it governs ASSIGNEES, which reach
+    // Jobber through teamMemberIdsToAssign (assessment) and the visit-crew
+    // field (see engagement-assignee-sync) — different fields on different
+    // Jobber types, so neither touches the other. Owner-as-salesperson
+    // was left an OPEN decision by 6f98a93 ("default = no"); Kevin closed it
+    // YES on 2026-09-04, because a franchise owner wants to see who owns the
+    // client, and a Jobber Request has no team field at all — salespersonId is
+    // the only place a person can go on one.
+    //
+    // Without this, a request-only send on a bare lead pushed NOTHING: no
+    // assessment to carry a team, no salesperson by choice. 67 such sends went
+    // out between 2026-07-31 and 2026-09-03, every one logged `assignment=ok`.
     const leadAssignees = await getLeadAssignees(leadId)
     const resolved = resolveJobberAssignment(leadAssignees)
+    salesPersonJobberId = resolved.primaryJobberUserId
     allAssigneeJobberIds = resolved.allJobberUserIds
     assigneeUnmappedCount = resolved.unmappedCount
   }
@@ -532,7 +546,14 @@ export async function POST(
   // still writes its own topic= breadcrumb, unchanged). The terminal row folds
   // them in via summarizeAssignmentOutcome so a send can no longer report
   // clean 'success' while the team/salesperson silently failed to attach.
-  const assignmentRequested = allAssigneeJobberIds.length > 0
+  // issue 158 — WHAT ACTUALLY LANDED IN JOBBER. The flag these replace was
+  // computed as allAssigneeJobberIds.length > 0: it asked only whether we HAD
+  // someone to send, never whether we sent them, which is precisely how 67
+  // sends that pushed nothing reported `assignment=ok`. It is deleted, not
+  // softened — its name is pinned absent by the issue-158 test — and these two
+  // are set at the point of a CONFIRMED push and nowhere else.
+  let salespersonLanded = false                    // salespersonId accepted (request and/or job)
+  let teamVerifiedCount = 0                        // ids read back in assessment.assignedUsers
   let requestSalespersonDropped = false            // request created WITHOUT the salesperson
   let jobSalespersonDropped = false                // job created WITHOUT the salesperson
   let assessmentTeamShortfall: string | null = null // set to the human summary on a team mismatch
@@ -811,6 +832,11 @@ export async function POST(
           REQUEST_CREATE_MUTATION,
           { input: unassigned },
         )
+      } else if (input.salespersonId && !res.userErrors?.length) {
+        // issue 158 — the salesperson was sent AND accepted. This is the only
+        // place the request leg may claim it landed; the retry branch above
+        // deliberately does not, because that request shipped unassigned.
+        salespersonLanded = true
       }
       return res
     }
@@ -935,6 +961,12 @@ export async function POST(
           allAssigneeJobberIds,
           createdAssessment?.assignedUsers?.nodes,
         )
+        // issue 158 — the team count the terminal row reports is the READ-BACK
+        // count, never the requested one. `returned` is what Jobber says it
+        // holds; `requested` is only what we asked. On a mismatch the send is
+        // already 'partial' via assessmentTeamShortfall below, and this still
+        // reports the honest partial number rather than the optimistic one.
+        teamVerifiedCount = diff.requested.filter(id => diff.returned.includes(id)).length
         if (!diff.ok) {
           console.warn('[send-to-jobber] issue 144 assessment team mismatch', {
             leadId, engagementId, assessmentId: jobberAssessmentGlobalId,
@@ -1031,6 +1063,10 @@ export async function POST(
       jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
         input: jobInput,
       })
+    } else if (jobInput.salespersonId && !jobCreate.userErrors?.length) {
+      // issue 158 — sent AND accepted. Mirrors the request leg exactly; the
+      // retry branch above never claims it, because that job shipped unassigned.
+      salespersonLanded = true
     }
     if (jobCreate.userErrors?.length) {
       return fail('job_create', jobCreate.userErrors[0].message)
@@ -1188,10 +1224,11 @@ export async function POST(
   if (jobSalespersonDropped)     assignmentProblems.push('job salesperson dropped (Jobber rejected the id)')
   if (assessmentTeamShortfall)   assignmentProblems.push(assessmentTeamShortfall)
   const assignmentOutcome = summarizeAssignmentOutcome({
-    requested: assignmentRequested,
     problems:  assignmentProblems,
     mapped:    allAssigneeJobberIds.length,
     unmapped:  assigneeUnmappedCount,
+    // issue 158 — what REACHED Jobber, not what resolved locally.
+    landed:    { salesperson: salespersonLanded, teamVerified: teamVerifiedCount },
   })
 
   await writeSyncLog({

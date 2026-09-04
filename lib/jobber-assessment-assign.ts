@@ -69,66 +69,91 @@ export function diffAssessmentAssignment(
 // summary so the terminal row can no longer claim clean success while an
 // assignment degraded. It is the summary seam, not a second parallel one.
 //
+// issue 158 — THE TOKEN NOW REPORTS WHAT LANDED, NOT WHAT RESOLVED.
+//
+// The lie this replaces: the old input was `requested: boolean`, computed at
+// the top of the send as `allAssigneeJobberIds.length > 0` — i.e. "we HAVE a
+// Jobber-linked assignee". It never asked whether that person was pushed
+// anywhere. A request-only send on a bare lead has no assessment to carry a
+// team and (before issue 158) set no salesperson, so it pushed NOTHING and
+// still reported a clean `assignment=ok`. 67 real sends across 19 locations
+// read that way between 2026-07-31 and 2026-09-03, and the token is exactly
+// what made them look fine. `requested` is GONE — not softened, removed, so
+// no caller can reintroduce the conflation.
+//
+// The input is now the set of things that actually reached Jobber:
+//   landed.salesperson  — salespersonId was accepted on the request and/or job
+//                         (false when it was never sent OR was dropped on the
+//                         rejection retry, which is separately a `problem`)
+//   landed.teamVerified — how many ids came BACK in assessment.assignedUsers,
+//                         i.e. read-back-proven, not merely requested
+// mapped/unmapped stay as they were: who was resolvable to a Jobber identity,
+// and who was picked but has none.
+//
 // Status shape (deliberate, see the writeSyncLog note in lib/sync-log.ts):
 //   · problems present → 'partial'. The client/request/assessment/job DO
 //     exist, so 'error' would falsely say the send failed; 'success' hid the
 //     failure. 'partial' is the only honest signal.
-//   · no problems, something WAS requested → 'success' + 'assignment=ok'.
-//   · nothing to assign (bare lead send) → 'success' + 'assignment=none'.
-//
-// issue 157 — the picked-but-unmapped case. An owner can pick an assignee who
-// has no jobber_user_id (Kevin/Leslie, no Jobber identity). resolveJobberAssignment
-// drops them from the Jobber push, so `requested` (mapped-count > 0) never sees
-// them and the terminal row reported a bare 'assignment=ok' — a chosen person
-// reached Jobber for nobody to see they didn't. Issue 148 already made the
-// interactive picker honest about this; the send path now matches. Two counts
-// close the gap:
-//   · unmapped > 0 AND some mapped (requested) → still 'success' (NOTHING
-//     failed — the mapped ones landed and the unmapped ones are correctly
-//     assigned internally), but the segment STATES it and is no longer a bare
-//     ok: 'assignment=ok(<mapped> of <total> to Jobber, <unmapped> internal-only)'.
-//   · all-unmapped — assignees WERE picked but NONE map to Jobber (requested is
-//     false, unmapped > 0) → 'success' + 'assignment=none(<unmapped> internal-only)'.
-//     Nothing failed and nothing reached Jobber, but this MUST read differently
-//     from a bare none: a bare none is the value a send with an EMPTY assignee
-//     field produces, and conflating "nobody was picked" with "three people were
-//     picked, none linked to Jobber" is the exact bug issue 157 exists to kill —
-//     it cost real diagnosis time on a live send. (Log copy — kin to issue 148's
-//     owner-facing "not linked to Jobber" line, not identical to it.)
-//   · genuinely nobody picked (requested false, unmapped 0) → bare
-//     'assignment=none'. That distinction is the whole point.
-// mapped/unmapped are optional: absent → treated as 0, so every issue-145
-// caller and the all-mapped path keep reporting exactly 'assignment=ok'/'none'.
+//   · something landed → 'success' + `assignment=ok(<what landed>)`, naming
+//     each destination. A bare `assignment=ok` is no longer producible.
+//   · nothing landed → 'success' (nothing FAILED) but the segment says so:
+//       - mapped people existed and none was pushed →
+//         `assignment=none(<n> mapped, nothing reached Jobber)`. This is the
+//         honest form of the 67. It must never read as ok again.
+//       - people picked, none linked to Jobber (issue 157) →
+//         `assignment=none(<n> internal-only)`
+//       - genuinely nobody picked → bare `assignment=none`
 //
 // `problems` are already human-readable ("request salesperson dropped …",
 // "assessment team incomplete …"); pass them in the order they occurred.
+export type AssignmentLanded = {
+  // salespersonId accepted on the request and/or the job.
+  salesperson?: boolean
+  // ids confirmed present in assessment.assignedUsers on the create read-back.
+  teamVerified?: number
+}
+
 export function summarizeAssignmentOutcome(input: {
-  requested: boolean
   problems: string[]
   mapped?: number
   unmapped?: number
+  landed?: AssignmentLanded
 }): { status: 'success' | 'partial'; segment: string } {
   const problems = input.problems.filter(Boolean)
   if (problems.length > 0) {
     return { status: 'partial', segment: `assignment=PARTIAL(${problems.join('; ')})` }
   }
+
+  const mapped = Number(input.mapped) || 0
   const unmapped = Number(input.unmapped) || 0
-  // Nothing mapped reached Jobber. Two DIFFERENT sends land here and must NOT
-  // read alike: assignees picked but none linked to Jobber (unmapped > 0), vs a
-  // genuinely empty assignee field (unmapped 0 → bare none).
-  if (!input.requested) {
-    return {
-      status: 'success',
-      segment: unmapped > 0 ? `assignment=none(${unmapped} internal-only)` : 'assignment=none',
+  const salesperson = !!input.landed?.salesperson
+  const teamVerified = Number(input.landed?.teamVerified) || 0
+
+  // What actually reached Jobber, named. Order is the order of the send.
+  const destinations: string[] = []
+  if (salesperson) destinations.push('salesperson')
+  if (teamVerified > 0) destinations.push(`team ${teamVerified} of ${mapped}`)
+
+  // NOTHING reached Jobber. Three different sends land here and must NOT read
+  // alike — conflating them is the whole bug this replaces.
+  if (destinations.length === 0) {
+    // Mapped people existed and not one was pushed. The 67. Nothing failed —
+    // there was simply no Jobber field to hold them — but the row must say it.
+    if (mapped > 0) {
+      const tail = unmapped > 0 ? `, ${unmapped} internal-only` : ''
+      return {
+        status: 'success',
+        segment: `assignment=none(${mapped} mapped, nothing reached Jobber${tail})`,
+      }
     }
-  }
-  if (unmapped > 0) {
-    const mapped = Number(input.mapped) || 0
-    const total = mapped + unmapped
-    return {
-      status: 'success',
-      segment: `assignment=ok(${mapped} of ${total} to Jobber, ${unmapped} internal-only)`,
+    // Assignees picked, none linked to Jobber (issue 157).
+    if (unmapped > 0) {
+      return { status: 'success', segment: `assignment=none(${unmapped} internal-only)` }
     }
+    // Genuinely nobody picked.
+    return { status: 'success', segment: 'assignment=none' }
   }
-  return { status: 'success', segment: 'assignment=ok' }
+
+  const tail = unmapped > 0 ? `, ${unmapped} internal-only` : ''
+  return { status: 'success', segment: `assignment=ok(${destinations.join(', ')}${tail})` }
 }
