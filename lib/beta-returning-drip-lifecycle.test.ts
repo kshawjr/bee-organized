@@ -206,16 +206,35 @@ describe('4) isPastClient — who counts as returning', () => {
     expect(h.callsFor('engagements')).toHaveLength(0)
   })
 
-  it('manual lead WITH a closed engagement → past client', async () => {
-    h.enqueue('leads', { import_source: 'manual' })
-    h.enqueue('engagements', { id: 'eng-closed' })
+  it('manual lead WITH a Closed Won engagement → past client', async () => {
+    h.enqueue('leads', { import_source: 'manual', paid_amount: 0 })
+    h.enqueue('engagements', { id: 'eng-won' })
     expect(await isPastClient(LEAD)).toBe(true)
     const eng = h.callsFor('engagements')[0]
-    expect(h.opsOf(eng, 'in')[0][1]).toEqual(['stage', ['Closed Won', 'Closed Lost']])
+    // The read asks for Closed WON only — a Closed Lost never qualifies.
+    expect(h.opsOf(eng, 'eq').map(o => o[1])).toContainEqual(['stage', 'Closed Won'])
+    expect(h.opsOf(eng, 'in')).toHaveLength(0)
+  })
+
+  it('manual lead with paid history → past client, no engagement read needed', async () => {
+    h.enqueue('leads', { import_source: 'manual', paid_amount: 250 })
+    expect(await isPastClient(LEAD)).toBe(true)
+    expect(h.callsFor('engagements')).toHaveLength(0)
+  })
+
+  // The 35-day auto-close (lib/auto-close.ts) closes never-hired enquiries as
+  // "No response". A person with ONLY that on record must stay a fresh lead:
+  // the Closed Won read finds nothing, so the answer is no.
+  it('manual lead whose only engagement is a Closed Lost (an auto-close "No response") → NOT a past client', async () => {
+    h.enqueue('leads', { import_source: 'manual', paid_amount: 0 })
+    h.enqueue('engagements', null)
+    expect(await isPastClient(LEAD)).toBe(false)
+    const eng = h.callsFor('engagements')[0]
+    expect(h.opsOf(eng, 'eq').map(o => o[1])).toContainEqual(['stage', 'Closed Won'])
   })
 
   it('manual lead with nothing closed (a new lead who submitted twice) → NOT a past client', async () => {
-    h.enqueue('leads', { import_source: 'manual' })
+    h.enqueue('leads', { import_source: 'manual', paid_amount: null })
     h.enqueue('engagements', null)
     expect(await isPastClient(LEAD)).toBe(false)
   })

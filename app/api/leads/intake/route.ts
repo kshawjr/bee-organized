@@ -841,7 +841,8 @@ async function mergeResubmission(args: {
   // the badge and the Home tile — six uncalled leads vanished from every
   // worklist. So a resubmission founds ONLY when the client is a past client,
   // by the same test the returning-client sequence already applies
-  // (isPastClient: Jobber-imported, or a closed engagement on record). A fresh
+  // (isPastClient: Jobber-imported, paid history, or a Closed WON on record —
+  // a Closed Lost alone, e.g. the 35-day auto-close, does not count). A fresh
   // lead's second form merges, notifies and leaves its touchpoint at lead
   // level, and the lead stays New/Attempting exactly as after the first form.
   // The answer is computed once here and reused by the sequence below.

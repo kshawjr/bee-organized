@@ -297,25 +297,32 @@ export type ReturningEnrolResult =
     }
 
 // Past client = came in through the Jobber import (any import_source other
-// than 'manual'), OR has at least one closed engagement on record. A new
-// website lead who submits the form twice is neither — import_source is
-// 'manual' and nothing has closed — so they stay on the ordinary drip.
+// than 'manual'), OR has paid history (leads.paid_amount > 0), OR has a
+// Closed WON engagement on record. A Closed Lost on its own is NOT enough:
+// the 35-day auto-close (lib/auto-close.ts) closes never-hired enquiries as
+// "No response", and those people must stay fresh leads — their next form is
+// a new enquiry in the Inbox, not a returning client owed the "good to hear
+// from you again" sequence. Before that ruling (2026-09-03) any closed
+// engagement counted, which was safe only while every close was a human one.
+// A new website lead who submits the form twice is none of these — so they
+// stay on the ordinary drip.
 export async function isPastClient(leadId: string): Promise<boolean> {
   const { data: lead } = await supabaseService
     .from('leads')
-    .select('import_source')
+    .select('import_source, paid_amount')
     .eq('id', leadId)
     .maybeSingle()
   if (lead?.import_source && lead.import_source !== 'manual') return true
+  if ((Number(lead?.paid_amount) || 0) > 0) return true
 
-  const { data: closed } = await supabaseService
+  const { data: won } = await supabaseService
     .from('engagements')
     .select('id')
     .eq('client_id', leadId)
-    .in('stage', ['Closed Won', 'Closed Lost'])
+    .eq('stage', 'Closed Won')
     .limit(1)
     .maybeSingle()
-  return !!closed
+  return !!won
 }
 
 export async function enrolReturningSequence(
