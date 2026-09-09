@@ -347,8 +347,11 @@ async function removeAttachments(paths: string[]): Promise<void> {
 // NEVER FATAL, and the log line is the fallback: until the migration runs, a
 // delete still works and leaves its trace in the Vercel log instead of a row.
 async function writeTombstone(target: Target, byUserId: string, hadReply: boolean): Promise<void> {
+  // The log line obeys the same rule as the row: it names the FACT, never the
+  // words. Putting the title in here would just move their sentence from a
+  // table Kevin controls into a Vercel log he cannot edit.
   const trace =
-    `[feedback DELETE] ${target.type ?? 'item'} "${target.title ?? ''}" (${target.id}) ` +
+    `[feedback DELETE] ${target.type ?? 'item'} (${target.id}) ` +
     `withdrawn by ${byUserId}; status=${target.status ?? '?'} had_reply=${hadReply}`
   try {
     const { error } = await supabaseService.from('feedback_deletions').insert({
@@ -356,7 +359,7 @@ async function writeTombstone(target: Target, byUserId: string, hadReply: boolea
       user_id: target.user_id,
       location_id: target.location_id,
       type: target.type,
-      title: target.title,
+      // NO TITLE. Kevin's ruling — their words go, the fact of it stays.
       status: target.status,
       item_created_at: target.created_at,
       had_reply: hadReply,

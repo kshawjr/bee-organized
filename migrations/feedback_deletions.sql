@@ -16,17 +16,19 @@
 --   · NO FOREIGN KEY to feedback_items. There is nothing to point at. The
 --     column holds the id the row USED to have, as a plain uuid, so a log line
 --     or an old email can still be matched up by hand.
---   · NO DESCRIPTION, NO ATTACHMENTS, NO THREAD. What the person actually
---     wrote is gone. The title stays because a trace nobody can read is not a
---     trace — "Ankur Patel withdrew 'Sort not permanent'" is a fact Kevin can
---     act on, "someone deleted something" is not.
+--   · NO TITLE, NO DESCRIPTION, NO ATTACHMENTS, NO THREAD. Kevin's ruling, and
+--     the principle behind it: THEIR WORDS GO, THE FACT OF IT STAYS. The title
+--     is the person's own sentence, and keeping their sentence after they asked
+--     us to delete it is the exact thing this feature exists to stop. An
+--     earlier draft of this table kept it "so the trace is readable"; that was
+--     the wrong trade and it is gone.
+--   · SO WHAT IS A TRACE FOR? One thing: triage opening a conversation that
+--     has vanished and needing to know it was withdrawn rather than lost. Who,
+--     when, which location, which id, and whether we had replied answers that
+--     completely — "Ankur Patel withdrew a bug report he filed on Aug 21" —
+--     without naming the thing.
 --   · NOTHING READS IT to rebuild an entry. It is an audit line, and the only
 --     surface that ever shows it is the triage side.
---
---   If Kevin wants ZERO residue, drop `title` from this table and the route
---   keeps working — it writes what the columns will take. The trace then
---   becomes "Ankur Patel withdrew a bug report he filed on Aug 21", which is
---   still enough to answer "where did it go?" and no longer names the thing.
 --
 -- had_reply IS THE PART THAT MATTERS ON THE TRIAGE SIDE. A withdrawn report we
 -- never answered is housekeeping. A withdrawn report we DID answer means a
@@ -47,8 +49,8 @@ create table if not exists public.feedback_deletions (
   user_id           uuid references public.hub_users(id) on delete cascade,
   location_id       uuid references public.locations(id) on delete set null,
   type              text,
-  title             text,
-  -- The entry's status and age at the moment it was withdrawn.
+  -- The entry's status and age at the moment it was withdrawn. Facts about the
+  -- report, not a word of it: no title here, deliberately — see the header.
   status            text,
   item_created_at   timestamptz,
   -- Had the team said anything on it? See the header — this is the flag that
@@ -67,7 +69,7 @@ create index if not exists feedback_deletions_item_idx
   on public.feedback_deletions (feedback_item_id);
 
 comment on table public.feedback_deletions is
-  'Audit line, one per report withdrawn by the person who filed it. NOT a soft delete — the feedback_items row and its thread are really gone. No description, no attachments, no FK back. Written by DELETE /api/feedback/[id], read only by corp triage.';
+  'Audit line, one per report withdrawn by the person who filed it. NOT a soft delete — the feedback_items row and its thread are really gone. No title, no description, no attachments, no FK back: their words go, the fact of it stays. Written by DELETE /api/feedback/[id], read only by corp triage.';
 
 -- ─── row-level security ──────────────────────────────────────────────
 -- Nobody reads this through an anon/authed client. Every read the app makes

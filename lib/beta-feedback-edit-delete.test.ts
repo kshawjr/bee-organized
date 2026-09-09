@@ -38,6 +38,10 @@ const h = vi.hoisted(() => {
     inserts: [] as { table: string; arg: any }[],
     updates: [] as { table: string; arg: any; filters: Record<string, any> }[],
     deletes: [] as { table: string; filters: Record<string, any> }[],
+    // Plain reads, with the filters they carried — so a test can prove the
+    // What's new lookup is scoped to the OPEN DRAFT and never sees a
+    // published release at all.
+    selects: [] as { table: string; filters: Record<string, any> }[],
     storageRemoved: [] as string[][],
     storageError: null as any,
     insertError: {} as Record<string, any>,
@@ -45,6 +49,7 @@ const h = vi.hoisted(() => {
   }
   const reset = () => {
     state.rows = {}; state.inserts = []; state.updates = []; state.deletes = []
+    state.selects = []
     state.storageRemoved = []; state.storageError = null; state.insertError = {}
     state.updateResult = null
   }
@@ -73,6 +78,7 @@ const h = vi.hoisted(() => {
         }
         return { data: { ...(state.rows[table] || {}), ...b.__update }, error: null }
       }
+      state.selects.push({ table, filters })
       return { data: state.rows[table] ?? null, error: null }
     }
     b.single = () => Promise.resolve(resolve())
@@ -345,7 +351,61 @@ describe('DELETE /api/feedback/[id] — taking it back', () => {
     expect(h.state.updates.filter(u => u.table === 'help_release_items')).toHaveLength(0)
   })
 
-  it('writes the tombstone — who, what, and whether we had replied', async () => {
+  // ── the three cases of the seed-line rule ──────────────────────────
+  // Kevin's ruling, and the whole of it: the test is on the LINE, never on the
+  // report's status.
+  //
+  //   UNEDITED + UNPUBLISHED → swept. Nobody has seen it and it is their
+  //                            sentence verbatim.
+  //   PUBLISHED              → stays. It has already gone out; a delete does
+  //                            not un-send a newsletter.
+  //   EDITED                 → stays. Kevin rewrote it; it is his sentence now.
+
+  // THE CASE THAT MATTERS MOST. Production has 13 unedited lines sitting in the
+  // open draft, every one an owner's title verbatim, and ALL 13 are on SHIPPED
+  // items — four of them Ankur's. A sweep that skipped closed reports would
+  // miss every single one, which is the whole population. Status is not part of
+  // this rule and this is the pin that keeps it out.
+  it('sweeps a SHIPPED item’s unedited draft line — the report’s status is irrelevant', async () => {
+    h.state.rows.feedback_items = {
+      ...ITEM, status: 'shipped',
+      admin_response: 'Fixed in this week’s release.',
+      admin_response_at: '2026-08-30T09:00:00Z',
+    }
+    h.state.rows.help_releases = { id: 'rel-draft' }
+    await del()
+    const sweep = h.state.updates.find(u => u.table === 'help_release_items')
+    expect(sweep, 'a shipped report’s unedited draft line must still be swept').toBeTruthy()
+    expect(sweep!.arg.deleted_at).toBeTruthy()
+    expect(sweep!.filters).toMatchObject({ release_id: 'rel-draft', feedback_item_id: 'fb-1' })
+  })
+
+  it('sweeps an ANSWERED item’s unedited draft line too — same reason', async () => {
+    h.state.rows.feedback_items = { ...ITEM, status: 'answered', replies: [teamRow()] }
+    h.state.rows.help_releases = { id: 'rel-draft' }
+    await del()
+    expect(h.state.updates.find(u => u.table === 'help_release_items')).toBeTruthy()
+  })
+
+  it('never reaches a PUBLISHED line — the lookup only ever asks for the open draft', async () => {
+    h.state.rows.help_releases = { id: 'rel-draft' }
+    await del()
+    const look = h.state.selects.find(q => q.table === 'help_releases')
+    // The scoping IS the protection: a published release is never returned, so
+    // its lines are never candidates for the sweep.
+    expect(look!.filters).toMatchObject({ status: 'draft' })
+  })
+
+  it('never touches an EDITED line — Kevin rewrote it, so it is his sentence now', async () => {
+    h.state.rows.help_releases = { id: 'rel-draft' }
+    await del()
+    const sweep = h.state.updates.find(u => u.table === 'help_release_items')!
+    // edited_at IS NULL is what withholds an edited line; deleted_at IS NULL
+    // stops a second sweep re-stamping one Kevin already removed.
+    expect(sweep.filters).toMatchObject({ edited_at: null, deleted_at: null })
+  })
+
+  it('writes the tombstone — who, when, which item, and whether we had replied', async () => {
     h.state.rows.feedback_items = {
       ...ITEM, admin_response: 'We are on it.', admin_response_at: '2026-08-30T09:00:00Z',
     }
@@ -353,18 +413,55 @@ describe('DELETE /api/feedback/[id] — taking it back', () => {
     const tomb = h.state.inserts.find(i => i.table === 'feedback_deletions')
     expect(tomb!.arg).toMatchObject({
       feedback_item_id: 'fb-1', user_id: 'owner-9', location_id: 'loc-1',
-      type: 'bug', title: 'Sort not permanent', status: 'submitted',
-      had_reply: true, deleted_by: 'owner-9',
+      type: 'bug', status: 'submitted', had_reply: true, deleted_by: 'owner-9',
     })
-    // The words themselves are NOT kept. This is a real delete.
-    expect(tomb!.arg).not.toHaveProperty('description')
-    expect(tomb!.arg).not.toHaveProperty('attachments')
   })
 
-  it('records had_reply false when nobody ever answered', async () => {
+  // KEVIN'S PRINCIPLE: their words go, the fact of it stays. The title is the
+  // person's own sentence — an audit row that keeps it is keeping the thing
+  // they asked us to delete, one table to the left. An earlier draft of the
+  // tombstone stored it "so the trace is readable"; this is the pin that says
+  // it never comes back.
+  it('keeps NO WORDS AT ALL — no title, no description, no attachments, no thread', async () => {
+    h.state.rows.feedback_items = {
+      ...ITEM, admin_response: 'We are on it.', replies: [teamRow()],
+    }
     await del()
-    const tomb = h.state.inserts.find(i => i.table === 'feedback_deletions')
-    expect(tomb!.arg.had_reply).toBe(false)
+    const tomb = h.state.inserts.find(i => i.table === 'feedback_deletions')!
+    expect(tomb.arg).not.toHaveProperty('title')
+    expect(tomb.arg).not.toHaveProperty('description')
+    expect(tomb.arg).not.toHaveProperty('attachments')
+    expect(tomb.arg).not.toHaveProperty('replies')
+    expect(tomb.arg).not.toHaveProperty('admin_response')
+    // And nothing smuggles the sentence in under another key.
+    expect(JSON.stringify(tomb.arg)).not.toContain('Sort not permanent')
+    expect(JSON.stringify(tomb.arg)).not.toContain('We are on it.')
+  })
+
+  // Kevin's split, the untouched end of it — and it is Ankur's case: a report
+  // nobody replied to and nobody moved. The row says a report was withdrawn,
+  // when, and from where. Nothing of the content, and had_reply false marks it
+  // as housekeeping rather than a conversation ended from the other end.
+  it('records had_reply false when nobody ever answered — the untouched case', async () => {
+    await del()
+    const tomb = h.state.inserts.find(i => i.table === 'feedback_deletions')!
+    expect(tomb.arg.had_reply).toBe(false)
+    expect(tomb.arg).toMatchObject({
+      feedback_item_id: 'fb-1', user_id: 'owner-9',
+      location_id: 'loc-1', deleted_by: 'owner-9',
+    })
+    expect(tomb.arg).not.toHaveProperty('title')
+  })
+
+  // The other end of the split: replied to, or closed. Same row, and the flag
+  // is what lets triage tell the two apart.
+  it('records had_reply true on a CLOSED item nobody wrote words on', async () => {
+    h.state.rows.feedback_items = { ...ITEM, status: 'shipped', replies: [teamRow()] }
+    await del()
+    const tomb = h.state.inserts.find(i => i.table === 'feedback_deletions')!
+    expect(tomb.arg.had_reply).toBe(true)
+    expect(tomb.arg.status).toBe('shipped')
+    expect(tomb.arg).not.toHaveProperty('title')
   })
 
   it('STILL SUCCEEDS when the tombstone table is not there yet', async () => {
