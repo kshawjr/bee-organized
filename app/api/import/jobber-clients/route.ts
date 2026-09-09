@@ -394,10 +394,50 @@ export async function POST(req: NextRequest) {
   // after we return the response. All progress is written to import_jobs
   // (read by /api/import/status/[id] polling), so no stream is needed.
   const emit = (_obj: any) => {}  // no-op: progress goes to DB, not a stream
+  // ── DIAGNOSTIC WRITE, loc_phillysuburbs stall ────────────────────────────
+  // sync_log, NOT console. 246f540 put console.log at the top of runImport and
+  // the lines never appeared — but Vercel's Logs page, filtered to this route,
+  // shows ZERO rows for a 30-minute window in which sync_log recorded this
+  // route's own JSON reply every single minute. The route ran ~30 times and
+  // Vercel logged none of it, so this function's logs are not reaching Vercel
+  // at all. Every "no log line, therefore it did not run" conclusion drawn
+  // before now was read off a broken instrument.
+  //
+  // sync_log is the working instrument: a row a minute, all day.
+  //
+  // AWAITED, never fire-and-forget. A dropped promise is the exact failure
+  // under investigation; an un-awaited diagnostic would reproduce the bug it
+  // is meant to detect and then report nothing. writeSyncLog already owns a
+  // never-throw contract, and the try/catch here is a second belt: a sync_log
+  // failure must never be able to break an import.
+  //
+  // entity_type 'location' matches recordContinuationAttempt — the sync_log
+  // CHECK has no 'import' member, the event is scoped to a location's import
+  // rather than to a record, and those rows are landing in production right
+  // now, so the shape is proven against the live schema.
+  const entryLog = async (message: string) => {
+    try {
+      await writeSyncLog({
+        location_id: locSlug,
+        entity_id: locSlug,
+        entity_type: 'location',
+        direction: 'inbound',
+        status: 'success',
+        message,
+      })
+    } catch (err) {
+      console.error('[import-entry] sync_log write failed', err)
+    }
+  }
+
   const runImport = async () => {
+      await entryLog(`[import-entry] runImport ENTERED job=${jobId}`)
+
       // ── DIAGNOSTIC, loc_phillysuburbs stall (job f385d31d, stuck at 1,606
       // of 18,883 since 2026-09-02) ──────────────────────────────────────────
-      // FIRST statement in the detached work, before anything else runs.
+      // Kept from 246f540. Harmless, and free if this function's logs ever
+      // start reaching Vercel again — but the sync_log row above is the one
+      // that decides the question.
       //
       // The route replies {"job_id":...,"started":true} — confirmed in
       // sync_log by the continuation diagnostic — and that reply is only sent
@@ -444,9 +484,14 @@ export async function POST(req: NextRequest) {
         `job=${jobId} loc=${locSlug}`,
       )
       if (!claimed || claimed.length === 0) {
+        // BUSY before the return — entered and bounced off a live mutex is a
+        // different finding from never entering at all, and both must be
+        // readable in sync_log.
+        await entryLog(`[import-entry] mutex BUSY job=${jobId}`)
         console.log(`[jobber-import] segment already running for job ${jobId} — exiting without spawning rival`)
         return
       }
+      await entryLog(`[import-entry] mutex WON job=${jobId}`)
 
       // Clear the mutex from any exit path. Idempotent — safe to call more
       // than once. Every return below must call this before returning.
