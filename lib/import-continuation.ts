@@ -379,6 +379,79 @@ export type ContinuationPostResult = {
   status?: number
   redirectedTo?: string
   detail?: string
+  /** What answered — content-type, differing final URL, body snippet. Absent
+   *  when the fetch threw, since there was no response to describe. */
+  evidence?: string
+}
+
+// ─── what actually answered ──────────────────────────────────────
+
+// How much of the body to keep. Enough to tell an import route's JSON from a
+// login page's <!doctype html>, short enough to sit in a sync_log message.
+export const RESPONSE_SNIPPET_MAX = 160
+
+/**
+ * Describe WHAT ANSWERED, not just that something did.
+ *
+ * THE PHILADELPHIA SUBURBS STALL (2026-09-02, loc_phillysuburbs, 1,606 of
+ * 18,883): the sweeper logged `outcome=landed status=200` about 4,300 times
+ * while Vercel showed the import route ran THREE times in three days. So ~4,300
+ * "successes" were recorded for requests that never reached the route.
+ *
+ * A 2xx proves SOMETHING answered. It does not prove the import route
+ * answered. An SSO login page answers 200 with HTML and is indistinguishable
+ * from a successful resume at the status-code level, and `redirect: 'manual'`
+ * only catches a redirect it is actually shown — an origin that rewrites, or
+ * serves the gate inline, never shows one.
+ *
+ * So record the three things that tell them apart: the content-type (JSON vs
+ * HTML), the final URL when it differs from the one we asked for, and a short
+ * body snippet. This is a DIAGNOSTIC. It changes no classification: a 2xx is
+ * still 'landed', the same URL and header still go out, redirect is still
+ * 'manual'. It only makes the remaining hop — the sweeper's fetch reaching the
+ * route — readable instead of assumed.
+ *
+ * The body read is guarded: an unreadable body records that fact and must
+ * never break the retry. A handoff that throws because we tried to look at it
+ * would be a worse bug than the one we are diagnosing.
+ */
+export async function describeResponse(
+  res: { headers?: any; url?: string; text?: () => Promise<string> },
+  requestUrl: string,
+): Promise<string> {
+  const bits: string[] = []
+
+  let contentType = ''
+  try {
+    contentType = String(res?.headers?.get?.('content-type') ?? '')
+  } catch {
+    contentType = ''
+  }
+  bits.push(`content-type=${contentType || 'none'}`)
+
+  // Only when it DIFFERS — logging the URL we just asked for on every one of
+  // ~4,300 attempts is noise that hides the one line that matters.
+  const finalUrl = String(res?.url ?? '')
+  if (finalUrl && finalUrl !== requestUrl) bits.push(`final-url=${finalUrl}`)
+
+  let snippet: string
+  try {
+    const body = await res.text!()
+    snippet = String(body ?? '').replace(/\s+/g, ' ').trim().slice(0, RESPONSE_SNIPPET_MAX)
+    if (!snippet) snippet = '(empty)'
+  } catch {
+    snippet = 'response body unreadable'
+  }
+  bits.push(`body="${snippet}"`)
+
+  return bits.join('; ')
+}
+
+/** Join a classification detail with the captured evidence; either may be absent. */
+export function withEvidence(detail: string | undefined, evidence: string | undefined): string | undefined {
+  if (!detail) return evidence
+  if (!evidence) return detail
+  return `${detail} — ${evidence}`
 }
 
 /**
@@ -416,19 +489,25 @@ export async function postContinuation(opts: {
     })
     const { outcome, redirect } = classifyContinuationResponse(res as any)
     const redirectedTo = redirect ? res.headers?.get?.('location') ?? undefined : undefined
+    // EVERY outcome, 'landed' included. The success path used to hold the
+    // response and throw it away, which is exactly why ~4,300 landed rows say
+    // nothing about what answered.
+    const evidence = await describeResponse(res as any, url)
+    const classified = redirect
+      ? `blocked by a redirect to ${redirectedTo ?? 'an unknown location'} — ` +
+        `origin ${opts.origin} looks SSO-gated`
+      : outcome === 'chain_capped'
+        ? `self-chain depth-capped by the platform (HTTP ${LOOP_DETECTED_STATUS} ` +
+          `Loop Detected) — the cron sweeper continues from here, as designed`
+        : outcome === 'bounced'
+          ? `import route returned ${res.status}`
+          : undefined
     return {
       outcome,
       status: res.status,
       redirectedTo,
-      detail: redirect
-        ? `blocked by a redirect to ${redirectedTo ?? 'an unknown location'} — ` +
-          `origin ${opts.origin} looks SSO-gated`
-        : outcome === 'chain_capped'
-          ? `self-chain depth-capped by the platform (HTTP ${LOOP_DETECTED_STATUS} ` +
-            `Loop Detected) — the cron sweeper continues from here, as designed`
-          : outcome === 'bounced'
-            ? `import route returned ${res.status}`
-            : undefined,
+      evidence,
+      detail: withEvidence(classified, evidence),
     }
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || controller.signal.aborted

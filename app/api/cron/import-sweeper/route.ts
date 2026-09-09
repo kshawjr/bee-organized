@@ -49,6 +49,7 @@ import {
   CLAIM_VERIFY_ATTEMPTS,
   CLAIM_VERIFY_INTERVAL_MS,
   type ContinuationOutcome,
+  withEvidence,
 } from '@/lib/import-continuation'
 
 export const dynamic = 'force-dynamic'
@@ -268,10 +269,17 @@ export async function GET(req: NextRequest) {
           // fail-out clock (agesBounceRun) — this signal is inherently racy
           // and must never be the reason a healthy import is killed.
           outcome = 'no_claim'
-          detail =
+          // APPEND, never overwrite. post.evidence is what actually answered
+          // (content-type, differing final URL, body snippet) and is the whole
+          // point of looking: "2xx but nobody claimed" plus "body was a login
+          // page" is a diagnosis, while "2xx but nobody claimed" alone is the
+          // ~4,300 rows we already have and cannot read.
+          detail = withEvidence(
             `POST returned 2xx but no segment claimed the job within ` +
-            `${Math.round((CLAIM_VERIFY_ATTEMPTS * CLAIM_VERIFY_INTERVAL_MS) / 1000)}s — ` +
-            `resume may not have taken`
+              `${Math.round((CLAIM_VERIFY_ATTEMPTS * CLAIM_VERIFY_INTERVAL_MS) / 1000)}s — ` +
+              `resume may not have taken`,
+            post.evidence,
+          )
         }
       }
 

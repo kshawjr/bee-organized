@@ -125,10 +125,17 @@ const RESUMABLE_STALE = () => ago(4)
 // Well past the ceiling → the sweeper gives up.
 const HOPELESS_STALE = () => ago(20)
 
-const resp = (over: Partial<{ status: number; type: string; location: string | null }> = {}) => ({
+const resp = (over: Partial<{ status: number; type: string; location: string | null; contentType: string; body: string; url: string }> = {}) => ({
   status: over.status ?? 200,
   type: over.type ?? 'basic',
-  headers: { get: (k: string) => (k === 'location' ? over.location ?? null : null) },
+  headers: {
+    get: (k: string) =>
+      k === 'location' ? over.location ?? null
+      : k.toLowerCase() === 'content-type' ? over.contentType ?? null
+      : null,
+  },
+  url: over.url,
+  text: async () => over.body ?? '',
 })
 
 // A running job row. Defaults to the CLEANLY-YIELDED state — released claim,
@@ -359,6 +366,27 @@ describe('GET /api/cron/import-sweeper — continuation handoff', () => {
     expect(body.results[0]).toMatchObject({ ok: false, outcome: 'no_claim' })
     expect(continuationRows()[0].status).toBe('error')
     expect(continuationRows()[0].message).toContain('outcome=no_claim')
+  })
+
+  it('NO_CLAIM keeps the evidence of what answered instead of overwriting it', async () => {
+    // loc_phillysuburbs: ~4,300 rows saying `outcome=landed status=200` while
+    // the route itself ran three times in three days. The no_claim downgrade
+    // used to REPLACE detail, throwing away the one thing that says whether
+    // the import route answered at all.
+    fetchMock.mockResolvedValue(resp({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><html><head><title>Sign in</title></head></html>',
+      url: 'https://vercel.com/sso/access',
+    }))
+    h.db.import_jobs = [job()]
+    await sweep()
+    const msg = continuationRows()[0].message
+    expect(msg).toContain('outcome=no_claim')
+    expect(msg).toContain('no segment claimed the job')          // the classification survives
+    expect(msg).toContain('content-type=text/html')              // and so does the evidence
+    expect(msg).toContain('Sign in')
+    expect(msg).toContain('final-url=https://vercel.com/sso/access')
   })
 
   it('NO_CLAIM: a slow (cold-starting) receiver that claims late still reads as landed', async () => {

@@ -28,6 +28,8 @@ import {
   agesBounceRun,
   CONTINUATION_LOG_PREFIX,
   CONTINUATION_TIMEOUT_MS,
+  RESPONSE_SNIPPET_MAX,
+  withEvidence,
 } from './import-continuation'
 
 const MIN = 60_000
@@ -368,5 +370,118 @@ describe('postContinuation', () => {
   it('builds the continuation URL with an encoded slug and no double slash', () => {
     expect(continuationUrl('https://app.example.com/', 'loc kc'))
       .toBe('https://app.example.com/api/import/jobber-clients?location_id=loc%20kc&_continue=1')
+  })
+})
+
+// ─── what actually answered ──────────────────────────────────────
+//
+// THE PHILADELPHIA SUBURBS STALL (loc_phillysuburbs, job f385d31d, stuck at
+// 1,606 of 18,883 since 2026-09-02). The sweeper logged `outcome=landed
+// status=200` about 4,300 times; Vercel shows /api/import/jobber-clients ran
+// THREE times in three days. So ~4,300 "successes" were recorded for requests
+// that never reached the route.
+//
+// A 2xx proves something answered, not that the import route answered. These
+// pin the evidence that tells them apart. NOTHING here changes classification
+// — a 2xx is still 'landed'; the diagnosis has to be readable without also
+// being a behaviour change nobody asked for.
+describe('postContinuation records WHAT answered, not just that something did', () => {
+  const reply = (over: any = {}) => ({
+    status: 200,
+    type: 'basic',
+    headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'application/json' : null) },
+    url: 'https://beehive.beeorganized.com/api/import/jobber-clients?location_id=loc_kc&_continue=1',
+    text: async () => '{"ok":true,"job_id":"f385d31d-e7cc-46af-9a3f-db9ca3429056"}',
+    ...over,
+  })
+  const post = (fetchImpl: any) =>
+    postContinuation({ origin: 'https://beehive.beeorganized.com', locationSlug: 'loc_kc', secret: 's', fetchImpl })
+
+  it('a real import reply shows its job_id in the detail', async () => {
+    const r = await post(vi.fn(async () => reply()))
+    expect(r.outcome).toBe('landed')
+    expect(r.detail).toContain('content-type=application/json')
+    expect(r.detail).toContain('f385d31d-e7cc-46af-9a3f-db9ca3429056')
+  })
+
+  it('an SSO login page answering 200 is STILL landed — but the detail gives it away', async () => {
+    const r = await post(vi.fn(async () => reply({
+      headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null) },
+      text: async () => '<!doctype html>\n<html>\n  <head><title>Authentication Required</title></head>\n  <body>Sign in to continue</body>\n</html>',
+    })))
+    // classification is deliberately unchanged — this is a diagnostic
+    expect(r.outcome).toBe('landed')
+    expect(r.status).toBe(200)
+    // ...and it is no longer indistinguishable from a real resume
+    expect(r.detail).toContain('content-type=text/html')
+    expect(r.detail).toContain('<!doctype html>')
+    expect(r.detail).toContain('Authentication Required')
+    // whitespace collapsed so the snippet stays one readable sync_log line
+    expect(r.detail).not.toContain('\n')
+  })
+
+  it('a final URL that differs from the one we asked for is recorded', async () => {
+    const r = await post(vi.fn(async () => reply({ url: 'https://vercel.com/sso/access?next=%2Fapi%2Fimport' })))
+    expect(r.outcome).toBe('landed')
+    expect(r.detail).toContain('final-url=https://vercel.com/sso/access')
+  })
+
+  it('a final URL equal to the target is NOT repeated — 4,300 rows of noise hides the one that matters', async () => {
+    const r = await post(vi.fn(async () => reply()))
+    expect(r.detail).not.toContain('final-url=')
+  })
+
+  it('an unreadable body records that, stays landed, and never breaks the retry', async () => {
+    const r = await post(vi.fn(async () => reply({
+      text: async () => { throw new Error('body already consumed') },
+    })))
+    expect(r.outcome).toBe('landed')
+    expect(r.detail).toContain('response body unreadable')
+  })
+
+  it('the snippet is capped, so one enormous page cannot flood sync_log', async () => {
+    const r = await post(vi.fn(async () => reply({ text: async () => 'x'.repeat(5000) })))
+    expect(r.detail).toContain('x'.repeat(RESPONSE_SNIPPET_MAX))
+    expect(r.detail).not.toContain('x'.repeat(RESPONSE_SNIPPET_MAX + 1))
+  })
+
+  it('an empty body says so rather than reading as a missing field', async () => {
+    const r = await post(vi.fn(async () => reply({ text: async () => '   ' })))
+    expect(r.detail).toContain('body="(empty)"')
+  })
+
+  it('a bounce keeps its classification detail AND gains the evidence', async () => {
+    const r = await post(vi.fn(async () => reply({ status: 503, text: async () => 'upstream unavailable' })))
+    expect(r.outcome).toBe('bounced')
+    expect(r.detail).toContain('import route returned 503')
+    expect(r.detail).toContain('upstream unavailable')
+  })
+
+  it('a thrown fetch has no response to describe, and still reports the throw', async () => {
+    const r = await post(vi.fn(async () => { throw new Error('ECONNRESET') }))
+    expect(r.outcome).toBe('errored')
+    expect(r.detail).toContain('ECONNRESET')
+    expect(r.evidence).toBeUndefined()
+  })
+
+  it('the URL, header, redirect mode and classification are untouched', async () => {
+    const fetchImpl = vi.fn(async () => reply()) as any
+    await post(fetchImpl)
+    const [url, opts] = fetchImpl.mock.calls[0]
+    expect(url).toBe('https://beehive.beeorganized.com/api/import/jobber-clients?location_id=loc_kc&_continue=1')
+    expect(opts.headers['x-import-continue-secret']).toBe('s')
+    expect(opts.redirect).toBe('manual')
+  })
+})
+
+describe('withEvidence — the sweeper appends, it does not overwrite', () => {
+  it('keeps both halves', () => {
+    expect(withEvidence('no segment claimed', 'content-type=text/html; body="<!doctype html>"'))
+      .toBe('no segment claimed — content-type=text/html; body="<!doctype html>"')
+  })
+  it('tolerates either half being absent', () => {
+    expect(withEvidence(undefined, 'content-type=none')).toBe('content-type=none')
+    expect(withEvidence('no segment claimed', undefined)).toBe('no segment claimed')
+    expect(withEvidence(undefined, undefined)).toBeUndefined()
   })
 })
