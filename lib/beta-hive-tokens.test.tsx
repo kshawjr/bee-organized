@@ -41,6 +41,7 @@ import TagsRow from '@/components/hive/shared/TagsRow'
 import ContactsBlock from '@/components/hive/shared/ContactsBlock'
 import PinnedBuzz from '@/components/hive/shared/PinnedBuzz'
 import ReferrerField from '@/components/hive/shared/ReferrerField'
+import AddressField from '@/components/hive/shared/AddressField'
 import { milestoneFamilies, STAGE_RECORD_FAMILY, CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import EngagementPanel from '@/components/hive/EngagementPanel'
@@ -382,6 +383,12 @@ describe('small-action TYPE scale (#59 round 2)', () => {
       ['PinnedBuzz', <PinnedBuzz notes={[]} />, 1],
       // the Referred-by value/✎ wrapper + the × clear
       ['ReferrerField', <ReferrerField lead={{ id: 'x', referred_by_kind: 'lead', referred_by_id: 'y', referred_by_name: 'Dot Nguyen', source: 'Referral' }} locationUuid="loc" />, 2],
+      // the address block's row verbs: "Stop using" on an extra address, and
+      // the "+ Add address" affordance. Both sat at the 16px floor unnoticed
+      // until Kevin saw them on screen — this block was simply not in this
+      // list, which is the only reason the chain went unpinned here.
+      ['AddressField', <AddressField leadId="x" value={{ address: '10 Old Rd', city: 'Fairway', state: 'KS', zip: '66205' }}
+        formerAddresses={[{ display: '55 Second St, Fairway, KS, 66205', street: '55 Second St', city: 'Fairway', state: 'KS', zip: '66205', jobber_property_id: '1', moved_at: '2026-09-01T00:00:00Z', label: 'second_home', status: 'active' }]} />, 2],
     ]
     for (const [label, ui, minButtons] of cases) {
       const { host, unmount } = await mount(ui)

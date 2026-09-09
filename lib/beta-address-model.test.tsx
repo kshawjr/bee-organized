@@ -349,10 +349,27 @@ describe('the address list — one list, primary marked', () => {
     await mountField({ jobberLinked: true, formerAddresses: [OTHER] })
     const btn = q('[data-address-action="retire"]') as HTMLElement
     expect(btn.style.textDecoration).not.toBe('underline')
-    // it inherits the meta line's size rather than setting a larger one
-    expect(btn.style.font).toBe('inherit')
     // and it is the LAST thing in its row, not pinned to a right-hand axis
     expect(btn.style.marginLeft).not.toBe('auto')
+    await unmountField()
+  })
+
+  it('both row verbs wear bee-small-action, and neither sets a size inline', async () => {
+    // WHAT THIS PINS: the CLASS, not the rendered size. jsdom does not apply
+    // globals.css, so nothing here can see the 16px!important button floor —
+    // a computed-size assertion would have passed happily while both controls
+    // rendered at 16px on screen, which is exactly how this shipped.
+    await mountField({ jobberLinked: true, formerAddresses: [OTHER] })
+    const retire = q('[data-address-action="retire"]') as HTMLElement
+    const add = q('[data-address-add-open]') as HTMLElement
+    for (const b of [retire, add]) {
+      expect(b.className).toContain('bee-small-action')
+      // an inline size on a <button> loses to the floor, so leaving one is a
+      // number that does nothing but mislead the next reader
+      expect(b.style.fontSize).toBe('')
+      // and the `font` SHORTHAND drags a size in the same way
+      expect(b.style.font).toBe('')
+    }
     await unmountField()
   })
 

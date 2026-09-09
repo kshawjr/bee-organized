@@ -352,8 +352,13 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
 
   // The muted line beneath an address. Raised from 10px — this is where the
   // label now lives, and a label nobody over 45 can read is not a label.
+  // T.badge.actionFont is the small-action type size, and bee-small-action
+  // is the CSS rule that lets a <button> actually render at it. The retire
+  // link lives inside this line, so the line is sized to the same token —
+  // otherwise the one element that cannot be resized would sit half a pixel
+  // proud of the text it belongs to.
   const META_LINE = {
-    fontSize: '11.5px', lineHeight: 1.45, color: T.ink.muted,
+    fontSize: T.badge.actionFont, lineHeight: 1.45, color: T.ink.muted,
     paddingLeft: '20px', margin: '0 0 6px',
   }
 
@@ -384,8 +389,14 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
       <span aria-hidden="true"> · </span>
       <button type="button" disabled={busy} data-address-action={retired ? 'restore' : 'retire'}
         onClick={() => entryAction(retired ? 'restore' : 'retire', i)}
+        className="bee-small-action"
         style={{
-          padding: 0, background: 'none', border: 'none', font: 'inherit',
+          padding: 0, background: 'none', border: 'none',
+          // fontFamily ONLY — never the `font` shorthand, which drags a
+          // size along with it and then loses that size to the 16px
+          // !important button floor in globals.css. The size comes from
+          // bee-small-action, the one rule that beats the floor.
+          fontFamily: 'inherit', fontWeight: 400,
           color: T.ink.muted, cursor: busy ? 'not-allowed' : 'pointer',
         }}>
         {retired ? 'Use again' : 'Stop using'}
@@ -507,7 +518,8 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
   const addLink = (!readOnly && !adding && display) ? (
     <p style={{ paddingLeft: '20px', margin: '0 0 2px' }}>
       <button type="button" data-address-add-open="1" onClick={openAdd}
-        style={{ padding: 0, background: 'none', border: 'none', color: T.ink.muted, fontFamily: 'inherit', fontSize: '12.5px', cursor: 'pointer' }}>
+        className="bee-small-action"
+        style={{ padding: 0, background: 'none', border: 'none', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
         + Add address
       </button>
     </p>
