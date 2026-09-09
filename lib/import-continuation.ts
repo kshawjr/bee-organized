@@ -50,6 +50,7 @@
 //     not against the HTTP status alone.
 
 import { writeSyncLog } from './sync-log'
+import { formatSecretMatch } from './secret-fingerprint'
 
 // Which mechanism made the attempt. selfContinue is the fast path (fires
 // within milliseconds of the yield); the sweeper is the every-minute net.
@@ -555,6 +556,35 @@ export async function postContinuation(opts: {
   const doFetch = opts.fetchImpl ?? fetch
   const url = continuationUrl(opts.origin, opts.locationSlug)
   const awaitResponse = opts.awaitResponse !== false
+
+  // ─── DIAGNOSTIC (temporary — Kevin removes this) ─────────────────────────
+  // The other half of the [secret-match] pair. The route records what it
+  // RECEIVED and what it compares against; this records what the sweeper is
+  // about to SEND. Two rows, one from each end, is what makes the question
+  // answerable: if both are present and the sha8s differ, the sweeper is
+  // reading a different CRON_SECRET than the route does. If the route's row
+  // says header=absent while this one says present, it was stripped in
+  // transit.
+  //
+  // NEVER the secret itself — presence, length, truncated sha256 only.
+  // Skipped when there is no secret to send AND none configured, so a
+  // misconfigured local run does not spam the log.
+  try {
+    await writeSyncLog({
+      location_id: opts.locationSlug,
+      entity_id: opts.locationSlug,
+      entity_type: 'location',
+      direction: 'outbound',
+      status: 'success',
+      message: formatSecretMatch({
+        side: 'sweeper',
+        headerValue: opts.secret,
+        envValue: process.env.CRON_SECRET,
+        origin: opts.origin,
+        note: awaitResponse ? 'awaiting' : 'dispatch',
+      }),
+    })
+  } catch { /* a diagnostic must never break a handoff */ }
 
   if (!awaitResponse) {
     // FIRE, THEN PROBE BRIEFLY.

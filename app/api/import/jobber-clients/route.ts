@@ -54,6 +54,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { canRunImport } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
+import { formatSecretMatch } from '@/lib/secret-fingerprint'
 import { resolveInternalOrigin } from '@/lib/internal-origin'
 import { postContinuation, recordContinuationAttempt } from '@/lib/import-continuation'
 import {
@@ -152,6 +153,11 @@ async function fetchAll(
 // ── handler ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  // Read early, for the diagnostic row's location scoping only. The real
+  // parsing below is untouched.
+  const queryLocIdEarly = (() => {
+    try { return new URL(req.url).searchParams.get('location_id') } catch { return null }
+  })()
   // ─── internal continuation: skip user-auth for self-chain / cron sweeper ──
   // The waitUntil self-chain (see selfContinue below) and the cron sweeper
   // (/api/cron/import-sweeper) re-POST here with no user session. They
@@ -161,6 +167,44 @@ export async function POST(req: NextRequest) {
   const isInternalContinue =
     !!process.env.CRON_SECRET &&
     req.headers.get('x-import-continue-secret') === process.env.CRON_SECRET
+
+  // ─── DIAGNOSTIC (temporary — Kevin removes this) ─────────────────────────
+  // The sweeper's POSTs are not being recognised as internal, while the SAME
+  // header sent by hand from outside is. Every [continuation] row the sweeper
+  // writes replies {"job_id":"...","started":true} — a string that exists
+  // nowhere in this file — so those requests took neither branch of the split
+  // at the bottom. This row says which of the two causes it is: the header
+  // never arriving, or arriving with a different value.
+  //
+  // NEVER the secret itself — presence, length and a truncated sha256 only.
+  // See lib/secret-fingerprint.ts.
+  //
+  // GATE: header present, OR no cookie. A browser POST always carries a
+  // session cookie; the sweeper and self-chain never do. So this captures
+  // every machine call — INCLUDING one whose secret header was stripped in
+  // transit, which is the whole point (gating on the header alone would make
+  // that case indistinguishable from no request at all) — while a watching
+  // browser's every-2s auto-continue writes nothing.
+  const dbgHeader = req.headers.get('x-import-continue-secret')
+  if (dbgHeader !== null || !req.headers.get('cookie')) {
+    try {
+      await writeSyncLog({
+        location_id: (queryLocIdEarly || 'unknown'),
+        entity_id: (queryLocIdEarly || 'unknown'),
+        entity_type: 'location',
+        direction: 'inbound',
+        status: 'success',
+        message: formatSecretMatch({
+          side: 'route',
+          headerValue: dbgHeader,
+          envValue: process.env.CRON_SECRET,
+          matched: isInternalContinue,
+          host: req.headers.get('host'),
+          origin: req.headers.get('origin') || req.headers.get('x-forwarded-host'),
+        }),
+      })
+    } catch { /* a diagnostic must never break the route */ }
+  }
 
   // ─── auth (user-session path) ──
   let hubUser: any = null
