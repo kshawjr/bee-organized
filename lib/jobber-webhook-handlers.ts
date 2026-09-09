@@ -115,6 +115,12 @@ import { jobberGraphQL } from './jobber'
 import { supabaseService } from './supabase-service'
 import { applyDripSideEffects, stopActiveDripsForLead } from './drip-lifecycle'
 import { disconnectJobberFromLocation } from './jobber-disconnect'
+import { parseFormerAddresses } from './lead-address'
+import {
+  planDriftAddress,
+  planDestroyedProperty,
+  type JobberPropertyAddress,
+} from './property-drift'
 import {
   SINGLE_CLIENT_QUERY,
   SINGLE_REQUEST_QUERY,
@@ -1255,9 +1261,77 @@ export function handleAssessmentDestroy(ctx: HandlerCtx) {
 // Bee Hub's address is the local record — losing the Jobber link to a
 // property doesn't invalidate the owner's notes about where the
 // customer lives.
-export function handlePropertyDestroy(ctx: HandlerCtx) {
+//
+// AND the case that used to fall through entirely: a destroyed property held
+// as one of the client's OTHER addresses. Nulling only ever looked at the
+// PRIMARY link, so an other-address stayed fully live — the send-time picker
+// kept offering it, and the send then FAILED, because a second address
+// resolves to a property that must already exist and the push refuses to
+// create one. We retire that entry instead: address, label and history kept,
+// Bee Hub just stops offering it. Never delete — an address deleted in Jobber
+// must not silently vanish from Bee Hub.
+export async function handlePropertyDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.PROPERTY_DESTROY
-  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'PROPERTY_DESTROY')
+  const primary = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'PROPERTY_DESTROY')
+  if (primary.lead_id) return primary // it was the primary; handled, nothing else holds it
+
+  const numeric = extractJobberId(ctx.itemId) || ctx.itemId
+  const retired = await retireDestroyedOtherAddress(ctx, numeric)
+  return retired ?? primary
+}
+
+// The holder of a destroyed property among their OTHER addresses, if any.
+// Returns null when nothing holds it, so the caller keeps the existing
+// no-op note. Fails soft: the jsonb containment filter errors while the
+// former_addresses column is absent (pre-migration), and nothing can match
+// anyway — a webhook that errors is a webhook Jobber retries forever.
+async function retireDestroyedOtherAddress(
+  ctx: HandlerCtx,
+  numeric: string,
+): Promise<HandlerResult | null> {
+  const { data: holder, error } = await supabaseService
+    .from('leads')
+    .select('id, stage, former_addresses')
+    .eq('location_id', ctx.location.location_id)
+    .filter('former_addresses', 'cs', JSON.stringify([{ jobber_property_id: numeric }]))
+    .maybeSingle()
+
+  if (error) {
+    if (!/former_addresses/i.test(error.message || '')) {
+      console.warn('[jobber-webhook] destroyed-property holder lookup failed', error.message)
+    }
+    return null
+  }
+  if (!holder) return null
+
+  const list = parseFormerAddresses((holder as any).former_addresses)
+  const plan = planDestroyedProperty(list, numeric)
+  const base = {
+    processed: true as const,
+    lead_id: holder.id,
+    lead_stage: (holder as any).stage || null,
+    prev_stage: (holder as any).stage || null,
+  }
+  if (plan.action === 'skip') {
+    return {
+      ...base,
+      note: `PROPERTY_DESTROY: property=${numeric} on lead ${holder.id} — ${plan.reason === 'already_retired' ? 'that address is already retired, left as is' : 'not held as one of their addresses (no-op)'}`,
+    }
+  }
+
+  const { error: upErr } = await supabaseService
+    .from('leads')
+    .update({ former_addresses: plan.next, updated_at: new Date().toISOString() })
+    .eq('id', holder.id)
+  if (upErr) {
+    console.warn('[jobber-webhook] retire-destroyed-address write failed', upErr.message)
+    return { ...base, note: `PROPERTY_DESTROY: property=${numeric} on lead ${holder.id} — could not retire it, nothing written` }
+  }
+
+  return {
+    ...base,
+    note: `PROPERTY_DESTROY: property=${numeric} deleted in Jobber — retired that address on lead ${holder.id}; the address is kept, Bee Hub stops offering it`,
+  }
 }
 
 // CLIENT_DESTROY → null ALL jobber_*_id columns (full link break).
@@ -1265,6 +1339,78 @@ export function handlePropertyDestroy(ctx: HandlerCtx) {
 export function handleClientDestroy(ctx: HandlerCtx) {
   const spec = DESTROY_SPECS.CLIENT_DESTROY
   return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'CLIENT_DESTROY')
+}
+
+// One of the client's OTHER addresses, discovered by an inbound property
+// event. Re-reads the lead, asks lib/property-drift what to do, and on
+// 'create' appends a single entry to former_addresses.
+//
+// FAILS SOFT ON BOTH HOPS. A failed re-read or a failed write logs, returns
+// processed:true, and SAYS IN THE NOTE that nothing was recorded. Two reasons:
+// a webhook that errors is a webhook Jobber retries forever, and a note that
+// claims an address was written when it was not is worse than the drift —
+// it is the drift, now invisible.
+async function recordDriftedProperty(
+  noun: string,
+  leadId: string,
+  propertyNumeric: string | null,
+  address: JobberPropertyAddress | null | undefined,
+): Promise<HandlerResult> {
+  const tail = `property=${propertyNumeric} is not lead ${leadId}'s linked property`
+
+  const { data: full, error: readErr } = await supabaseService
+    .from('leads')
+    .select('id, stage, address, city, state, zip, former_addresses')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  if (readErr || !full) {
+    console.warn('[jobber-webhook] drift re-read failed', { leadId, error: readErr?.message })
+    return {
+      processed: true,
+      lead_id: leadId,
+      note: `${noun}: ${tail} — could not re-read the lead, nothing recorded`,
+    }
+  }
+
+  const formerAddresses = parseFormerAddresses((full as any).former_addresses)
+  const plan = planDriftAddress({
+    lead: full as any,
+    formerAddresses,
+    address,
+    jobberPropertyId: propertyNumeric,
+    nowIso: new Date().toISOString(),
+  })
+
+  const base = { processed: true as const, lead_id: leadId, lead_stage: (full as any).stage || null, prev_stage: (full as any).stage || null }
+
+  if (plan.action === 'skip') {
+    const why =
+      plan.reason === 'no_address' ? 'no usable address in Jobber, nothing recorded'
+      : plan.reason === 'matches_primary' ? 'already this lead\'s primary address, nothing recorded'
+      : `already on the client as other address #${plan.index + 1}${plan.retired ? ' (retired, left retired)' : ''}, nothing recorded`
+    return { ...base, note: `${noun}: ${tail} — ${why}` }
+  }
+
+  // ONLY these two keys. The primary address columns and the property link
+  // are absent by construction, not by care taken at the call site.
+  const { error: upErr } = await supabaseService
+    .from('leads')
+    .update({
+      former_addresses: [...formerAddresses, plan.entry],
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', leadId)
+
+  if (upErr) {
+    console.warn('[jobber-webhook] drift write failed', { leadId, error: upErr.message })
+    return { ...base, note: `${noun}: ${tail} — could not record it, nothing written` }
+  }
+
+  return {
+    ...base,
+    note: `${noun}: ${tail} — recorded as another of the client's addresses (${plan.entry.display})`,
+  }
 }
 
 // PROPERTY_CREATE / PROPERTY_UPDATE — Jobber-side is authoritative for
@@ -1389,10 +1535,21 @@ async function handlePropertyCore(
         !!(data as any).jobber_property_id &&
         String((data as any).jobber_property_id) !== String(propertyNumeric ?? '')
       if (linkedElsewhere) {
-        return {
-          processed: true,
-          note: `${noun}: property=${propertyNumeric} is not lead ${data.id}'s linked property (${(data as any).jobber_property_id}) — left alone`,
-        }
+        // THE GUARD HOLDS, AND NOW IT ALSO RECORDS.
+        //
+        // This is a property of a client we know, at an address that is not
+        // the one the lead is linked to. The rule stays exactly what d8aa5ef
+        // made it: never write the primary address columns, never move
+        // jobber_property_id. What changes is that we no longer walk away —
+        // "left alone" is why ~105 clients have properties in Jobber that Bee
+        // Hub has no record of, six of them with live work at an address that
+        // appears nowhere on the client's card.
+        //
+        // So: add it as one of the client's OTHER addresses, which violates
+        // neither half of the rule. planDriftAddress owns the decision (shared
+        // with any future backfill sweep) and the patch below carries
+        // former_addresses and updated_at — nothing else, ever.
+        return await recordDriftedProperty(noun, data.id, propertyNumeric, propRec.address)
       }
       lead = { id: data.id, name: data.name, stage: data.stage }
     }

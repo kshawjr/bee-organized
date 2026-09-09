@@ -14,8 +14,9 @@
 //   · a formatting-only edit pushes nothing (and a 'move' without a real
 //     new address is refused outright)
 //   · the inbound webhook updates the RIGHT address once a client has two,
-//     and a lead linked to a DIFFERENT property is left alone (the stomp
-//     this build fixes)
+//     and a lead linked to a DIFFERENT property keeps its own address and
+//     link (the stomp this build fixes) while the drifted address is
+//     recorded as another of the client's addresses
 //   · several Jobber properties + one Bee Hub address keeps the legacy
 //     managed-blast-radius behavior (nothing breaks, nothing new pushes)
 //   · nothing that was silent before now pushes (unlinked clients push
@@ -255,15 +256,36 @@ describe('inbound property events route to the right address', () => {
     expect(p.jobber_property_id).toBeUndefined()
   })
 
-  it('a lead linked to a DIFFERENT property is left alone — the stomp is fixed', async () => {
+  // WAS "left alone". The guard's RULE is unchanged and still asserted below —
+  // the primary address columns and the property link stay out of the patch,
+  // which is the stomp d8aa5ef fixed. What changed is that walking away is no
+  // longer the whole answer: the drifted address is now recorded as one of the
+  // client's OTHER addresses, which violates neither half of that rule.
+  // See lib/beta-property-drift.test.ts for the full behaviour.
+  it('a lead linked to a DIFFERENT property keeps its address and link — and the drift is recorded', async () => {
     propertyReturns('333', 'Some Other Property St')
     h.enqueue('leads', null) // no current-link match
     h.enqueue('leads', null) // no former match
     h.enqueue('leads', { id: 'lead-1', name: 'x', stage: 'Nurturing', jobber_property_id: '999' }) // client match, linked elsewhere
+    h.enqueue('leads', {     // the re-read, for the drift decision
+      id: 'lead-1', stage: 'Nurturing',
+      address: '10 Old Rd, Fairway, KS, 66205', city: 'Fairway', state: 'KS', zip: '66205',
+      former_addresses: [],
+    })
     const res = await handlePropertyUpdate(ctx())
     expect(res.processed).toBe(true)
-    expect(String(res.note)).toContain('left alone')
-    expect(updatePatchOn('leads')).toBeUndefined()
+
+    const p = updatePatchOn('leads')
+    // THE STOMP GUARD — unchanged, and the reason this test exists.
+    expect(p.address).toBeUndefined()
+    expect(p.city).toBeUndefined()
+    expect(p.state).toBeUndefined()
+    expect(p.zip).toBeUndefined()
+    expect(p.jobber_property_id).toBeUndefined()
+    // and the address Jobber told us about is no longer thrown away
+    expect(p.former_addresses).toHaveLength(1)
+    expect(p.former_addresses[0].display).toBe('Some Other Property St, Fairway, KS, 66205')
+    expect(p.former_addresses[0].jobber_property_id).toBe('333')
   })
 
   it('the original backfill case survives: an UNLINKED lead still syncs by client', async () => {
