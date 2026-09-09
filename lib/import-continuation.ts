@@ -153,6 +153,45 @@ export const DISPATCH_ABORT_MS = 810_000
 // far shorter than a real segment.
 export const DISPATCH_PROBE_MS = 10_000
 
+// ─── THE REPLAY, AND WHY THIS ONE WORD IS THE FIX ────────────────────────
+//
+// Every sweeper attempt on the night of 2026-09-08/09 (04:09, 04:10, 04:11)
+// received a response carrying date=Thu, 03 Sep 2026 09:00:25 GMT and
+// x-vercel-id=...pjlcn-1788426025318-... — IDENTICAL across all three, and
+// 1788426025318 decodes to 3 Sep 09:00:25, matching the date. A per-request id
+// cannot repeat, so that is ONE stored response replayed for six days. Its
+// body is the pre-fix {"job_id":"...","started":true}, which is why it carries
+// none of the fields a19d1db added and why the route never logged: the
+// function was never being invoked at all.
+//
+// It is not Vercel's edge cache — x-vercel-cache said MISS, and a curl to the
+// sweeper's exact URL reached the function every time. It is NEXT'S OWN
+// SERVER-SIDE FETCH CACHE. Next 14.2.35 patches globalThis.fetch
+// (next/dist/server/lib/patch-fetch.js) and, for a call with no `cache`
+// option, walks to `cacheReason = "auto cache"` with `revalidate = false`,
+// which stores the response for CACHE_ONE_YEAR. A POST is only excluded when
+// `staticGenerationStore.revalidate === 0`, and it is undefined here — so the
+// exclusion never fires. Cached in-process, never leaving the server, which is
+// exactly why the edge reported MISS while the date and x-vercel-id stayed
+// frozen at the moment the entry was first written.
+//
+// `export const dynamic = 'force-dynamic'` DOES NOT PREVENT THIS. It sets
+// staticGenerationStore.forceDynamic, which appears in exactly one place in
+// patch-fetch.js and only suppresses a DynamicServerError. The sweeper route
+// has declared force-dynamic all along and was still served the replay — which
+// is independent confirmation, not speculation.
+//
+// 'no-store' is what actually stops it: it drives curRevalidate to 0, which
+// makes isCacheableRevalidate false, so no cache key is computed and neither a
+// read nor a write happens.
+//
+// NOT ALSO `next: { revalidate: 0 }`. It is redundant once the cache is
+// skipped outright, and it carries a DynamicServerError path
+// (!forceDynamic && !forceStatic && next.revalidate === 0) that the import
+// route — which does not declare force-dynamic — would be the one exposed to.
+// One mechanism, no second thing to get wrong.
+export const CONTINUATION_FETCH_CACHE = 'no-store' as const
+
 // Captured at module load, ON PURPOSE. Tests legitimately stub global
 // setTimeout to make their own waits instant; the probe must still measure
 // real elapsed time or it fires before any fetch can answer and every reply
@@ -647,6 +686,8 @@ export async function postContinuation(opts: {
         headers: { 'x-import-continue-secret': opts.secret },
         redirect: 'manual',
         signal: controller.signal,
+        // NEVER CACHED — see CONTINUATION_FETCH_CACHE below.
+        cache: CONTINUATION_FETCH_CACHE,
       }).then(
         (res) => ({ kind: 'res' as const, res }),
         (err) => ({ kind: 'err' as const, err }),
@@ -699,6 +740,8 @@ export async function postContinuation(opts: {
       headers: { 'x-import-continue-secret': opts.secret },
       redirect: 'manual',
       signal: controller.signal,
+      // NEVER CACHED — see CONTINUATION_FETCH_CACHE below.
+      cache: CONTINUATION_FETCH_CACHE,
     })
     return await classifyAndDescribe(res as any, url, opts.origin, opts.locationSlug)
   } catch (err: any) {

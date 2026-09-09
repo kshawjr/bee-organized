@@ -94,6 +94,21 @@ import { buildLastChildActivity, selectSampleClients } from '@/lib/import-sample
 
 export const runtime = 'nodejs'
 export const maxDuration = 800
+// A POST that reads request headers and query params and mutates production
+// data is dynamic by nature, and this route did not say so — the sweeper route
+// has declared it all along. Added for correctness and to stop Next treating
+// the handler as anything but per-request; it may also correct the response's
+// `cache-control: public, max-age=0, must-revalidate`, which is the wrong
+// header for a POST.
+//
+// TO BE CLEAR, THIS IS NOT WHAT FIXED THE REPLAY. force-dynamic sets
+// staticGenerationStore.forceDynamic, which appears in exactly one place in
+// Next's patch-fetch.js and only suppresses a DynamicServerError; it does not
+// disable the server-side fetch cache. The sweeper route has declared
+// force-dynamic throughout and was still served a six-day-old response. The
+// fix is `cache: 'no-store'` on the fetch itself — see
+// CONTINUATION_FETCH_CACHE in lib/import-continuation.
+export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

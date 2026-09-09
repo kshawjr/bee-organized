@@ -30,6 +30,7 @@ import {
   CONTINUATION_TIMEOUT_MS,
   RESPONSE_SNIPPET_MAX,
   withEvidence,
+  CONTINUATION_FETCH_CACHE,
 } from './import-continuation'
 
 const MIN = 60_000
@@ -600,5 +601,68 @@ describe('postContinuation with awaitResponse:false', () => {
       source: 'sweeper', outcome: 'dispatched', jobId: 'job-1',
     })
     expect(parseContinuationLogMessage(msg)).toEqual({ source: 'sweeper', outcome: 'dispatched' })
+  })
+})
+
+// ─── the six-day replay ──────────────────────────────────────────
+//
+// Every sweeper attempt on 2026-09-09 (04:09, 04:10, 04:11) got a response
+// carrying date=Thu, 03 Sep 2026 09:00:25 GMT and the SAME
+// x-vercel-id=...pjlcn-1788426025318-..., whose embedded timestamp decodes to
+// that same instant. A per-request id cannot repeat: it was one stored
+// response replayed for six days, with the pre-fix body that is why the route
+// never logged. Not the edge cache (x-vercel-cache: MISS) — Next's own
+// server-side fetch cache, which in 14.2.35 stores an un-optioned fetch under
+// `cacheReason = "auto cache"` with `revalidate = false`, i.e. for a year.
+//
+// `dynamic = 'force-dynamic'` does not prevent it; the sweeper route has
+// declared it all along. `cache: 'no-store'` is what skips the cache outright.
+describe('the continuation POST is never served from a cache', () => {
+  const okReply = async () => ({
+    status: 200, type: 'basic', headers: { get: () => null }, text: async () => '{"ok":true}',
+  })
+
+  it('THE FIX: the awaited path sends cache: no-store', async () => {
+    const fetchImpl = vi.fn(okReply) as any
+    await postContinuation({ origin: 'https://x', locationSlug: 'loc_kc', secret: 's', fetchImpl })
+    const [, opts] = fetchImpl.mock.calls[0]
+    expect(opts.cache).toBe('no-store')
+  })
+
+  it('THE FIX: the fire-then-probe path sends cache: no-store too', async () => {
+    // The sweeper's path — the one that was being replayed.
+    const fetchImpl = vi.fn(okReply) as any
+    await postContinuation({
+      origin: 'https://x', locationSlug: 'loc_phillysuburbs', secret: 's',
+      fetchImpl, awaitResponse: false, probeMs: 50,
+    })
+    const [, opts] = fetchImpl.mock.calls[0]
+    expect(opts.cache).toBe('no-store')
+  })
+
+  it('both paths send the SAME cache option — one of them being fixed is not enough', async () => {
+    const a = vi.fn(okReply) as any
+    const b = vi.fn(okReply) as any
+    await postContinuation({ origin: 'https://x', locationSlug: 'l', secret: 's', fetchImpl: a })
+    await postContinuation({ origin: 'https://x', locationSlug: 'l', secret: 's', fetchImpl: b, awaitResponse: false, probeMs: 50 })
+    expect(a.mock.calls[0][1].cache).toBe(b.mock.calls[0][1].cache)
+    expect(a.mock.calls[0][1].cache).toBe(CONTINUATION_FETCH_CACHE)
+  })
+
+  it('no-store is the exported constant, so both call sites cannot drift apart', () => {
+    expect(CONTINUATION_FETCH_CACHE).toBe('no-store')
+  })
+
+  it('nothing else about the request changed — same URL, header and redirect mode', async () => {
+    const fetchImpl = vi.fn(okReply) as any
+    await postContinuation({
+      origin: 'https://beehive.beeorganized.com', locationSlug: 'loc_phillysuburbs', secret: 's3cret', fetchImpl,
+    })
+    const [url, opts] = fetchImpl.mock.calls[0]
+    expect(url).toBe('https://beehive.beeorganized.com/api/import/jobber-clients?location_id=loc_phillysuburbs&_continue=1')
+    expect(opts.method).toBe('POST')
+    expect(opts.headers['x-import-continue-secret']).toBe('s3cret')
+    expect(opts.redirect).toBe('manual')
+    expect(opts.signal).toBeDefined()
   })
 })
