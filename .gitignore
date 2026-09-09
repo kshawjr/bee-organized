@@ -49,6 +49,10 @@ redact-sync-log-names.report*.json
 .property-backfill-progress.json
 .property-backfill-progress.json.tmp
 property-backfill-progress*.json
+# One checkpoint per --location scope (.property-backfill-progress.loc_kc.json
+# and friends). Same customer data, same rule.
+.property-backfill-progress.*.json
+.property-backfill-progress.*.json.tmp
 
 # Google service-account keys — never commit (GOOGLE_SA_KEY env var is the only home)
 *service-account*.json

@@ -42,13 +42,22 @@
 //                                    # are an address the card already holds,
 //                                    # written differently. Different-unit
 //                                    # rows are STILL written. Default off.
+//   node scripts/backfill-property-drift.mjs --location=loc_kc --commit
+//                                    # ONE franchise. Repeatable
+//                                    # (--location=a --location=b). An
+//                                    # unrecognised slug fails before any
+//                                    # Jobber call rather than sweeping
+//                                    # nothing and reporting a clean run.
+//                                    # Each scope gets its OWN checkpoint
+//                                    # file, so one franchise at a time needs
+//                                    # no deleting between runs.
 //   node scripts/backfill-property-drift.mjs --include-philly
 //   node scripts/backfill-property-drift.mjs --env <path>     # default .env.local
 //   node scripts/backfill-property-drift.mjs --progress <path>
 //   node scripts/backfill-property-drift.mjs --page-size 25 --property-page 8
-//   node scripts/backfill-property-drift.mjs --location loc_x # one location
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -61,8 +70,23 @@ const ROOT = resolvePath(HERE, '..')
 const argv = process.argv.slice(2)
 const has = (k) => argv.includes(k)
 const val = (k, d = null) => {
+  const withEq = argv.find((a) => a.startsWith(k + '='))
+  if (withEq) return withEq.slice(k.length + 1)
   const i = argv.indexOf(k)
   return i > -1 && argv[i + 1] ? argv[i + 1] : d
+}
+// Repeatable flags. Both spellings, because muscle memory produces both:
+//   --location=loc_a --location=loc_b
+//   --location loc_a --location loc_b
+//   --location=loc_a,loc_b
+const vals = (k) => {
+  const out = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith(k + '=')) out.push(...a.slice(k.length + 1).split(','))
+    else if (a === k && argv[i + 1] && !argv[i + 1].startsWith('-')) out.push(...argv[++i].split(','))
+  }
+  return out.map((s) => s.trim()).filter(Boolean)
 }
 
 if (has('--help') || has('-h')) {
@@ -78,12 +102,48 @@ const COMMIT = has('--commit')
 const MODE = COMMIT ? 'commit' : 'dry-run'
 const RESUME = has('--resume')
 const INCLUDE_PHILLY = has('--include-philly')
-const ONLY_LOCATION = val('--location')
+// Sorted and de-duplicated here so the checkpoint filename is stable whatever
+// order the flags were typed in. The engine normalizes again for the scope
+// comparison — that one is authoritative, this is just for the filename.
+const ONLY_LOCATIONS = Array.from(new Set(vals('--location'))).sort()
 // Default OFF. Without it this run behaves exactly as it did before the flag
 // existed, which is the only safe default for something that changes what
 // lands on an owner's card.
 const SKIP_NEAR_DUPLICATES = has('--skip-near-duplicates')
-const PROGRESS_PATH = resolvePath(process.cwd(), val('--progress', '.property-backfill-progress.json'))
+
+// ── THE CHECKPOINT IS SCOPED TO WHAT THE RUN IS SWEEPING ──────────────────
+//
+// Kevin is going to run this one franchise at a time. With a single shared
+// checkpoint file that goes wrong two different ways, and the second is the
+// dangerous one:
+//
+//   · without --resume, every run after the first refuses to start ("a
+//     checkpoint already exists"), so he would be deleting a file between
+//     every franchise;
+//   · with --resume, the checkpoint still lists the PREVIOUS franchise as
+//     completed and its counts and findings ride along into this run's
+//     report — and if he ever re-named an earlier location it would be
+//     skipped as "already done" while the report said the run was clean.
+//     That is the stale-checkpoint failure exactly.
+//
+// So the default filename carries the scope: one franchise gets its own
+// checkpoint, resumable on its own, and a different franchise cannot collide
+// with it. `--progress <path>` still overrides for anyone who wants one file.
+//
+// The scope is ALSO recorded inside the checkpoint and checked on resume, so
+// an explicit --progress pointing at another scope's file is refused rather
+// than silently skipping locations. Belt and braces, because the cost of
+// getting this wrong is a franchise Kevin believes was swept and was not.
+const scopeKey =
+  ONLY_LOCATIONS.length === 0
+    ? 'all'
+    : ONLY_LOCATIONS.length === 1
+      ? ONLY_LOCATIONS[0]
+      : `${ONLY_LOCATIONS.length}locs-${createHash('sha256').update(ONLY_LOCATIONS.join('|')).digest('hex').slice(0, 8)}`
+const PROGRESS_PATH = resolvePath(
+  process.cwd(),
+  val('--progress', `.property-backfill-progress.${scopeKey}.json`),
+)
 const CLIENT_PAGE = Number(val('--page-size', '25'))
 const PROPERTY_PAGE = Number(val('--property-page', '8'))
 
@@ -129,6 +189,24 @@ console.log(
   ).join('\n') + '\n',
 )
 
+// Third banner, same principle: WHICH franchises this run touches is the
+// first thing to be sure of when committing one at a time.
+console.log(
+  (ONLY_LOCATIONS.length
+    ? [
+        '---------------------------------------------------------',
+        `---  --location: ONLY ${ONLY_LOCATIONS.join(', ')}`,
+        '---  every other location is untouched by this run    ---',
+        '---------------------------------------------------------',
+      ]
+    : [
+        '---------------------------------------------------------',
+        '---  no --location: EVERY location in scope           ---',
+        '---------------------------------------------------------',
+      ]
+  ).join('\n') + '\n',
+)
+
 // ── env ───────────────────────────────────────────────────────────────────
 const envPath = resolvePath(process.cwd(), val('--env', '.env.local'))
 if (!existsSync(envPath)) {
@@ -162,6 +240,7 @@ const {
   totalCounts,
   emptyProgress,
   assertResumable,
+  selectRequestedLocations,
   PHILLY_SLUG,
 } = backfill
 
@@ -185,7 +264,7 @@ if (RESUME) {
   }
   existing = JSON.parse(readFileSync(PROGRESS_PATH, 'utf8'))
   try {
-    assertResumable(existing, MODE, INCLUDE_PHILLY)
+    assertResumable(existing, MODE, INCLUDE_PHILLY, ONLY_LOCATIONS)
   } catch (err) {
     console.error(`cannot resume: ${err.message}`)
     process.exit(1)
@@ -212,8 +291,25 @@ if (locErr) {
   process.exit(1)
 }
 const locById = new Map(locationRows.map((r) => [r.location_id, r]))
-let locations = locationRows
-if (ONLY_LOCATION) locations = locations.filter((r) => r.location_id === ONLY_LOCATION)
+const locations = locationRows
+
+// ── VALIDATE --location BEFORE ANY JOBBER WORK ────────────────────────────
+// The Supabase read above is the only thing that has happened so far; no
+// token has been fetched and no franchise account has been touched. A slug
+// that names nothing this run would sweep stops here, loudly, naming what
+// was expected — never a clean "0 locations in scope" that reads as success.
+try {
+  const targets = selectRequestedLocations(locations, {
+    includePhilly: INCLUDE_PHILLY,
+    only: ONLY_LOCATIONS,
+  })
+  if (ONLY_LOCATIONS.length) {
+    console.log(`--location resolved to ${targets.length}: ${targets.map((t) => t.location_id).join(', ')}\n`)
+  }
+} catch (err) {
+  console.error(`\n${err.message}\n`)
+  process.exit(1)
+}
 
 // ── Jobber, read-only ─────────────────────────────────────────────────────
 // Its own POST rather than jobberQueryThrottled, for ONE reason: that helper
@@ -315,19 +411,16 @@ const opts = {
   clientPage: CLIENT_PAGE,
   propertyPage: PROPERTY_PAGE,
   skipNearDuplicates: SKIP_NEAR_DUPLICATES,
+  only: ONLY_LOCATIONS,
 }
 
-if (ONLY_LOCATION) console.log(`limited to ${ONLY_LOCATION}\n`)
+// The Philly case used to be handled here with its own message. It is not a
+// special case any more: naming it without --include-philly simply means it is
+// not in scope, which selectRequestedLocations already reports above — and
+// reports better, because it names the flag that would allow it.
 if (!INCLUDE_PHILLY) console.log(`${PHILLY_SLUG} is skipped (already current) — --include-philly to sweep it too\n`)
-if (ONLY_LOCATION === PHILLY_SLUG && !INCLUDE_PHILLY) {
-  console.error(
-    `you asked for ${PHILLY_SLUG} only, but it is skipped by default — ` +
-      `add --include-philly or nothing will be swept.`,
-  )
-  process.exit(1)
-}
 
-let progress = existing ?? emptyProgress(MODE, INCLUDE_PHILLY, deps.now())
+let progress = existing ?? emptyProgress(MODE, INCLUDE_PHILLY, deps.now(), ONLY_LOCATIONS)
 let exitCode = 0
 try {
   progress = await runBackfill(locations, deps, opts, existing)

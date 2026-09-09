@@ -84,6 +84,81 @@ export function selectLocations(
     .sort((a, b) => (a.location_id < b.location_id ? -1 : a.location_id > b.location_id ? 1 : 0))
 }
 
+/**
+ * A --location slug that names nothing this run would have swept.
+ *
+ * THE FAILURE THIS EXISTS TO PREVENT. Before validation, a typo'd slug
+ * filtered the list to nothing and the sweep reported a clean run: "0 locations
+ * in scope", no errors, exit 0. That reads exactly like success. Kevin is going
+ * to commit one franchise at a time and check the cards afterwards, so a run
+ * that quietly did nothing is the single most expensive way this can fail — he
+ * would go and look at a location that was never touched and conclude the sweep
+ * does not work.
+ */
+export class UnknownLocationError extends Error {
+  readonly unknown: string[]
+  readonly outOfScope: string[]
+  readonly available: string[]
+  constructor(unknown: string[], outOfScope: string[], available: string[]) {
+    const lines: string[] = ['--location named something this run would not sweep:']
+    for (const s of outOfScope) {
+      lines.push(`  ${s} — that location exists, but it is skipped by default; add --include-philly to sweep it`)
+    }
+    for (const s of unknown) {
+      lines.push(`  ${s} — no location with that slug has a Jobber account`)
+    }
+    lines.push('', `in scope for this run (${available.length}):`, ...available.map((s) => `  ${s}`))
+    super(lines.join('\n'))
+    this.name = 'UnknownLocationError'
+    this.unknown = unknown
+    this.outOfScope = outOfScope
+    this.available = available
+  }
+}
+
+/**
+ * The locations this run will actually sweep, after --location.
+ *
+ * NAMING PHILLY DOES NOT OVERRIDE --include-philly. Two flags must not both
+ * control the same thing with the quieter one able to sidestep the louder:
+ * --include-philly is the switch that says "yes, sweep the 18,889-client
+ * account", and --location is scope selection, not permission. So
+ * `--location=loc_phillysuburbs` on its own FAILS — loudly, naming the flag
+ * that would allow it — rather than silently sweeping nothing.
+ *
+ * Order follows selectLocations, not the order the slugs were typed, so a
+ * resumed run visits them the same way whatever the command line looked like.
+ */
+export function selectRequestedLocations(
+  rows: BackfillLocationRow[] | null | undefined,
+  opts: { includePhilly?: boolean; only?: string[] | null } = {},
+): BackfillLocationRow[] {
+  const inScope = selectLocations(rows, { includePhilly: opts.includePhilly })
+  const asked = (opts.only ?? []).map((s) => String(s ?? '').trim()).filter(Boolean)
+  if (!asked.length) return inScope
+
+  const inScopeIds = new Set(inScope.map((r) => r.location_id))
+  // Everything with a Jobber account, Philly included — so a slug that is out
+  // of scope only because of the Philly rule can be told apart from a typo.
+  const anyConnected = new Set(
+    selectLocations(rows, { includePhilly: true }).map((r) => r.location_id),
+  )
+
+  const unknown: string[] = []
+  const outOfScope: string[] = []
+  for (const slug of asked) {
+    if (inScopeIds.has(slug)) continue
+    if (anyConnected.has(slug)) outOfScope.push(slug)
+    else unknown.push(slug)
+  }
+  if (unknown.length || outOfScope.length) {
+    throw new UnknownLocationError(unknown, outOfScope, inScope.map((r) => r.location_id))
+  }
+
+  const wanted = new Set(asked)
+  return inScope.filter((r) => wanted.has(r.location_id))
+}
+
 // ── the query ────────────────────────────────────────────────────────────
 
 // THE FIELD TRAP. Jobber's Client type has TWO property-bearing fields: a
@@ -299,6 +374,15 @@ export interface Progress {
   version: number
   mode: SweepMode
   include_philly: boolean
+  /**
+   * The --location slugs this checkpoint was written for, sorted. Empty means
+   * "everything in scope". Recorded so a resume cannot be pointed at a
+   * checkpoint from a different scope — see assertResumable.
+   *
+   * Optional in the type: a checkpoint written before this field existed had
+   * no --location, which is exactly what an absent value reads as.
+   */
+  scope?: string[]
   started_at: string
   updated_at: string
   /** Locations swept to the last page. Resume skips these outright. */
@@ -310,11 +394,22 @@ export interface Progress {
   errors: SweepError[]
 }
 
-export function emptyProgress(mode: SweepMode, includePhilly: boolean, nowIso: string): Progress {
+/** Sorted and de-duplicated, so two runs naming the same set agree. */
+export function normalizeScope(only: string[] | null | undefined): string[] {
+  return Array.from(new Set((only ?? []).map((s) => String(s ?? '').trim()).filter(Boolean))).sort()
+}
+
+export function emptyProgress(
+  mode: SweepMode,
+  includePhilly: boolean,
+  nowIso: string,
+  only?: string[] | null,
+): Progress {
   return {
     version: PROGRESS_VERSION,
     mode,
     include_philly: includePhilly,
+    scope: normalizeScope(only),
     started_at: nowIso,
     updated_at: nowIso,
     completed: [],
@@ -334,7 +429,12 @@ export function emptyProgress(mode: SweepMode, includePhilly: boolean, nowIso: s
  * possible shape for a production write, so it is refused rather than
  * reconciled.
  */
-export function assertResumable(p: Progress, mode: SweepMode, includePhilly: boolean): void {
+export function assertResumable(
+  p: Progress,
+  mode: SweepMode,
+  includePhilly: boolean,
+  scope?: string[] | null,
+): void {
   if (p.version !== PROGRESS_VERSION) {
     throw new Error(`checkpoint is version ${p.version}, this build writes ${PROGRESS_VERSION} — start a fresh run`)
   }
@@ -348,6 +448,19 @@ export function assertResumable(p: Progress, mode: SweepMode, includePhilly: boo
     throw new Error(
       `checkpoint was written ${p.include_philly ? 'including' : 'excluding'} ${PHILLY_SLUG}; ` +
         `this run does the opposite — start a fresh run instead.`,
+    )
+  }
+  // A checkpoint remembers which locations it already COMPLETED, so resuming
+  // one under a different --location would skip a franchise Kevin has just
+  // asked for and report it as done. Refused rather than reconciled, for the
+  // same reason as the mode check above.
+  const was = normalizeScope(p.scope)
+  const now = normalizeScope(scope)
+  if (was.join('|') !== now.join('|')) {
+    const name = (s: string[]) => (s.length ? s.join(', ') : 'every location in scope')
+    throw new Error(
+      `checkpoint was written for ${name(was)}; this run is for ${name(now)}. ` +
+        `Resuming across a scope change would skip a location you asked for — start a fresh run instead.`,
     )
   }
 }
@@ -404,6 +517,11 @@ export interface SweepOptions {
   maxRateLimitRetries?: number
   /** --skip-near-duplicates. Default off; see isWithheldByFlag. */
   skipNearDuplicates?: boolean
+  /**
+   * --location. Empty or absent sweeps everything in scope. A slug that names
+   * nothing this run would sweep throws — see selectRequestedLocations.
+   */
+  only?: string[] | null
 }
 
 /**
@@ -767,13 +885,21 @@ export async function runBackfill(
   existing?: Progress,
 ): Promise<Progress> {
   const includePhilly = !!opts.includePhilly
-  const progress = existing ?? emptyProgress(opts.mode, includePhilly, deps.now())
-  if (existing) assertResumable(existing, opts.mode, includePhilly)
+  const scope = normalizeScope(opts.only)
 
-  const targets = selectLocations(locations, { includePhilly })
+  // FIRST, and before anything touches Jobber. An unrecognised --location
+  // throws here, so a typo cannot reach a franchise account and cannot be
+  // mistaken for a run that found nothing to do.
+  const targets = selectRequestedLocations(locations, { includePhilly, only: scope })
+
+  const progress = existing ?? emptyProgress(opts.mode, includePhilly, deps.now(), scope)
+  if (existing) assertResumable(existing, opts.mode, includePhilly, scope)
+
   deps.log(
-    `${targets.length} location${targets.length === 1 ? '' : 's'} in scope` +
-      (includePhilly ? ` (including ${PHILLY_SLUG})` : ` (${PHILLY_SLUG} skipped)`),
+    scope.length
+      ? `${targets.length} location${targets.length === 1 ? '' : 's'} in scope, limited by --location to: ${scope.join(', ')}`
+      : `${targets.length} location${targets.length === 1 ? '' : 's'} in scope` +
+          (includePhilly ? ` (including ${PHILLY_SLUG})` : ` (${PHILLY_SLUG} skipped)`),
   )
 
   for (const loc of targets) {
