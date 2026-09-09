@@ -354,17 +354,23 @@ export async function POST(req: NextRequest) {
   // the classic fire-and-forget-on-a-dying-lambda trap, and it is why the fast
   // path stopped working (the loc_kc stalls, 2026-07-22).
   //
-  // Awaiting instead is correct AND cheap: we are already inside the outer
-  // waitUntil(runImport()), so the function stays alive as long as this promise
-  // is pending, and the receiving segment claims + returns 200 in well under a
-  // second (it defers its own work to its own waitUntil). Outcome is recorded
-  // to sync_log either way — a bounce is now readable, and the cron sweeper is
-  // still the net if it doesn't land.
+  // SUPERSEDED BY THE HANDOFF FIX. On the internal continuation path — the one
+  // this call always lands on, because it carries the secret — runImport is
+  // awaited inside the request. So this call sits inside a segment that is
+  // itself on the route's 800s ceiling, and it fires WITHOUT waiting for the
+  // reply (awaitResponse: false); waiting would nest the next segment inside
+  // this one until the ceiling blew. Outcome is still recorded to sync_log,
+  // and the cron sweeper is still the net.
   const selfContinue = async (jobIdForLog: string) => {
     const post = await postContinuation({
       origin: selfOrigin,
       locationSlug: locSlug,
       secret: process.env.CRON_SECRET || '',
+      // MUST NOT WAIT. This call is made from inside a segment that is itself
+      // inside the request, on an 800s ceiling. Waiting for the next segment
+      // to finish would nest segment inside segment until the ceiling blew.
+      // Fire; the claim check and the sweeper carry it from here.
+      awaitResponse: false,
     })
     await recordContinuationAttempt({
       jobId: jobIdForLog,
@@ -390,9 +396,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Run the import detached from the request via waitUntil so it survives
-  // after we return the response. All progress is written to import_jobs
-  // (read by /api/import/status/[id] polling), so no stream is needed.
+  // The segment body. On the internal continuation path it is AWAITED inside
+  // the request (see the split call site at the bottom) — it used to be
+  // detached for every caller, which silently dropped it. A browser POST still
+  // launches it detached so the onboarding poller can start. All progress is
+  // written to import_jobs (read by /api/import/status/[id] polling), so no
+  // stream is needed.
   const emit = (_obj: any) => {}  // no-op: progress goes to DB, not a stream
   // ── DIAGNOSTIC WRITE, loc_phillysuburbs stall ────────────────────────────
   // sync_log, NOT console. 246f540 put console.log at the top of runImport and
@@ -415,6 +424,20 @@ export async function POST(req: NextRequest) {
   // CHECK has no 'import' member, the event is scoped to a location's import
   // rather than to a record, and those rows are landing in production right
   // now, so the shape is proven against the live schema.
+  // WHAT THE SEGMENT ACTUALLY DID.
+  //
+  // `started: true` used to be returned before any work happened, which is
+  // precisely why a completely dead handoff hid for six days: the reply was
+  // about ACCEPTANCE, and nothing downstream could tell acceptance from a run.
+  // Now the reply reports the run. Mutated at the few points that matter and
+  // read once, after the segment is awaited.
+  const segment = {
+    entered: false,
+    mutex: 'not_reached' as 'not_reached' | 'won' | 'busy',
+    records_written: 0,
+    error: null as string | null,
+  }
+
   const entryLog = async (message: string) => {
     try {
       await writeSyncLog({
@@ -431,6 +454,7 @@ export async function POST(req: NextRequest) {
   }
 
   const runImport = async () => {
+      segment.entered = true
       await entryLog(`[import-entry] runImport ENTERED job=${jobId}`)
 
       // ── DIAGNOSTIC, loc_phillysuburbs stall (job f385d31d, stuck at 1,606
@@ -462,9 +486,9 @@ export async function POST(req: NextRequest) {
       const TIME_BUDGET_MS = 600_000
       const timeLow = () => Date.now() - RUN_START > TIME_BUDGET_MS
 
-      // Per-job mutex: because the frontend re-POSTs to auto-continue and the
-      // POST returns immediately (waitUntil is fire-and-forget), the poller
-      // can't tell if the prior segment is still running server-side. Claim
+      // Per-job mutex: the frontend re-POSTs to auto-continue and callers fire
+      // continuations without waiting for the reply, so a caller can't tell if
+      // the prior segment is still running server-side. Claim
       // segment_started_at atomically — only proceed if the row is null or
       // stale (>90s old). Stale reclaim covers crashed segments.
       const MUTEX_TTL_MS = 90_000
@@ -487,10 +511,12 @@ export async function POST(req: NextRequest) {
         // BUSY before the return — entered and bounced off a live mutex is a
         // different finding from never entering at all, and both must be
         // readable in sync_log.
+        segment.mutex = 'busy'
         await entryLog(`[import-entry] mutex BUSY job=${jobId}`)
         console.log(`[jobber-import] segment already running for job ${jobId} — exiting without spawning rival`)
         return
       }
+      segment.mutex = 'won'
       await entryLog(`[import-entry] mutex WON job=${jobId}`)
 
       // Clear the mutex from any exit path. Idempotent — safe to call more
@@ -1090,7 +1116,10 @@ export async function POST(req: NextRequest) {
             stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
           }
           processed++
-          wroteThisRun++
+          // Mirrored onto `segment` so the reply's record count is correct at
+          // EVERY exit — yield, park, cancel, completion, or a throw — without
+          // touching any of those exit paths.
+          segment.records_written = ++wroteThisRun
           if (processed % 50 === 0 || processed === clients.length) {
             // Refresh location_claim_at alongside the progress write so the
             // cron sweeper doesn't classify this segment as stale mid-loop
@@ -1324,6 +1353,7 @@ export async function POST(req: NextRequest) {
           ...stats,
         })
       } catch (err: any) {
+        segment.error = String(err?.message || err)
         console.error('[jobber-clients-import]', err)
         await updateProgress(jobId, {
           status: 'failed',
@@ -1336,7 +1366,70 @@ export async function POST(req: NextRequest) {
       // no finally/controller.close needed — nothing is streaming
   }
 
-  // Launch detached; return job_id immediately so the connection closes fast.
+  // ─── THE HANDOFF, SPLIT BY CALLER ────────────────────────────────────────
+  //
+  // THE FAILURE. This was `waitUntil(runImport())` for every caller, and the
+  // work NEVER STARTED. Proof (251b44e): in the six minutes after that deploy
+  // went READY, sync_log held six [continuation] rows — each carrying this
+  // route's own reply, {"job_id":"f385d31d...","started":true} — and ZERO
+  // [import-entry] rows. The ENTERED write is the first statement inside
+  // runImport and goes to the same table, through the same helper, that was
+  // delivering a row a minute beside it. The route ran, replied, and the work
+  // was discarded. Philadelphia Suburbs sat at 1,606 of 18,883 for six days.
+  //
+  // Mechanism is inference, not proof: @vercel/functions implements waitUntil
+  // as `getContext().waitUntil?.(p)`, and the optional call drops the promise
+  // with no error when there is no request context. Rather than chase it, the
+  // RETRY PATH no longer depends on it.
+  //
+  // WHY SPLIT RATHER THAN AWAIT EVERYWHERE. Awaiting on every caller fixes the
+  // stall but breaks the onboarding UI: the browser's startImport() reads
+  // job_id out of this reply and only then starts its status poller, so a
+  // reply that now means "the segment finished" would leave an owner watching
+  // a dead spinner for up to TIME_BUDGET_MS (600s). The six-day failure lives
+  // entirely in the RETRY path, so that is the path that changes. Kevin's
+  // call: no UI change on the same night the import changes.
+  //
+  // The signal is isInternalContinue — the x-import-continue-secret check that
+  // already exists at the top of this handler and is already the security
+  // boundary between the sweeper/self-chain and a browser. Deliberately NOT a
+  // new flag or query param: a second signal would be a second thing to get
+  // wrong, and the two would eventually disagree.
+  //
+  // Awaiting fits the internal path: a segment is bounded by WRITE_BATCH_CAP
+  // (400 records) or TIME_BUDGET_MS (600s), whichever comes first, and this
+  // route carries maxDuration 800s (vercel.json). Its callers moved with it —
+  // the sweeper and selfContinue fire without waiting for the reply and let
+  // the claim verification decide (see postContinuation's awaitResponse).
+  //
+  // ── THE KNOWN HOLE, ACCEPTED ──
+  // The browser's OPENING segment still goes through the detached path and can
+  // still be silently dropped. That is tolerable now in a way it was not
+  // before: the cron sweeper re-pokes within 60s, and the continuation path it
+  // uses is the one fixed here. Worst case is a one-minute delay at the START
+  // of an import, not a permanent stall. This is a deliberate trade, not an
+  // oversight — do not "fix" it by awaiting here without also moving
+  // startImport off this reply for its job_id.
+  if (isInternalContinue) {
+    await runImport()
+
+    // The reply reports the RUN, not the acceptance. `started: true` used to
+    // be returned before any work happened, which is exactly why a completely
+    // dead handoff hid for six days.
+    return NextResponse.json({
+      job_id: jobId,
+      started: segment.entered,
+      entered: segment.entered,
+      mutex: segment.mutex,              // 'won' | 'busy' | 'not_reached'
+      ran_segment: segment.mutex === 'won',
+      records_written: segment.records_written,
+      ...(segment.error ? { segment_error: segment.error } : {}),
+    })
+  }
+
+  // Browser path — unchanged from production. Launch detached and return
+  // job_id immediately so startImport() can start its poller. `started` here
+  // still means ACCEPTED, and says so.
   waitUntil(runImport())
-  return NextResponse.json({ job_id: jobId, started: true })
+  return NextResponse.json({ job_id: jobId, started: true, accepted: true })
 }

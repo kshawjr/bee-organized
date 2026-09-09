@@ -70,7 +70,15 @@ export type ContinuationSource = 'self_chain' | 'sweeper'
 //               sweeper (cron-originated, so a fresh invocation chain) takes
 //               over by design. Observed on the real loc_kc import at ~3,340
 //               of 3,352 records; the sweeper carried it to 'completed'.
-export type ContinuationOutcome = 'landed' | 'no_claim' | 'bounced' | 'errored' | 'chain_capped'
+//   dispatched — the POST was SENT and the connection deliberately released
+//               without waiting for the reply. Since the segment now runs
+//               INSIDE the request (the handoff fix), a reply means "the whole
+//               segment finished", which can be ~600s away — far past any
+//               timeout a once-a-minute cron can hold. So the caller fires and
+//               lets the CLAIM VERIFICATION decide the truth, which was always
+//               the honest signal. Never a failure on its own; the sweeper
+//               resolves it to 'landed' or 'no_claim' from DB state.
+export type ContinuationOutcome = 'landed' | 'no_claim' | 'bounced' | 'errored' | 'chain_capped' | 'dispatched'
 
 // Vercel returns this when a function invokes itself past the platform's
 // recursion limit. It is the reason THE SWEEPER IS THE PRIMARY MECHANISM and
@@ -88,7 +96,7 @@ export const LOOP_DETECTED_STATUS = 508
  * emit some. Alarming on it would make the digest noise that nobody reads.
  */
 export const isFailedOutcome = (o: ContinuationOutcome): boolean =>
-  o !== 'landed' && o !== 'chain_capped'
+  o !== 'landed' && o !== 'chain_capped' && o !== 'dispatched'
 
 /**
  * Outcomes that age a job toward the max-lifetime fail-out. ONLY hard
@@ -130,6 +138,24 @@ export const CONTINUATION_LOG_PREFIX = '[continuation]'
 // landed, so give the cold path real headroom. Still bounded — a hung
 // connection must never pin the yielding function open indefinitely.
 export const CONTINUATION_TIMEOUT_MS = 30_000
+
+// The bound used when the caller does NOT wait for the reply (awaitResponse
+// false). It exists only so a genuinely dead socket is eventually released —
+// never to cut a live segment short, so it sits just past the import route's
+// 800s maxDuration. The caller is not held open by it: not awaiting is what
+// guarantees that, and this timer only ever reaps the connection.
+export const DISPATCH_ABORT_MS = 810_000
+
+// How long to wait for a reply before concluding "the segment is running".
+// Comfortably longer than any fast rejection (gate redirect, 401, 5xx, 508),
+// far shorter than a real segment.
+export const DISPATCH_PROBE_MS = 10_000
+
+// Captured at module load, ON PURPOSE. Tests legitimately stub global
+// setTimeout to make their own waits instant; the probe must still measure
+// real elapsed time or it fires before any fetch can answer and every reply
+// reads as "still running". Production behaviour is identical either way.
+const timerFn: typeof setTimeout = setTimeout
 
 // After a 2xx, how many times to re-check for the receiving segment's claim
 // before concluding nobody took the job (≈15s of cover). Attempt-bounded
@@ -215,7 +241,8 @@ export function parseContinuationLogMessage(
     outcome !== 'no_claim' &&
     outcome !== 'bounced' &&
     outcome !== 'errored' &&
-    outcome !== 'chain_capped'
+    outcome !== 'chain_capped' &&
+    outcome !== 'dispatched'
   ) {
     return null
   }
@@ -455,6 +482,40 @@ export function withEvidence(detail: string | undefined, evidence: string | unde
 }
 
 /**
+ * Classify a continuation response and attach the evidence of what answered.
+ * Shared by both paths — the awaited one and the fire-then-probe one — so a
+ * reply that arrives quickly is read identically however it was requested.
+ */
+async function classifyAndDescribe(
+  res: { status: number; type?: string; headers?: any; url?: string; text?: () => Promise<string> },
+  requestUrl: string,
+  origin: string,
+): Promise<ContinuationPostResult> {
+  const { outcome, redirect } = classifyContinuationResponse(res as any)
+  const redirectedTo = redirect ? res.headers?.get?.('location') ?? undefined : undefined
+  // EVERY outcome, 'landed' included. The success path used to hold the
+  // response and throw it away, which is exactly why ~4,300 landed rows say
+  // nothing about what answered.
+  const evidence = await describeResponse(res as any, requestUrl)
+  const classified = redirect
+    ? `blocked by a redirect to ${redirectedTo ?? 'an unknown location'} — ` +
+      `origin ${origin} looks SSO-gated`
+    : outcome === 'chain_capped'
+      ? `self-chain depth-capped by the platform (HTTP ${LOOP_DETECTED_STATUS} ` +
+        `Loop Detected) — the cron sweeper continues from here, as designed`
+      : outcome === 'bounced'
+        ? `import route returned ${res.status}`
+        : undefined
+  return {
+    outcome,
+    status: res.status,
+    redirectedTo,
+    evidence,
+    detail: withEvidence(classified, evidence),
+  }
+}
+
+/**
  * Fire one continuation POST and classify the result.
  *
  * AWAITED, never fire-and-forget: the caller must still be holding the
@@ -471,9 +532,96 @@ export async function postContinuation(opts: {
   secret: string
   fetchImpl?: typeof fetch
   timeoutMs?: number
+  /**
+   * Wait for the reply (default true), or fire and release the connection.
+   *
+   * FALSE IS FOR CALLERS THAT CANNOT WAIT. The segment now runs INSIDE the
+   * request — that is the handoff fix; nothing is detached, so nothing can be
+   * dropped. The consequence is that a reply now means "the entire segment
+   * finished", up to TIME_BUDGET_MS (600s) away. No caller here can hold that:
+   * the sweeper is a once-a-minute cron with no maxDuration override, and
+   * selfContinue runs INSIDE a segment that is itself on an 800s ceiling —
+   * awaiting there would nest segment inside segment until the ceiling blew.
+   *
+   * So those two fire and let the CLAIM VERIFICATION decide, which was always
+   * the honest signal: a 2xx never proved a segment took the job, and a held
+   * claim always did. A dead socket is still bounded (DISPATCH_ABORT_MS), and
+   * not awaiting is what keeps a hung connection from pinning the caller open.
+   */
+  awaitResponse?: boolean
+  /** Probe window for awaitResponse:false. Defaults to DISPATCH_PROBE_MS. */
+  probeMs?: number
 }): Promise<ContinuationPostResult> {
   const doFetch = opts.fetchImpl ?? fetch
   const url = continuationUrl(opts.origin, opts.locationSlug)
+  const awaitResponse = opts.awaitResponse !== false
+
+  if (!awaitResponse) {
+    // FIRE, THEN PROBE BRIEFLY.
+    //
+    // Every FAILURE mode of this handoff is fast — an SSO gate redirects, a
+    // bad secret 401s, a dead route 5xxs, the platform 508s — all decided
+    // before the route does any work. Every SUCCESS is slow: the segment runs
+    // inside the request now and takes minutes. So a short probe separates
+    // them cleanly. If a reply lands inside the probe window we classify it
+    // exactly as before, evidence and all — the SSO detection that mattered
+    // in the loc_kc incident is NOT lost. If nothing lands, the segment is
+    // running and the claim check decides.
+    //
+    // The request is NEVER aborted at the probe: the hard abort sits past the
+    // route's own 800s ceiling and exists only to reap a dead socket. Cutting
+    // the connection on a healthy segment could take the segment with it.
+    const controller = new AbortController()
+    const hardTimer = timerFn(() => controller.abort(), DISPATCH_ABORT_MS)
+    // A synchronous throw (bad URL, no fetch impl) never even leaves the box —
+    // catch it here rather than letting it escape past the probe.
+    let settled: Promise<{ kind: 'res'; res: any } | { kind: 'err'; err: any }>
+    try {
+      settled = doFetch(url, {
+        method: 'POST',
+        headers: { 'x-import-continue-secret': opts.secret },
+        redirect: 'manual',
+        signal: controller.signal,
+      }).then(
+        (res) => ({ kind: 'res' as const, res }),
+        (err) => ({ kind: 'err' as const, err }),
+      )
+    } catch (err: any) {
+      clearTimeout(hardTimer)
+      return { outcome: 'errored', detail: String(err?.message || err) }
+    }
+    const probe = new Promise<{ kind: 'probe' }>((resolve) =>
+      timerFn(() => resolve({ kind: 'probe' }), opts.probeMs ?? DISPATCH_PROBE_MS),
+    )
+
+    const first = await Promise.race([settled, probe])
+
+    if (first.kind === 'probe') {
+      // Still in flight — the segment is running. Let go, but keep the
+      // rejection handled so an eventual failure is never unhandled.
+      void settled.then(() => clearTimeout(hardTimer), () => clearTimeout(hardTimer))
+      return {
+        outcome: 'dispatched',
+        detail:
+          `no reply within ${Math.round((opts.probeMs ?? DISPATCH_PROBE_MS) / 1000)}s — ` +
+          `the segment runs inside the request, so this is the healthy case; ` +
+          `the claim check decides`,
+      }
+    }
+
+    clearTimeout(hardTimer)
+    if (first.kind === 'err') {
+      const aborted = (first.err as any)?.name === 'AbortError' || controller.signal.aborted
+      return {
+        outcome: 'errored',
+        detail: aborted
+          ? `continuation POST aborted after ${DISPATCH_ABORT_MS}ms`
+          : String((first.err as any)?.message || first.err),
+      }
+    }
+    return await classifyAndDescribe(first.res as any, url, opts.origin)
+  }
+
   const timeoutMs = opts.timeoutMs ?? CONTINUATION_TIMEOUT_MS
 
   // AbortSignal.timeout isn't available in every runtime this file loads in
@@ -487,28 +635,7 @@ export async function postContinuation(opts: {
       redirect: 'manual',
       signal: controller.signal,
     })
-    const { outcome, redirect } = classifyContinuationResponse(res as any)
-    const redirectedTo = redirect ? res.headers?.get?.('location') ?? undefined : undefined
-    // EVERY outcome, 'landed' included. The success path used to hold the
-    // response and throw it away, which is exactly why ~4,300 landed rows say
-    // nothing about what answered.
-    const evidence = await describeResponse(res as any, url)
-    const classified = redirect
-      ? `blocked by a redirect to ${redirectedTo ?? 'an unknown location'} — ` +
-        `origin ${opts.origin} looks SSO-gated`
-      : outcome === 'chain_capped'
-        ? `self-chain depth-capped by the platform (HTTP ${LOOP_DETECTED_STATUS} ` +
-          `Loop Detected) — the cron sweeper continues from here, as designed`
-        : outcome === 'bounced'
-          ? `import route returned ${res.status}`
-          : undefined
-    return {
-      outcome,
-      status: res.status,
-      redirectedTo,
-      evidence,
-      detail: withEvidence(classified, evidence),
-    }
+    return await classifyAndDescribe(res as any, url, opts.origin)
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || controller.signal.aborted
     return {

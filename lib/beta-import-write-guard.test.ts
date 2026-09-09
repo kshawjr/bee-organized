@@ -156,9 +156,10 @@ describe('jobber-clients route — write-guard wiring', () => {
   // A nested waitUntil() here is a SILENT NO-OP: @vercel/functions resolves it
   // as `getContext().waitUntil?.(p)`, and by the time a segment yields the HTTP
   // response is long gone, so there is no request context to register with —
-  // the promise is dropped and the function is not held open for it. Awaiting
-  // inside the outer waitUntil(runImport()) is what keeps the lambda alive for
-  // the handoff. This is the loc_kc fast-path regression; pin it.
+  // the promise is dropped and the function is not held open for it. Since the
+  // handoff fix there is no outer detachment at all — the segment is awaited
+  // inside the request — so a nested one here would be dropped outright. This
+  // is the loc_kc fast-path regression; pin it.
   it('EVERY self-continue call site is awaited', () => {
     const calls = src.match(/^[^\n]*selfContinue\(jobId\)/gm) ?? []
     expect(calls.length).toBeGreaterThanOrEqual(2)   // fetch-phase + write-phase yields
@@ -166,13 +167,16 @@ describe('jobber-clients route — write-guard wiring', () => {
   })
 
   it('self-continue never wraps its POST in a nested waitUntil', () => {
-    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('// Run the import detached'))
-    expect(decl).not.toContain('waitUntil')
+    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('const runImport ='))
+    // Matches the CALL, not the bare word: the surrounding comment has to be
+    // able to name the hazard it is documenting. A nested handoff would always
+    // be written `waitUntil(`, so this still catches the real defect.
+    expect(decl).not.toMatch(/waitUntil\s*\(/)
     expect(decl).toContain('await postContinuation(')
   })
 
   it('self-continue records its outcome so a bounce is not silently swallowed', () => {
-    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('// Run the import detached'))
+    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('const runImport ='))
     expect(decl).toContain('recordContinuationAttempt(')
     expect(decl).toMatch(/source:\s*'self_chain'/)
     // The old code ended in `.catch(() => {})` — every failure vanished.

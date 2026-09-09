@@ -485,3 +485,120 @@ describe('withEvidence — the sweeper appends, it does not overwrite', () => {
     expect(withEvidence(undefined, undefined)).toBeUndefined()
   })
 })
+
+// ─── firing without waiting for the reply ────────────────────────
+//
+// The segment now runs INSIDE the request (the handoff fix), so a reply means
+// "the whole segment finished" — up to 600s away. Neither caller can hold
+// that: the sweeper is a once-a-minute cron with no maxDuration override, and
+// selfContinue runs inside a segment already on an 800s ceiling. So they fire
+// and let the claim verification decide.
+//
+// What must NOT be lost: every fast rejection — an SSO gate, a bad secret, a
+// 5xx, a 508 — still has to be classified, because those are the failures that
+// stranded loc_kc. They all answer in milliseconds, so a short probe catches
+// them while never cutting a healthy segment short.
+describe('postContinuation with awaitResponse:false', () => {
+  const fire = (fetchImpl: any, probeMs = 50) =>
+    postContinuation({
+      origin: 'https://beehive.beeorganized.com',
+      locationSlug: 'loc_phillysuburbs',
+      secret: 's',
+      fetchImpl,
+      awaitResponse: false,
+      probeMs,
+    })
+
+  it('a segment that keeps working reads as dispatched, not as a timeout failure', async () => {
+    // Never answers within the probe — the healthy case now.
+    const fetchImpl = vi.fn(() => new Promise(() => {})) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('dispatched')
+    expect(r.detail).toMatch(/claim check decides/)
+    // and it is NOT a failure, so it neither alarms nor ages a job
+    expect(isFailedOutcome('dispatched')).toBe(false)
+    expect(agesBounceRun('dispatched')).toBe(false)
+  })
+
+  it('A HUNG CONNECTION NEVER PINS THE CALLER OPEN', async () => {
+    const fetchImpl = vi.fn(() => new Promise(() => {})) as any
+    const started = Date.now()
+    const r = await fire(fetchImpl, 30)
+    // Returned on the probe, not on the fetch — which never settles at all.
+    expect(r.outcome).toBe('dispatched')
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
+  it('the request is NOT aborted at the probe — that would kill a live segment', async () => {
+    let seenSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_u: string, o: any) => { seenSignal = o.signal; return new Promise(() => {}) }) as any
+    await fire(fetchImpl, 20)
+    await new Promise((r) => setTimeout(r, 60))   // well past the probe
+    expect(seenSignal?.aborted).toBe(false)
+  })
+
+  it('AN SSO GATE IS STILL CAUGHT — the loc_kc failure mode survives the change', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      status: 0, type: 'opaqueredirect',
+      headers: { get: (k: string) => (k === 'location' ? 'https://vercel.com/sso' : null) },
+      text: async () => '',
+    })) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('bounced')          // NOT swallowed as 'dispatched'
+    expect(r.redirectedTo).toBe('https://vercel.com/sso')
+    expect(r.detail).toMatch(/SSO-gated/)
+    expect(agesBounceRun('bounced')).toBe(true) // and it still ages the job
+  })
+
+  it('a fast 5xx is still a bounce, with its evidence', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      status: 503, type: 'basic',
+      headers: { get: () => null },
+      text: async () => 'upstream unavailable',
+    })) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('bounced')
+    expect(r.detail).toContain('import route returned 503')
+    expect(r.detail).toContain('upstream unavailable')
+  })
+
+  it('a 508 is still the designed self-chain handoff, not a fault', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      status: 508, type: 'basic', headers: { get: () => null }, text: async () => '',
+    })) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('chain_capped')
+    expect(agesBounceRun('chain_capped')).toBe(false)
+  })
+
+  it('a synchronous throw is reported, not swallowed as dispatched', async () => {
+    const fetchImpl = vi.fn(() => { throw new Error('bad url') }) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('errored')
+    expect(r.detail).toContain('bad url')
+  })
+
+  it('a rejected fetch inside the probe window is errored, and never unhandled', async () => {
+    const fetchImpl = vi.fn(async () => { throw new Error('ECONNRESET') }) as any
+    const r = await fire(fetchImpl)
+    expect(r.outcome).toBe('errored')
+    expect(r.detail).toContain('ECONNRESET')
+  })
+
+  it('the default is still to wait — only callers that must, opt out', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      status: 200, type: 'basic', headers: { get: () => null }, text: async () => '{"ok":true}',
+    })) as any
+    const r = await postContinuation({
+      origin: 'https://x', locationSlug: 'loc_kc', secret: 's', fetchImpl,
+    })
+    expect(r.outcome).toBe('landed')
+  })
+
+  it('a dispatched attempt round-trips through the sync_log format', () => {
+    const msg = formatContinuationLogMessage({
+      source: 'sweeper', outcome: 'dispatched', jobId: 'job-1',
+    })
+    expect(parseContinuationLogMessage(msg)).toEqual({ source: 'sweeper', outcome: 'dispatched' })
+  })
+})

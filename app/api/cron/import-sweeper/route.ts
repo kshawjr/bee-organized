@@ -239,12 +239,21 @@ export async function GET(req: NextRequest) {
         origin,
         locationSlug: j.location_id,
         secret,
+        // FIRE, DON'T WAIT. The segment now runs inside the request, so a
+        // reply means the whole segment finished — up to 600s away. This cron
+        // fires every minute and has no maxDuration override; it cannot hold
+        // that connection, and waiting would turn every healthy resume into a
+        // reported timeout. The claim verification below is the honest signal
+        // and always was: a 2xx never proved a segment took the job.
+        awaitResponse: false,
       })
 
       let outcome: ContinuationOutcome = post.outcome
       let detail = post.detail
 
-      if (outcome === 'landed') {
+      // 'dispatched' verifies exactly like 'landed' did — the POST is away and
+      // DB state decides whether a segment actually took the job.
+      if (outcome === 'landed' || outcome === 'dispatched') {
         // Verify against DB STATE, not the HTTP status: did a segment actually
         // take the job? POLL for it — do NOT read once. The receiving route is
         // a cold-startable 800s function and was measured taking >9s between
@@ -275,11 +284,15 @@ export async function GET(req: NextRequest) {
           // page" is a diagnosis, while "2xx but nobody claimed" alone is the
           // ~4,300 rows we already have and cannot read.
           detail = withEvidence(
-            `POST returned 2xx but no segment claimed the job within ` +
+            `POST sent but no segment claimed the job within ` +
               `${Math.round((CLAIM_VERIFY_ATTEMPTS * CLAIM_VERIFY_INTERVAL_MS) / 1000)}s — ` +
               `resume may not have taken`,
             post.evidence,
           )
+        } else {
+          // A segment holds the claim (or the job left 'running' because it
+          // finished). That is a landing, however the HTTP layer read.
+          outcome = 'landed'
         }
       }
 
