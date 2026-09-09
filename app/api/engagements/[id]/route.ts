@@ -2,7 +2,8 @@
 //
 // GET   /api/engagements/:id — engagement + full children (chronological)
 //   + client summary (name, lifetime paid across ALL engagements, prior
-//   count, other-open count). Fetched by EngagementPanel on open so the
+//   count, other-open count, and the client's full engagement list for
+//   the panel's "Also on this client" block — all from ONE sibling query). Fetched by EngagementPanel on open so the
 //   board rows stay lightweight. Panel open also DRIFT-RECOVERS linked
 //   engagements (recoverEngagementStageDrift): forward-only, silent
 //   re-derive from the children fetched here — self-heals a stale stage
@@ -87,7 +88,13 @@ export async function GET(
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('leads').select('id, name, email, phone, address, city, state, zip, request_details, source, referred_by_kind, referred_by_id').eq('id', engagement.client_id).maybeSingle(),
-    supabaseService.from('engagements').select('id, stage, total_paid').eq('client_id', engagement.client_id),
+    // ONE query for every engagement this client has — it already
+    // powered lifetime paid / prior count / other-open. Widened (NOT
+    // duplicated) so the panel's "Also on this client" list rides the
+    // same round trip: no per-row fetch, no N+1. Money is the row's own
+    // total_invoiced/total_paid columns; child records are NOT joined
+    // here (a quote-derived value would cost one query per sibling).
+    supabaseService.from('engagements').select('id, title, stage, created_at, total_invoiced, total_paid').eq('client_id', engagement.client_id),
     supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
     // Engagement-scoped notes (kind='job' via the panel composer); newest
     // first. Degrades to [] pre-migration (query errors, data stays null).
@@ -252,6 +259,18 @@ export async function GET(
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,
       other_open: otherOpen,
+      // Every engagement on this client INCLUDING the one being viewed —
+      // the panel marks the current row rather than filtering it out, so
+      // the owner sees the whole set and where they are in it. Display
+      // only; ordering is the panel's (newest first).
+      engagements: siblings.map(e => ({
+        id: e.id,
+        title: (e as any).title ?? null,
+        stage: e.stage,
+        created_at: (e as any).created_at ?? null,
+        total_invoiced: num((e as any).total_invoiced),
+        total_paid: num(e.total_paid),
+      })),
     },
   })
 }

@@ -29,6 +29,10 @@
 //           (creation_type is never persisted — child rows are the one
 //           honest signal). Plus the invoice detail inset (INV- number/
 //           dates + honest deep-link actions).
+//           Then 'Also on this client' — every engagement on the same
+//           client, newest first, the current one marked with a gold
+//           rule and a "You're here" chip. Renders only when there IS
+//           more than one. Display only, inert rows.
 //     RIGHT description (EditableDesc) + engagement-scoped activity +
 //           composer
 //   action bar — PINNED (sticky): Call · Log touchpoint · (Send to
@@ -186,6 +190,62 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
           </a>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── "Also on this client" ─────────────────────────────────────
+// Whitney Elliott's blind card (Portland, 2026-09): a card read
+// "Request" while the SAME client's other engagement had become a job,
+// been completed and invoiced. The data was right — the card could not
+// see its siblings. Kevin's ruling: more information to the owner.
+// DISPLAY ONLY. No writes, no stage moves, nothing clickable.
+//
+// Treatment 2 (Kevin's pick of three):
+//   · colour comes from the STAGE CHIP ONLY — rows carry no tint
+//   · the current row carries a thin gold left rule (T.brand.gold) —
+//     the same one-of-these-is-the-one-you-mean marker language the
+//     address card uses to call out the main address
+//   · the current row's chip reads "You're here"
+//
+// Both closed stages are GRAY in stageConfig (locked pairs — Closed Won
+// and Closed Lost are the SAME chip family, deliberately), so the chip
+// alone cannot tell won from lost. THE MONEY does that: the invoiced
+// figure is the fact that would have told Whitney the work was done, so
+// it renders on every row that has one. Chips are composed from
+// stageConfig via StatusChip, exactly as every other surface does them.
+const CURRENT_CHIP_LABEL = 'You\u2019re here'
+
+// Rows are INERT on purpose. This panel has no engagement-to-engagement
+// navigation seam — it takes onOpenClient and never onOpenEngagement —
+// and a display change is not the place to invent one. HiveShell owns an
+// openEngagement(); threading it here is a separate, deliberate call.
+function ClientEngagementRow({ row, current }) {
+  const money = engagementValue(row)
+  const title = displayTitle(row)
+  return (
+    <div data-client-eng={row.id} data-client-eng-current={current ? '1' : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '7px 0 7px 9px',
+        // Transparent rule on every other row so marking the current one
+        // shifts no text — the gold is the ONLY difference.
+        borderLeft: `2px solid ${current ? T.brand.gold : 'transparent'}`,
+      }}>
+      <span style={{ flexShrink: 0, fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum }}>
+        {fmtDate(row.created_at) || '\u2014'}
+      </span>
+      <span title={title} style={{ flex: 1, minWidth: 0, fontSize: '13px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {title}
+      </span>
+      <span data-client-eng-chip={row.id} style={{ flexShrink: 0 }}>
+        <StatusChip label={current ? CURRENT_CHIP_LABEL : stageDisplayLabel(row.stage)} styleKey={row.stage} />
+      </span>
+      {money != null && (
+        <span data-client-eng-money={row.id} style={{ flexShrink: 0, fontSize: '13px', fontWeight: 600, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum }}>
+          {fmtMoney(money)}
+        </span>
+      )}
     </div>
   )
 }
@@ -390,6 +450,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // Masthead value — total_invoiced once real, best quote before that;
   // hidden (not '$0') when neither exists.
   const dealValue = eng ? engagementValue({ ...eng, quotes: children.quotes }) : null
+
+  // Every engagement on this client, newest first, the current one
+  // included and marked. Rides the SAME /api/engagements/:id payload the
+  // panel already fetches (the route's one sibling query, widened) — no
+  // per-row request, no N+1. MOST CLIENTS HAVE EXACTLY ONE: at 0 or 1 row
+  // the whole section renders nothing at all — no heading, no "none" —
+  // rather than putting an empty block on thousands of cards.
+  const clientEngagements = (data?.client?.engagements || [])
+    .slice()
+    .sort((a, b) => (Date.parse(b?.created_at) || 0) - (Date.parse(a?.created_at) || 0))
+  const showClientEngagements = clientEngagements.length > 1
 
   // Close-out (doc §4/§5): the triggers live in the masthead ··· menu.
   // "Mark as Closed Won/Lost" open the engagement-scoped WIZARDS
@@ -662,6 +733,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Also on this client — the sibling engagements this card used to
+          hide. Renders ONLY when there is more than one; a single-
+          engagement client (most of them) gets nothing here. */}
+      {showClientEngagements && (
+        <div data-client-engagements="1">
+          <MicroLabel>Also on this client</MicroLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', marginTop: '2px' }}>
+            {clientEngagements.map(row => (
+              <ClientEngagementRow key={row.id} row={row} current={row.id === engagementId} />
+            ))}
+          </div>
         </div>
       )}
     </div>
