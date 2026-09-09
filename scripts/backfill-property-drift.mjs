@@ -125,6 +125,7 @@ const backfill = await import(pathToFileURL(ROOT + '/lib/property-backfill.ts').
 const {
   runBackfill,
   formatReport,
+  totalCounts,
   emptyProgress,
   assertResumable,
   PHILLY_SLUG,
@@ -304,6 +305,23 @@ try {
 
 console.log('\n' + formatReport(progress))
 console.log(`\ncheckpoint: ${PROGRESS_PATH}`)
+
+// The one number the first dry run could not give: how many of the
+// would-creates are a second property rather than the same address written
+// differently. Near-duplicates and different-units are still WRITTEN by
+// --commit — the split is reporting, not a filter.
+const t = totalCounts(progress)
+if (progress.findings.length) {
+  console.log(
+    `\nof ${t.would_create} would-create: ` +
+      `${t.would_create_new} genuinely new, ` +
+      `${t.would_create_different_unit} a different unit in a building we already hold, ` +
+      `${t.would_create_near_duplicate} near-duplicates of an address already on the card.`,
+  )
+  console.log(
+    'NOTE: --commit still writes ALL of them. The labels are for reading, not filtering.',
+  )
+}
 if (MODE === 'dry-run' && progress.findings.length) {
   console.log('\nReview the list above. If it looks right, re-run the same command with --commit.')
 }

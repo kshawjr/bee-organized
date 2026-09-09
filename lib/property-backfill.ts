@@ -39,7 +39,14 @@ import {
   type FormerAddress,
   type LeadAddressParts,
 } from './lead-address'
-import { planDriftAddress, type JobberPropertyAddress } from './property-drift'
+import {
+  planDriftAddress,
+  parseLooseAddress,
+  compareLoose,
+  describeLooseDifference,
+  type JobberPropertyAddress,
+  type LooseAddress,
+} from './property-drift'
 
 // ── scope ────────────────────────────────────────────────────────────────
 
@@ -220,6 +227,13 @@ export interface SweepCounts {
   already_listed_retired: number
   no_usable_address: number
   would_create: number
+  // The would_create split. These three sum to would_create, and they are
+  // REPORTING ONLY — every one of them is still a create as far as
+  // planDriftAddress and --commit are concerned. would_create_new is the
+  // number Kevin is after.
+  would_create_near_duplicate: number
+  would_create_different_unit: number
+  would_create_new: number
   created: number
   write_failed: number
   clients_with_more_properties_than_fetched: number
@@ -236,6 +250,9 @@ export function emptyCounts(): SweepCounts {
     already_listed_retired: 0,
     no_usable_address: 0,
     would_create: 0,
+    would_create_near_duplicate: 0,
+    would_create_different_unit: 0,
+    would_create_new: 0,
     created: 0,
     write_failed: 0,
     clients_with_more_properties_than_fetched: 0,
@@ -258,6 +275,8 @@ export interface DriftFinding {
   jobber_property_id: string | null
   address: string
   why: string
+  /** Reporting only — see classifyWouldCreate. Never affects the write. */
+  label: DuplicateLabel
 }
 
 export interface SweepError {
@@ -399,6 +418,80 @@ export function describeWhyNew(input: {
   ].join('; ')
 }
 
+// ── near-duplicate classification (REPORTING ONLY) ────────────────────────
+//
+// The first dry run produced 1,336 would-creates against an expected ~137, and
+// reading it by eye showed a large share were the same address written
+// differently rather than a second property. This puts a number on that split
+// so the fix can be chosen from evidence rather than from an impression.
+//
+// IT CHANGES NOTHING. planDriftAddress still decides create-or-skip on its own
+// strict key; --commit still writes every would-create, near-duplicates
+// included. This only labels them. When Kevin has the split he can decide
+// whether the loose key should become the real matcher — and that is a change
+// to property-drift, not to this file.
+//
+// THREE LABELS, because two would lose the case that matters most. A second
+// unit in the same building is a genuinely different property an owner wants
+// on the card, and folding it into "near-duplicate" would quietly discard
+// exactly the rows the sweep exists to find.
+
+export type DuplicateLabel = 'near-duplicate' | 'different-unit' | 'new'
+
+export interface WouldCreateClassification {
+  label: DuplicateLabel
+  /** Short phrase for the row's "why" line. Empty for a genuine new. */
+  reason: string
+}
+
+/**
+ * Compare one would-create against the primary AND every address already on
+ * the card, and say which it near-matches and on what basis.
+ *
+ * PRECEDENCE. A near-duplicate anywhere on the card wins, because one
+ * confident "we already hold this" settles the row however many other
+ * addresses it fails to match. Only if nothing near-matches does a
+ * unit difference decide it. Failing both, it is new.
+ *
+ * The primary is checked first and named first, since that is where the
+ * defects in the run mostly are — a stored primary missing its zip, or
+ * carrying its own city/state/zip tail twice.
+ */
+export function classifyWouldCreate(input: {
+  lead: LeadAddressParts
+  formerAddresses: FormerAddress[]
+  entry: FormerAddress
+}): WouldCreateClassification {
+  const candidate = parseLooseAddress(input.entry?.display ?? '')
+  if (!candidate.street) return { label: 'new', reason: '' }
+
+  const against: Array<{ what: string; loose: LooseAddress }> = []
+  const primary = formatLeadAddress(input.lead)
+  if (primary) against.push({ what: 'the primary', loose: parseLooseAddress(primary) })
+  const list = Array.isArray(input.formerAddresses) ? input.formerAddresses : []
+  list.forEach((e, i) => {
+    const display = String(e?.display ?? '')
+    if (display) against.push({ what: `other address #${i + 1}`, loose: parseLooseAddress(display) })
+  })
+
+  let unitHit: string | null = null
+  for (const c of against) {
+    const verdict = compareLoose(candidate, c.loose)
+    if (verdict === 'match') {
+      return {
+        label: 'near-duplicate',
+        reason: `near-duplicate of ${c.what} — differs ${describeLooseDifference(candidate, c.loose)}`,
+      }
+    }
+    if (verdict === 'unit_differs' && !unitHit) unitHit = c.what
+  }
+
+  if (unitHit) {
+    return { label: 'different-unit', reason: `a different unit in the same building as ${unitHit}` }
+  }
+  return { label: 'new', reason: '' }
+}
+
 function clientLabel(node: any): string {
   const name = [node?.firstName, node?.lastName].map((s) => String(s ?? '').trim()).filter(Boolean).join(' ')
   const company = String(node?.companyName ?? '').trim()
@@ -538,6 +631,24 @@ export async function sweepLocation(
         }
 
         counts.would_create++
+
+        // REPORTING ONLY, and after the decision, never before it. The label
+        // is attached to the row and counted; it does not gate the write below
+        // and it did not gate the plan above.
+        const classified = classifyWouldCreate({
+          lead: held.lead as LeadAddressParts,
+          formerAddresses: held.formerAddresses,
+          entry: plan.entry,
+        })
+        if (classified.label === 'near-duplicate') counts.would_create_near_duplicate++
+        else if (classified.label === 'different-unit') counts.would_create_different_unit++
+        else counts.would_create_new++
+
+        const why = describeWhyNew({
+          lead: held.lead as LeadAddressParts,
+          formerAddresses: held.formerAddresses,
+          jobberPropertyId: propNumeric,
+        })
         progress.findings.push({
           location_id: locId,
           location_name: locName,
@@ -546,11 +657,8 @@ export async function sweepLocation(
           jobber_client_id: numeric ?? '',
           jobber_property_id: propNumeric,
           address: plan.entry.display,
-          why: describeWhyNew({
-            lead: held.lead as LeadAddressParts,
-            formerAddresses: held.formerAddresses,
-            jobberPropertyId: propNumeric,
-          }),
+          why: classified.reason ? `${why} — BUT ${classified.reason}` : why,
+          label: classified.label,
         })
 
         const next = [...held.formerAddresses, plan.entry]
@@ -664,6 +772,9 @@ function countLines(c: SweepCounts): string[] {
     `already known — listed, retired      ${c.already_listed_retired}`,
     `skipped — no usable address          ${c.no_usable_address}`,
     `WOULD CREATE                         ${c.would_create}`,
+    `  · near-duplicate of one we hold    ${c.would_create_near_duplicate}   (same place, written differently)`,
+    `  · different unit, same building    ${c.would_create_different_unit}   (a real second property)`,
+    `  · GENUINELY NEW                    ${c.would_create_new}`,
     `written                              ${c.created}`,
     `write failed                         ${c.write_failed}`,
     `clients with more properties than one page carried  ${c.clients_with_more_properties_than_fetched}`,
@@ -696,13 +807,30 @@ export function formatReport(progress: Progress): string {
   out.push('')
 
   if (progress.findings.length) {
-    out.push(`══ ${progress.findings.length} address${progress.findings.length === 1 ? '' : 'es'} to add — review before committing`, '')
-    for (const f of progress.findings) {
-      out.push(`  ${f.location_name} · ${f.client} (lead ${f.lead_id})`)
-      out.push(`    address : ${f.address}`)
-      out.push(`    property: ${f.jobber_property_id ?? '(none given)'}   jobber client: ${f.jobber_client_id}`)
-      out.push(`    why new : ${f.why}`)
-      out.push('')
+    // Grouped, and the genuinely-new ones first: that is the list Kevin is
+    // actually deciding about. The other two groups are printed in full rather
+    // than summarised away, because the classifier is new and its calls have
+    // to be checkable by eye before anyone trusts the totals.
+    const groups: Array<[DuplicateLabel, string]> = [
+      ['new', 'GENUINELY NEW — no address on the card looks like these'],
+      ['different-unit', 'DIFFERENT UNIT — same building as one we hold, but a different unit'],
+      ['near-duplicate', 'NEAR-DUPLICATE — looks like an address the card already holds'],
+    ]
+    out.push(
+      `══ ${progress.findings.length} address${progress.findings.length === 1 ? '' : 'es'} the sweep would add — review before committing`,
+      '',
+    )
+    for (const [label, heading] of groups) {
+      const rows = progress.findings.filter((f) => f.label === label)
+      if (!rows.length) continue
+      out.push(`── ${rows.length} ${heading}`, '')
+      for (const f of rows) {
+        out.push(`  ${f.location_name} · ${f.client} (lead ${f.lead_id})`)
+        out.push(`    address : ${f.address}`)
+        out.push(`    property: ${f.jobber_property_id ?? '(none given)'}   jobber client: ${f.jobber_client_id}`)
+        out.push(`    why new : ${f.why}`)
+        out.push('')
+      }
     }
   } else {
     out.push('══ no addresses to add', '')
