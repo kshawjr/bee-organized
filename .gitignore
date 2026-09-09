@@ -44,6 +44,11 @@ backfill-assessment-duration.report*.json
 backfill-archived-quote-close.report*.json
 # #125 report carries the pre-redaction names — never commit
 redact-sync-log-names.report*.json
+# property-drift backfill checkpoint — carries client names and home
+# addresses for every would-create, so it is customer data. Never commit.
+.property-backfill-progress.json
+.property-backfill-progress.json.tmp
+property-backfill-progress*.json
 
 # Google service-account keys — never commit (GOOGLE_SA_KEY env var is the only home)
 *service-account*.json
