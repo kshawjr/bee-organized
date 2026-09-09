@@ -466,7 +466,7 @@ function EditForm({ item, onCancel, onSaved }) {
 export function deleteConfirmSentence(item) {
   const atts = Array.isArray(item?.attachments) ? item.attachments.length : 0
   const bits = ['This deletes your report for good — we can’t get it back']
-  if (atts > 0) bits.push(atts === 1 ? 'and the file you sent goes with it' : `and the ${atts} files you sent go with them`)
+  if (atts > 0) bits.push(atts === 1 ? 'and the file you sent goes with it' : `and the ${atts} files you sent go with it`)
   if (hasFeedbackReply(item) || (Array.isArray(item?.replies) && item.replies.some(r => r?.author_role === 'team'))) {
     bits.push('along with what the team wrote back')
   }

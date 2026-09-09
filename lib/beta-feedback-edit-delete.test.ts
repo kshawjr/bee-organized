@@ -421,7 +421,7 @@ describe('the delete confirmation', () => {
     expect(deleteConfirmSentence({ attachments: [{ path: 'a' }], replies: [] }))
       .toContain('and the file you sent goes with it')
     expect(deleteConfirmSentence({ attachments: [{ path: 'a' }, { path: 'b' }], replies: [] }))
-      .toContain('and the 2 files you sent go with them')
+      .toContain('and the 2 files you sent go with it')
   })
 
   it('says the answer goes too when the team has written back', () => {
