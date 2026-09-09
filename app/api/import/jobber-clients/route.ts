@@ -395,6 +395,26 @@ export async function POST(req: NextRequest) {
   // (read by /api/import/status/[id] polling), so no stream is needed.
   const emit = (_obj: any) => {}  // no-op: progress goes to DB, not a stream
   const runImport = async () => {
+      // ── DIAGNOSTIC, loc_phillysuburbs stall (job f385d31d, stuck at 1,606
+      // of 18,883 since 2026-09-02) ──────────────────────────────────────────
+      // FIRST statement in the detached work, before anything else runs.
+      //
+      // The route replies {"job_id":...,"started":true} — confirmed in
+      // sync_log by the continuation diagnostic — and that reply is only sent
+      // after the location claim is won. Yet sampling import_jobs across 95s
+      // spanning a retry shows location_claim_at and segment_started_at both
+      // null throughout and processed_records unmoved.
+      //
+      // This line separates the two possible readings. If it appears in
+      // Vercel, the background work DOES start and dies somewhere inside, and
+      // we hunt there. If it never appears while the route keeps replying
+      // started:true, waitUntil is silently discarding the promise —
+      // @vercel/functions implements it as `getContext().waitUntil?.(p)`, and
+      // the optional call drops the work with no error when there is no live
+      // request context. That is the exact hazard the selfContinue comment
+      // above documents from the loc_kc incident (2026-07-22).
+      console.log(`[import-entry] runImport ENTERED job=${jobId} loc=${locSlug}`)
+
       // Wall-clock guard: stop fetching before the 800s Vercel wall and let the
       // frontend re-POST to resume from the persisted cursor. 600s leaves ample
       // headroom for the write phase (or a mid-page throttle pause) to finish.
@@ -416,6 +436,13 @@ export async function POST(req: NextRequest) {
         .eq('id', jobId)
         .or(`segment_started_at.is.null,segment_started_at.lt.${cutoffIso}`)
         .select('id')
+      // Same diagnostic: tells "never entered" apart from "entered and bounced
+      // off the segment mutex". Placed before the early return so one grep for
+      // [import-entry] shows both branches.
+      console.log(
+        `[import-entry] segment mutex claim=${claimed && claimed.length ? 'won' : 'lost'} ` +
+        `job=${jobId} loc=${locSlug}`,
+      )
       if (!claimed || claimed.length === 0) {
         console.log(`[jobber-import] segment already running for job ${jobId} — exiting without spawning rival`)
         return
