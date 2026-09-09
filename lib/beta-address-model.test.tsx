@@ -287,6 +287,85 @@ describe('retiring is Bee Hub only', () => {
   })
 })
 
+// ═══ 4b) the redesigned list ═══════════════════════════════════
+// One list, primary marked. The old shape read as three unrelated columns
+// (address, stranded label pill, a shouting underlined "Stop using" pinned
+// far right) and gave the primary no label at all, so the client's main
+// address looked like a different KIND of record from the rest.
+describe('the address list — one list, primary marked', () => {
+  it('the PRIMARY row says "main address" in words, next to its label', async () => {
+    await mountField({ jobberLinked: true, addressLabel: 'home', formerAddresses: [OTHER] })
+    const primary = q('[data-address-primary]')!
+    expect(primary.textContent).toContain('2101 Lenox Oval')
+    // Kevin's ruling: the words appear on the row. Not a dot alone, not a
+    // tooltip — this row is the one that syncs to Jobber as the service
+    // address, and the others do not.
+    expect(primary.textContent).toContain('Home · main address')
+    await unmountField()
+  })
+
+  it('a NON-primary row does not say "main address"', async () => {
+    await mountField({ jobberLinked: true, addressLabel: 'home', formerAddresses: [OTHER] })
+    const entry = q('[data-address-entry="0"]')!
+    expect(entry.textContent).toContain('118 Elmhurst Rd')
+    expect(entry.textContent).toContain('Second home')
+    expect(entry.textContent).not.toContain('main address')
+    await unmountField()
+  })
+
+  it('the primary is labelled too — both rows read as the same kind of thing', async () => {
+    await mountField({ jobberLinked: true, addressLabel: 'home', formerAddresses: [OTHER] })
+    expect(q('[data-address-primary]')!.textContent).toContain('Home')
+    expect(q('[data-address-entry="0"]')!.textContent).toContain('Second home')
+    await unmountField()
+  })
+
+  it('a webhook-found address reads "Other · Found in Jobber", keeping the kind AND the note', async () => {
+    const found = { ...OTHER, label: 'other', label_note: 'Found in Jobber' }
+    await mountField({ jobberLinked: true, formerAddresses: [found] })
+    expect(q('[data-address-entry="0"]')!.textContent).toContain('Other · Found in Jobber')
+    await unmountField()
+  })
+
+  it('a RETIRED row stays in the same list, struck through, still saying "No longer used"', async () => {
+    await mountField({ jobberLinked: true, formerAddresses: [{ ...OTHER, status: 'retired' }] })
+    const entry = q('[data-address-retired="1"]')!
+    // same list — not moved to a separate section
+    expect(entry.getAttribute('data-address-entry')).toBe('0')
+    expect(entry.textContent).toContain('No longer used')
+    expect(entry.querySelector('[data-address-action="restore"]')).toBeTruthy()
+    await unmountField()
+  })
+
+  it('the "OTHER ADDRESSES" sub-heading is gone — one list under one label', async () => {
+    await mountField({ jobberLinked: true, addressLabel: 'home', formerAddresses: [OTHER] })
+    expect(host.textContent).not.toContain('Other addresses')
+    expect(host.textContent).not.toContain('OTHER ADDRESSES')
+    expect(q('[data-meta-row="addresses"]')).toBeTruthy()
+    await unmountField()
+  })
+
+  it('retire/restore is no longer the loudest thing: no underline, meta colour, last in the row', async () => {
+    await mountField({ jobberLinked: true, formerAddresses: [OTHER] })
+    const btn = q('[data-address-action="retire"]') as HTMLElement
+    expect(btn.style.textDecoration).not.toBe('underline')
+    // it inherits the meta line's size rather than setting a larger one
+    expect(btn.style.font).toBe('inherit')
+    // and it is the LAST thing in its row, not pinned to a right-hand axis
+    expect(btn.style.marginLeft).not.toBe('auto')
+    await unmountField()
+  })
+
+  it('every address row sits in one column — no right-hand axis to misalign', async () => {
+    await mountField({ jobberLinked: true, addressLabel: 'home', formerAddresses: [OTHER] })
+    // the label and the retire control live INSIDE the row's text column,
+    // beneath the address, so a wrapping address drags nothing out of line
+    const entry = q('[data-address-entry="0"]')!
+    expect(entry.querySelector('[data-address-action="retire"]')).toBeTruthy()
+    await unmountField()
+  })
+})
+
 // ═══ 5) the five labels ════════════════════════════════════════
 describe('labels — the fixed five, and only those five', () => {
   it('exactly five, in order, with Other last', () => {

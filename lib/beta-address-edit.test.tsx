@@ -149,7 +149,7 @@ describe('AddressField edit mode — save and cancel', () => {
   it('open prefills street (derived) + parts; ✓ saves ONE PATCH with the composed address', async () => {
     installFetch()
     const { host, unmount } = await mountField()
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     expect(streetInput(host)!.value).toBe('29659 Calle Violeta')
     expect(input(host, 'City')!.value).toBe('Temecula')
     await type(streetInput(host)!, '500 Oak Ave')
@@ -170,12 +170,12 @@ describe('AddressField edit mode — save and cancel', () => {
   it('✗ cancels with ZERO writes; Esc cancels too', async () => {
     installFetch()
     const { host, unmount } = await mountField()
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, 'abandoned')
     await click(cancelBtn(host)!)
     expect(leadPatches).toEqual([])
     expect(host.textContent).toContain('29659 Calle Violeta')
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await key(input(host, 'City')!, 'Escape')
     expect(streetInput(host)).toBeNull()
     expect(leadPatches).toEqual([])
@@ -185,7 +185,7 @@ describe('AddressField edit mode — save and cancel', () => {
   it('no-change save closes silently (normalized compare — zero writes)', async () => {
     installFetch()
     const { host, unmount } = await mountField()
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await click(saveBtn(host)!)
     expect(leadPatches).toEqual([])
     expect(streetInput(host)).toBeNull()
@@ -196,7 +196,7 @@ describe('AddressField edit mode — save and cancel', () => {
   it('parts without a street → quiet inline error, no junk PATCH', async () => {
     installFetch()
     const { host, unmount } = await mountField({ address: null, city: null, state: null, zip: null })
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(input(host, 'City')!, 'Austin')
     await click(saveBtn(host)!)
     expect(host.textContent).toContain('Enter a street address')
@@ -207,7 +207,7 @@ describe('AddressField edit mode — save and cancel', () => {
   it('clearing everything saves nulls (Address removed, Bee Hub only)', async () => {
     installFetch()
     const { host, unmount } = await mountField()
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '')
     await type(input(host, 'City')!, '')
     await type(input(host, 'State')!, '')
@@ -221,7 +221,7 @@ describe('AddressField edit mode — save and cancel', () => {
   it('failed PATCH keeps the edit open with the inline error, draft intact', async () => {
     installFetch({ patchOk: false })
     const { host, unmount } = await mountField()
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '500 Oak Ave')
     await click(saveBtn(host)!)
     expect(streetInput(host)).toBeTruthy()
@@ -239,7 +239,7 @@ describe('AddressField — Places autocomplete and the manual fallback', () => {
       details: { formatted: '500 Oak Ave, Austin, TX 78701, USA', street: '500 Oak Ave', apt: '', city: 'Austin', state: 'TX', zip: '78701' },
     })
     const { host, unmount } = await mountField({ address: null, city: null, state: null, zip: null })
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '500 Oak')
     await sleep(250) // debounce → /autocomplete
     const suggestion = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('500 Oak Ave'))!
@@ -260,7 +260,7 @@ describe('AddressField — Places autocomplete and the manual fallback', () => {
   it('Places down (e.g. no GOOGLE_PLACES_API_KEY) → manual typing still saves', async () => {
     installFetch({ placesFail: true })
     const { host, unmount } = await mountField({ address: null, city: null, state: null, zip: null })
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '742 Evergreen Terrace')
     await sleep(250) // the failed autocomplete must not break anything
     await type(input(host, 'City')!, 'Springfield')
@@ -292,7 +292,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
   it('typed unit survives picking a prediction with NO subpremise (the reported case)', async () => {
     installFetch(OAK)
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(input(host, 'Apt')!, 'Apt 4')
     await pickOak(host)
     // The prediction replaced the street line — the unit did NOT go with it.
@@ -308,7 +308,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
   it('a prediction WITH a real subpremise fills the Apt field and saves', async () => {
     installFetch({ ...OAK, details: { ...OAK.details, apt: 'Unit 12' } })
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await pickOak(host)
     expect(input(host, 'Apt')!.value).toBe('Unit 12')
     await click(saveBtn(host)!)
@@ -320,7 +320,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
     // Two-segment description because parseAddress reads "street, city ST zip".
     installFetch({ predictions: [{ place_id: 'p1', description: '500 Oak Ave, Austin TX 78701' }], details: null })
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(input(host, 'Apt')!, 'Apt 4')
     await pickOak(host)
     expect(input(host, 'Apt')!.value).toBe('Apt 4')
@@ -332,7 +332,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
   it('Places down entirely → manually typed street + unit still save', async () => {
     installFetch({ placesFail: true })
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '742 Evergreen Terrace')
     await sleep(250) // failed autocomplete must not break anything
     await type(input(host, 'Apt')!, 'Apt 9')
@@ -348,7 +348,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
   it('no unit at all → no stray text (exact composed string after a pick)', async () => {
     installFetch(OAK)
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await pickOak(host)
     expect(input(host, 'Apt')!.value).toBe('')
     await click(saveBtn(host)!)
@@ -359,7 +359,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
   it('unit without a street is junk — inline error, zero writes', async () => {
     installFetch()
     const { host, unmount } = await mountField(EMPTY)
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(input(host, 'Apt')!, 'Apt 4')
     await click(saveBtn(host)!)
     expect(host.textContent).toContain('Enter a street address')
@@ -372,7 +372,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
     const { host, unmount } = await mountField({
       address: '123 Main St Apt 4, Denver, CO, 80202', city: 'Denver', state: 'CO', zip: '80202',
     })
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     expect(streetInput(host)!.value).toBe('123 Main St Apt 4')
     expect(input(host, 'Apt')!.value).toBe('')
     // Untouched save is still a no-change close — zero writes, no doubling.
@@ -385,7 +385,7 @@ describe('AddressField — discrete Apt/Suite (issue 133)', () => {
 // ── toast truths ────────────────────────────────────────────────
 describe('AddressField — the toast tells the whole truth', () => {
   const editAndSave = async (host: Element) => {
-    await click(host.querySelector('p')!)
+    await click(host.querySelector('[data-meta-row="address"]')!)
     await type(streetInput(host)!, '500 Oak Ave')
     await type(input(host, 'City')!, 'Austin')
     await type(input(host, 'State')!, 'TX')

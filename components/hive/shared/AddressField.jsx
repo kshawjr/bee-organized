@@ -320,60 +320,125 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     )
   }
 
-  // ── THE CLIENT'S OTHER ADDRESSES ────────────────────────────────
-  // A live list, not history. Each row carries its label so an owner can
-  // tell which house is which, and each can be retired — which hides it
-  // HERE and changes nothing in Jobber. Absent entirely for a client with
-  // one address: that screen is exactly as it was.
-  const labelPill = (text) => text ? (
-    <span style={{
-      fontSize: '10px', fontWeight: 600, color: T.ink.muted, background: T.surface.sunken,
-      padding: '1px 6px', borderRadius: T.radius.pill, marginLeft: '6px', whiteSpace: 'nowrap',
-    }}>{text}</span>
-  ) : null
+  // ── THE ADDRESS LIST ────────────────────────────────────────────
+  // ONE list, primary marked — not a primary row plus a sub-headed
+  // appendix. The old shape read as three unrelated columns (address,
+  // stranded label pill, shouting "Stop using" pinned right) and gave the
+  // primary no label at all, so the client's main address looked like a
+  // different KIND of thing from the rest.
+  //
+  // Every row is now identical in shape: a status dot, the address, and one
+  // muted meta line beneath it. Only the dot and the meta text differ, so
+  // the eye reads a list rather than a table with a ragged right edge.
+  //
+  // "main address" is SPELLED OUT on the primary row, deliberately, and is
+  // not reducible to the dot or a tooltip: that row is the one whose address
+  // syncs to Jobber as the service address, and the others do not. A quiet
+  // visual marker cannot carry a consequence that size.
 
-  const primaryLabelText = addressLabelText(addressLabel, addressLabelNote)
+  // Filled for the primary, hollow for the rest, ghosted when retired. The
+  // dot sits in the ICON GUTTER every meta row uses, so the address text
+  // still lines up with phone, email, source and referrer above and below
+  // it — the block is redesigned, but it is not detached from its card.
+  const statusDot = (kind) => (
+    <span aria-hidden="true" style={{
+      width: '8px', height: '8px', borderRadius: T.radius.pill, display: 'inline-block',
+      background: kind === 'primary' ? T.ink.secondary : 'transparent',
+      border: kind === 'primary' ? 'none'
+        : `1.5px solid ${kind === 'retired' ? T.ink.disabled : T.hairline.control}`,
+      boxSizing: 'border-box',
+    }} />
+  )
 
+  // The muted line beneath an address. Raised from 10px — this is where the
+  // label now lives, and a label nobody over 45 can read is not a label.
+  const META_LINE = {
+    fontSize: '11.5px', lineHeight: 1.45, color: T.ink.muted,
+    paddingLeft: '20px', margin: '0 0 6px',
+  }
+
+  // The meta line's text. 'other' shows the WORD plus its note ("Other ·
+  // Found in Jobber") rather than the note alone — the note answers "which
+  // one", the word still says what kind of thing it is. Composed here, not
+  // in lib/address-labels: the label vocabulary is not ours to change.
+  const metaLabelText = (label, note) => {
+    const resolved = addressLabelText(label, note)
+    if (!resolved) return null
+    return label === 'other' && resolved !== 'Other' ? `Other · ${resolved}` : resolved
+  }
+
+  // Retire / restore now sits at the END of the meta line, in that line's
+  // own muted colour and size, with no underline. It was the loudest thing
+  // in the block — larger than the label, underlined, pinned to the far
+  // right on its own axis, so the eye landed on a destructive-looking action
+  // before it read the address.
+  //
+  // Kept as a visible link rather than hidden behind a per-row menu, on
+  // purpose: retiring is reversible and destroys nothing (the address, its
+  // label and its history all stay, and Jobber is not touched at all), and
+  // there is no per-row edit affordance to hide it behind — the pencil edits
+  // the PRIMARY. Inventing a menu would be new interaction machinery in a
+  // presentation-only change. Last, smallest, faintest is enough.
+  const retireLink = (retired, i) => (!readOnly ? (
+    <>
+      <span aria-hidden="true"> · </span>
+      <button type="button" disabled={busy} data-address-action={retired ? 'restore' : 'retire'}
+        onClick={() => entryAction(retired ? 'restore' : 'retire', i)}
+        style={{
+          padding: 0, background: 'none', border: 'none', font: 'inherit',
+          color: T.ink.muted, cursor: busy ? 'not-allowed' : 'pointer',
+        }}>
+        {retired ? 'Use again' : 'Stop using'}
+      </button>
+    </>
+  ) : null)
+
+  const primaryMeta = [metaLabelText(addressLabel, addressLabelNote), 'main address']
+    .filter(Boolean).join(' · ')
+
+  const primaryRow = (
+    <div key="primary" data-address-primary="1">
+      <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : 'Edit address'}
+        data-meta-row="address"
+        style={{ ...metaRowStyle(), marginBottom: 0, cursor: readOnly ? 'default' : 'text' }}>
+        <span style={metaIconStyle}>{statusDot('primary')}</span>
+        {/* title on the VALUE span, not just the row: the child's title wins
+            within its own box, so hovering a clipped address still reveals it
+            in full while the row keeps its edit affordance (issue 118). */}
+        <span style={metaValueStyle} title={display}>{display}</span>
+        {!readOnly && <EditPencil />}
+      </p>
+      {/* Kevin's ruling: the words "main address" appear on this row. Not a
+          dot alone, not a tooltip — this is the address that syncs to Jobber
+          as the service address, and the others do not. A quiet visual
+          marker cannot carry a consequence that size. */}
+      <p style={META_LINE}>{primaryMeta}</p>
+    </div>
+  )
+
+  // Retired entries stay in this same list, de-emphasised in place. Moving
+  // them to their own section would re-create the appendix this replaces.
   const otherRows = (Array.isArray(formerAddresses) ? formerAddresses : []).map((f, i) => {
     const retired = isRetiredAddress(f)
-    const text = addressLabelText(f.label, f.label_note)
+    const label = metaLabelText(f.label, f.label_note)
+    const metaText = [label, retired ? 'No longer used' : null].filter(Boolean).join(' · ')
     return (
-      <div key={`${f.display}-${i}`} data-address-entry={i} data-address-retired={retired ? '1' : '0'}
-        style={{ display: 'flex', alignItems: 'baseline', gap: '4px', margin: '2px 0 0' }}>
-        <span title={f.display} style={{
-          fontSize: '11.5px', lineHeight: 1.5, minWidth: 0,
-          color: retired ? T.ink.disabled : T.ink.quiet,
-          textDecoration: retired ? 'line-through' : 'none',
-        }}>{f.display}</span>
-        {labelPill(text)}
-        {retired && <span style={{ fontSize: '10px', color: T.ink.disabled }}>No longer used</span>}
-        {!readOnly && (
-          <button type="button" disabled={busy} data-address-action={retired ? 'restore' : 'retire'}
-            onClick={() => entryAction(retired ? 'restore' : 'retire', i)}
-            style={{
-              marginLeft: 'auto', padding: 0, background: 'none', border: 'none', flexShrink: 0,
-              color: T.ink.muted, fontFamily: 'inherit', fontSize: '11px',
-              cursor: busy ? 'not-allowed' : 'pointer', textDecoration: 'underline',
-            }}>
-            {retired ? 'Use again' : 'Stop using'}
-          </button>
-        )}
+      <div key={`${f.display}-${i}`} data-address-entry={i} data-address-retired={retired ? '1' : '0'}>
+        <p style={{ ...metaRowStyle(), marginBottom: 0, cursor: 'default' }}>
+          <span style={metaIconStyle}>{statusDot(retired ? 'retired' : 'other')}</span>
+          <span style={{
+            ...metaValueStyle,
+            color: retired ? T.ink.disabled : T.ink.primary,
+            textDecoration: retired ? 'line-through' : 'none',
+          }} title={f.display}>{f.display}</span>
+        </p>
+        <p style={META_LINE}>
+          {metaText}
+          {retireLink(retired, i)}
+        </p>
       </div>
     )
   })
-
-  // One quiet heading rather than repeating "Other address:" on every row —
-  // the rows now carry their own labels, and the heading still gives an
-  // UNLABELLED entry (anything written before the five labels existed) the
-  // context the old per-row prefix carried.
-  const othersBlock = otherRows.length > 0 ? (
-    <div data-meta-row="former-addresses" style={{ paddingLeft: '20px', marginTop: '3px' }}>
-      <p style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.4px', textTransform: 'uppercase', color: T.ink.muted, margin: '0 0 1px' }}>
-        Other addresses
-      </p>
-      {otherRows}
-    </div>
-  ) : null
 
   // ── THE ADD FORM ────────────────────────────────────────────────
   // Explicit. No question about intent, and no inference from the shape of
@@ -440,9 +505,9 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
   ) : null
 
   const addLink = (!readOnly && !adding && display) ? (
-    <p style={{ paddingLeft: '20px', margin: '3px 0 0' }}>
+    <p style={{ paddingLeft: '20px', margin: '0 0 2px' }}>
       <button type="button" data-address-add-open="1" onClick={openAdd}
-        style={{ padding: 0, background: 'none', border: 'none', color: T.ink.muted, fontFamily: 'inherit', fontSize: '11.5px', cursor: 'pointer' }}>
+        style={{ padding: 0, background: 'none', border: 'none', color: T.ink.muted, fontFamily: 'inherit', fontSize: '12.5px', cursor: 'pointer' }}>
         + Add address
       </button>
     </p>
@@ -450,18 +515,19 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
 
   return display ? (
     <>
-    <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : 'Edit address'}
-      data-meta-row="address"
-      style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
-      <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
-      {/* title on the VALUE span, not just the row: the child's title
-          wins within its own box, so hovering the clipped text reveals
-          the full address while the row keeps its edit affordance (issue 118). */}
-      <span style={metaValueStyle} title={display}>{display}</span>
-      {labelPill(primaryLabelText)}
-      {!readOnly && <EditPencil />}
-    </p>
-    {othersBlock}
+    {/* ONE label over ONE list. The old "OTHER ADDRESSES" sub-heading split
+        the block in two and made the primary look like a different kind of
+        record from the rest; the marked rows carry that distinction now. */}
+    <div data-meta-row="addresses">
+      <p style={{ ...metaRowStyle(), marginBottom: '5px', cursor: 'default' }}>
+        <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
+        <span style={{ color: T.ink.muted }}>
+          {otherRows.length > 0 ? 'Addresses' : 'Address'}
+        </span>
+      </p>
+      {primaryRow}
+      {otherRows}
+    </div>
     {addLink}
     {addBlock}
     </>

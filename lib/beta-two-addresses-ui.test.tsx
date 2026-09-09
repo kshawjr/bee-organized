@@ -124,10 +124,12 @@ describe('the card with history, and without', () => {
     // moved can still have live work at the old house (Jobber keeps both
     // properties bookable), so 'Previously' — and its 'moved' date — read
     // as history the record cannot actually vouch for.
-    // The per-row "Other address:" prefix became one quiet heading over the
-    // list, because each row now carries its own label pill. An UNLABELLED
-    // entry like this one still reads correctly under the heading.
-    expect(host.textContent).toContain('Other addresses')
+    // Re-anchored: the "OTHER ADDRESSES" sub-heading is gone. One list under
+    // a single label, with the primary MARKED — so what distinguishes a
+    // client with extra addresses is the extra ROW, and the label going
+    // plural. An UNLABELLED entry like this one still reads correctly.
+    expect(host.querySelectorAll('[data-address-entry]')).toHaveLength(1)
+    expect(host.textContent).toContain('Addresses')
     expect(host.textContent).toContain('10 Old Rd, Fairway, KS, 66205')
     expect(host.textContent).not.toContain('Previously:')
     expect(host.textContent).not.toContain('moved Aug')
@@ -137,7 +139,11 @@ describe('the card with history, and without', () => {
   it('one address renders exactly as before — no history block, no question machinery visible', async () => {
     stubFetch()
     const { host, unmount } = await mountField({ jobberLinked: true })
-    expect(host.textContent).not.toContain('Other addresses')
+    // Re-anchored to the same distinction, from the other side: one address
+    // means no extra rows at all, and the label stays singular.
+    expect(host.querySelectorAll('[data-address-entry]')).toHaveLength(0)
+    expect(host.textContent).toContain('Address')
+    expect(host.textContent).not.toContain('Addresses')
     expect(host.textContent).not.toContain('Did they move?')
     await unmount()
   })
