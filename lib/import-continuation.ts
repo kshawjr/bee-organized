@@ -51,6 +51,7 @@
 
 import { writeSyncLog } from './sync-log'
 import { formatSecretMatch } from './secret-fingerprint'
+import { formatResponder } from './response-forensics'
 
 // Which mechanism made the attempt. selfContinue is the fast path (fires
 // within milliseconds of the yield); the sweeper is the every-minute net.
@@ -488,9 +489,10 @@ export function withEvidence(detail: string | undefined, evidence: string | unde
  * reply that arrives quickly is read identically however it was requested.
  */
 async function classifyAndDescribe(
-  res: { status: number; type?: string; headers?: any; url?: string; text?: () => Promise<string> },
+  res: { status: number; type?: string; headers?: any; url?: string; redirected?: boolean; text?: () => Promise<string> },
   requestUrl: string,
   origin: string,
+  locationSlug?: string,
 ): Promise<ContinuationPostResult> {
   const { outcome, redirect } = classifyContinuationResponse(res as any)
   const redirectedTo = redirect ? res.headers?.get?.('location') ?? undefined : undefined
@@ -507,6 +509,39 @@ async function classifyAndDescribe(
       : outcome === 'bounced'
         ? `import route returned ${res.status}`
         : undefined
+  // ─── DIAGNOSTIC (temporary — Kevin removes this) ─────────────────────────
+  // WHO ANSWERED? The sweeper gets 200 with {"job_id":"...","started":true} —
+  // a string that exists nowhere in the current codebase — while the import
+  // function never runs (1b385c2 proved that: six sweeper rows, zero route
+  // rows, and the route logs unconditionally for any cookie-less request).
+  // Something between function egress and the route is replying on its behalf.
+  //
+  // So dump everything that could name the responder, not a chosen few
+  // headers — the answer is most likely in one nobody thought to look at.
+  // Redacted by header NAME; see lib/response-forensics.
+  if (locationSlug) {
+    try {
+      await writeSyncLog({
+        location_id: locationSlug,
+        entity_id: locationSlug,
+        entity_type: 'location',
+        direction: 'inbound',
+        status: 'success',
+        message: formatResponder({
+          requestUrl,
+          origin,
+          status: res.status,
+          type: (res as any).type,
+          redirected: (res as any).redirected,
+          finalUrl: (res as any).url,
+          headers: (res as any).headers,
+          bodySnippet: evidence,
+          outcome,
+        }),
+      })
+    } catch { /* a diagnostic must never break a handoff */ }
+  }
+
   return {
     outcome,
     status: res.status,
@@ -649,7 +684,7 @@ export async function postContinuation(opts: {
           : String((first.err as any)?.message || first.err),
       }
     }
-    return await classifyAndDescribe(first.res as any, url, opts.origin)
+    return await classifyAndDescribe(first.res as any, url, opts.origin, opts.locationSlug)
   }
 
   const timeoutMs = opts.timeoutMs ?? CONTINUATION_TIMEOUT_MS
@@ -665,7 +700,7 @@ export async function postContinuation(opts: {
       redirect: 'manual',
       signal: controller.signal,
     })
-    return await classifyAndDescribe(res as any, url, opts.origin)
+    return await classifyAndDescribe(res as any, url, opts.origin, opts.locationSlug)
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || controller.signal.aborted
     return {
