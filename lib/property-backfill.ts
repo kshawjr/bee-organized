@@ -234,6 +234,9 @@ export interface SweepCounts {
   would_create_near_duplicate: number
   would_create_different_unit: number
   would_create_new: number
+  // Withheld by --skip-near-duplicates. Its own counter on purpose: folding it
+  // into another one would hide the number Kevin chose to leave behind.
+  near_duplicates_skipped_by_flag: number
   created: number
   write_failed: number
   clients_with_more_properties_than_fetched: number
@@ -253,6 +256,7 @@ export function emptyCounts(): SweepCounts {
     would_create_near_duplicate: 0,
     would_create_different_unit: 0,
     would_create_new: 0,
+    near_duplicates_skipped_by_flag: 0,
     created: 0,
     write_failed: 0,
     clients_with_more_properties_than_fetched: 0,
@@ -277,6 +281,11 @@ export interface DriftFinding {
   why: string
   /** Reporting only — see classifyWouldCreate. Never affects the write. */
   label: DuplicateLabel
+  /**
+   * True when --skip-near-duplicates withheld this row. The row is still
+   * listed: a review that silently loses rows is not a review.
+   */
+  skipped_by_flag: boolean
 }
 
 export interface SweepError {
@@ -393,6 +402,35 @@ export interface SweepOptions {
   clientPage?: number
   propertyPage?: number
   maxRateLimitRetries?: number
+  /** --skip-near-duplicates. Default off; see isWithheldByFlag. */
+  skipNearDuplicates?: boolean
+}
+
+/**
+ * THE WRITE FILTER — separate from the dry-run guard, and narrower.
+ *
+ * The labelled dry run found 1,342 would-creates: 1,107 genuinely new, 19 a
+ * different unit in a building we already hold, and 216 near-duplicates of an
+ * address already on the card. Writing those 216 would put a second address on
+ * ~216 owners' cards that is the same place written differently. This is how
+ * Kevin leaves them out.
+ *
+ * ONLY 'near-duplicate'. A different-unit row is a REAL second property — that
+ * is the entire reason it has its own label instead of being folded in — and
+ * filtering it here would silently drop 19 properties an owner wants. That
+ * mistake would leave no trace in the output, which is why it is the one this
+ * function is mutation-tested against.
+ *
+ * It sits ALONGSIDE shouldWrite, not inside it: the mode gate decides whether
+ * this run writes at all, and this decides whether a particular row is one of
+ * the rows it writes. Two questions, two names, each failing on its own.
+ */
+export function isWithheldByFlag(
+  label: DuplicateLabel,
+  skipNearDuplicates: boolean | null | undefined,
+): boolean {
+  if (!skipNearDuplicates) return false
+  return label === 'near-duplicate'
 }
 
 /**
@@ -644,6 +682,9 @@ export async function sweepLocation(
         else if (classified.label === 'different-unit') counts.would_create_different_unit++
         else counts.would_create_new++
 
+        const withheld = isWithheldByFlag(classified.label, opts.skipNearDuplicates)
+        if (withheld) counts.near_duplicates_skipped_by_flag++
+
         const why = describeWhyNew({
           lead: held.lead as LeadAddressParts,
           formerAddresses: held.formerAddresses,
@@ -659,7 +700,13 @@ export async function sweepLocation(
           address: plan.entry.display,
           why: classified.reason ? `${why} — BUT ${classified.reason}` : why,
           label: classified.label,
+          skipped_by_flag: withheld,
         })
+
+        // Withheld by the flag: counted, listed, and not written. Nothing
+        // below runs for it — including the in-memory update, because the card
+        // does not hold this address and must not be treated as if it does.
+        if (withheld) continue
 
         const next = [...held.formerAddresses, plan.entry]
 
@@ -775,6 +822,7 @@ function countLines(c: SweepCounts): string[] {
     `  · near-duplicate of one we hold    ${c.would_create_near_duplicate}   (same place, written differently)`,
     `  · different unit, same building    ${c.would_create_different_unit}   (a real second property)`,
     `  · GENUINELY NEW                    ${c.would_create_new}`,
+    `withheld by --skip-near-duplicates   ${c.near_duplicates_skipped_by_flag}`,
     `written                              ${c.created}`,
     `write failed                         ${c.write_failed}`,
     `clients with more properties than one page carried  ${c.clients_with_more_properties_than_fetched}`,
@@ -823,9 +871,15 @@ export function formatReport(progress: Progress): string {
     for (const [label, heading] of groups) {
       const rows = progress.findings.filter((f) => f.label === label)
       if (!rows.length) continue
-      out.push(`── ${rows.length} ${heading}`, '')
+      // Withheld rows are STILL LISTED, and said so on every line. The flag
+      // changes what gets written, never what Kevin gets to look at — a row
+      // that vanishes from the review is a row nobody can disagree with.
+      const withheld = rows.filter((f) => f.skipped_by_flag).length
+      out.push(`── ${rows.length} ${heading}${withheld ? ` — ${withheld} WOULD BE SKIPPED by --skip-near-duplicates` : ''}`, '')
       for (const f of rows) {
-        out.push(`  ${f.location_name} · ${f.client} (lead ${f.lead_id})`)
+        out.push(
+          `  ${f.skipped_by_flag ? '[WOULD BE SKIPPED] ' : ''}${f.location_name} · ${f.client} (lead ${f.lead_id})`,
+        )
         out.push(`    address : ${f.address}`)
         out.push(`    property: ${f.jobber_property_id ?? '(none given)'}   jobber client: ${f.jobber_client_id}`)
         out.push(`    why new : ${f.why}`)

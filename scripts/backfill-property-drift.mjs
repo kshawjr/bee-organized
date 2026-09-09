@@ -37,6 +37,11 @@
 //   node scripts/backfill-property-drift.mjs                  # dry run
 //   node scripts/backfill-property-drift.mjs --resume         # continue one
 //   node scripts/backfill-property-drift.mjs --commit         # apply
+//   node scripts/backfill-property-drift.mjs --commit --skip-near-duplicates
+//                                    # apply, but leave out the ~216 rows that
+//                                    # are an address the card already holds,
+//                                    # written differently. Different-unit
+//                                    # rows are STILL written. Default off.
 //   node scripts/backfill-property-drift.mjs --include-philly
 //   node scripts/backfill-property-drift.mjs --env <path>     # default .env.local
 //   node scripts/backfill-property-drift.mjs --progress <path>
@@ -61,7 +66,11 @@ const val = (k, d = null) => {
 }
 
 if (has('--help') || has('-h')) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 46).join('\n'))
+  // The header block, up to and including its closing rule. Found rather than
+  // counted, so adding a line to the docs cannot silently truncate the help.
+  const lines = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
+  const end = lines.findIndex((l, i) => i > 0 && l.startsWith('// ═══'))
+  console.log(lines.slice(0, end + 1).join('\n'))
   process.exit(0)
 }
 
@@ -70,6 +79,10 @@ const MODE = COMMIT ? 'commit' : 'dry-run'
 const RESUME = has('--resume')
 const INCLUDE_PHILLY = has('--include-philly')
 const ONLY_LOCATION = val('--location')
+// Default OFF. Without it this run behaves exactly as it did before the flag
+// existed, which is the only safe default for something that changes what
+// lands on an owner's card.
+const SKIP_NEAR_DUPLICATES = has('--skip-near-duplicates')
 const PROGRESS_PATH = resolvePath(process.cwd(), val('--progress', '.property-backfill-progress.json'))
 const CLIENT_PAGE = Number(val('--page-size', '25'))
 const PROPERTY_PAGE = Number(val('--property-page', '8'))
@@ -94,6 +107,27 @@ const BANNER =
         '',
       ]
 console.log(BANNER.join('\n'))
+
+// Second banner, same reason as the first: which rows this run will leave
+// behind is as much a fact about it as whether it writes at all.
+console.log(
+  (SKIP_NEAR_DUPLICATES
+    ? [
+        '---------------------------------------------------------',
+        '---  --skip-near-duplicates IS ON                     ---',
+        '---  near-duplicates will be LISTED but NOT written   ---',
+        '---  different-unit rows ARE still written            ---',
+        '---------------------------------------------------------',
+      ]
+    : [
+        '---------------------------------------------------------',
+        '---  --skip-near-duplicates is OFF (default)          ---',
+        '---  ALL would-creates are written, near-duplicates   ---',
+        '---  included                                         ---',
+        '---------------------------------------------------------',
+      ]
+  ).join('\n') + '\n',
+)
 
 // ── env ───────────────────────────────────────────────────────────────────
 const envPath = resolvePath(process.cwd(), val('--env', '.env.local'))
@@ -280,6 +314,7 @@ const opts = {
   includePhilly: INCLUDE_PHILLY,
   clientPage: CLIENT_PAGE,
   propertyPage: PROPERTY_PAGE,
+  skipNearDuplicates: SKIP_NEAR_DUPLICATES,
 }
 
 if (ONLY_LOCATION) console.log(`limited to ${ONLY_LOCATION}\n`)
@@ -308,8 +343,7 @@ console.log(`\ncheckpoint: ${PROGRESS_PATH}`)
 
 // The one number the first dry run could not give: how many of the
 // would-creates are a second property rather than the same address written
-// differently. Near-duplicates and different-units are still WRITTEN by
-// --commit — the split is reporting, not a filter.
+// differently.
 const t = totalCounts(progress)
 if (progress.findings.length) {
   console.log(
@@ -318,9 +352,18 @@ if (progress.findings.length) {
       `${t.would_create_different_unit} a different unit in a building we already hold, ` +
       `${t.would_create_near_duplicate} near-duplicates of an address already on the card.`,
   )
-  console.log(
-    'NOTE: --commit still writes ALL of them. The labels are for reading, not filtering.',
-  )
+  if (SKIP_NEAR_DUPLICATES) {
+    console.log(
+      `--skip-near-duplicates left ${t.near_duplicates_skipped_by_flag} of them behind. ` +
+        `They are still listed above, marked [WOULD BE SKIPPED]. ` +
+        `The ${t.would_create_different_unit} different-unit rows were NOT skipped — they are real second properties.`,
+    )
+  } else {
+    console.log(
+      'NOTE: --commit writes ALL of them, near-duplicates included. ' +
+        'Pass --skip-near-duplicates to leave those out.',
+    )
+  }
 }
 if (MODE === 'dry-run' && progress.findings.length) {
   console.log('\nReview the list above. If it looks right, re-run the same command with --commit.')
