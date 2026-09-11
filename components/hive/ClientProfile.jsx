@@ -42,6 +42,7 @@
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
 import { T } from './shared/tokens'
+import { describeDismissal, dismissalLine, stillNurturing } from './shared/dismissalFacts'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel, vitalsAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -97,6 +98,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const [tab, setTab] = useState('overview')
   const [showClosed, setShowClosed] = useState(false)
   const [showAllReferred, setShowAllReferred] = useState(false)
+  const [puttingBack, setPuttingBack] = useState(false)
   // The touchpoint composer is the shared center modal (TouchpointModal)
   // — the old inline select+input+Log wedge is gone and its method/note
   // state went with it into the modal.
@@ -260,6 +262,26 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       body: JSON.stringify(patch),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+  }
+
+  // "Put back" from the card. Same single write the Inbox's toast Undo has
+  // always done — patch inbox_dismissed_at to null — reached from a place that
+  // is still there tomorrow. No confirm: restoring is safe, and this is one
+  // lead, not a batch. The card is the door that actually found Courtney
+  // Grady, so it carries the action rather than only reporting the state.
+  async function putBackFromCard() {
+    if (!c) return
+    setPuttingBack(true)
+    try {
+      await patchLead({ inbox_dismissed_at: null })
+      setData(d => d ? { ...d, client: { ...d.client, inbox_dismissed_at: null } } : d)
+      onLeadPatched(c.id, { inbox_dismissed_at: null })
+      setToast({ kind: 'success', msg: `${c.name} is back in the Inbox` })
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Put back failed: ${e.message}` })
+    } finally {
+      setPuttingBack(false)
+    }
   }
 
   // Posted from the pinned buzz band (append-only; it owns the draft,
@@ -794,6 +816,57 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         .bee-card-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
         @media (max-width: 700px) { .bee-card-cols { grid-template-columns: 1fr; } }
       `}</style>
+
+      {/* Dismissed notice — the line this card exists to carry. The Inbox
+          chip only helps somebody who goes LOOKING in the Inbox; Kevin found
+          Courtney Grady by opening her record, where nothing said a thing was
+          wrong. It renders ONLY while the lead is actually dismissed, and it
+          says four things: that she was set aside, by whom and when (shared
+          wording — a name only when one was genuinely recorded), that she is
+          still live, and how to undo it.
+          The "still receiving emails" half is gated on the drip really being
+          live: a plain dismiss never stops nurturing, but a Network MOVE sets
+          paused alongside the dismissal, and promising emails that have been
+          paused would be the same invented-fact this whole change is against. */}
+      {(() => {
+        const facts = describeDismissal(c.inbox_dismissed_at, data.touchpoints || [])
+        if (!facts) return null
+        const nurturing = stillNurturing(c)
+        return (
+          <div data-testid="card-dismissed-notice"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+              padding: '10px 12px', background: T.surface.sunken,
+              border: T.border.thin, borderRadius: T.radius.inset,
+            }}>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <p data-testid="card-dismissed-line" style={{ fontSize: '12.5px', fontWeight: 500, color: T.ink.primary }}>
+                {dismissalLine(facts)}
+              </p>
+              <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, marginTop: '2px' }}>
+                {nurturing
+                  ? 'Taken off the Inbox list only — still a live lead, and still receiving your emails.'
+                  : 'Taken off the Inbox list only — still a live lead. Their emails are paused.'}
+              </p>
+            </div>
+            {!readOnly && (
+              /* .bee-small-action releases the globals.css 16px button floor,
+                 which silently overrides an inline font-size. */
+              <button className="bee-small-action" data-testid="card-put-back"
+                onClick={putBackFromCard} disabled={puttingBack}
+                style={{
+                  padding: '0 14px', height: '26px', borderRadius: T.radius.pill,
+                  border: T.border.control, background: 'transparent',
+                  color: T.ink.secondary, cursor: puttingBack ? 'default' : 'pointer',
+                  fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
+                  opacity: puttingBack ? 0.5 : 1,
+                }}>
+                Put back
+              </button>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Header — avatar + name + status chip; v4 subtitle: location ·
           client since Mon YYYY · Jobber ↗ (the Build-1 client link).

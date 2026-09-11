@@ -54,6 +54,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 're
 import { createPortal } from 'react-dom'
 import { deriveClientStatus, enquiryDateOf, isBackAgain } from './shared/clientStatus'
 import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
+import { describeDismissal, dismissalLine, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { isInboxCountable } from './shared/inboxCountable'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
@@ -458,6 +459,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // linger in localStorage.
   useEffect(() => { try { localStorage.removeItem('bee_hive_inbox_filters') } catch {} }, [])
   const [fltOpen, setFltOpen] = useState(false)
+  // The Dismissed chip is a VIEW toggle and nothing else. It is session state,
+  // not useStoredState, precisely so it is OFF on every load: an owner who
+  // never mis-clicks must see the Inbox exactly as it is today, and a
+  // preference that could persist "on" would quietly change that for them.
+  // It is deliberately NOT folded into isSoftRemovedFromInbox's four
+  // persistent exclusions — read that file's header. Those are REMOVALS and
+  // they feed the nav badge; a view toggle that touched the badge would
+  // recreate #89 exactly, which is what the badge test below pins.
+  const [showDismissed, setShowDismissed] = useState(false)
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -608,6 +618,46 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     }
     return n
   }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Dismissed (the VIEW, never a removal) ──────────────────
+  // The leads inbox_dismissed_at is hiding, in the current scope. Courtney
+  // Grady (Central Denver) is why this exists: dismissed by mistake, still a
+  // live lead, still on the Client List, still in the drip — and invisible in
+  // the one place anyone looks for work, for 36 hours.
+  //
+  // This list is built from `scoped` INDEPENDENTLY of the worklist derivation
+  // above, and it is NOT part of any count the nav badge reads. It shares the
+  // view filters with the worklist so the chip's number and its rows always
+  // agree with each other and with the filter row they sit on; it does NOT
+  // share the soft-removal test, because being dismissed is the entry
+  // criterion here rather than a reason to drop out. A lead that is ALSO
+  // junked, snoozed or transferred stays out — those are different holds with
+  // their own homes (the Bin, a date, another location), and surfacing them
+  // here would make "Dismissed" mean "everything hidden".
+  const dismissedRows = useMemo(() => {
+    const rows = []
+    for (const p of scoped) {
+      if (p.atLocOther) continue
+      if (!p.inboxDismissedAt && !dismissedIds.has(p.id)) continue
+      // Only the dismiss hold — not junk, not a live snooze, not a transfer.
+      if (p.isJunk || junkedIds.has(p.id)) continue
+      if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
+      if (transferredIds.has(p.id)) continue
+      if (!passesInboxFilters(p)) continue
+      rows.push(p)
+    }
+    // Most recently set aside first — the mis-click someone is looking for is
+    // the one that just happened.
+    rows.sort((a, b) => new Date(b.inboxDismissedAt || 0).getTime() - new Date(a.inboxDismissedAt || 0).getTime())
+    return rows
+  }, [scoped, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // actor id → display name, from the roster this screen ALREADY holds for the
+  // assignee stack. Resolving here costs nothing — no fetch, no widened
+  // select, no per-row lookup. An id the roster can't cover (a corporate admin
+  // acting on a franchise's lead — 1 of 95 in prod) resolves to null, and
+  // dismissalLine falls back to the bare date rather than inventing anybody.
+  const resolveActorName = useMemo(() => (id) => assigneeRoster.get(id) || null, [assigneeRoster])
 
   // ── Selection universe ─────────────────────────────────────
   // The VISIBLE rows (filters + section derivation already applied),
@@ -804,7 +854,11 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       fetch('/api/touchpoints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: p.id, kind: 'system', method: 'system', label: 'Dismissed from Inbox — nurturing continues' }),
+        // actor:'session' — attribute this to whoever clicked. The route
+        // resolves the id from the session; nothing identifying travels from
+        // here. Without it the audit row records WHEN but never WHO, which is
+        // why 84 historical dismissals can never name anybody.
+        body: JSON.stringify({ lead_id: p.id, kind: 'system', method: 'system', label: DISMISS_BUTTON_LABEL, actor: 'session' }),
       }).then(r => { if (!r.ok) console.warn('Failed to log dismiss touchpoint') })
         .catch(() => console.warn('Failed to log dismiss touchpoint'))
       setToast(undoToast('Dismissed', async () => {
@@ -818,6 +872,41 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       }))
     } catch (e) {
       setToast({ kind: 'error', msg: `Dismiss failed: ${e.message}` })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // "Put back" — the durable undo. The toast's Undo action has always done
+  // exactly this write; the only thing wrong with it was that it vanished
+  // after a few seconds, which is how a mis-click became irreversible from the
+  // UI. Same call, from a place that is still there tomorrow.
+  //
+  // No confirm step, deliberately (Kevin's call to make, made): restoring is
+  // safe — it clears a hold on a lead that never stopped being live — and this
+  // acts on ONE row per click, so there is no bulk gesture that could dump a
+  // worklist back on somebody. A confirm on a harmless single action would be
+  // the only modal in the list. The Undo toast covers the stray click.
+  async function putBackLead(p) {
+    setBusyId(p.id)
+    try {
+      await patchLead(p.id, { inbox_dismissed_at: null })
+      dropFrom(setDismissedIds, p.id)
+      // The row leaves the Dismissed view and re-derives into its real band
+      // (New or Attempting) off inboxDismissedAt going null — no local
+      // reassignment, the same discipline the rest of this screen keeps.
+      onLeadPatched?.(p.id, { inbox_dismissed_at: null })
+      setToast(undoToast(`${p.name} put back`, async () => {
+        try {
+          await patchLead(p.id, { inbox_dismissed_at: new Date().toISOString() })
+          addTo(setDismissedIds, p.id)
+          setToast({ kind: 'success', msg: `${p.name} dismissed again` })
+        } catch (e) {
+          setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
+        }
+      }))
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Put back failed: ${e.message}` })
     } finally {
       setBusyId(null)
     }
@@ -881,7 +970,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     }
   }
 
-  function Row({ p, family, pill }) {
+  // `dismissed` renders THIS SAME ROW in the set-aside state: identical
+  // anatomy (avatar, name, status chip, tel:, detail line) so a dismissed lead
+  // is recognisably the same person as the row someone remembers, with the
+  // live action cluster swapped for one "Put back" and a line saying when — and
+  // by whom, where that was ever recorded. Reusing Row rather than writing a
+  // second row component is the #89 lesson applied to markup: two copies drift.
+  function Row({ p, family, pill, dismissed = false }) {
     const isTransfer = pill === 'Transfer'
     // Per-section card nav (issue 134, Inbox follow-up): a row click hands its
     // SECTION's displayed row ids as the profile's siblings, so the card's ‹ ›
@@ -894,7 +989,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // trade: a row dispositioned mid-walk stays walkable. That is safe — the
     // profile fetches by id and soft removals are flags, never deletes — the
     // chevron just shows a lead that has since left the list.
-    const sectionRows = isTransfer ? transfer : pill === 'New' ? fresh : working
+    const sectionRows = dismissed ? dismissedRows : isTransfer ? transfer : pill === 'New' ? fresh : working
+    // What we may say about the dismissal. Computed from the person in hand —
+    // the sweep already shipped it — and worded by the shared module so this
+    // row and the lead's card can never word it differently.
+    const dismissFacts = dismissed
+      ? (p.dismissal || describeDismissal(p.inboxDismissedAt, p.outreachTimeline || []))
+      : null
+    const dismissText = dismissFacts ? dismissalLine(dismissFacts, resolveActorName) : null
     const sent = freshlySent(p)
     // Send to Jobber is offered on every open enquiry, linked clients included
     // (Kevin, 2026-09-03): a returning client's new enquiry needs the same door
@@ -947,7 +1049,28 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // engagement lands (the poll injects it and the row derives out of the
     // Inbox); settledSendIds carries the leads whose poll hit its cap, so the
     // copy softens to the calm close instead of ever spinning forever.
-    const actions = sent ? (
+    const actions = dismissed ? (
+      readOnly ? null : (
+        /* The durable undo. .bee-small-action is load-bearing: the
+           globals.css `button{font-size:16px!important}` floor silently
+           discards an inline fontSize, and this class is the release stop —
+           without it this row verb renders at 16px and towers over the row. */
+        <button
+          className="bee-small-action"
+          data-testid={`put-back-${p.id}`}
+          disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); putBackLead(p) }}
+          style={{
+            padding: '0 12px', height: T.badge.height, borderRadius: T.radius.pill,
+            border: T.border.control, background: 'transparent',
+            color: T.ink.secondary, cursor: busyId === p.id ? 'default' : 'pointer',
+            fontFamily: 'inherit', whiteSpace: 'nowrap',
+            opacity: busyId === p.id ? 0.5 : 1,
+          }}>
+          Put back
+        </button>
+      )
+    ) : sent ? (
       <SentWaiting settled={settledSendIds.has(p.id)} />
     ) : readOnly ? null : isTransfer ? (
       /* Needs-transfer row: TWO corporate dispositions, and ONLY these — the
@@ -1043,14 +1166,17 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           // A fired long-press already entered selection — swallow the
           // click that follows the pointer release.
           if (lpFired.current) { lpFired.current = false; return }
-          if (selectMode) toggleSelect(p)
+          // A dismissed row is never part of a batch — it is set aside, not
+          // queued work — so the click always opens the record. That door
+          // matters: Kevin found Courtney by opening her, not by scanning.
+          if (selectMode && !dismissed) toggleSelect(p)
           else onOpenPerson(p, sectionRows.map(r => r.id))
         }}
-        onPointerDown={() => pressStart(p)}
+        onPointerDown={() => { if (!dismissed) pressStart(p) }}
         onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd}
         style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: T.border.divider, cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {!readOnly && selectMode && (
+          {!readOnly && selectMode && !dismissed && (
             <input type="checkbox" checked={checked} disabled={linked}
               title={linked ? 'Managed in Jobber' : `Select ${p.name}`}
               aria-label={linked ? 'Managed in Jobber' : `Select ${p.name}`}
@@ -1115,7 +1241,18 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 content), deliberately NOT the record surfaces' add-affordance;
                 this is a triage list. No title on the placeholder — a tooltip
                 saying "no details" is noise. */}
-            {!isTransfer && (jobDetail ? (
+            {/* The third line. On a dismissed row it carries the dismissal
+                itself rather than the request snippet — this is the line the
+                row exists to show, and it keeps the row's height identical to
+                a live one. Wording comes from the shared module: a name only
+                when one was genuinely recorded, otherwise the bare date. It
+                NEVER renders "by system" or "by unknown". */}
+            {dismissed ? (
+              <p className="bee-inbox-detail" data-testid={`dismissed-line-${p.id}`} title={dismissText || undefined}
+                style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
+                {dismissText}
+              </p>
+            ) : !isTransfer && (jobDetail ? (
               <p className="bee-inbox-detail" title={jobDetail}
                 style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
                 {jobDetail}
@@ -1174,6 +1311,21 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     padding: isMobile ? '12px' : '14px 14px 16px',
     scrollMarginTop: '12px',
   }
+  // Dismissed shell — the SUNKEN ground. The whole point of the treatment is
+  // that these rows must not read as work: raised+shadow is the card idiom for
+  // "act on this", so the shelf sits BELOW the page surface instead, with no
+  // lift at all. Same container grammar as the corporate shell above, different
+  // meaning, no tint (this is quiet, not categorical).
+  const dismissedShellStyle = {
+    background: T.surface.sunken,
+    border: T.border.thin,
+    borderRadius: T.radius.card,
+    padding: isMobile ? '12px' : '14px 14px 16px',
+    scrollMarginTop: '12px',
+  }
+  // Rows inside the sunken shell: no shadow (it would lift them back into
+  // reading as work) and the hairline in place of the card border.
+  const dismissedCardStyle = { ...cardStyle, boxShadow: 'none', border: T.border.thin }
   // Rows inside the shell: the neutral card, minus the drop shadow (it would
   // muddy the tint) and with the shell's border in place of the card's.
   const transferCardStyle = { ...cardStyle, boxShadow: 'none', border: `1px solid ${T.corp.border}` }
@@ -1210,6 +1362,36 @@ export default function InboxScreen({ people = [], transferPeople = [], location
             }} />
         )}
         <span style={{ flex: 1 }} />
+        {/* Dismissed — a VIEW toggle sitting on the filter row, OFF by
+            default. An owner who never mis-clicks sees no change at all; the
+            COUNT is the whole point, because it is the only thing on this
+            screen that says something is being hidden from them.
+            Rendered only when there IS something hidden — a permanent "· 0"
+            would be chrome that never means anything.
+            Styled as FilterButton's twin on purpose (same padding, radius,
+            hairline, active fill) so the two read as one control row. It
+            carries no .bee-small-action for the same reason: FilterButton has
+            none either, so both take the globals.css 16px button floor and
+            stay the same size. Releasing only this one would make it the odd
+            small pill next to its sibling. */}
+        {dismissedRows.length > 0 && (
+          <button
+            data-testid="inbox-dismissed-chip"
+            aria-pressed={showDismissed}
+            onClick={() => setShowDismissed(v => !v)}
+            title={showDismissed ? 'Hide dismissed leads' : 'Show leads dismissed from this Inbox'}
+            style={{
+              padding: '5px 12px', borderRadius: T.radius.pill,
+              border: T.border.thin,
+              background: showDismissed ? T.surface.raised : 'transparent',
+              fontSize: '12px', fontWeight: showDismissed ? 500 : 400,
+              color: showDismissed ? T.ink.primary : T.ink.muted,
+              cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+              lineHeight: 'inherit', flexShrink: 0,
+            }}>
+            Dismissed · {dismissedRows.length}
+          </button>
+        )}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
@@ -1408,6 +1590,29 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           </div>
           </>
           )}
+        </div>
+      )}
+
+      {/* Dismissed — the set-aside shelf. Rendered OUTSIDE the empty/sections
+          ternary above on purpose: an Inbox with nothing live in it still has
+          to be able to show what is hidden, and inside that branch the empty
+          state would win and the shelf would vanish exactly when it is most
+          needed. Gated on !locationRequired for the same reason the sections
+          are — on 'All Locations' no per-location leads are loaded at all. */}
+      {!locationRequired && showDismissed && dismissedRows.length > 0 && (
+        <div id="bee-inbox-sec-dismissed" data-testid="inbox-dismissed-section" style={dismissedShellStyle}>
+          <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.secondary, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ display: 'inline-flex', flexShrink: 0 }}><IconCheck size={13} /></span>
+            Dismissed · {dismissedRows.length}
+          </p>
+          {/* Plain language, and the reassurance first: the fear a dismissed
+              lead creates is "did I lose her?", and the answer is no. */}
+          <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, margin: '5px 0 10px', maxWidth: '52ch' }}>
+            Set aside from this list. They&apos;re still live leads and still on your Client List — put anyone back who shouldn&apos;t have left.
+          </p>
+          <div style={dismissedCardStyle}>
+            {dismissedRows.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" dismissed />)}
+          </div>
         </div>
       )}
 

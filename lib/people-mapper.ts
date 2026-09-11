@@ -5,6 +5,7 @@
 // (in app/page.tsx) and any future refetch path can use the same logic.
 
 import { factsFromRows } from './enquiry-exit'
+import { describeDismissal } from '@/components/hive/shared/dismissalFacts'
 
 type LeadRow = {
   id: string
@@ -405,6 +406,14 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // Inbox-scoped soft removal — the Inbox worklist skips these rows;
     // deriveClientStatus stays blind to it (directory keeps the truth).
     inboxDismissedAt: row.inbox_dismissed_at || null,
+    // What is KNOWN about that dismissal — when, by whom (when it was ever
+    // recorded), and which of the three write paths did it. Derived from rows
+    // already in hand: the column above plus the touchpoints this sweep
+    // already joined, whose select('*') carries user_id free. NO extra query,
+    // and deliberately NOT one lookup per row — the Inbox renders a list.
+    // null when the lead is not dismissed. See shared/dismissalFacts.js for
+    // the display rule this feeds (never invent an actor).
+    dismissal: describeDismissal(row.inbox_dismissed_at || null, allTouchpoints),
     // Last drip-step send outcome — surfaced in PersonPanel so silent
     // failures (missing sender config / Resend errors) are visible.
     dripLastSendStatus: row.drip_last_send_status || null,

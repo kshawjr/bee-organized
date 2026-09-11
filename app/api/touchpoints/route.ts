@@ -82,6 +82,16 @@ export async function POST(req: Request) {
   const drip_id = body.drip_id as string | null | undefined
   const notes = body.notes as string | null | undefined
   const occurred_at = body.occurred_at as string | undefined
+  // A 'system' event with a HUMAN behind it (2026-09-10). Most system
+  // touchpoints are machine-fired and rightly unattributed, but some are the
+  // audit trail of a button a person pressed — the Inbox dismiss is one, and
+  // it has been losing its author since the day it shipped (all 84 dismiss
+  // touchpoints in prod carry a null user_id). The caller opts in with
+  // actor:'session'; it carries NO identity of its own — the id used is the
+  // session this route already resolved, so a client can attribute an event to
+  // itself and to nobody else. Absent (every existing caller), behaviour is
+  // byte-identical to before.
+  const attributeToSession = body.actor === 'session'
 
   // Validate the subject: exactly one of lead_id / partner_id (the DB XOR).
   const hasLead = typeof lead_id === 'string' && lead_id.length > 0
@@ -153,8 +163,9 @@ export async function POST(req: Request) {
 
   // Insert via the shared writer (lib/touchpoints.ts) so the Slack "Log call"
   // interactivity handler and this in-record path produce identical rows. The
-  // reach_out updated_at bump lives inside insertTouchpoint. system/drip events
-  // have no human author; everything else is attributed to the session user.
+  // reach_out updated_at bump lives inside insertTouchpoint. drip events never
+  // have a human author; system events have one only when the caller opted in
+  // (see attributeToSession above); everything else is the session user.
   const result = await insertTouchpoint({
     ...(hasLead ? { lead_id } : { partner_id }),
     location_uuid: subjectLocation,
@@ -171,7 +182,13 @@ export async function POST(req: Request) {
     status: status ?? null,
     drip_id: drip_id ?? null,
     notes: notes ?? null,
-    user_id: kind === 'system' || kind === 'drip' ? null : hubUser.id,
+    // 'drip' is always machine-fired and stays unattributed. 'system' is
+    // unattributed UNLESS the caller opted in above, in which case the actor
+    // is this session's user — never a value the client supplied.
+    user_id:
+      kind === 'drip' || (kind === 'system' && !attributeToSession)
+        ? null
+        : hubUser.id,
     occurred_at: occurred_at ?? null,
   })
 
