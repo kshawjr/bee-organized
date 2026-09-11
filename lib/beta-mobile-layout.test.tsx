@@ -69,7 +69,7 @@ describe('beta mobile layout', () => {
     // (nav restructure 2026-07-18 — Board+List merged into Engagements).
     const strip = html.match(/<div style="([^"]*overflow-x:auto[^"]*)">(.*?)<\/div>/)
     expect(strip, 'tab strip scroll container missing').toBeTruthy()
-    for (const label of ['Inbox (New)', 'Engagements', 'Client List']) expect(strip![2]).toContain(label)
+    for (const label of ['Inbox (New Leads)', 'Engagements in Jobber']) expect(strip![2]).toContain(label)
 
     // Row 2: the Board/List sub-toggle, right-aligned (Engagements is the
     // default tab). The "Open engagements" corner text was REMOVED 2026-07-19

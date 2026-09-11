@@ -3,9 +3,11 @@
 // Clients nav restructure + grouped color-band list views (2026-07-18),
 // plus the collapsible-bands + tab-badge refinement (2026-07-19).
 //
-//   1) Nav shows exactly THREE tabs, each with a count badge:
-//      Inbox (New) · Engagements · Client List. Engagements badge = open
-//      engagements (the value the removed corner text showed).
+//   1) Nav shows exactly TWO tabs, each with a count badge:
+//      Inbox (New Leads) · Engagements in Jobber. Engagements badge = open
+//      engagements (the value the removed corner text showed). Client List
+//      left this row on 2026-09-10 for the sidebar (see
+//      lib/beta-nav-client-list-sidebar.test.tsx).
 //   2) Engagements opens on Board; the Board|List sub-toggle persists
 //      (bee_hive_eng_view) and List rehydrates. The corner "Open
 //      engagements · N" text is gone.
@@ -93,21 +95,24 @@ beforeEach(() => { vi.stubGlobal('localStorage', lsMock); lsStore.clear() })
 afterEach(() => { vi.unstubAllGlobals(); lsStore.clear() })
 
 // ── 1) nav labels + badges ──────────────────────────────────────
-describe('nav — exactly three tabs with count badges', () => {
-  it('renders Inbox (New) · Engagements · Client List, and no standalone Board/List/Clients tab', () => {
+describe('nav — exactly two tabs with count badges', () => {
+  it('renders Inbox (New Leads) · Engagements in Jobber, and NO Client List tab', () => {
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
-    expect(html).toContain('Inbox (New)')
-    expect(html).toContain('Engagements')
-    expect(html).toContain('Client List')
+    expect(html).toContain('Inbox (New Leads)')
+    expect(html).toContain('Engagements in Jobber')
+    // Client List moved to the sidebar (2026-09-10) — it must NOT be a tab.
+    expect(html).not.toContain('Client List')
     expect(html).not.toContain('>Clients<')
   })
 
-  it('each tab shows a count badge; Engagements badge = open engagements, Client List = total clients', () => {
+  it('each remaining tab shows a count badge; Engagements badge = open engagements', () => {
     // 4 open engagements, 2 clients (Nora=New, Pete=Past → inbox counts New+Attempting = 1).
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
-    expect(html).toMatch(/Engagements<span[^>]*>4<\/span>/)
-    expect(html).toMatch(/Client List<span[^>]*>2<\/span>/)
-    expect(html).toMatch(/Inbox \(New\)<span[^>]*>1<\/span>/)
+    expect(html).toMatch(/Engagements in Jobber<span[^>]*>4<\/span>/)
+    // The Client List count is deliberately dropped, not re-homed — the
+    // sidebar carries no counts, and total clients is inventory, not work.
+    expect(html).not.toContain('Client List')
+    expect(html).toMatch(/Inbox \(New Leads\)<span[^>]*>1<\/span>/)
   })
 
   it('the "Open engagements · N" corner text is gone', () => {

@@ -139,6 +139,16 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
     await act(async () => { await Promise.resolve() })
   }
 
+  // Client List left the top tab row on 2026-09-10 and lives in the sidebar
+  // now. The sidebar reaches the lens by handing the shell a { tab:'clients' }
+  // intent — this does exactly that, on the SAME mounted shell.
+  const switchToClientList = async () => {
+    await act(async () => {
+      root.render(<HiveShell people={PEOPLE} engagements={[]} locFilter="loc-uuid-1" urlClientId="p1" urlEngagementId="eng-7" initialIntent={{ tab: 'clients' }} />)
+    })
+    await act(async () => { await Promise.resolve() })
+  }
+
   const text = () => container.textContent || ''
   const byText = (label: string) =>
     Array.from(container.querySelectorAll('button')).find(b => (b.textContent || '').trim() === label)
@@ -214,10 +224,7 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
     await logFromPanel()
 
     // Close the overlay, then switch lens on the SAME mounted shell.
-    const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().includes('Client List'))
-    expect(clientsTab).toBeTruthy()
-    await act(async () => { clientsTab!.click() })
+    await switchToClientList()
 
     // The Client List groups by status: the re-derived person now heads the
     // Attempting band (nav restructure 2026-07-18 — grouped color-band view).

@@ -185,10 +185,22 @@ describe('log call re-derives across lenses (HiveShell)', () => {
     vi.restoreAllMocks()
   })
 
+  let mountedPeople: any[] = []
   const mount = (lens: string, people: any[]) => {
+    mountedPeople = people
     localStorage.setItem('bee_hive_beta_lens', lens)
     act(() => {
       root.render(<HiveShell people={people} engagements={[]} locFilter="loc-uuid-1" />)
+    })
+  }
+
+  // Client List left the top tab row on 2026-09-10 and lives in the sidebar
+  // now, so there is no tab to click here. The sidebar reaches the lens by
+  // handing the shell a { tab:'clients' } intent — this does exactly that, on
+  // the SAME mounted shell, which is the journey being asserted.
+  const switchToClientList = async () => {
+    await act(async () => {
+      root.render(<HiveShell people={mountedPeople} engagements={[]} locFilter="loc-uuid-1" initialIntent={{ tab: 'clients' }} />)
     })
   }
 
@@ -236,11 +248,8 @@ describe('log call re-derives across lenses (HiveShell)', () => {
     mount('inbox', people)
     await clickLogCall()
 
-    // Switch lens on the SAME mounted shell — same session, no new props.
-    const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().includes('Client List'))
-    expect(clientsTab).toBeTruthy()
-    await act(async () => { clientsTab!.click() })
+    // Switch lens on the SAME mounted shell — same session.
+    await switchToClientList()
 
     // The Client List groups by STATUS (grouped color-band view). The
     // re-derived person now sits inside the Attempting band, not New — the
@@ -257,9 +266,7 @@ describe('log call re-derives across lenses (HiveShell)', () => {
     mount('inbox', [person(), person({ id: 'p2', name: 'Dana Reed', email: 'dana@email.com' })])
     await clickLogCall() // fires on the first New row (Sarah)
 
-    const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().includes('Client List'))
-    await act(async () => { clientsTab!.click() })
+    await switchToClientList()
 
     // Dana still derives New — the override is scoped to the person it names,
     // so she stays inside the New band of the grouped Client List. Expand New

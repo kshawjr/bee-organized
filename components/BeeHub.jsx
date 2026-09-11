@@ -9752,7 +9752,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onReportProblem=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onLensChange=()=>{}, onReportProblem=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -10053,6 +10053,9 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // back up to the App so it can't re-fire.
           initialIntent={initialHiveIntent}
           onIntentConsumed={onHiveIntentConsumed}
+          // Lens reported UP so the sidebar can mark its nested Client List
+          // item. Notification only — the shell keeps ownership of the lens.
+          onLensChange={onLensChange}
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
@@ -36837,6 +36840,22 @@ export default function App({
   // URL-persisted (same as the board's listInitialView one-shot); a refresh
   // returns to the remembered lens, which is the right default.
   const [hiveIntent, setHiveIntent] = useState(null)
+  // Which lens the Clients shell is showing, reported up by HiveShell. Read
+  // ONLY to light the sidebar's nested Client List item — the shell still owns
+  // the lens; nothing here sets it. null until the shell mounts and reports.
+  const [hiveLens, setHiveLens] = useState(null)
+  // Sidebar → Client List. Deliberately the SAME three moves onOpenHive makes
+  // (stash the intent, switch the section, drive the URL to /clients), because
+  // it is the same journey Home's deep links already take — not a second way
+  // in that could drift from it.
+  const openClientListLens = () => {
+    setHiveIntent({ tab: 'clients' })
+    setActiveNav('hive')
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname !== '/clients') window.history.pushState({}, '', '/clients')
+      window.scrollTo(0, 0)
+    }
+  }
 const [people, setPeople]                 = useState(Array.isArray(initialPeople) ? initialPeople : ALL_PEOPLE)
  // Extend with randomized mock data post-mount. Module-level Math.random
   // would diverge between SSR and client → hydration mismatch.
@@ -37167,7 +37186,13 @@ if (Array.isArray(initialPeople)) return
   // setShowManual(true) instead of nav(key). No activeNav highlight either.
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
-    { key:'hive',     icon:'🐝', label:'Clients'    },
+    // Client List moved out of the Clients top tab row and in here as a nested
+    // item (2026-09-10). `children` is new to this nav — the only nesting in
+    // the sidebar — and both the desktop and mobile renders below understand
+    // it. `lens` is what the child lights up on, matched against hiveLens.
+    { key:'hive',     icon:'🐝', label:'Clients', children:[
+      { key:'hive-clients', label:'Client List', lens:'clients', onPick:()=>openClientListLens() },
+    ] },
     { key:'partners', icon:'👥', label:'Network'},
     { key:'reports',  icon:'📊', label:'Reports' },
     // issue 140: Back Office sits alongside Reports/Settings and is shown to
@@ -37324,8 +37349,8 @@ if (Array.isArray(initialPeople)) return
               const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
               const isActive = activeNav===item.key
               return (
+                <React.Fragment key={item.key}>
                 <button
-                  key={item.key}
                   onClick={()=>{
                     if (isLocked) return
                     if (item.action==='openManual') { setShowManual(true); setShowMobileNav(false); return }
@@ -37337,6 +37362,23 @@ if (Array.isArray(initialPeople)) return
                   <span style={{ fontSize:'14px', fontWeight:isActive?600:500, color:isActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{item.label}</span>
                   {isActive&&<div style={{ marginLeft:'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
                 </button>
+                {/* Same nesting as the desktop sidebar, at this drawer's own
+                    scale: its rows are 20px icon + 14px gap off a 14px inset,
+                    so the child indents to 48px to sit under the parent label,
+                    and keeps the 48px minHeight every row here has for touch. */}
+                {(item.children||[]).map(child=>{
+                  const childActive = isActive && hiveLens===child.lens
+                  return (
+                    <button
+                      key={child.key}
+                      onClick={()=>{ if (isLocked) return; child.onPick(); setShowMobileNav(false) }}
+                      style={{ width:'100%', minHeight:'48px', padding:'10px 14px 10px 48px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left', background:childActive?'rgba(168,201,196,0.14)':'transparent', opacity:isLocked?0.3:1 }}>
+                      <span style={{ fontSize:'13px', fontWeight:childActive?600:500, color:childActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{child.label}</span>
+                      {childActive&&<div style={{ marginLeft:'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
+                    </button>
+                  )
+                })}
+                </React.Fragment>
               )
             })}
           </div>
@@ -37573,7 +37615,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* Sample-now/bulk-later gap state: the Clients surface must explain a
             partial book ("rest arrives tonight"), or it reads as data loss. */}
         <ImportGapBanner locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} />
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onReportProblem={openRecordReport} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onLensChange={setHiveLens} onReportProblem={openRecordReport} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -37836,11 +37878,43 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
             const isActive = activeNav===item.key
             return (
-              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
+              <React.Fragment key={item.key}>
+              <button onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
                 <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                 <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
                 {isActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
               </button>
+              {/* Nested items — the sidebar's FIRST nesting, so the language is
+                  borrowed from the rows above rather than from the tab row it
+                  replaces: same button shell, same radius, same active fill,
+                  same 4px dot. Three differences carry the hierarchy and
+                  nothing else does:
+                    · NO icon. The emoji here are section marks; giving a child
+                      one would make it read as a fourth section.
+                    · paddingLeft 44px = the parent's 14px inset + its 18px icon
+                      + the 12px gap, so the child's label starts exactly under
+                      the parent's label rather than at an invented indent.
+                    · 12px type against the parent's 13px, and the parent's own
+                      muted stop when idle.
+                  The fontSize sits on the SPAN, not the button — same as every
+                  row above — because globals.css `button{font-size:16px!important}`
+                  discards an inline size on the button itself. That is also why
+                  .bee-small-action is not used here: it releases to 12px, but
+                  the sibling rows do not use it, and matching them matters more
+                  than the class.
+                  A child lights up only when its section is active AND the shell
+                  reports its lens, so landing on the Client List shows Clients
+                  as the active section with Client List marked inside it. */}
+              {(item.children||[]).map(child=>{
+                const childActive = isActive && hiveLens===child.lens
+                return (
+                  <button key={child.key} onClick={()=>{ if (isLocked) return; child.onPick() }} style={{ width:'100%', padding:'7px 14px 7px 44px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', textAlign:'left', background:childActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
+                    <span style={{ fontSize:'12px', fontWeight:childActive?600:400, color:childActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{child.label}</span>
+                    {childActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
+                  </button>
+                )
+              })}
+              </React.Fragment>
             )
           })}
         </div>

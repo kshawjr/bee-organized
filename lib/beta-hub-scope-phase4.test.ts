@@ -390,7 +390,7 @@ describe('HiveShell — the record lenses on "all" (Phase 4b)', () => {
   it('badges are suppressed, not shown as zero', () => {
     // A 0 would read as "you have no work" rather than "not counted here".
     expect(src).toContain('const tabBadges = locationRequired')
-    expect(src).toContain("{ inbox: null, engagements: null, clients: null }")
+    expect(src).toContain("{ inbox: null, engagements: null }")
   })
 
   it('the Board/List toggle is hidden when there is no board', () => {

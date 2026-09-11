@@ -44,16 +44,24 @@ import { T } from './shared/tokens'
 
 // Nav restructure 2026-07-18: three top-level tabs. Board + List are no
 // longer separate tabs — they became a sub-toggle INSIDE Engagements (see
-// engView below). "Inbox (New)" keeps the count badge; "Client List" is the
-// people lens; "Engagements" holds the board/list toggle.
-// Every tab carries a count badge (2026-07-19): Inbox = New+Attempting,
+// engView below).
+//
+// 2026-09-10 — TWO tabs. Client List moved OUT of this row and into the left
+// sidebar, nested under Clients (BeeHub owns that chrome). Only the placement
+// of the control moved: 'clients' is still a lens here, still rendered by the
+// same ClientGroupedList, still remembered under the same localStorage key.
+// That matters — a stored lens of 'clients' predates this change on real
+// machines, and it must still resolve rather than strand someone on a blank
+// screen. The hydration whitelist below therefore still accepts it, and there
+// is a test that fails if it stops.
+//
+// Both remaining tabs carry a count badge (2026-07-19): Inbox = New+Attempting,
 // Engagements = total open engagements (the count the corner text used to
-// show, now removed), Client List = total clients in scope. Per-tab counts
-// are wired in `tabBadges` below; the badge pill itself is one shared anatomy.
+// show, now removed). Client List's own count is NOT re-homed here — see the
+// note by tabBadges.
 const TABS = [
-  { key: 'inbox',       label: 'Inbox (New)', live: true, badge: true, Icon: IconInbox },
-  { key: 'engagements', label: 'Engagements', live: true, badge: true, Icon: IconLayoutKanban },
-  { key: 'clients',     label: 'Client List', live: true, badge: true, Icon: IconUsers },
+  { key: 'inbox',       label: 'Inbox (New Leads)', live: true, badge: true, Icon: IconInbox },
+  { key: 'engagements', label: 'Engagements in Jobber', live: true, badge: true, Icon: IconLayoutKanban },
 ]
 
 // The preferred top-level tab sticks across sessions. (Key name unchanged
@@ -234,6 +242,11 @@ export default function HiveShell({
   // untouched — no intent means the remembered lens/view/collapse win as before.
   initialIntent = null,
   onIntentConsumed = () => {},
+  // Which lens is showing, reported UP (§8.5 events-up) so the sidebar can
+  // light its nested Client List item. The shell still OWNS the lens — this is
+  // a notification, not control — so nothing here changes if the caller
+  // ignores it, which every non-sidebar caller does.
+  onLensChange = () => {},
 }) {
   // Top-level tab — default 'engagements' (opens on the board), hydrated
   // from localStorage after mount (SSR-safe). A stored legacy 'board'/'list'
@@ -248,6 +261,10 @@ export default function HiveShell({
     } catch {}
   }, [])
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
+  // Fires for the hydrated value too, not just for clicks — a reload that
+  // lands on the Client List must light the sidebar item without anyone
+  // having touched anything.
+  useEffect(() => { onLensChange(lens) }, [lens]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Board-vs-List sub-toggle within Engagements — default 'board', its
   // choice remembered. Hydrated after mount, same SSR-safe pattern.
@@ -331,11 +348,19 @@ export default function HiveShell({
   // Inbox deep-link section seed (one-shot) — the Inbox-lens counterpart to
   // listInitialView; consumed by InboxScreen's initialSection.
   const [inboxInitialSection, setInboxInitialSection] = useState(null)
-  // Apply a deep-link intent ONCE on mount. Placed AFTER the lens/engView
+  // Apply a deep-link intent ONCE PER INTENT. Placed AFTER the lens/engView
   // hydration effects above (effects run in definition order), so a real
   // intent wins the initial entry over the remembered pref. A stage `group`
   // implies List view (the band only exists there — item 4 of the contract).
   // onIntentConsumed hands it back so a later render can't re-fire it.
+  //
+  // Keyed on initialIntent rather than mount (2026-09-10): every previous
+  // caller lived on another screen, so a new intent always coincided with this
+  // shell mounting, and mount-only was indistinguishable from correct. The
+  // sidebar's nested Client List item is the first caller that can fire while
+  // the shell is ALREADY mounted — on mount-only deps its click would do
+  // nothing at all. No loop: consuming sets it back to null and the guard
+  // below returns on null.
   useEffect(() => {
     if (!initialIntent) return
     const { tab, view, group, section } = initialIntent
@@ -347,7 +372,7 @@ export default function HiveShell({
     if (tab === 'inbox' && section) setInboxInitialSection(section)
     onIntentConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [initialIntent])
   // Opening an engagement swaps the single overlay slot to the panel AND
   // drives the URL to /clients/<clientId>?e=<engagementId> — shareable,
   // refresh-survivable, back/forward-aware, and location-scoped through the
@@ -708,21 +733,29 @@ export default function HiveShell({
     return n
   }, [patchedPeople, locFilter, openFiltered, filtered])
 
-  // Client List badge: total clients in the current location scope — the
-  // exact set ClientGroupedList renders (grouped by status).
-  const clientCount = useMemo(() => (
-    locFilter === 'all' ? patchedPeople.length : patchedPeople.filter(p => p.locationId === locFilter).length
-  ), [patchedPeople, locFilter])
+  // The Client List count that used to ride this row is DELIBERATELY GONE, not
+  // re-homed. Three reasons, in order of weight:
+  //   · the sidebar it moved to carries no counts anywhere. Adding the first
+  //     would import this row's badge idiom into a surface with no such
+  //     language — and nesting is already one new pattern in that chrome.
+  //   · the other two badges count WORK waiting (leads to contact, engagements
+  //     open). Total clients is inventory: it only ever grows, and there is
+  //     nothing to act on when it does.
+  //   · it is not actually lost. ClientGroupedList's own bands each carry their
+  //     count, on the screen where the number means something.
+  // Recomputing it in BeeHub purely to decorate a nav item would also put a
+  // second derivation of the same number in a second file, which is how the
+  // badge and the list drifted apart in #89.
 
   // Per-tab badge counts, all from real sources (never hardcoded): Inbox =
   // New+Attempting (inboxCount), Engagements = open engagements (openCount —
-  // the value the removed corner text showed), Client List = clientCount.
+  // the value the removed corner text showed).
   // On 'All Locations' no records are loaded, so every one of these is 0 —
   // which would read as "you have no work", not "this isn't counted here".
   // Suppressed rather than shown as zero.
   const tabBadges = locationRequired
-    ? { inbox: null, engagements: null, clients: null }
-    : { inbox: inboxCount, engagements: openCount, clients: clientCount }
+    ? { inbox: null, engagements: null }
+    : { inbox: inboxCount, engagements: openCount }
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? tabBadges[t.key] : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all
   // four tabs, left of the counter. Mobile gets the FAB instead. Hidden
