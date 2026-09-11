@@ -74,7 +74,7 @@
       "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
       "lines": [
         36365,
-        37457
+        37461
       ]
     },
     {
@@ -97,7 +97,7 @@
       "note": "Role gating for which nav items appear is inline here. Help appears for every role (an owner's own reports live under Help › My requests — \"What you've told us\" is retired); Admin only for elevated users.",
       "lines": [
         37187,
-        37457
+        37461
       ]
     },
     {

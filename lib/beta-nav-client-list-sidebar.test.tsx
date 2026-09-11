@@ -4,8 +4,9 @@
 //
 //   · "Inbox (New)"  → "Inbox (New Leads)"
 //   · "Engagements"  → "Engagements in Jobber"
-//   · Client List leaves the top tab row and becomes a NESTED item in the left
-//     sidebar under Clients. The top row is two tabs.
+//   · The client list leaves the top tab row and becomes a NESTED item in the
+//     left sidebar under Clients, labelled "Everyone" (renamed 2026-09-11).
+//     The top row is two tabs.
 //
 // Nothing about the view changed — same lens key, same ClientGroupedList, same
 // data. Only the control that reaches it moved.
@@ -161,17 +162,53 @@ describe('Client List has left the top tab row', () => {
 describe('Client List is nested under Clients in the sidebar', () => {
   const navBlock = BEEHUB.slice(BEEHUB.indexOf('const navItems = ['), BEEHUB.indexOf('const navItems = [') + 2500)
 
+  it('reads "Everyone", and "Client List" is no longer a nav label anywhere', () => {
+    expect(navBlock).toContain("label:'Everyone'")
+    expect(navBlock).not.toContain("label:'Client List'")
+    // Not a label anywhere else in the app either — the rename is a display
+    // string, so this is the one place it can hide.
+    expect(BEEHUB).not.toMatch(/label: ?'Client List'/)
+    expect(SHELL).not.toMatch(/label: ?'Client List'/)
+  })
+
+  it('the rename is DISPLAY ONLY — the lens key, the child key and the wiring are untouched', () => {
+    expect(navBlock).toContain("lens:'clients'")
+    expect(navBlock).toContain("key:'hive-clients'")
+    expect(BEEHUB).toContain("setHiveIntent({ tab: 'clients' })")
+    expect(SHELL).toContain("const LENS_LS_KEY = 'bee_hive_beta_lens'")
+  })
+
   it('is declared as a child of the Clients nav item, and is not a sibling section', () => {
     expect(navBlock).toContain("key:'hive'")
     expect(navBlock).toContain('children:[')
-    expect(navBlock).toContain("label:'Client List'")
-    expect(navBlock).toContain("lens:'clients'")
-    // It must hang off Clients, not become a seventh top-level section.
+    // It must hang off Clients, not become a seventh top-level section. That
+    // adjacency is load-bearing for the LABEL too: "Everyone" only means
+    // something with "Clients" directly above it.
     const hiveAt = navBlock.indexOf("key:'hive'")
-    const childAt = navBlock.indexOf("label:'Client List'")
+    const childAt = navBlock.indexOf("label:'Everyone'")
     const nextTopLevel = navBlock.indexOf("key:'partners'")
     expect(childAt).toBeGreaterThan(hiveAt)
     expect(childAt).toBeLessThan(nextTopLevel)
+  })
+
+  it('BOTH navs keep the parent immediately above the child — the label depends on it', () => {
+    // In each render the children map sits directly after the parent button,
+    // inside the same fragment, so "Clients" is the row above "Everyone" on
+    // desktop AND in the mobile drawer. If the mobile drawer ever rendered a
+    // flat list, "Everyone" would sit between Network and Reports meaning
+    // nothing — this is the assertion that would catch it.
+    const sites = [...BEEHUB.matchAll(/\(item\.children\|\|\[\]\)\.map\(child=>\{/g)]
+    expect(sites, 'desktop sidebar + mobile drawer').toHaveLength(2)
+    for (const site of sites) {
+      const before = BEEHUB.slice(0, site.index!)
+      // The row immediately preceding each children map is the PARENT row —
+      // the last thing rendered before it is the parent's own label, with no
+      // other nav row opened in between.
+      const parentLabelAt = before.lastIndexOf('{item.label}')
+      const buttonAt = before.lastIndexOf('<button')
+      expect(parentLabelAt).toBeGreaterThan(-1)
+      expect(parentLabelAt).toBeGreaterThan(buttonAt)   // same button, still open
+    }
   })
 
   it('BOTH navs render children — the desktop sidebar and the mobile drawer', () => {

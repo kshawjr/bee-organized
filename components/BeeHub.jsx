@@ -37191,7 +37191,11 @@ if (Array.isArray(initialPeople)) return
     // the sidebar — and both the desktop and mobile renders below understand
     // it. `lens` is what the child lights up on, matched against hiveLens.
     { key:'hive',     icon:'🐝', label:'Clients', children:[
-      { key:'hive-clients', label:'Client List', lens:'clients', onPick:()=>openClientListLens() },
+      // "Everyone" (Kevin, seen live 2026-09-11): "Clients › Client List" read
+      // redundant with the word doing double duty. DISPLAY STRING ONLY — the
+      // lens key, the route, the component and every variable here still say
+      // clients, because that is what it is.
+      { key:'hive-clients', label:'Everyone', lens:'clients', onPick:()=>openClientListLens() },
     ] },
     { key:'partners', icon:'👥', label:'Network'},
     { key:'reports',  icon:'📊', label:'Reports' },
@@ -37903,8 +37907,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
                   the sibling rows do not use it, and matching them matters more
                   than the class.
                   A child lights up only when its section is active AND the shell
-                  reports its lens, so landing on the Client List shows Clients
-                  as the active section with Client List marked inside it. */}
+                  reports its lens, so landing on the client list shows Clients
+                  as the active section with "Everyone" marked inside it. */}
               {(item.children||[]).map(child=>{
                 const childActive = isActive && hiveLens===child.lens
                 return (
