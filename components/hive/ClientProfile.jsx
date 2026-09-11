@@ -59,6 +59,7 @@ import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
+import NameField from './shared/NameField'
 import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
 import ContactsBlock from './shared/ContactsBlock'
@@ -875,7 +876,20 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-            <span title={c.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            {/* The name is EDITABLE here (Linda Dibias, North Jersey: "How
+                do I update a clients name"). NameField supplies the pencil
+                and the editor; the header keeps its own 19px/600 type by
+                handing it down as titleStyle, so nothing about the
+                masthead's scale changes. */}
+            <NameField
+              leadId={c.id}
+              value={{ name: c.name, first_name: c.first_name, last_name: c.last_name, company: c.company }}
+              onSaved={contactSaved}
+              setToast={setToast}
+              readOnly={readOnly}
+              jobberLinked={jobberLinked}
+              titleStyle={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle }}
+            />
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>
           <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

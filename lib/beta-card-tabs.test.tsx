@@ -404,7 +404,10 @@ describe('header client identity (Option B)', () => {
   it('client name is the primary headline — 19px/600 h2, larger than the subtitle; renders exactly ONCE', async () => {
     const { host, unmount } = await mountPanel()
     const h2 = host.querySelector('h2')! as HTMLElement
-    expect(h2.textContent).toBe('Dana Client')
+    // The headline now carries the inline-edit pencil (shared/NameField —
+    // the name is editable on both record headers). The NAME is still the
+    // whole of the heading's text; ✎ is the affordance beside it.
+    expect(h2.textContent!.replace('✎', '')).toBe('Dana Client')
     expect(h2.style.fontSize).toBe('19px')
     expect(String(h2.style.fontWeight)).toBe('600')
     // headline outranks the 12px subtitle

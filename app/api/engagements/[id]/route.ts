@@ -87,7 +87,7 @@ export async function GET(
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
-    supabaseService.from('leads').select('id, name, email, phone, address, city, state, zip, request_details, source, referred_by_kind, referred_by_id').eq('id', engagement.client_id).maybeSingle(),
+    supabaseService.from('leads').select('id, name, first_name, last_name, company, jobber_client_id, email, phone, address, city, state, zip, request_details, source, referred_by_kind, referred_by_id').eq('id', engagement.client_id).maybeSingle(),
     // ONE query for every engagement this client has — it already
     // powered lifetime paid / prior count / other-open. Widened (NOT
     // duplicated) so the panel's "Also on this client" list rides the
@@ -243,6 +243,14 @@ export async function GET(
       jobber_connected: !!locRes.data?.jobber_access_token,
       reviews_link: locRes.data?.reviews_link ?? null,
       name: clientRes.data?.name ?? 'Unknown',
+      // The three Jobber-facing name parts + the link, so the masthead's
+      // NameField can edit the name in place (it edits the parts, never the
+      // derived display string — see lib/lead-name) and report honestly
+      // whether there was a Jobber client to sync to.
+      first_name: clientRes.data?.first_name ?? null,
+      last_name: clientRes.data?.last_name ?? null,
+      company: clientRes.data?.company ?? null,
+      jobber_client_id: clientRes.data?.jobber_client_id ?? null,
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,
       address: clientRes.data?.address ?? null,

@@ -80,6 +80,7 @@ import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
 import AddressField from './shared/AddressField'
+import NameField from './shared/NameField'
 import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -966,9 +967,38 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <InitialsAvatar name={client?.name || eng.client_name || '?'} bg={stageFam.bg} text={stageFam.text} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h2 title={client?.name || eng.client_name || undefined} style={{ minWidth: 0, fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {client?.name || eng.client_name || 'Client'}
-                </h2>
+                {/* The name is EDITABLE here too — same person, different
+                    screen (Kevin's ruling: both record headers, and only
+                    the headers). It needs the real client record to edit
+                    the three name parts, so a masthead rendered from the
+                    engagement's denormalized client_name alone stays plain
+                    text until the client loads. NameField keeps the h2's
+                    own 19px/600 type via titleStyle. */}
+                {client ? (
+                  // wrapAs="h2" — the masthead headline STAYS an h2 carrying
+                  // its own 19px/600; NameField adds the affordance, not a
+                  // second heading or a second type scale.
+                  <NameField
+                    wrapAs="h2"
+                    leadId={client.id}
+                    value={{ name: client.name, first_name: client.first_name, last_name: client.last_name, company: client.company }}
+                    onSaved={(cols) => {
+                      // client lives inside `data` — merge there, then hand
+                      // the same cols up so board/list/inbox reflect the
+                      // rename without a reload (the AddressField pattern).
+                      setData(d => (d ? { ...d, client: { ...d.client, ...cols } } : d))
+                      onLeadPatched(client.id, cols)
+                    }}
+                    setToast={setToast}
+                    readOnly={readOnly}
+                    jobberLinked={!!client.jobber_client_id}
+                    titleStyle={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle }}
+                  />
+                ) : (
+                  <h2 title={eng.client_name || undefined} style={{ minWidth: 0, fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {eng.client_name || 'Client'}
+                  </h2>
+                )}
                 {client?.location_name && (
                   <span style={{ fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{client.location_name}</span>
                 )}

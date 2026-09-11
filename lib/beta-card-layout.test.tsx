@@ -181,7 +181,9 @@ describe('masthead persistence', () => {
     engBody = engagementPayload({ engagement: { total_invoiced: 1200 } })
     const { host, unmount } = await mountPanel()
     await click(tabButton(host, 'Files')!)
-    expect(host.querySelector('h2')!.textContent).toBe('Dana Client')
+    // ✎ stripped: the headline carries the inline-edit pencil since the
+    // name became editable on the record headers (shared/NameField).
+    expect(host.querySelector('h2')!.textContent!.replace('✎', '')).toBe('Dana Client')
     expect(host.textContent).toContain('Kitchen + Pantry')
     expect(host.textContent).toContain('$1,200')
     expect(host.textContent).toContain('No files yet')

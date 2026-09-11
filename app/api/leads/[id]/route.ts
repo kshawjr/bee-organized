@@ -31,6 +31,8 @@ import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWri
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 import { diffAddressPatch, buildFormerAddress, parseFormerAddresses, isMissingFormerAddressesColumn } from '@/lib/lead-address'
 import { syncLeadAddressToJobber, createPropertyForMove, type MovePropertyResult } from '@/lib/jobber-address-sync'
+import { diffNamePatch, normalizeNamePatch, touchesName, composeLeadName, nameValidationError, nameSyncFailed, NOT_LINKED_NOTE, type NameWriteback } from '@/lib/lead-name'
+import { syncLeadNameToJobber } from '@/lib/jobber-name-sync'
 import type { AddressWriteback } from '@/lib/jobber-address-writeback'
 
 const VALID_STAGES = [
@@ -65,6 +67,10 @@ const PATCHABLE_FIELDS = new Set([
   'name',
   'first_name',
   'last_name',
+  // The third field that maps onto a Jobber client (companyName). It was
+  // written by the import but not patchable, so the hive had no way to fix
+  // a business name at all — see lib/lead-name.
+  'company',
   'email',
   'phone',
   // legacy single-field address (kept writable until we drop it post-launch)
@@ -217,7 +223,7 @@ export async function PATCH(
   // ─── Load existing lead for scoping check ─────────────────────
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, location_uuid, location_id, stage, jobber_client_id, jobber_property_id, phone, email, address, city, state, zip, addresses')
+    .select('id, location_uuid, location_id, stage, jobber_client_id, jobber_property_id, name, first_name, last_name, company, phone, email, address, city, state, zip, addresses')
     .eq('id', id)
     .single()
 
@@ -307,6 +313,41 @@ export async function PATCH(
         { status: 400 }
       )
     }
+  }
+
+  // ─── THE NAME: DERIVED, NEVER SENT ────────────────────────────
+  // Linda Dibias (North Jersey) asked how to fix a client's name and the
+  // honest answer was "you can't" — the header rendered it as plain text,
+  // and the only route to a correction was renaming in Jobber and waiting
+  // for CLIENT_UPDATE, which does nothing whatever for a lead that was
+  // never sent to Jobber.
+  //
+  // The editor edits the THREE fields that map onto Jobber (first_name,
+  // last_name, company); `name` is the DISPLAY value and is computed here
+  // from them with the import's own rule (lib/lead-name). Deriving it
+  // server-side is what makes "name and first/last never drift" a property
+  // of the code rather than a rule every future caller has to remember.
+  const nameDiff = touchesName(patch) ? diffNamePatch(patch, existing as any) : null
+  if (nameDiff) {
+    // A client must be CALLED something. Every one of the 41,734 rows
+    // satisfies this today and the editor doesn't get to create the first
+    // exception — nor to write the import's 'Unknown' onto a real client.
+    const invalid = nameValidationError(nameDiff.next)
+    if (invalid) {
+      return NextResponse.json({ error: 'name_cannot_be_empty', detail: invalid }, { status: 400 })
+    }
+    Object.assign(patch, normalizeNamePatch(patch))
+    patch.name = composeLeadName(nameDiff.next) // overwrites anything the caller sent
+  } else if ('name' in patch) {
+    // A bare `name` with no parts behind it is exactly the drift this
+    // feature exists to prevent: the header would show one thing and the
+    // three Jobber-facing columns another. Refused rather than silently
+    // dropped, so the caller is told where names are edited — the
+    // move_is_now_add_then_retire precedent below.
+    return NextResponse.json({
+      error: 'name_is_derived',
+      detail: 'Send first_name / last_name / company; the display name is computed from them.',
+    }, { status: 400 })
   }
 
   // ─── Address column coherence ─────────────────────────────────
@@ -487,6 +528,62 @@ export async function PATCH(
     })
   }
 
+  // ─── Jobber name write-back on real name change ───────────────
+  // Same rails as the contact write-back above, name flavour
+  // (lib/jobber-name-sync): fetch the client BY ID → diff → clientEdit
+  // { firstName, lastName, companyName }. An emptied part is saved here
+  // but never erased there (the standing policy), and that skip is
+  // reported rather than hidden. Awaited but non-fatal: the lead save has
+  // already succeeded and no Jobber failure may undo it — but the failure
+  // RIDES THE RESPONSE, so the UI cannot show a tick over a change that
+  // only half happened.
+  let nameWriteback: NameWriteback | null = null
+  if (nameDiff?.changed && existing.jobber_client_id && existing.location_id) {
+    nameWriteback = await syncLeadNameToJobber({
+      leadId: id,
+      locationSlug: existing.location_id,
+      jobberClientId: String(existing.jobber_client_id),
+      target: nameDiff.next,
+      cleared: nameDiff.clearedFields,
+    })
+  }
+
+  // ─── Name audit touchpoint (after sync — the note tells the ────
+  // whole truth). A client's name changing is the thing someone asks
+  // about three weeks later, so it is written for EVERY real change,
+  // linked or not. Label carries the new display name; notes retains the
+  // old one plus what did or didn't reach Jobber — the address
+  // touchpoint's shape exactly.
+  if (nameDiff?.changed) {
+    const noteParts: string[] = []
+    if (nameDiff.prevDisplay) noteParts.push(`was ${nameDiff.prevDisplay}`)
+    if (!existing.jobber_client_id) {
+      // Saved here and nowhere else. Say so, rather than letting the
+      // silence imply a sync that never happened.
+      noteParts.push(NOT_LINKED_NOTE)
+    } else if (nameSyncFailed(nameWriteback)) {
+      // THE honesty rule, in the permanent record. A failure that only
+      // ever appeared in a toast is a failure nobody can find later.
+      noteParts.push('Jobber rejected the change — the name there is unchanged')
+    } else if (nameWriteback?.first_name === 'kept_in_jobber' || nameWriteback?.last_name === 'kept_in_jobber' || nameWriteback?.company === 'kept_in_jobber') {
+      noteParts.push('a part was emptied here and left as it was in Jobber')
+    }
+    const { data: tpRow } = await supabaseService
+      .from('touchpoints')
+      .insert({
+        lead_id: id,
+        location_uuid: existing.location_uuid,
+        kind: 'system',
+        label: `Name updated → ${nameDiff.display}`,
+        notes: noteParts.length ? noteParts.join(' · ') : null,
+        user_id: hubUser.id,
+        occurred_at: new Date().toISOString(),
+      })
+      .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
+      .single()
+    if (tpRow) contactActivity.push(tpRow)
+  }
+
   // ─── Jobber address write-back on real address change ─────────
   // Same rails, address flavor (lib/jobber-address-sync): ONE fetch-
   // current → per-target diff → clientEdit { billingAddress } + —
@@ -574,6 +671,7 @@ export async function PATCH(
     {
       lead: fresh,
       ...(contactWriteback ? { contact_writeback: contactWriteback } : {}),
+      ...(nameWriteback ? { name_writeback: nameWriteback } : {}),
       ...(addressWriteback ? { address_writeback: addressWriteback } : {}),
       ...(contactActivity.length ? { contact_activity: contactActivity } : {}),
     },
