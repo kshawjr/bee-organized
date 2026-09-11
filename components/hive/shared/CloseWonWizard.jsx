@@ -27,6 +27,7 @@
 import React, { useState } from 'react'
 import { CLOSED_WON } from './stageConfig'
 import { commitEngagementClose, writeEngagementMarker, invoicesSettled } from './closeEngagement'
+import { OWING_REASON_LABEL, OWING_REASON_PLACEHOLDER, OWING_REASON_HELP } from './finalProcessing'
 import { WizardShell, wizPrimaryBtn, wizAccentBtn, wizQuietBtn, wizSeg, wizInput, wizLabel } from './CloseWizardKit'
 import { IconExternalLink, IconCheck } from '@/components/ui/icons'
 import { T } from './tokens'
@@ -48,18 +49,33 @@ function defaultReactivationDate() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// overBalance (issue 119) — the OWNER OVERRIDE entry. The owner says the
+// deal is settled in Jobber, Bee Hub still shows a balance, and Kevin's
+// ruling is that the owner wins. It runs THIS wizard, not a second close
+// path: satisfaction, the review offer and re-engage are exactly as
+// valuable on a deal whose money didn't reconcile, and skipping them
+// would be the real loss. Only step 1 changes — the invoice step stops
+// being a dead end and becomes the place the mandatory reason is asked,
+// because that is where the balance is on screen. Steps 2–4 are the
+// ordinary path, untouched.
 export default function CloseWonWizard({
   engagementId, leadId, invoices = [], totalInvoiced = 0, reviewsLink = null,
+  overBalance = false,
   isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false,
 }) {
   const [step, setStep] = useState(0)
   const [satisfaction, setSatisfaction] = useState(null) // 'happy' | 'unhappy'
   const [reviewRequested, setReviewRequested] = useState(false)
   const [note, setNote] = useState('')
+  const [overrideReason, setOverrideReason] = useState('')
   const [reactivateDate, setReactivateDate] = useState(defaultReactivationDate)
   const [busy, setBusy] = useState(false)
 
   const settled = invoicesSettled(invoices)
+  // The override only means anything while money is actually showing; a
+  // settled deal that somehow arrives with the flag runs the plain path.
+  const overriding = overBalance && !settled
+  const reasonGiven = overrideReason.trim().length > 0
   const total = Number(totalInvoiced) || invoices.reduce((s, i) => s + (Number(i.total) || 0), 0)
   const owing = invoices.reduce((s, i) => s + (i.balance_owing != null ? Number(i.balance_owing) || 0 : 0), 0)
   const happy = satisfaction === 'happy'
@@ -67,7 +83,14 @@ export default function CloseWonWizard({
   async function confirm() {
     setBusy(true)
     try {
-      const j = await commitEngagementClose(engagementId, { closeAs: CLOSED_WON, closedNote: note })
+      // On the override the owner's REASON is the note that must survive
+      // and be legible on the engagement, so it leads; an optional
+      // completion note from step 3 follows it on its own line rather
+      // than being dropped. The ordinary path is unchanged.
+      const closedNote = overriding
+        ? [overrideReason.trim(), note.trim()].filter(Boolean).join('\n')
+        : note
+      const j = await commitEngagementClose(engagementId, { closeAs: CLOSED_WON, closedNote, overBalance: overriding })
       // Side markers — real, persisted touchpoints; each non-fatal (the
       // Won close is the money truth and has already committed).
       const markers = []
@@ -89,7 +112,7 @@ export default function CloseWonWizard({
           await writeEngagementMarker({ leadId, engagementId, kind: m.kind, label: m.label, notes: null, occurredAt: m.occurredAt })
         } catch { /* non-fatal — the close stands regardless */ }
       }
-      setToast({ kind: 'success', msg: 'Closed as won' })
+      setToast({ kind: 'success', msg: overriding ? 'Closed as won — your reason is on the engagement' : 'Closed as won' })
       onClosed(CLOSED_WON, j)
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
@@ -118,13 +141,30 @@ export default function CloseWonWizard({
           {settled ? <IconCheck size={14} /> : null}
           {settled
             ? (invoices.length === 0 ? 'No invoices outstanding' : 'All invoices settled')
-            : `Still owing ${fmtMoney(owing)} — settle in Jobber before closing won`}
+            : overriding
+              ? `Bee Hub still shows ${fmtMoney(owing)} owing — you’re closing this anyway`
+              : `Still owing ${fmtMoney(owing)} — settle in Jobber before closing won`}
         </div>
       </div>
-      {!settled && (
+      {!settled && !overriding && (
         <p style={{ fontSize: '11px', color: T.ink.muted }}>
           A won deal has no open balance. Collect or write off the remainder in Jobber, or close as lost instead.
         </p>
+      )}
+      {/* OWNER OVERRIDE (issue 119) — asked here, beside the figure it
+          overrides, and required before Next will move. The route
+          refuses an empty one too; this is the courteous half. */}
+      {overriding && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {wizLabel(OWING_REASON_LABEL)}
+          <textarea value={overrideReason} onChange={e => setOverrideReason(e.target.value)} rows={2}
+            aria-label={OWING_REASON_LABEL} data-bee-owing-reason
+            placeholder={OWING_REASON_PLACEHOLDER} style={{ ...wizInput(), resize: 'vertical', minHeight: '48px' }} />
+          <p style={{ fontSize: '11px', color: T.ink.muted }}>{OWING_REASON_HELP}</p>
+          <p style={{ fontSize: '11px', color: T.ink.muted }}>
+            We’re not changing the {fmtMoney(owing)} and we’re not touching Jobber — the figure stays as it is, with your reason beside it.
+          </p>
+        </div>
       )}
     </div>
   )
@@ -196,7 +236,11 @@ export default function CloseWonWizard({
     footer = (
       <>
         <button onClick={onCancel} disabled={busy} style={wizQuietBtn()}>Cancel</button>
-        <button onClick={() => setStep(1)} disabled={busy || !settled} style={wizPrimaryBtn(!settled)}>Next</button>
+        {/* Overriding: Next unlocks on the REASON, not on the money —
+            that is the whole point. Otherwise the settled gate stands. */}
+        <button onClick={() => setStep(1)}
+          disabled={busy || (overriding ? !reasonGiven : !settled)}
+          style={wizPrimaryBtn(overriding ? !reasonGiven : !settled)}>Next</button>
       </>
     )
   } else if (step === 1) {
@@ -217,7 +261,13 @@ export default function CloseWonWizard({
     footer = (
       <>
         <button onClick={() => setStep(2)} disabled={busy} style={wizQuietBtn()}>Back</button>
-        <button onClick={confirm} disabled={readOnly || busy} style={wizAccentBtn(readOnly || busy)}>Close as won</button>
+        {/* The reason is re-checked at the commit, not just at step 1 —
+            the field is editable and could have been emptied on the way
+            back through. The route refuses it regardless. */}
+        <button onClick={confirm} disabled={readOnly || busy || (overriding && !reasonGiven)}
+          style={wizAccentBtn(readOnly || busy || (overriding && !reasonGiven))}>
+          {overriding ? 'Close as won anyway' : 'Close as won'}
+        </button>
       </>
     )
   }

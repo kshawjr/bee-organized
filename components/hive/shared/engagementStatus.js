@@ -85,6 +85,13 @@ const CLOSED_REASON_LABELS = {
   written_off: 'Written off',
   lost_other: 'Other',
   stale_on_import: 'Stale on import',
+  // The owner-override Won (issue 119) — closed while Bee Hub still
+  // showed a balance. The value itself is declared in the write path
+  // (shared/closeEngagement) and in lib/engagements; this map is DISPLAY
+  // ONLY and must not import either, so the literal repeats here exactly
+  // as 'won' and 'stale_on_import' already do. Without this line the
+  // underscore fallback renders it as "won balance owing".
+  won_balance_owing: 'Won · balance still showing',
 }
 export function closedReasonLabel(reason) {
   if (!reason) return null

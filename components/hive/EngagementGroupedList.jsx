@@ -41,12 +41,40 @@ import {
   deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs,
   ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount,
 } from './shared/engagementStatus'
+import { FINAL_PROCESSING, FINAL_PROCESSING_LEAD, finalProcessingGroupLines } from './shared/finalProcessing'
 import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
+
+// WHY THIS BAND IS FULL (issue 119). Final processing is a deliberate
+// waiting room — the live derivation rests a done deal here so the
+// owner runs the close-won wizard — and the screen never said so, so
+// owners read the pile as broken. The lead line says it isn't, then ONE
+// LINE PER CASE PRESENT (fully paid / never invoiced / balance owing),
+// because the three are different situations with different next steps
+// and collapsing them into one sentence is the thing that confused
+// people in the first place. Wording is shared with the panel
+// (shared/finalProcessing) so the two surfaces can't drift.
+//
+// NOTE, NOT AN ACTION. There is deliberately no bulk close here: 447
+// engagements and one button that closes all of them is exactly the
+// accident the dismissed-lead work exists to prevent.
+function FinalProcessingNote({ rows }) {
+  const lines = finalProcessingGroupLines(rows)
+  if (lines.length === 0) return null
+  return (
+    <div data-bee-final-processing-note
+      style={{ background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <p style={{ fontSize: '12px', fontWeight: 600, color: T.ink.primary, lineHeight: 1.5 }}>{FINAL_PROCESSING_LEAD}</p>
+      {lines.map(l => (
+        <p key={l} style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5 }}>{l}</p>
+      ))}
+    </div>
+  )
+}
 const CLOSED_WINDOW = 50
 // The Closed group's stable id in the collapse store (the open bands key on
 // their stage.key).
@@ -119,7 +147,7 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
 // chevron) and its rows on white cards. The chevron points down when
 // expanded, right when collapsed; its color matches the band (fam.text).
 // Collapsed → children are not rendered at all.
-function StageBand({ stageKey, gid, label, count, expanded, onToggle, children }) {
+function StageBand({ stageKey, gid, label, count, expanded, onToggle, note = null, children }) {
   const fam = CHIP_STYLES[stageKey] || CHIP_STYLES.gray
   return (
     <div id={gid ? `bee-eng-band-${gid}` : undefined} style={{ background: fam.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px', scrollMarginTop: '12px' }}>
@@ -141,6 +169,7 @@ function StageBand({ stageKey, gid, label, count, expanded, onToggle, children }
       </div>
       {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {note}
           {children}
         </div>
       )}
@@ -249,7 +278,8 @@ export default function EngagementGroupedList({
           const expanded = isExp(s.key)
           return (
             <StageBand key={s.key} stageKey={s.key} gid={s.key} label={s.displayLabel} count={rows.length}
-              expanded={expanded} onToggle={() => toggle(s.key)}>
+              expanded={expanded} onToggle={() => toggle(s.key)}
+              note={s.key === FINAL_PROCESSING && rows.length > 0 ? <FinalProcessingNote rows={rows} /> : null}>
               {rows.length === 0
                 ? <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>None in this stage</div>
                 : rows.map(e => <EngagementRow key={e.id} e={e} nowMs={nowMs} onOpen={onOpenEngagement} isMobile={isMobile} />)}

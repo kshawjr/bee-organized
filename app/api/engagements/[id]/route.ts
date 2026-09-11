@@ -34,7 +34,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { writeSyncLog } from '@/lib/sync-log'
-import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, type EngagementStage } from '@/lib/engagements'
+import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, WON_OVER_BALANCE, type EngagementStage } from '@/lib/engagements'
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
 
 // Close-out vocabulary (doc §4). A WON close is always reason 'won'. LOST
@@ -373,18 +373,43 @@ export async function PATCH(
           { status: 409 },
         )
       }
+      // OWNER OVERRIDE close (issue 119): a Won committed while Bee Hub
+      // still shows an outstanding balance, because the owner says it
+      // was settled in Jobber. THE REASON IS MANDATORY, and THIS is the
+      // floor under that rule — a forged request carrying the override
+      // reason with no note is refused right here, before any write, not
+      // merely greyed out in the wizard. A silent override would be
+      // worse than no override at all.
+      //
+      // The balance is deliberately NOT touched: no zeroing to make the
+      // row tidy. The number stays true and the close explains itself.
+      // Nothing in this route reaches Jobber — Bee Hub's stage is
+      // Bee Hub's.
+      const wonOverBalance = stage === 'Closed Won' && body?.closed_reason === WON_OVER_BALANCE
+      const overrideNote = typeof body?.closed_note === 'string' ? body.closed_note.trim() : ''
+      if (wonOverBalance && !overrideNote) {
+        return NextResponse.json(
+          {
+            error: 'close_reason_required',
+            message: 'Closing a deal that still shows a balance has to record why',
+          },
+          { status: 400 },
+        )
+      }
       patch.stage = stage
       patch.stage_entered_at = nowIso
       if (targetTerminal) {
         patch.closed_at = nowIso
-        // Won is always 'won'. Lost stores the client-provided reason LABEL
+        // Won is 'won' — or WON_OVER_BALANCE on the owner override above,
+        // so a future reader can tell the two apart from the row alone.
+        // Lost stores the client-provided reason LABEL
         // verbatim (the admin picklist is the source of truth and the column
         // is unconstrained) — trimmed and length-capped, never coerced to a
         // fixed enum. Falls back to 'Other' only when nothing usable was sent.
         const reasonRaw = body?.closed_reason
         const reason =
           stage === 'Closed Won'
-            ? 'won'
+            ? (wonOverBalance ? WON_OVER_BALANCE : 'won')
             : (typeof reasonRaw === 'string' && reasonRaw.trim()
                 ? reasonRaw.trim().slice(0, 200)
                 : 'Other')

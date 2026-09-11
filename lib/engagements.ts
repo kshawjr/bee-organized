@@ -55,6 +55,20 @@ export const OPENING_STAGE: Record<FoundedBy, EngagementStage> = {
 
 export const NURTURING_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
+// The closed_reason an OWNER OVERRIDE close stamps (issue 119) — a Won
+// committed while Bee Hub still shows an outstanding balance, because
+// the owner says it was settled in Jobber. Server-side close vocabulary
+// lives here beside 'won' / 'stale_on_import' / 'quote_archived' /
+// 'job_deleted'; the client write path (components/hive/shared/
+// closeEngagement.js) carries the matching literal because it must
+// never import this module (Supabase service client in the browser
+// bundle). beta-final-processing-explains pins the two equal.
+//
+// NOTHING here derives this value: it is a HUMAN intent, stamped only by
+// the PATCH route when an owner runs the override close. The derivation
+// below never writes it, and never reads it either.
+export const WON_OVER_BALANCE = 'won_balance_owing'
+
 const ts = (v: any) => (v ? new Date(v).getTime() : 0)
 
 // ── stage derivation (single source) ──────────────────────────────

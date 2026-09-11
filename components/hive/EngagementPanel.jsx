@@ -86,6 +86,7 @@ import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
 import { invoicesSettled } from './shared/closeEngagement'
+import { finalProcessingCase, finalProcessingExplainer, FINAL_PROCESSING_LEAD, OWING_CLOSE_ACTION } from './shared/finalProcessing'
 import ClosedSummary from './shared/ClosedSummary'
 import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
@@ -550,6 +551,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // invoices; a human confirming a $0 outcome is exactly what the button +
   // wizard are for.
   const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesSettled(children.invoices || [])
+
+  // WHY IT IS WAITING (issue 119). The rules above were right and the
+  // screen never said so, so a pile of deliberately-waiting deals read
+  // as a pile of broken ones — owners across many locations wrote in
+  // calling them "stuck". finalProcessing.js holds the wording (one
+  // source, shared with the list) and derives the case from the SAME
+  // invoicesSettled the gate above reads, so the sentence about the
+  // button is always true of the button actually rendered beside it.
+  // Null at every other stage, so this renders nothing elsewhere.
+  const fpCase = finalProcessingCase(eng, children.invoices || [])
+  const fpExplainer = finalProcessingExplainer(fpCase, children.invoices || [])
 
   // Masthead ··· menu items — grows with more record actions later.
   // Visibility rules (beta-record-menu-visibility pin):
@@ -1103,6 +1115,40 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </div>
       )}
 
+      {/* WHY FINAL PROCESSING IS WAITING (issue 119) — the three cases
+          read differently and are never collapsed into one sentence:
+          fully paid (settled, mark it won), never invoiced (the $0
+          close), balance owing (the button is correctly absent, and
+          here is what to do instead). Sits directly ABOVE the Mark won
+          button so the explanation and the affordance it describes are
+          one thing. Absent at every other stage — fpCase is null there. */}
+      {eng && fpExplainer && (
+        <div data-bee-final-processing-why={fpCase}
+          style={{ background: T.surface.sunken, borderRadius: T.radius.inset, padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <p style={{ fontSize: '12px', fontWeight: 600, color: T.ink.primary }}>{fpExplainer.title}</p>
+          <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5 }}>{FINAL_PROCESSING_LEAD}</p>
+          <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5 }}>{fpExplainer.body}</p>
+          {/* THE DELIBERATE SECOND ACTION. Kevin's ruling: if the owner
+              says it is paid in Jobber and Bee Hub disagrees, they can
+              close it. NOT the Mark won button promoted — a quiet text
+              action, so someone closing forty settled deals cannot hit
+              this one by muscle memory. It opens the SAME CloseWonWizard
+              (overBalance), which asks for the mandatory reason; there
+              is no second close path. bee-small-action releases the
+              globals.css 16px button floor to 12px, matching the quiet
+              row-verbs on ClientProfile / NetworkPersonRecord — this
+              must read as chrome beside the 16px accent button. */}
+          {fpCase === 'owing' && !readOnly && (
+            <button type="button" className="bee-small-action" data-bee-close-over-balance
+              onClick={() => setWizard('won-over-balance')}
+              style={{ alignSelf: 'flex-start', marginTop: '3px', padding: '4px 0', border: 'none', background: 'transparent',
+                color: T.accent.deep, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+              {OWING_CLOSE_ACTION}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* READY-TO-CLOSE cue — the primary, obvious win path. Surfaces
           ONLY when canCloseWon (Final Processing + invoices settled: every
           invoice paid or zero balance, zero invoices included): the deal is
@@ -1192,13 +1238,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           setToast={setToast}
         />
       )}
-      {wizard === 'won' && eng && (
+      {/* ONE Close-Won wizard, two entrances. 'won' is the ordinary
+          Mark-won button; 'won-over-balance' is the owner override on a
+          deal that still shows money (issue 119). Same component, same
+          commit path, same satisfaction / review / re-engage steps —
+          those are no less valuable because the money didn't reconcile,
+          and a second close path would have skipped them. */}
+      {(wizard === 'won' || wizard === 'won-over-balance') && eng && (
         <CloseWonWizard
           engagementId={engagementId}
           leadId={client?.id}
           invoices={children.invoices || []}
           totalInvoiced={eng.total_invoiced || 0}
           reviewsLink={client?.reviews_link || null}
+          overBalance={wizard === 'won-over-balance'}
           isMobile={isMobile}
           onCancel={() => setWizard(null)}
           onClosed={onWizardClosed}

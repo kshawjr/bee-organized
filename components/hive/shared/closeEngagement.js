@@ -44,13 +44,35 @@ export function invoicesSettled(invoices = []) {
     invoices.every(i => i.status === 'paid' || Number(i.balance_owing) === 0)
 }
 
+// The closed_reason stamped by an OWNER OVERRIDE close (issue 119): the
+// owner says the deal is settled in Jobber, Bee Hub still shows a
+// balance, and Kevin's ruling is that the owner wins. A distinct value
+// — never plain 'won' — so a future reader can tell "closed with $340
+// still showing as owed" from "closed, fully paid" in the row itself,
+// not by inference. The ROUTE holds the matching literal (the server
+// close vocabulary lives beside 'won' / 'stale_on_import' in
+// lib/engagements.ts, which client code must never import — it drags
+// the Supabase service client into the browser bundle). The two are
+// pinned equal by beta-final-processing-explains.
+export const WON_OVER_BALANCE = 'won_balance_owing'
+
 // Commit a terminal close. Returns the route's JSON on success; throws on
 // any non-2xx so callers surface the message. closedNote is trimmed;
 // empty → omitted (the route leaves the column untouched).
-export async function commitEngagementClose(engagementId, { closeAs, closedReason, closedNote }) {
+//
+// overBalance: the owner-override Won described above. It sends the
+// WON_OVER_BALANCE reason and REQUIRES a note — the route refuses an
+// empty one (that refusal is the floor; this check only saves a
+// round-trip). The balance itself is never written: the number stays
+// true and the close explains itself. Nothing here reaches Jobber —
+// Bee Hub's stage is Bee Hub's.
+
+export async function commitEngagementClose(engagementId, { closeAs, closedReason, closedNote, overBalance = false }) {
   const note = (closedNote || '').trim()
+  const wonOverBalance = closeAs === CLOSED_WON && overBalance
+  if (wonOverBalance && !note) throw new Error('A reason is required to close this with a balance showing')
   const body = closeAs === CLOSED_WON
-    ? { stage: CLOSED_WON, closed_reason: 'won', ...(note ? { closed_note: note } : {}) }
+    ? { stage: CLOSED_WON, closed_reason: wonOverBalance ? WON_OVER_BALANCE : 'won', ...(note ? { closed_note: note } : {}) }
     : { stage: CLOSED_LOST, closed_reason: closedReason, ...(note ? { closed_note: note } : {}) }
   const res = await fetch(`/api/engagements/${engagementId}`, {
     method: 'PATCH',

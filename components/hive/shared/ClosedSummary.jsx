@@ -19,15 +19,25 @@
 import React from 'react'
 import { IconCheck, IconX } from '@/components/ui/icons'
 import { closedReasonLabel, formatFullDate } from './engagementStatus'
+import { WON_OVER_BALANCE, OWING_CLOSED_LABEL, owingClosedLine } from './finalProcessing'
 import { T } from './tokens'
 
 export default function ClosedSummary({ engagement }) {
   const e = engagement
   if (!e || (e.stage !== 'Closed Won' && e.stage !== 'Closed Lost')) return null
   const won = e.stage === 'Closed Won'
+  // An OWNER OVERRIDE close (issue 119) — won while Bee Hub still showed
+  // money owing. Kevin's ruling: the fact stays and is LEGIBLE, not
+  // buried in an audit table nobody opens. So it gets its own verdict
+  // line, the balance beside it, and the owner's reason rendered IN FULL
+  // — never the one-line ellipsis the optional completion note gets,
+  // because this note is the whole justification for the close.
+  const overBalance = won && e.closed_reason === WON_OVER_BALANCE
   // 'won' as a reason is redundant beside the 'Closed won' verdict —
   // suppress it; every other reason (including machine stamps) shows.
-  const reason = e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason)
+  const reason = overBalance
+    ? OWING_CLOSED_LABEL
+    : (e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason))
   const note = (e.closed_note || '').trim()
   return (
     <div style={{ padding: '10px 14px', background: T.surface.sunken, borderRadius: T.radius.inset, display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -41,11 +51,22 @@ export default function ClosedSummary({ engagement }) {
           {formatFullDate(e.closed_at) ? ` · ${formatFullDate(e.closed_at)}` : ''}
         </span>
       </p>
-      {note && (
+      {overBalance && (
+        <p data-bee-over-balance-line style={{ fontSize: '11px', color: T.ink.secondary, paddingLeft: '20px' }}>
+          {owingClosedLine(e)}
+        </p>
+      )}
+      {note && (overBalance ? (
+        // Full text, wrapped — the reason a balance was overridden has to
+        // be readable without hovering for a tooltip.
+        <p data-bee-over-balance-reason style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          “{note}”
+        </p>
+      ) : (
         <p title={note} style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           “{note}”
         </p>
-      )}
+      ))}
     </div>
   )
 }
