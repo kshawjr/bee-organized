@@ -25,7 +25,7 @@
 //    must then show the DATE ALONE — never "by system", never "by unknown",
 //    never a dangling "by". A person probably clicked it and we did not write
 //    it down; saying otherwise is a guess presented as fact.
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -108,6 +108,20 @@ const installFetch = () => {
   return fetchMock
 }
 
+// happy-dom ships no localStorage here and useStoredState try/catches around
+// it, so without this the collapse state would silently never persist and the
+// "survives a reload" assertion would be vacuous. Same stub the #89 badge test
+// installs for the same reason.
+beforeAll(() => {
+  const store = new Map<string, string>()
+  ;(globalThis as any).localStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => { store.set(k, String(v)) },
+    removeItem: (k: string) => { store.delete(k) },
+    clear: () => { store.clear() },
+  }
+})
+
 let cleanup: Array<() => void> = []
 afterEach(() => { cleanup.forEach(fn => fn()); cleanup = [] })
 beforeEach(() => { installFetch(); try { localStorage.clear() } catch {} })
@@ -137,10 +151,16 @@ const inbox = (people: any[], over: any = {}) => (
     locationUsers={roster} setToast={setToast} {...over} />
 )
 
-const chip = (host: Element) =>
-  host.querySelector('[data-testid="inbox-dismissed-chip"]') as HTMLButtonElement | null
+// The band's heading IS the disclosure control — a div role=button, because a
+// real <button> would take the globals.css 16px floor and render this heading
+// larger than New and Attempting beside it.
+const band = (host: Element) =>
+  host.querySelector('[aria-label="Dismissed group"]') as HTMLElement | null
 const section = (host: Element) =>
   host.querySelector('[data-testid="inbox-dismissed-section"]')
+// A row is on screen only when the band is expanded.
+const rowsShown = (host: Element) =>
+  host.querySelectorAll('[data-testid^="put-back-"]').length
 const dismissedLine = (host: Element, id: string) =>
   host.querySelector(`[data-testid="dismissed-line-${id}"]`)?.textContent || ''
 
@@ -270,7 +290,7 @@ describe('the feed carries the dismissal', () => {
       const rows = Array.from({ length: n }, (_, i) =>
         dismissedWithActor({ personOver: { id: `d-${i}`, name: `Dismissed ${i}` } }))
       const m = await mount(inbox(rows))
-      await click(chip(m.host)!)
+      await click(band(m.host)!)
       return fetchMock.mock.calls.length
     }
     expect(await countFor(25)).toBe(await countFor(1))
@@ -280,50 +300,89 @@ describe('the feed carries the dismissal', () => {
 // ═══════════════════════════════════════════════════════════
 // The chip, and the badge it must never touch.
 // ═══════════════════════════════════════════════════════════
-describe('the Dismissed chip', () => {
-  it('is OFF by default — the Inbox looks exactly as it does today', async () => {
+describe('the Dismissed band', () => {
+  it('renders COLLAPSED by default — heading and count visible, rows folded away', async () => {
     const live = person({ name: 'Live Lead' })
-    const gone = dismissedNoActor()
-    const m = await mount(inbox([live, gone]))
+    const m = await mount(inbox([live, dismissedNoActor()]))
 
-    expect(m.host.textContent).toContain('Live Lead')
+    // The band is on screen and says how many. Nothing is hidden from the
+    // owner — but an owner with 40 dismissed leads does not get 40 rows.
+    const heading = band(m.host)!
+    expect(heading).not.toBeNull()
+    expect(heading.textContent).toContain('Dismissed')
+    expect(heading.textContent).toContain('1')
+    expect(heading.getAttribute('aria-expanded')).toBe('false')
+
+    expect(rowsShown(m.host)).toBe(0)
     expect(m.host.textContent).not.toContain('Courtney Grady')
-    expect(section(m.host)).toBeNull()
-    expect(chip(m.host)!.getAttribute('aria-pressed')).toBe('false')
+    expect(m.host.textContent).toContain('Live Lead')   // the worklist is untouched
   })
 
-  it('counts what is hidden', async () => {
+  it('sits with New and Attempting as a third band, same heading treatment', async () => {
+    const m = await mount(inbox([person({ name: 'Live Lead' }), dismissedNoActor()]))
+    const headings = [...m.host.querySelectorAll('p, [role="button"]')]
+      .map(el => (el.textContent || '').trim())
+    expect(headings.some(h => /New · 1/.test(h))).toBe(true)
+    expect(headings.some(h => /Attempting · 0/.test(h))).toBe(true)
+    expect(headings.some(h => /Dismissed · 1/.test(h))).toBe(true)
+  })
+
+  it('counts what is set aside', async () => {
     const m = await mount(inbox([
       person({ name: 'Live Lead' }),
       dismissedNoActor({ personOver: { id: 'd1', name: 'Courtney Grady' } }),
       dismissedNoActor({ personOver: { id: 'd2', name: 'Shelby Hoyt' } }),
     ]))
-    expect(chip(m.host)!.textContent).toContain('2')
+    expect(band(m.host)!.textContent).toContain('2')
   })
 
-  it('does not render at all when nothing is hidden', async () => {
+  it('does not render at all when nothing is dismissed', async () => {
     const m = await mount(inbox([person({ name: 'Live Lead' })]))
-    expect(chip(m.host)).toBeNull()
+    expect(band(m.host)).toBeNull()
+    expect(section(m.host)).toBeNull()
   })
 
-  it('turning it ON shows dismissed leads; turning it OFF hides them again', async () => {
+  it('expanding shows the rows; collapsing folds them away again', async () => {
     const m = await mount(inbox([person({ name: 'Live Lead' }), dismissedNoActor()]))
 
-    await click(chip(m.host)!)
-    expect(section(m.host)).not.toBeNull()
+    await click(band(m.host)!)
+    expect(band(m.host)!.getAttribute('aria-expanded')).toBe('true')
     expect(m.host.textContent).toContain('Courtney Grady')
+    expect(rowsShown(m.host)).toBe(1)
     expect(m.host.textContent).toContain('Live Lead')   // the worklist is untouched
 
-    await click(chip(m.host)!)
-    expect(section(m.host)).toBeNull()
+    await click(band(m.host)!)
+    expect(band(m.host)!.getAttribute('aria-expanded')).toBe('false')
+    expect(rowsShown(m.host)).toBe(0)
     expect(m.host.textContent).not.toContain('Courtney Grady')
   })
 
-  it('shows the shelf even when the live worklist is EMPTY', async () => {
-    // The case the empty state would otherwise win: nothing live, something
-    // hidden. This is precisely when someone needs to see what is hidden.
+  it('opens by keyboard too — the heading is a div, so this is wired by hand', async () => {
     const m = await mount(inbox([dismissedNoActor()]))
-    await click(chip(m.host)!)
+    await act(async () => {
+      band(m.host)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    expect(rowsShown(m.host)).toBe(1)
+  })
+
+  it('the expanded state SURVIVES A RELOAD', async () => {
+    const m = await mount(inbox([dismissedNoActor()]))
+    await click(band(m.host)!)
+    expect(rowsShown(m.host)).toBe(1)
+
+    // A fresh mount is a reload: the choice is read back from storage rather
+    // than clobbered by the pre-hydration default (the 9c85091 guard).
+    const again = await mount(inbox([dismissedNoActor()]))
+    expect(band(again.host)!.getAttribute('aria-expanded')).toBe('true')
+    expect(rowsShown(again.host)).toBe(1)
+  })
+
+  it('shows the band even when the live worklist is EMPTY', async () => {
+    // The case the empty state would otherwise win: nothing live, something
+    // set aside. This is precisely when someone needs to see it.
+    const m = await mount(inbox([dismissedNoActor()]))
+    expect(band(m.host)).not.toBeNull()
+    await click(band(m.host)!)
     expect(m.host.textContent).toContain('Courtney Grady')
   })
 
@@ -331,7 +390,7 @@ describe('the Dismissed chip', () => {
     const m = await mount(inbox([
       dismissedNoActor({ personOver: { id: 'dj', name: 'Junked Too', isJunk: true } }),
     ]))
-    expect(chip(m.host)).toBeNull()
+    expect(band(m.host)).toBeNull()
   })
 })
 
@@ -354,7 +413,7 @@ describe('#89 guard: the chip is a VIEW toggle, never a removal', () => {
     return m ? Number(m[1]) : 0
   }
 
-  it('toggling the chip does NOT move the nav badge count', async () => {
+  it('expanding or collapsing the band does NOT move the nav badge count', async () => {
     const m = await mount(React.createElement(HiveShell as any, shellBase({
       people: [
         person({ name: 'Live One' }),
@@ -372,14 +431,19 @@ describe('#89 guard: the chip is a VIEW toggle, never a removal', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 0)) })
     expect(badgeCount(m.host)).toBe(before)
 
-    // Reveal the dismissed rows. The badge counts WORK, and a dismissed lead
-    // is not work — revealing it must not add it back to the count.
-    await click(chip(m.host)!)
+    // The band's COUNT is on screen from the start, collapsed or not, and the
+    // badge must already be unaffected by it.
+    expect(band(m.host)!.textContent).toContain('2')
+    expect(badgeCount(m.host)).toBe(before)
+
+    // Expand. The badge counts WORK, and a dismissed lead is not work —
+    // revealing the rows must not add them back to the count.
+    await click(band(m.host)!)
     expect(m.host.textContent).toContain('Courtney Grady')
     expect(badgeCount(m.host)).toBe(before)
 
-    // …and hiding them again must not move it either.
-    await click(chip(m.host)!)
+    // …and folding them away again must not move it either.
+    await click(band(m.host)!)
     expect(badgeCount(m.host)).toBe(before)
   })
 })
@@ -391,7 +455,7 @@ describe('a dismissed row says when, and who when we know', () => {
   it('shows WHO and WHEN when the actor was recorded', async () => {
     const p = dismissedWithActor({ personOver: { id: 'dw', name: 'Debra Vargas' } })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
     const line = dismissedLine(m.host, p.id)
     expect(line).toContain('Dismissed by Andrea Whitfield')
   })
@@ -399,14 +463,14 @@ describe('a dismissed row says when, and who when we know', () => {
   it('an AUTOMATIC route now shows its name in the row — the feed carries it', async () => {
     const p = dismissedWithActor({ route: 'no_coverage', personOver: { id: 'nc', name: 'Ashley Devoto' } })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
     expect(dismissedLine(m.host, p.id)).toContain('Andrea Whitfield')
   })
 
   it('a lead with NO recorded actor degrades to the DATE ALONE — no invented person', async () => {
     const p = dismissedNoActor({ personOver: { id: 'na', name: 'Courtney Grady' } })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
 
     const line = dismissedLine(m.host, p.id)
     expect(line).toMatch(/^Dismissed \d/)
@@ -423,7 +487,7 @@ describe('a dismissed row says when, and who when we know', () => {
       dismissal: { at, route: 'network', actorId: 'u-not-in-roster', actorName: null },
     })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
     expect(dismissedLine(m.host, p.id)).not.toMatch(/\bby\b/)
   })
 })
@@ -436,7 +500,7 @@ describe('Put back', () => {
     const p = dismissedNoActor({ personOver: { id: 'pb', name: 'Courtney Grady' } })
     const patched: any[] = []
     const m = await mount(inbox([p], { onLeadPatched: (id: string, cols: any) => patched.push({ id, cols }) }))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
 
     const btn = m.host.querySelector(`[data-testid="put-back-${p.id}"]`) as HTMLButtonElement
     expect(btn, 'a dismissed row carries a durable Put back').toBeTruthy()
@@ -454,13 +518,13 @@ describe('Put back', () => {
     const back = { ...p, inboxDismissedAt: null, dismissal: null }
     await m.rerender(inbox([back], {}))
     expect(m.host.textContent).toContain('Courtney Grady')
-    expect(chip(m.host)).toBeNull()
+    expect(band(m.host)).toBeNull()
   })
 
   it('is undoable — a stray click is not permanent either', async () => {
     const p = dismissedNoActor({ personOver: { id: 'pb2', name: 'Courtney Grady' } })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
     await click(m.host.querySelector(`[data-testid="put-back-${p.id}"]`)!)
 
     const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
@@ -476,9 +540,101 @@ describe('Put back', () => {
     // verb renders at 16px and towers over the row it sits in.
     const p = dismissedNoActor({ personOver: { id: 'pb3' } })
     const m = await mount(inbox([p]))
-    await click(chip(m.host)!)
+    await click(band(m.host)!)
     const btn = m.host.querySelector(`[data-testid="put-back-${p.id}"]`) as HTMLButtonElement
     expect(btn.className).toContain('bee-small-action')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// Clearing the shelf — the Recycle Bin, one row at a time.
+//
+// Junk and dismiss are DIFFERENT STATES. A dismissed lead that gets binned is
+// both; undoing the bin must leave the dismissal exactly where it was. That is
+// the subtle bug here, and the mutation test for it is the one that matters.
+// ═══════════════════════════════════════════════════════════
+describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
+  const expandedShelf = async (p: any, over: any = {}) => {
+    const m = await mount(inbox([p], over))
+    await click(band(m.host)!)
+    return m
+  }
+
+  it('junks the lead and it leaves the shelf', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bn', name: 'Courtney Grady' } })
+    const m = await expandedShelf(p)
+
+    const btn = m.host.querySelector(`[data-testid="bin-${p.id}"]`) as HTMLButtonElement
+    expect(btn, 'a dismissed row offers the Bin').toBeTruthy()
+    await click(btn)
+
+    // The EXISTING junk write — is_junk, and nothing else. Not a delete, and
+    // not a second path of its own.
+    expect(patches).toHaveLength(1)
+    expect(patches[0]).toEqual({ id: p.id, body: { is_junk: true } })
+    // It is off the shelf — the whole band goes with the last row.
+    expect(m.host.textContent).not.toContain('Courtney Grady')
+    expect(band(m.host)).toBeNull()
+  })
+
+  it('the binned lead is in the Recycle Bin — is_junk is what the Bin reads', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bn2', name: 'Courtney Grady' } })
+    const m = await expandedShelf(p)
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    expect(patches[0].body.is_junk).toBe(true)
+    // Nothing about the dismissal was touched on the way there.
+    expect('inbox_dismissed_at' in patches[0].body).toBe(false)
+  })
+
+  it('UNDO returns it to the shelf STILL DISMISSED — it does not jump the worklist', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bn3', name: 'Courtney Grady' } })
+    const m = await expandedShelf(p)
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+
+    const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
+    const undo = kids.find(k => k?.type === 'button')
+    expect(undo, 'Bin offers an Undo').toBeTruthy()
+    await act(async () => { await undo.props.onClick() })
+
+    // THE POINT: the undo clears is_junk and ONLY is_junk. Clearing
+    // inbox_dismissed_at too would quietly restore her to the worklist, which
+    // is a different decision than the one being undone.
+    expect(patches[1]).toEqual({ id: p.id, body: { is_junk: false } })
+    expect('inbox_dismissed_at' in patches[1].body).toBe(false)
+
+    // So she is back on the SHELF, not in the worklist.
+    expect(band(m.host)).not.toBeNull()
+    expect(m.host.textContent).toContain('Courtney Grady')
+    expect(m.host.querySelector(`[data-testid="put-back-${p.id}"]`)).toBeTruthy()
+  })
+
+  it('says where it went back to, rather than claiming it was "restored"', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bn4', name: 'Courtney Grady' } })
+    const m = await expandedShelf(p)
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
+    await act(async () => { await kids.find(k => k?.type === 'button').props.onClick() })
+    expect(lastToast.msg).toContain('back under Dismissed')
+  })
+
+  it('both verbs carry the small-action release class', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bn5' } })
+    const m = await expandedShelf(p)
+    expect((m.host.querySelector(`[data-testid="put-back-${p.id}"]`) as HTMLElement).className).toContain('bee-small-action')
+    expect((m.host.querySelector(`[data-testid="bin-${p.id}"]`) as HTMLElement).className).toContain('bee-small-action')
+  })
+
+  it('there is NO bulk bin — one row at a time, deliberately', async () => {
+    // A single click that empties a shelf of 40 is the exact accident this
+    // whole piece of work exists to prevent.
+    const rows = Array.from({ length: 5 }, (_, i) =>
+      dismissedNoActor({ personOver: { id: `bulk-${i}`, name: `Dismissed ${i}` } }))
+    const m = await mount(inbox(rows))
+    await click(band(m.host)!)
+    const shelf = section(m.host)!
+    const verbs = [...shelf.querySelectorAll('button')].map(b => (b.textContent || '').trim())
+    expect(verbs.filter(v => /bin/i.test(v))).toHaveLength(5)     // one per row
+    expect(verbs.some(v => /bin all|empty|clear all/i.test(v))).toBe(false)
   })
 })
 

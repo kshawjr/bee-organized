@@ -61,7 +61,7 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers, IconMail } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers, IconMail, IconChevronRight } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import MiniAvatar from './shared/MiniAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
@@ -149,12 +149,40 @@ const transferOriginLine = (p) => {
   return [place, p.project, 'from global form'].filter(Boolean).join(' · ')
 }
 
-function SectionLabel({ glyph, color, label, count, hint }) {
-  return (
-    <p style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.6px', textTransform: 'uppercase', color, marginBottom: '8px' }}>
+// ONE heading treatment for all three bands. `onToggle` makes it a disclosure
+// (Dismissed); without it the markup is byte-identical to what New and
+// Attempting have always rendered.
+//
+// A div role="button", NOT a <button> — the same choice ClientGroupedList's
+// band headers make, and for the same reason: globals.css has
+// `button{font-size:16px!important}` as an iOS zoom guard, and .bee-small-action
+// releases it only as far as 12px. Either way a real button would render this
+// heading larger than the two beside it, which is exactly the "same heading
+// treatment" this is supposed to be. Keyboard support is wired by hand because
+// a div does not come with it.
+function SectionLabel({ glyph, color, label, count, hint, expanded = null, onToggle = null }) {
+  const inner = (
+    <>
       <span style={{ marginRight: '5px' }}>{glyph}</span>
       {label} · {count} · <span style={{ color, opacity: 0.55, textTransform: 'none', letterSpacing: '0.3px' }}>{hint}</span>
-    </p>
+    </>
+  )
+  const type = { fontSize: '11px', fontWeight: 500, letterSpacing: '0.6px', textTransform: 'uppercase', color }
+  if (!onToggle) return <p style={{ ...type, marginBottom: '8px' }}>{inner}</p>
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={!!expanded}
+      aria-label={`${label} group`}
+      onClick={onToggle}
+      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onToggle() } }}
+      style={{ ...type, marginBottom: '8px', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+      <span>{inner}</span>
+      <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color }}>
+        <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+      </span>
+    </div>
   )
 }
 
@@ -459,15 +487,31 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // linger in localStorage.
   useEffect(() => { try { localStorage.removeItem('bee_hive_inbox_filters') } catch {} }, [])
   const [fltOpen, setFltOpen] = useState(false)
-  // The Dismissed chip is a VIEW toggle and nothing else. It is session state,
-  // not useStoredState, precisely so it is OFF on every load: an owner who
-  // never mis-clicks must see the Inbox exactly as it is today, and a
-  // preference that could persist "on" would quietly change that for them.
-  // It is deliberately NOT folded into isSoftRemovedFromInbox's four
-  // persistent exclusions — read that file's header. Those are REMOVALS and
-  // they feed the nav badge; a view toggle that touched the badge would
-  // recreate #89 exactly, which is what the badge test below pins.
-  const [showDismissed, setShowDismissed] = useState(false)
+  // Dismissed is a BAND now (Kevin, seen in production 2026-09-10): the chip
+  // was too hidden. It sits with New and Attempting under the same heading
+  // treatment, so its COUNT is on screen whether or not anyone opens it —
+  // nothing is hidden — while the ROWS stay folded away, because an owner with
+  // 40 dismissed leads should not get 40 rows stacked under their worklist.
+  //
+  // COLLAPSED BY DEFAULT via the ClientGroupedList idiom: a keyed map where
+  // ABSENT means collapsed, so a first visit is folded and each later choice
+  // is remembered. useStoredState is what makes that safe — its hydration
+  // guard is STATE holding the key (9c85091), so the pre-hydration default can
+  // no longer be written to localStorage and clobber a real stored choice.
+  //
+  // Deliberately NOT namespaced per location the way bee_hive_inbox_filters is
+  // (issue 123). That namespacing exists because a SOURCE filter set at one
+  // location emptied every other location's Inbox; a folded band has no such
+  // failure mode — it hides no count and changes no data — and one remembered
+  // preference across locations is what an owner would expect.
+  //
+  // Still a VIEW, never a removal: it is deliberately NOT folded into
+  // isSoftRemovedFromInbox's four persistent exclusions — read that file's
+  // header. Those feed the nav badge, and a view that touched the badge would
+  // recreate #89 exactly, which is what the badge guard test pins.
+  const [collapseMap, setCollapseMap] = useStoredState('bee_hive_inbox_dismissed_collapsed', {})
+  const dismissedExpanded = !!collapseMap.dismissed
+  const toggleDismissed = () => setCollapseMap(prev => ({ ...prev, dismissed: !prev.dismissed }))
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -757,9 +801,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       addTo(setJunkedIds, p.id)
       setToast(undoToast('Marked as junk', async () => {
         try {
+          // Clears is_junk and NOTHING else. A dismissed lead that was binned
+          // comes back to the Dismissed band still dismissed — junk and
+          // dismiss are separate states, and undoing one must not silently
+          // clear the other. Hence the wording: "restored" would read as "back
+          // in your worklist", which is not what happened.
           await patchLead(p.id, { is_junk: false })
           dropFrom(setJunkedIds, p.id)
-          setToast({ kind: 'success', msg: `${p.name} restored` })
+          setToast({ kind: 'success', msg: p.inboxDismissedAt ? `${p.name} is back under Dismissed` : `${p.name} restored` })
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
@@ -1055,20 +1104,33 @@ export default function InboxScreen({ people = [], transferPeople = [], location
            globals.css `button{font-size:16px!important}` floor silently
            discards an inline fontSize, and this class is the release stop —
            without it this row verb renders at 16px and towers over the row. */
-        <button
-          className="bee-small-action"
-          data-testid={`put-back-${p.id}`}
-          disabled={busyId === p.id}
-          onClick={(ev) => { ev.stopPropagation(); putBackLead(p) }}
-          style={{
-            padding: '0 12px', height: T.badge.height, borderRadius: T.radius.pill,
-            border: T.border.control, background: 'transparent',
-            color: T.ink.secondary, cursor: busyId === p.id ? 'default' : 'pointer',
-            fontFamily: 'inherit', whiteSpace: 'nowrap',
-            opacity: busyId === p.id ? 0.5 : 1,
-          }}>
-          Put back
-        </button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            className="bee-small-action"
+            data-testid={`put-back-${p.id}`}
+            disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); putBackLead(p) }}
+            style={{ ...dismissedVerb, opacity: busyId === p.id ? 0.5 : 1, cursor: busyId === p.id ? 'default' : 'pointer' }}>
+            Put back
+          </button>
+          {/* Clearing the shelf. This is JUNK, not deletion: the lead goes to
+              the Recycle Bin, which already exists and which
+              isSoftRemovedFromInbox already excludes, so the row simply leaves.
+              It rides markJunk — the Inbox's existing junk write — rather than
+              a second path that could drift from it.
+              ONE ROW AT A TIME, deliberately. There is no "bin all" here and
+              must not be: a single click that empties a shelf of 40 is exactly
+              the accident this whole piece of work exists to prevent. */}
+          <button
+            className="bee-small-action"
+            data-testid={`bin-${p.id}`}
+            title="Move to the Recycle Bin"
+            disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); markJunk(p) }}
+            style={{ ...dismissedVerb, opacity: busyId === p.id ? 0.5 : 1, cursor: busyId === p.id ? 'default' : 'pointer' }}>
+            Bin
+          </button>
+        </span>
       )
     ) : sent ? (
       <SentWaiting settled={settledSendIds.has(p.id)} />
@@ -1297,6 +1359,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     )
   }
 
+  // The dismissed row's two verbs share one style so neither can drift into
+  // looking more consequential than the other. Both carry .bee-small-action at
+  // the call site — the globals.css 16px button floor silently discards an
+  // inline fontSize, and that class is the release stop.
+  const dismissedVerb = {
+    padding: '0 12px', height: T.badge.height, borderRadius: T.radius.pill,
+    border: T.border.control, background: 'transparent',
+    color: T.ink.secondary, fontFamily: 'inherit', whiteSpace: 'nowrap',
+  }
   const cardStyle = { background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }
   // The unrouted queue lives in its OWN tinted container rather than a card in
   // the same stack: a left edge accent was too quiet, and these leads read as
@@ -1362,36 +1433,6 @@ export default function InboxScreen({ people = [], transferPeople = [], location
             }} />
         )}
         <span style={{ flex: 1 }} />
-        {/* Dismissed — a VIEW toggle sitting on the filter row, OFF by
-            default. An owner who never mis-clicks sees no change at all; the
-            COUNT is the whole point, because it is the only thing on this
-            screen that says something is being hidden from them.
-            Rendered only when there IS something hidden — a permanent "· 0"
-            would be chrome that never means anything.
-            Styled as FilterButton's twin on purpose (same padding, radius,
-            hairline, active fill) so the two read as one control row. It
-            carries no .bee-small-action for the same reason: FilterButton has
-            none either, so both take the globals.css 16px button floor and
-            stay the same size. Releasing only this one would make it the odd
-            small pill next to its sibling. */}
-        {dismissedRows.length > 0 && (
-          <button
-            data-testid="inbox-dismissed-chip"
-            aria-pressed={showDismissed}
-            onClick={() => setShowDismissed(v => !v)}
-            title={showDismissed ? 'Hide dismissed leads' : 'Show leads dismissed from this Inbox'}
-            style={{
-              padding: '5px 12px', borderRadius: T.radius.pill,
-              border: T.border.thin,
-              background: showDismissed ? T.surface.raised : 'transparent',
-              fontSize: '12px', fontWeight: showDismissed ? 500 : 400,
-              color: showDismissed ? T.ink.primary : T.ink.muted,
-              cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-              lineHeight: 'inherit', flexShrink: 0,
-            }}>
-            Dismissed · {dismissedRows.length}
-          </button>
-        )}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
@@ -1489,7 +1530,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           precise outcome the picker prompt exists to avoid. When a location is
           required, always fall through to the sections branch so the transfer
           queue and the prompt render. */}
-      {!locationRequired && transfer.length === 0 && fresh.length === 0 && working.length === 0 ? (
+      {!locationRequired && transfer.length === 0 && fresh.length === 0 && working.length === 0 && dismissedRows.length === 0 ? (
         hiddenByFilters > 0 ? null : (
         // A filter is nominally active but nothing New/Attempting is hidden by
         // it (hidden === 0 → no badge to contradict): FilteredEmpty still names
@@ -1588,31 +1629,33 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               </div>
             )}
           </div>
+
+          {/* Dismissed — the third band. Same heading treatment as the two
+              above, so the count is simply part of how the Inbox reads rather
+              than something an owner has to go looking for. Absent entirely at
+              zero: a permanent "DISMISSED · 0" would be chrome that never means
+              anything, and the band exists to say something is here. */}
+          {dismissedRows.length > 0 && (
+            <div id="bee-inbox-sec-dismissed" data-testid="inbox-dismissed-section" style={{ scrollMarginTop: '12px' }}>
+              <SectionLabel glyph={<IconCheck size={13} />} color={T.ink.secondary}
+                label="Dismissed" count={dismissedRows.length} hint="Set aside — still live"
+                expanded={dismissedExpanded} onToggle={toggleDismissed} />
+              {dismissedExpanded && (
+                <div style={dismissedShellStyle}>
+                  {/* The reassurance leads, because the fear a dismissed lead
+                      creates is "did I lose her?" and the answer is no. */}
+                  <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, margin: '0 0 10px', maxWidth: '52ch' }}>
+                    Still live leads, still on your Client List. Put anyone back who shouldn&apos;t have left — or bin the ones you&apos;re done with.
+                  </p>
+                  <div style={dismissedCardStyle}>
+                    {dismissedRows.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" dismissed />)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           </>
           )}
-        </div>
-      )}
-
-      {/* Dismissed — the set-aside shelf. Rendered OUTSIDE the empty/sections
-          ternary above on purpose: an Inbox with nothing live in it still has
-          to be able to show what is hidden, and inside that branch the empty
-          state would win and the shelf would vanish exactly when it is most
-          needed. Gated on !locationRequired for the same reason the sections
-          are — on 'All Locations' no per-location leads are loaded at all. */}
-      {!locationRequired && showDismissed && dismissedRows.length > 0 && (
-        <div id="bee-inbox-sec-dismissed" data-testid="inbox-dismissed-section" style={dismissedShellStyle}>
-          <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.secondary, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ display: 'inline-flex', flexShrink: 0 }}><IconCheck size={13} /></span>
-            Dismissed · {dismissedRows.length}
-          </p>
-          {/* Plain language, and the reassurance first: the fear a dismissed
-              lead creates is "did I lose her?", and the answer is no. */}
-          <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, margin: '5px 0 10px', maxWidth: '52ch' }}>
-            Set aside from this list. They&apos;re still live leads and still on your Client List — put anyone back who shouldn&apos;t have left.
-          </p>
-          <div style={dismissedCardStyle}>
-            {dismissedRows.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" dismissed />)}
-          </div>
         </div>
       )}
 
