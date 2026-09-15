@@ -443,8 +443,8 @@
       ],
       "note": "The current Clients surface. HiveScreen in BeeHub.jsx is the older board that still renders for roles without beta access — check components/hive/shared/betaGate.js before assuming which one a reporter is looking at.",
       "lines": [
-        147,
-        1084
+        148,
+        1114
       ]
     },
     {

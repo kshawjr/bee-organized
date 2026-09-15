@@ -308,27 +308,37 @@ describe('optimistic state survives a concurrent refetch', () => {
 })
 
 describe('channel scoping + lifecycle', () => {
+  // HiveShell opens MORE THAN ONE channel now: engagements (this suite) and
+  // touchpoints (someone else's logged call, beta-touchpoints-realtime). These
+  // assertions were written when it opened exactly one, and `channels.length`
+  // was standing in for "the engagements subscription is the only one, and it
+  // is right". Only the second half was ever the point, so they now select the
+  // engagements channel by TABLE rather than by position — which says what
+  // they mean and stops a future third subscription breaking them again.
+  const engChannels = () => channels.filter((c: any) => c.config?.table === 'engagements')
+
   it('scopes the channel to a real locFilter uuid', async () => {
     serverRows = []
     await mountShell([ENG()], { locFilter: 'loc-1' })
-    expect(channels.length).toBe(1)
-    expect(channels[0].subscribed).toBe(true)
-    expect(channels[0].config.table).toBe('engagements')
-    expect(channels[0].config.event).toBe('UPDATE')
-    expect(channels[0].config.filter).toBe('location_uuid=eq.loc-1')
+    const eng = engChannels()
+    expect(eng.length).toBe(1) // exactly one engagements subscription, still
+    expect(eng[0].subscribed).toBe(true)
+    expect(eng[0].config.table).toBe('engagements')
+    expect(eng[0].config.event).toBe('UPDATE')
+    expect(eng[0].config.filter).toBe('location_uuid=eq.loc-1')
   })
 
   it("subscribes UNFILTERED when locFilter is 'all' (RLS scopes delivery)", async () => {
     serverRows = []
     await mountShell([ENG()], { locFilter: 'all' })
-    expect(channels.length).toBe(1)
-    expect(channels[0].config.filter).toBeUndefined()
+    expect(engChannels().length).toBe(1)
+    expect(engChannels()[0].config.filter).toBeUndefined()
   })
 
   it('a locFilter change tears down the old channel and opens exactly one new', async () => {
     serverRows = []
     await mountShell([ENG()], { locFilter: 'loc-1' })
-    const first = channels[0]
+    const first = engChannels()[0]
 
     await act(async () => {
       root.render(React.createElement(HiveShell, { engagements: [ENG()], locFilter: 'loc-2' }))
@@ -336,8 +346,8 @@ describe('channel scoping + lifecycle', () => {
     await flush()
 
     expect(removed).toContain(first)
-    expect(channels.length).toBe(2) // no duplicate subscription
-    expect(channels[1].config.filter).toBe('location_uuid=eq.loc-2')
+    expect(engChannels().length).toBe(2) // no duplicate subscription
+    expect(engChannels()[1].config.filter).toBe('location_uuid=eq.loc-2')
   })
 
   it('removes the channel on unmount', async () => {

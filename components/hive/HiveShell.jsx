@@ -33,6 +33,7 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters } from './shared/en
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
 import { reconcileSentPolls, pollDelayForElapsed, SEND_POLL_CAP_MS } from './shared/jobberSendPoll'
 import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
+import { useTouchpointsRealtime } from '@/lib/use-touchpoints-realtime'
 import { useStoredState } from './shared/useStoredControls'
 import { nextRecordOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
@@ -449,6 +450,35 @@ export default function HiveShell({
       return { ...prev, [personId]: [...cur, entry] }
     })
   }, [])
+
+  // ── someone ELSE's touchpoint, live ──────────────────────────
+  // The other half of the log-call lift. applyTouchpoint above re-derives the
+  // card for the person who logged the call; this re-derives it for everyone
+  // else watching the same Inbox, so two bees working one worklist stop
+  // chasing the same lead. A webhook's touchpoint arrives by the same door.
+  //
+  // It calls applyTouchpoint ITSELF rather than touching touchPatches — the
+  // whole point. That seam already projects through people-mapper's
+  // touchpointToTimelineEntry and already refuses an id it is holding, so a
+  // remote entry and a local one are the SAME kind of thing by construction,
+  // and mergePeopleTouches (additive-BY-ID) then drops either one the moment
+  // the server snapshot carries it. One opinion about how an entry joins a
+  // person, shared by both sources. A second path here is exactly how the
+  // same call would get counted twice and land the person in the wrong
+  // Inbox touch band.
+  //
+  // The realtime row is already the shape applyTouchpoint expects: the
+  // postgres_changes payload is the raw touchpoints row, and the projector
+  // reads raw column names (kind/method/label/occurred_at/status).
+  //
+  // A touchpoint whose lead is not in `people` merges into nothing —
+  // mergePeopleTouches only ever maps over rows it already has — so an
+  // out-of-scope lead cannot be conjured onto the board by an event.
+  const handleTouchpointRealtime = useCallback((row) => {
+    applyTouchpoint(row.lead_id, row)
+  }, [applyTouchpoint])
+
+  useTouchpointsRealtime(locFilter, handleTouchpointRealtime)
 
   // ── revalidation: reconcile a fresh open set into serverRevalidated ──
   // The MERGE half of the refresh fix (the pure logic lives in
