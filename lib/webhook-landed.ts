@@ -39,8 +39,18 @@
 //   *_DESTROY          → the DESTROY_SPECS columns are actually null on
 //                        the matched lead ('na' when no lead matched —
 //                        a documented no-op, nothing to verify)
-//   PROPERTY_CREATE/   → lead.jobber_property_id points at this property
-//   PROPERTY_UPDATE      ('na' when no lead matched)
+//   PROPERTY_CREATE/   → the lead HOLDS this property, in either of the two
+//   PROPERTY_UPDATE      places the handler can put it: its primary link
+//                        (jobber_property_id), OR an entry in
+//                        former_addresses with this jobber_property_id —
+//                        the drift and other-address branches never move
+//                        the link (the d8aa5ef stomp guard). 'na' when no
+//                        lead matched, or the note is one of the handler's
+//                        own PROPERTY_NOOP_NOTES (it wrote nothing on purpose)
+//   PROPERTY_DESTROY   → primary case: the DESTROY_SPECS link is null.
+//                        Other-address case: that entry is retired and the
+//                        link is not this property. 'na' for no lead, or a
+//                        PROPERTY_NOOP_NOTES no-op (already retired)
 //   APP_DISCONNECT     → locations row shows jobber_connected=false
 //   CLIENT_UPDATE      → 'na' (field refresh; no intended state transition)
 //   everything else    → 'na' (processed-only)
@@ -61,9 +71,11 @@ import {
 } from './engagements'
 import {
   DESTROY_SPECS,
+  PROPERTY_NOOP_NOTES,
   type HandlerCtx,
   type HandlerResult,
 } from './jobber-webhook-handlers'
+import { isRetiredAddress } from './lead-address'
 
 export type LandedStatus = 'landed' | 'not_landed' | 'na'
 
@@ -113,6 +125,29 @@ async function checkDestroyLanded(
     : 'not_landed'
 }
 
+// Where a lead holds a property, in one re-read: is it the primary link, and
+// which entry among the OTHER addresses carries it (if any). Same match the
+// handler's own lookup makes — raw array, id compared as a string.
+async function readPropertyHolding(leadId: string, propertyId: string) {
+  const { data: lead } = await supabaseService
+    .from('leads')
+    .select(['former_addresses', ...DESTROY_SPECS.PROPERTY_DESTROY.nulls].join(', '))
+    .eq('id', leadId)
+    .maybeSingle()
+  if (!lead) return null
+  const row = lead as any
+  const list: any[] = Array.isArray(row.former_addresses) ? row.former_addresses : []
+  return {
+    row,
+    primary: row.jobber_property_id != null && String(row.jobber_property_id) === String(propertyId),
+    other: list.find(e => e && String(e.jobber_property_id ?? '') === String(propertyId)) ?? null,
+  }
+}
+
+// The handler said it wrote nothing on purpose, in its own exported words.
+const isPropertyNoop = (note: string | undefined): boolean =>
+  !!note && Object.values(PROPERTY_NOOP_NOTES).some(m => note.includes(m))
+
 export async function checkLanded(
   ctx: Pick<HandlerCtx, 'topic' | 'itemId' | 'location'>,
   result: HandlerResult,
@@ -152,6 +187,19 @@ export async function checkLanded(
         if (archived) return data?.archived_at ? 'landed' : 'not_landed'
         return data && data.archived_at == null ? 'landed' : 'not_landed'
       }
+    }
+
+    // PROPERTY_DESTROY on one of the client's OTHER addresses. The handler
+    // retires that entry and leaves the link alone — the link is a different
+    // property — so the DESTROY_SPECS "is the link null?" check below would
+    // alarm on every correct retire, and pass a failed one whenever the
+    // holder's link happened to be empty. Verify the entry itself. The
+    // primary path (its note says it "nulled" the link) keeps the check below.
+    if (topic === 'PROPERTY_DESTROY' && result.lead_id && !result.note?.includes(': nulled ')) {
+      if (isPropertyNoop(result.note)) return 'na' // already retired
+      const held = await readPropertyHolding(result.lead_id, numeric)
+      if (!held?.other) return 'not_landed'
+      return !held.primary && isRetiredAddress(held.other) ? 'landed' : 'not_landed'
     }
 
     // Destroys — including the soft-destroy fallbacks that UPDATE
@@ -265,14 +313,18 @@ export async function checkLanded(
       case 'PROPERTY_CREATE':
       case 'PROPERTY_UPDATE': {
         if (!result.lead_id) return 'na' // no matching lead — documented no-op
-        const { data: lead } = await supabaseService
-          .from('leads')
-          .select('jobber_property_id')
-          .eq('id', result.lead_id)
-          .maybeSingle()
-        return lead && String(lead.jobber_property_id) === String(numeric)
-          ? 'landed'
-          : 'not_landed'
+        // No usable address / already the primary / already one of their
+        // addresses: the handler wrote nothing on purpose. Nothing to verify.
+        if (isPropertyNoop(result.note)) return 'na'
+        // TWO success shapes. The handler has two places to put a property,
+        // and d8aa5ef forbids it moving the link to reach the second:
+        //   · the primary link IS this property (primary + unlinked branches)
+        //   · an OTHER address carries this id (the drift branch appends
+        //     one; the in-place branch refreshes one)
+        // Asking only the first alarmed on every correct drift write. A
+        // failed drift write leaves neither shape, and stays not_landed.
+        const held = await readPropertyHolding(result.lead_id, numeric)
+        return held && (held.primary || held.other) ? 'landed' : 'not_landed'
       }
       case 'APP_DISCONNECT': {
         const { data: locRow } = await supabaseService

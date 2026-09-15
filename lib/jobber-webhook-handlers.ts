@@ -1280,6 +1280,18 @@ export async function handlePropertyDestroy(ctx: HandlerCtx): Promise<HandlerRes
   return retired ?? primary
 }
 
+// The words a property event uses when it DELIBERATELY writes nothing.
+// lib/webhook-landed.ts imports these to record such an event 'na' — the
+// same words, never a re-typed copy that can drift from what the handler
+// actually writes. A failure note ("could not …") must never contain one.
+export const PROPERTY_NOOP_NOTES = {
+  noAddress: 'no usable address in Jobber, nothing recorded',
+  matchesPrimary: 'already this lead\'s primary address, nothing recorded',
+  matchesExisting: 'already on the client as other address #',
+  alreadyRetired: 'that address is already retired, left as is',
+  notHeld: 'not held as one of their addresses (no-op)',
+} as const
+
 // The holder of a destroyed property among their OTHER addresses, if any.
 // Returns null when nothing holds it, so the caller keeps the existing
 // no-op note. Fails soft: the jsonb containment filter errors while the
@@ -1315,7 +1327,7 @@ async function retireDestroyedOtherAddress(
   if (plan.action === 'skip') {
     return {
       ...base,
-      note: `PROPERTY_DESTROY: property=${numeric} on lead ${holder.id} — ${plan.reason === 'already_retired' ? 'that address is already retired, left as is' : 'not held as one of their addresses (no-op)'}`,
+      note: `PROPERTY_DESTROY: property=${numeric} on lead ${holder.id} — ${plan.reason === 'already_retired' ? PROPERTY_NOOP_NOTES.alreadyRetired : PROPERTY_NOOP_NOTES.notHeld}`,
     }
   }
 
@@ -1386,9 +1398,9 @@ async function recordDriftedProperty(
 
   if (plan.action === 'skip') {
     const why =
-      plan.reason === 'no_address' ? 'no usable address in Jobber, nothing recorded'
-      : plan.reason === 'matches_primary' ? 'already this lead\'s primary address, nothing recorded'
-      : `already on the client as other address #${plan.index + 1}${plan.retired ? ' (retired, left retired)' : ''}, nothing recorded`
+      plan.reason === 'no_address' ? PROPERTY_NOOP_NOTES.noAddress
+      : plan.reason === 'matches_primary' ? PROPERTY_NOOP_NOTES.matchesPrimary
+      : `${PROPERTY_NOOP_NOTES.matchesExisting}${plan.index + 1}${plan.retired ? ' (retired, left retired)' : ''}, nothing recorded`
     return { ...base, note: `${noun}: ${tail} — ${why}` }
   }
 
