@@ -431,3 +431,299 @@ describe('BeeHub is wired to the seam this suite tests', () => {
     expect(revalidate).not.toContain('leadsRealtime')
   })
 })
+
+// ── the arrival is VISIBLE, COUNTED, and SCOPED ───────────────────
+// The INSERT path above proves a row lands. This block pins the three things
+// Kevin asked for on top of it, each of which can regress independently:
+//   · the card rings briefly as it appears (his choice over a "1 new lead"
+//     banner) — and rings by REUSING _realtimePulse, not a second mechanism
+//   · the nav badge moves WITH the band count. A card that appears while the
+//     badge still says 0 is worse than no card at all.
+//   · a lead the viewer may not see never leaks in — enforced by the ONE
+//     shared exclusion predicate, not a second opinion local to the insert.
+import { isInboxCountable } from '@/components/hive/shared/inboxCountable'
+import { isSoftRemovedFromInbox } from '@/components/hive/shared/inboxSoftRemoval'
+
+// HiveShell owns the nav badge; InboxScreen owns the bands. They are different
+// components reading the SAME `people`, which is exactly why they can drift —
+// #89 was that drift. This harness holds both over one state tree, so an
+// assertion that the two moved together is a real claim about the app and not
+// about a number this test computed for itself: the badge line below is
+// HiveShell's inboxCount, transcribed.
+function BadgeHarness({ locFilter, initialPeople = [] as any[], serverRows = null as any }: any) {
+  const [people, setPeople] = React.useState(initialPeople)
+  // BeeHub's prop→state sync after router.refresh(). Present so the refetch
+  // race below is the REAL one (a server snapshot replacing the array), not a
+  // second realtime event standing in for it.
+  React.useEffect(() => { if (Array.isArray(serverRows)) setPeople(serverRows) }, [serverRows])
+  const onChange = React.useCallback(async ({ type, leadId }: any) => {
+    if (type === 'DELETE') { setPeople(prev => removeRealtimePerson(prev, leadId)); return }
+    const res = await fetch(`/api/leads/${leadId}`, { credentials: 'include' })
+    if (!res.ok) return
+    const { person: fresh } = await res.json()
+    if (!fresh) return
+    setPeople(prev => upsertRealtimePerson(prev, fresh, Date.now()))
+  }, [])
+  useLeadsRealtime(locFilter, onChange)
+  // ── HiveShell's inboxCount, transcribed ──
+  const scopedPeople = locFilter === 'all' ? people : people.filter((p: any) => p.locationId === locFilter)
+  const badge = scopedPeople.reduce((n: number, p: any) => n + (isInboxCountable(p, new Set(), new Set(), Date.now()) ? 1 : 0), 0)
+  return (
+    <>
+      <div data-testid="nav-badge">{`badge:${badge}`}</div>
+      <InboxScreen people={people} engagements={[]} locFilter={locFilter} />
+    </>
+  )
+}
+
+const mountBadge = async (props: any) => {
+  container = document.createElement('div')
+  document.body.appendChild(container)
+  await act(async () => {
+    root = createRoot(container)
+    root.render(<BadgeHarness {...props} />)
+  })
+  await flush()
+}
+
+const badgeText = () => container.querySelector('[data-testid="nav-badge"]')?.textContent || ''
+const pulsingRows = () => container.querySelectorAll('.bee-inbox-row.bee-row-pulse').length
+const rowCount = () => container.querySelectorAll('.bee-inbox-row').length
+
+describe('the card rings as it lands', () => {
+  it('an inserted row carries the arrival pulse', async () => {
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+    expect(pulsingRows()).toBe(0)
+
+    await emit('INSERT', 'p-new')
+
+    expect(text()).toContain('Nora Vance')
+    expect(pulsingRows()).toBe(1)
+  })
+
+  it('rows that were already there do NOT ring — only the arrival', async () => {
+    // The pulse says "this one is new". If every row rang, it would say nothing.
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person({ id: 'p-old', name: 'Old Olive' })] })
+
+    await emit('INSERT', 'p-new')
+
+    expect(rowCount()).toBe(2)
+    expect(pulsingRows()).toBe(1)
+  })
+
+  it('spends _realtimePulse rather than a second highlight of its own', async () => {
+    // Pinned as a SOURCE fact: the row must read the stamp the shared merge
+    // sets. A row that grew its own "isNew" flag would pass the tests above
+    // while quietly becoming the second mechanism this build was told not to
+    // build — and would then drift from the merge that feeds every other lens.
+    const src = readFileSync(join(process.cwd(), 'components/hive/InboxScreen.jsx'), 'utf8')
+    expect(src).toContain('p._realtimePulse')
+    expect(src).toContain('bee-row-pulse')
+  })
+
+  it('a stale stamp does not ring on a later remount', async () => {
+    // _realtimePulse rides the person until the next refetch replaces it, so
+    // without a freshness window the row would ring again every time it
+    // remounted — a filter change, a band move, collapsing Dismissed.
+    const stale = { ...person({ id: 'p-stale', name: 'Stale Stan' }), _realtimePulse: Date.now() - 60_000 }
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [stale] })
+    expect(text()).toContain('Stale Stan')
+    expect(pulsingRows()).toBe(0)
+  })
+})
+
+describe('the badge moves with the band', () => {
+  it('an INSERT moves the band count AND the nav badge together', async () => {
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+    expect(badgeText()).toBe('badge:0')
+    // A wholly empty Inbox renders ONE empty state, not zeroed band headings.
+    expect(text()).toContain('New inquiries land here')
+
+    await emit('INSERT', 'p-new')
+
+    expect(text()).toContain('New · 1')
+    expect(badgeText()).toBe('badge:1') // the card and the count agree (#89)
+  })
+
+  it('an Attempting arrival moves the badge too — the badge is New + Attempting', async () => {
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance', outreachTimeline: [reachOut] })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-new')
+
+    expect(text()).toContain('Attempting · 1')
+    expect(badgeText()).toBe('badge:1')
+  })
+})
+
+describe('an arrival the viewer may not see never leaks in', () => {
+  it('an INSERT that arrives already JUNKED does not appear and is not counted', async () => {
+    leadById['p-junk'] = person({ id: 'p-junk', name: 'Junk Jenny', isJunk: true })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-junk')
+
+    expect(text()).not.toContain('Junk Jenny')
+    // Still wholly empty — the junked arrival created no band at all.
+    expect(text()).toContain('New inquiries land here')
+    expect(badgeText()).toBe('badge:0')
+    expect(rowCount()).toBe(0)
+  })
+
+  it('an INSERT that arrives already DISMISSED stays off the worklist and the badge', async () => {
+    // Dismissed is a BAND, not a deletion (Courtney Grady) — the row is
+    // reachable under a collapsed heading, which is deliberate. What must
+    // never happen is it landing in New/Attempting or inflating the badge.
+    leadById['p-dism'] = person({ id: 'p-dism', name: 'Dismissed Dana', inboxDismissedAt: daysAgo(1) })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-dism')
+
+    expect(text()).toContain('New · 0')
+    expect(text()).toContain('Attempting · 0')
+    expect(badgeText()).toBe('badge:0')
+    expect(rowCount()).toBe(0) // the band is collapsed by default
+    expect(text()).toContain('Dismissed · 1') // by design, not on the worklist
+  })
+
+  it('an INSERT that arrives SNOOZED does not appear', async () => {
+    leadById['p-snz'] = person({ id: 'p-snz', name: 'Snoozed Sam', snoozeUntil: new Date(now + 86400000).toISOString() })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-snz')
+
+    expect(text()).not.toContain('Snoozed Sam')
+    expect(badgeText()).toBe('badge:0')
+  })
+
+  it("another location's lead is not delivered, so nothing to exclude downstream", async () => {
+    leadById['p-far'] = person({ id: 'p-far', name: 'Far Away', locationId: 'loc-uuid-9' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-far', 'loc-uuid-9')
+
+    expect(text()).not.toContain('Far Away')
+    expect(badgeText()).toBe('badge:0')
+    expect(leadFetches).toEqual([])
+  })
+
+  it("on 'all', a delivered lead outside the viewer's scope is still excluded by the shared predicate", async () => {
+    // The mutation target. 'all' subscribes UNFILTERED, so exclusion here is
+    // the PREDICATE's job, not the channel's — this is the case where letting
+    // the insert past isSoftRemovedFromInbox would put a junked lead on a
+    // worklist. Both the list and the badge must refuse it.
+    leadById['p-junk'] = person({ id: 'p-junk', name: 'Junk Jenny', isJunk: true, locationId: 'loc-uuid-9' })
+    await mountBadge({ locFilter: 'all', initialPeople: [] })
+
+    await emit('INSERT', 'p-junk', 'loc-uuid-9')
+
+    expect(text()).not.toContain('Junk Jenny')
+    expect(badgeText()).toBe('badge:0')
+  })
+
+  it('the Inbox asks the SHARED predicate rather than re-deciding visibility', async () => {
+    // Source pin: one opinion about what is hidden, shared with the badge.
+    const src = readFileSync(join(process.cwd(), 'components/hive/InboxScreen.jsx'), 'utf8')
+    expect(src).toContain('isSoftRemovedFromInbox(')
+    // and the predicate really does hide these — the thing the rows rely on
+    expect(isSoftRemovedFromInbox(person({ isJunk: true }), now)).toBe(true)
+    expect(isSoftRemovedFromInbox(person({ inboxDismissedAt: daysAgo(1) }), now)).toBe(true)
+    expect(isSoftRemovedFromInbox(person(), now)).toBe(false)
+  })
+})
+
+describe('an INSERT racing a refetch renders one card, not two', () => {
+  it('a server snapshot that already contains the arrival does not double it', async () => {
+    // The real race: the INSERT lands live, then router.refresh() delivers a
+    // fresh people array that ALSO contains the lead. Wholesale replacement,
+    // so the id can only appear once — pinned because an append-based merge
+    // (or a merge layered on top of the refresh) would show Nora twice.
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-new')
+    expect(text()).toContain('New · 1')
+
+    await act(async () => {
+      root.render(<BadgeHarness locFilter="loc-uuid-1" serverRows={[person({ id: 'p-new', name: 'Nora Vance' })]} />)
+    })
+    await flush()
+
+    expect(text()).toContain('New · 1')
+    expect(badgeText()).toBe('badge:1')
+    expect(rowCount()).toBe(1)
+  })
+
+  it('a duplicate INSERT burst for the same lead still renders one card', async () => {
+    leadById['p-new'] = person({ id: 'p-new', name: 'Nora Vance' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [] })
+
+    await emit('INSERT', 'p-new')
+    await emit('INSERT', 'p-new')
+    await emit('INSERT', 'p-new')
+
+    expect(rowCount()).toBe(1)
+    expect(text()).toContain('New · 1')
+    expect(badgeText()).toBe('badge:1')
+  })
+})
+
+describe('UPDATE and DELETE behave exactly as they did before this build', () => {
+  it('an UPDATE replaces a row in place rather than adding one', async () => {
+    leadById['p1'] = person({ name: 'Renamed Rita' })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person({ name: 'Sarah Mitchell' })] })
+    expect(text()).toContain('Sarah Mitchell')
+
+    await emit('UPDATE', 'p1')
+
+    expect(text()).toContain('Renamed Rita')
+    expect(text()).not.toContain('Sarah Mitchell')
+    expect(rowCount()).toBe(1)
+    expect(badgeText()).toBe('badge:1')
+  })
+
+  it('an UPDATE that adds a reach-out moves the row New → Attempting', async () => {
+    leadById['p1'] = person({ outreachTimeline: [reachOut] })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+    expect(text()).toContain('New · 1')
+
+    await emit('UPDATE', 'p1')
+
+    expect(text()).toContain('New · 0')
+    expect(text()).toContain('Attempting · 1')
+    expect(badgeText()).toBe('badge:1') // still countable, different band
+  })
+
+  it('an UPDATE that junks a lead removes it from the list and the badge', async () => {
+    leadById['p1'] = person({ isJunk: true })
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+    expect(badgeText()).toBe('badge:1')
+
+    await emit('UPDATE', 'p1')
+
+    expect(rowCount()).toBe(0)
+    expect(badgeText()).toBe('badge:0')
+  })
+
+  it('a DELETE drops the row and the badge follows — no refetch attempted', async () => {
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+    expect(text()).toContain('Sarah Mitchell')
+    expect(badgeText()).toBe('badge:1')
+
+    await emit('DELETE', 'p1')
+
+    expect(text()).not.toContain('Sarah Mitchell')
+    expect(badgeText()).toBe('badge:0')
+    expect(leadFetches).toEqual([]) // DELETE is terminal — nothing to enrich
+  })
+
+  it('a DELETE for a lead it never had is a no-op', async () => {
+    await mountBadge({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+    await emit('DELETE', 'p-unknown')
+    expect(text()).toContain('Sarah Mitchell')
+    expect(rowCount()).toBe(1)
+  })
+})

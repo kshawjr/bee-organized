@@ -131,6 +131,23 @@ select{-webkit-appearance:none}
   100% { transform: translateX(100%)  scaleX(0.35); }
 }
 
+/* Realtime arrival pulse — a row that landed via Supabase Realtime rings once
+   as it appears, so an owner watching the Inbox sees WHICH card is new rather
+   than having to spot the difference. Kevin, 2026-09-15: the card just appears,
+   briefly highlighted — deliberately NOT a "1 new lead" banner.
+
+   The keyframes carry the name BeeHub's classic person list already animates
+   inline (components/BeeHub.jsx), because there is exactly ONE arrival
+   highlight in this app and both surfaces spend the same one. The stamp behind
+   it is `_realtimePulse`, set by upsertRealtimePerson — this class is only the
+   paint, never a second source of truth about what is new.
+
+   ONE-SHOT, not looping: no `infinite`, so it rings once and stops. Box-shadow
+   only — it paints outside the row's own box and so cannot reflow the list or
+   shift a neighbouring row under a cursor mid-click. */
+@keyframes beehubRealtimePulse { 0%,100% { box-shadow:none } 30% { box-shadow:0 0 0 3px rgba(16,185,129,0.35) } }
+.bee-row-pulse { animation: beehubRealtimePulse 1.5s ease; }
+
 /* prefers-reduced-motion: every looping animation above stops. The elements
    still RENDER — a static bee + pot, a solid bar — because hiding them would
    leave those users with no loading feedback at all, which is worse than an
@@ -139,5 +156,8 @@ select{-webkit-appearance:none}
   .bee-loader-orbit,
   .bee-loader-counter,
   .bee-loader-pot,
-  .bee-scope-bar { animation: none !important; }
+  .bee-scope-bar,
+  /* The arrival pulse is decoration: the row still APPEARS for these users,
+     it just doesn't ring. Nothing is lost but the animation. */
+  .bee-row-pulse { animation: none !important; }
 }

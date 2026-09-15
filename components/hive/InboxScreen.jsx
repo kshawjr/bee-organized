@@ -114,6 +114,13 @@ const freshlySent = (p) => /^(REQ|JOB)-/.test(p.jobberRef || '')
 // render would defeat the prop's referential stability for no reason.
 const EMPTY_SET = new Set()
 
+// How long a Realtime arrival stays "fresh" enough to ring. Comfortably longer
+// than the 1.5s animation (so a row that paints a beat after the merge still
+// gets its full pulse) and far shorter than a session (so a remount minutes
+// later is calm). The CSS owns the animation's own duration; this only decides
+// whether the class goes on at all.
+const REALTIME_PULSE_MS = 6000
+
 // The after-Send waiting state (issue 155), shown in place of the row's action
 // cluster once a lead has been sent to Jobber. A card can't leave the Inbox
 // until its engagement exists, and the Jobber webhook founds that ~11s later
@@ -1027,6 +1034,20 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // second row component is the #89 lesson applied to markup: two copies drift.
   function Row({ p, family, pill, dismissed = false }) {
     const isTransfer = pill === 'Transfer'
+    // Arrival pulse — the row rings once when it landed via Realtime. The
+    // stamp is upsertRealtimePerson's `_realtimePulse`, REUSED rather than
+    // re-derived: this row has no second opinion about what is new, and no
+    // second highlight mechanism exists to drift from it.
+    //
+    // WINDOWED on purpose. `_realtimePulse` rides the person object until the
+    // next refetch replaces it, so an unwindowed test would ring again every
+    // time the row happens to remount — collapsing the Dismissed band, a
+    // filter change, a band move. Comparing against a fresh clock means the
+    // stamp only paints while it is genuinely fresh, and a remount minutes
+    // later renders a calm row. Read at render (not the memoised `nowMs`,
+    // which is a whole-screen snapshot) so the window is measured from the
+    // moment this row actually paints.
+    const pulsed = !!p._realtimePulse && (Date.now() - p._realtimePulse) < REALTIME_PULSE_MS
     // Per-section card nav (issue 134, Inbox follow-up): a row click hands its
     // SECTION's displayed row ids as the profile's siblings, so the card's ‹ ›
     // chevrons page card-to-card within this section in the on-screen order —
@@ -1223,7 +1244,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       </>
     )
     return (
-      <div className="bee-inbox-row"
+      <div className={pulsed ? 'bee-inbox-row bee-row-pulse' : 'bee-inbox-row'}
         onClick={() => {
           // A fired long-press already entered selection — swallow the
           // click that follows the pointer release.
