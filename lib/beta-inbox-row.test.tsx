@@ -7,7 +7,7 @@
 //     the bordered text pills are gone
 //   - behavior preserved: Log call still POSTs the reach_out touchpoint,
 //     Send still hands the person to onSendToJobber, More still opens
-//     the existing overflow (Junk / Snooze / Dismiss intact)
+//     the existing overflow (the four dispositions intact)
 //   - phone line: tel: link with DIGITS-ONLY href (phone_normalized
 //     first, client-side strip as fallback) displaying the FORMATTED
 //     phone; tapping it never opens the client card
@@ -139,13 +139,13 @@ describe('ghost icon actions', () => {
     await sent.unmount()
   })
 
-  it('More opens the existing overflow — Junk / Snooze / Dismiss intact (portaled past the card clip)', async () => {
+  it('More opens the existing overflow — the four dispositions intact (portaled past the card clip)', async () => {
     const m = await mount(inbox([person()]))
     await click(byLabel(m.host, 'More')!)
     const menu = document.querySelector('[data-bee-row-menu]')
     expect(menu, 'menu rides the portal to <body>').toBeTruthy()
-    for (const label of ['Snooze until tomorrow', 'Snooze until next week', 'Dismiss', 'Mark as junk']) {
-      expect([...menu!.querySelectorAll('button')].some(b => (b.textContent || '').trim() === label),
+    for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as junk'] /* snooze removed 2026-09-16 */) {
+      expect([...menu!.querySelectorAll('button')].some(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === label),
         `overflow must still offer "${label}"`).toBe(true)
     }
     await m.unmount()

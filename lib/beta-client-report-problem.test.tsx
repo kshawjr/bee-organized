@@ -59,9 +59,12 @@ const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 })
 const btn = (host: Element, text: string) =>
-  [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text)
+  [...host.querySelectorAll('button')].find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === text)
+// Menu rows carry a DESCRIPTION under the label since the 2026-09-16 rework,
+// so a row's textContent is label + sentence. Read the label's own span.
 const menuLabels = (host: Element) =>
-  [...host.querySelectorAll('button')].map(b => (b.textContent || '').trim())
+  [...host.querySelectorAll('button')].map(b =>
+    ((b.querySelector('span')?.textContent) || b.textContent || '').trim())
 
 const mountProfile = (over: any = {}) => mount(
   <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}}

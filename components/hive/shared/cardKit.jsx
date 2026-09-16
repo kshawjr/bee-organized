@@ -142,6 +142,10 @@ export function ActionRow({ children }) {
 
 export function CardMenu({ items = [], label = 'More' }) {
   const [open, setOpen] = useState(false)
+  // Which item has armed its confirmation. Disarms whenever the menu closes,
+  // so a stale "yes" can never fire against a shut menu.
+  const [armed, setArmed] = useState(null)
+  useEffect(() => { if (!open) setArmed(null) }, [open])
   useEffect(() => {
     if (!open) return
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
@@ -173,7 +177,33 @@ export function CardMenu({ items = [], label = 'More' }) {
             border: T.border.thin, borderRadius: T.radius.inset,
             boxShadow: T.shadow.pop, padding: '4px',
           }}>
-            {items.map(it => <MenuRow key={it.key} item={it} close={() => setOpen(false)} />)}
+            {(() => {
+              const armedItem = armed && items.find(i => i.key === armed)
+              if (armedItem) {
+                // The confirmation stands IN PLACE OF the menu — the same
+                // in-menu pattern the Inbox row menu uses, and deliberately
+                // not window.confirm(), which says "localhost says" and
+                // cannot name the client or point at another action.
+                return (
+                  <div data-testid={`menu-confirm-${armedItem.key}`} style={{ padding: '4px 2px' }}>
+                    <p style={{ padding: '4px 10px 6px', fontSize: '11.5px', lineHeight: 1.45,
+                      color: armedItem.danger ? T.state.danger.strong : T.ink.secondary, maxWidth: '32ch' }}>
+                      {armedItem.confirm.prompt}
+                    </p>
+                    <MenuRow close={() => setOpen(false)} onArm={() => {}}
+                      item={{ key: `${armedItem.key}-yes`, testid: `menu-confirm-${armedItem.key}-yes`,
+                        label: armedItem.confirm.yes, danger: armedItem.danger,
+                        onPick: () => { setArmed(null); armedItem.onPick() } }} />
+                    <MenuRow close={() => {}} onArm={() => {}}
+                      item={{ key: `${armedItem.key}-no`, testid: `menu-confirm-${armedItem.key}-no`,
+                        label: armedItem.confirm.no, onPick: () => setArmed(null) }} />
+                  </div>
+                )
+              }
+              return items.map(it => it.heading
+                ? <MenuHeading key={`h-${it.key}`}>{it.heading}</MenuHeading>
+                : <MenuRow key={it.key} item={it} close={() => setOpen(false)} onArm={setArmed} />)
+            })()}
           </div>
         </>
       )}
@@ -181,23 +211,54 @@ export function CardMenu({ items = [], label = 'More' }) {
   )
 }
 
-function MenuRow({ item, close }) {
+// A row may carry a DESCRIPTION — one line saying what the action actually
+// does — and may ARM A CONFIRMATION instead of firing. Both arrived with the
+// lead-menu rework: the four dispositions looked alike, fired instantly, and
+// Close vs Junk is the confusion that does real damage. An item with
+// `confirm` replaces the menu body with its prompt rather than calling
+// onPick; the caller supplies the words (shared/leadDispositions), so the
+// Inbox row menu and this one cannot describe the same action differently.
+function MenuRow({ item, close, onArm }) {
   const [hover, setHover] = useState(false)
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); close(); item.onPick() }}
+      data-testid={item.testid}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (item.confirm) { onArm(item.key); return }  // arm, do not write
+        close(); item.onPick()
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         display: 'block', width: '100%', textAlign: 'left',
-        padding: '8px 10px', border: 'none', borderRadius: T.radius.control,
+        padding: item.description ? '7px 10px' : '8px 10px',
+        border: 'none', borderRadius: T.radius.control,
         background: hover ? T.surface.hover : 'transparent',
-        fontSize: '13px', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
-        color: item.danger ? T.state.danger.strong : T.ink.primary,
+        fontFamily: 'inherit', cursor: 'pointer',
       }}
     >
-      {item.label}
+      <span style={{ display: 'block', fontSize: '13px', fontWeight: 500,
+        color: item.danger ? T.state.danger.strong : T.ink.primary }}>
+        {item.label}
+      </span>
+      {item.description && (
+        <span style={{ display: 'block', marginTop: '2px', fontSize: '11.5px', lineHeight: 1.4,
+          color: T.ink.quiet, maxWidth: '30ch' }}>
+          {item.description}
+        </span>
+      )}
     </button>
+  )
+}
+
+// The group heading. A label, not a control: not focusable, not clickable.
+function MenuHeading({ children }) {
+  return (
+    <p style={{ padding: '7px 10px 3px', fontSize: '10.5px', fontWeight: 600,
+      letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted }}>
+      {children}
+    </p>
   )
 }
 

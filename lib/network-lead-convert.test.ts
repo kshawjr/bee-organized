@@ -270,7 +270,14 @@ describe('F) Home needs-transfer counts the same way in both scopes', () => {
 describe('G) the door is wired where it was specified', () => {
   it('the Inbox row ··· menu carries ONE entry, not two modes', () => {
     const inbox = src('components/hive/InboxScreen.jsx')
-    expect(inbox).toContain('Add to Network…')
+    // The LABEL moved into shared/leadDispositions with the 2026-09-16 menu
+    // rework, so both menus spend one wording; the Inbox now references it
+    // rather than spelling it. The one-entry-not-two rule is unchanged, and
+    // is what this still asserts.
+    const vocab = src('components/hive/shared/leadDispositions.js')
+    expect(vocab).toContain('Add to Network…')
+    expect(vocab).not.toContain('Move to Network…')
+    expect(inbox).toContain('DISPOSITIONS.network.label')
     expect(inbox).not.toContain('Move to Network…')
     expect(inbox).toContain('<NetworkConvertSheet')
   })

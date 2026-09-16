@@ -115,8 +115,16 @@ const moreButton = (host: Element) =>
 
 // The open menu portals to <body> (the cards clip overflow), so its
 // items are found through the portal container, not the mount host.
+// Menu rows now carry a DESCRIPTION under the label (the 2026-09-16 rework),
+// so a row's textContent is label + sentence and an exact match no longer
+// works. Match the label's own span, which is the row's first child span.
 const menuButton = (text: string) =>
-  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
+  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => {
+    const lbl = b.querySelector('span')
+    return ((lbl?.textContent) || b.textContent || '').trim() === text
+  })
+const menuByTestId = (id: string) =>
+  document.querySelector(`[data-bee-row-menu] [data-testid="${id}"]`) as HTMLButtonElement | null
 
 const openMenuAnd = async (host: Element, label: string) => {
   await click(moreButton(host)!)
@@ -127,8 +135,8 @@ const openMenuAnd = async (host: Element, label: string) => {
 // confirm, and only the confirm writes. This drives the full two-step.
 const junkVia = async (host: Element) => {
   await click(moreButton(host)!)
-  await click(menuButton('Mark as junk')!)          // arms confirm — no write
-  await click(menuButton('Confirm — mark as junk')!) // the actual junk
+  await click(menuByTestId('menu-junk')!)            // arms confirm — no write
+  await click(menuByTestId('menu-confirm-junk-yes')!) // the actual junk
 }
 
 beforeEach(() => {
@@ -146,13 +154,13 @@ describe('Mark as junk', () => {
 
     // First pick only ARMS the confirm — no write, row still present.
     await click(moreButton(m.host)!)
-    await click(menuButton('Mark as junk')!)
+    await click(menuByTestId('menu-junk')!)
     expect(patches).toHaveLength(0)
-    expect(menuButton('Confirm — mark as junk')).toBeTruthy()
+    expect(menuByTestId('menu-confirm-junk-yes')).toBeTruthy()
     expect(m.host.textContent).toContain('Sarah Mitchell')
 
     // The confirm does the write.
-    await click(menuButton('Confirm — mark as junk')!)
+    await click(menuByTestId('menu-confirm-junk-yes')!)
     expect(patches).toEqual([{ id: p.id, body: { is_junk: true } }])
     expect(m.host.textContent).not.toContain('Sarah Mitchell')
     // Destructive undo window is 6s (host honors an explicit duration).
@@ -168,8 +176,8 @@ describe('Mark as junk', () => {
     const p = person()
     const m = await mount(inbox([p]))
     await click(moreButton(m.host)!)
-    await click(menuButton('Mark as junk')!)
-    await click(menuButton('Keep lead')!)
+    await click(menuByTestId('menu-junk')!)
+    await click(menuByTestId('menu-confirm-junk-no')!)
     expect(patches).toHaveLength(0)
     expect(m.host.textContent).toContain('Sarah Mitchell')
     await m.unmount()
@@ -198,34 +206,12 @@ describe('Mark as junk', () => {
 
 // ═══ snooze ════════════════════════════════════════════════
 describe('Snooze', () => {
-  it('PATCHes a future date-only snoozed_until with NO stage write, undo clears', async () => {
-    const p = person()
-    const m = await mount(inbox([p]))
-
-    await openMenuAnd(m.host, 'Snooze until tomorrow')
-
-    expect(patches).toHaveLength(1)
-    const body = patches[0].body
-    expect(Object.keys(body)).toEqual(['snoozed_until']) // no stage, no note — Classic's coupling untouched
-    expect(body.snoozed_until).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(new Date(body.snoozed_until).getTime()).toBeGreaterThan(now)
-    expect(m.host.textContent).not.toContain('Sarah Mitchell')
-
-    await clickUndo(lastToast)
-    expect(patches[1]).toEqual({ id: p.id, body: { snoozed_until: null } })
-    expect(m.host.textContent).toContain('Sarah Mitchell')
-    await m.unmount()
-  })
-
-  it('"Snooze until next week" lands ~7 days out', async () => {
-    const m = await mount(inbox([person()]))
-    await openMenuAnd(m.host, 'Snooze until next week')
-    const t = new Date(patches[0].body.snoozed_until).getTime()
-    expect(t).toBeGreaterThan(now + 5 * 86400000)
-    expect(t).toBeLessThan(now + 9 * 86400000)
-    await m.unmount()
-  })
-
+  // The two tests that drove "Snooze until tomorrow" / "next week" are GONE
+  // with the menu items (2026-09-16): snooze had been set 8 times in the
+  // platform's life against 157 dismissals, so it lost its two of six slots.
+  // Everything that READS a snooze stays, and the tests below still pin it —
+  // future-snoozed rows are skipped, woken ones surface. That is what
+  // protects the 3 leads snoozed right now.
   it('future-snoozed rows from props are skipped; past snoozes surface again', async () => {
     const future = person({ name: 'Future Snooze', snoozeUntil: daysAhead(3).slice(0, 10) })
     const past = person({ name: 'Woken Up', snoozeUntil: daysAgo(3).slice(0, 10) })
@@ -242,7 +228,11 @@ describe('Dismiss', () => {
     const p = person()
     const m = await mount(inbox([p]))
 
+    // Dismiss now ARMS a confirmation before writing (2026-09-16) — it used
+    // to fire on the menu pick.
     await openMenuAnd(m.host, 'Dismiss')
+    expect(patches).toHaveLength(0)
+    await click(menuByTestId('menu-confirm-dismiss-yes')!)
 
     expect(patches).toHaveLength(1)
     const iso = patches[0].body.inbox_dismissed_at
@@ -321,14 +311,12 @@ describe('wiring', () => {
     expect(hub).toMatch(/setToast\(null\),\s*toast\.duration\s*\|\|\s*3000/)
   })
 
-  it('snooze / dismiss undos keep the 3s default — only junk opts into 6s', async () => {
-    const m = await mount(inbox([person()]))
-    await openMenuAnd(m.host, 'Snooze until tomorrow')
-    expect(lastToast.duration).toBeUndefined()
-    await m.unmount()
-
+  it('the dismiss undo keeps the 3s default — only junk opts into 6s', async () => {
+    // The snooze half is gone with the menu item; dismiss still carries the
+    // default, and junk still opts into 6s below.
     const m2 = await mount(inbox([person()]))
     await openMenuAnd(m2.host, 'Dismiss')
+    await click(menuByTestId('menu-confirm-dismiss-yes')!)
     expect(lastToast.duration).toBeUndefined()
     await m2.unmount()
   })

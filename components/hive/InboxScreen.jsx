@@ -54,6 +54,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 're
 import { createPortal } from 'react-dom'
 import { deriveClientStatus, enquiryDateOf, isBackAgain } from './shared/clientStatus'
 import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
+import { DISPOSITIONS, DISPOSITION_GROUPS, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
 import { describeDismissal, dismissalLine, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { isInboxCountable } from './shared/inboxCountable'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
@@ -309,21 +310,61 @@ function AgeInline({ created, nowMs, style = {} }) {
 // One row of the ··· overflow menu. stopPropagation keeps the click off
 // the row (which opens the ClientProfile) and off the document
 // outside-click closer.
-function MenuRow({ label, danger, disabled, onPick }) {
+function MenuRow({ label, description, danger, disabled, onPick, testid }) {
+  // whiteSpace:nowrap is right for a bare verb and WRONG once a row carries a
+  // sentence under it, so the description wraps and the label does not.
   return (
-    <button disabled={disabled}
+    <button disabled={disabled} data-testid={testid}
       onClick={(ev) => { ev.stopPropagation(); onPick() }}
       onMouseEnter={(ev) => { ev.currentTarget.style.background = T.surface.hover }}
       onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent' }}
       style={{
-        display: 'flex', alignItems: 'center', gap: '7px', width: '100%',
-        padding: '8px 10px', border: 'none', background: 'transparent',
-        borderRadius: T.radius.control, fontSize: '13px', fontWeight: 500,
-        fontFamily: 'inherit', color: danger ? T.state.danger.strong : T.ink.primary,
-        cursor: 'pointer', textAlign: 'left', whiteSpace: 'nowrap',
+        display: 'block', width: '100%',
+        padding: '7px 10px', border: 'none', background: 'transparent',
+        borderRadius: T.radius.control, fontFamily: 'inherit',
+        cursor: 'pointer', textAlign: 'left',
       }}>
-      {label}
+      <span style={{ display: 'flex', alignItems: 'center', gap: '7px',
+        fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap',
+        color: danger ? T.state.danger.strong : T.ink.primary }}>
+        {label}
+      </span>
+      {description && (
+        <span style={{ display: 'block', marginTop: '2px', fontSize: '11.5px', lineHeight: 1.4,
+          color: T.ink.quiet, whiteSpace: 'normal', maxWidth: '30ch' }}>
+          {description}
+        </span>
+      )}
     </button>
+  )
+}
+
+// The section heading above each group. Not a button — it is a label, so it
+// is not focusable and not clickable.
+function MenuGroupHeading({ children }) {
+  return (
+    <p style={{ padding: '7px 10px 3px', fontSize: '10.5px', fontWeight: 600,
+      letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted, whiteSpace: 'nowrap' }}>
+      {children}
+    </p>
+  )
+}
+
+// The in-menu confirmation. This is the pattern the junk door ALREADY used
+// here (an armed danger step rendered in place of the row) — extended to
+// carry the same sentence the menu row showed, rather than a new dialog.
+// Deliberately not window.confirm(): a native dialog says "localhost says"
+// and cannot name the lead or point at Close.
+function MenuConfirm({ prompt, yes, danger, disabled, onConfirm, onCancel, testid }) {
+  return (
+    <div data-testid={testid} style={{ padding: '4px 2px' }}>
+      <p style={{ padding: '4px 10px 6px', fontSize: '11.5px', lineHeight: 1.45,
+        color: danger ? T.state.danger.strong : T.ink.secondary, whiteSpace: 'normal', maxWidth: '32ch' }}>
+        {prompt}
+      </p>
+      <MenuRow danger={danger} disabled={disabled} onPick={onConfirm} label={yes} testid={`${testid}-yes`} />
+      <MenuRow disabled={disabled} onPick={onCancel} label={CONFIRM_NO} testid={`${testid}-no`} />
+    </div>
   )
 }
 
@@ -464,7 +505,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // row re-deriving out of its section the instant the close lands.
   const [closeLostFor, setCloseLostFor] = useState(null)
   const [menuFor, setMenuFor] = useState(null) // row id whose ··· menu is open
-  const [confirmJunkId, setConfirmJunkId] = useState(null) // row id awaiting single junk confirm
+  // Which row is awaiting which confirmation: { id, key }. Replaces the
+  // junk-only confirmJunkId — Dismiss needs the same treatment, and one bit
+  // of state for both keeps them arming and disarming identically.
+  const [confirmFor, setConfirmFor] = useState(null)
   // Bulk selection (feedback #5) — the Inbox is the ONLY surface where
   // leads are removable (pre-Jobber; Kevin 7/10). Remove = the same
   // mark-junk write path as the ··· row action, batched. Selection is
@@ -550,7 +594,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // The single mark-as-junk confirm is scoped to the open menu — any close
   // path (outside click, Escape, reopening another row) disarms it, so a
   // stale "confirm junk" can never fire against a row whose menu is shut.
-  useEffect(() => { if (!menuFor) setConfirmJunkId(null) }, [menuFor])
+  useEffect(() => { if (!menuFor) setConfirmFor(null) }, [menuFor])
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
@@ -870,34 +914,21 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     }
   }
 
-  async function snoozeLead(p, days) {
-    // Date-only string — Classic compares snoozeUntil in the YYYY-MM-DD
-    // vocabulary (snoozedToday, wake-up banner). Deliberately NO stage
-    // write: Classic's snooze→Nurturing coupling lives in ITS SnoozePopup
-    // call site, not in the column, so writing only snoozed_until can't
-    // trip it.
-    const until = new Date(nowMs + days * 86400000)
-    const iso = until.toISOString().slice(0, 10)
-    const human = until.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    setBusyId(p.id)
-    try {
-      await patchLead(p.id, { snoozed_until: iso })
-      addTo(setSnoozedIds, p.id)
-      setToast(undoToast(`Snoozed until ${human}`, async () => {
-        try {
-          await patchLead(p.id, { snoozed_until: null })
-          dropFrom(setSnoozedIds, p.id)
-          setToast({ kind: 'success', msg: `${p.name} restored` })
-        } catch (e) {
-          setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
-        }
-      }))
-    } catch (e) {
-      setToast({ kind: 'error', msg: `Snooze failed: ${e.message}` })
-    } finally {
-      setBusyId(null)
-    }
-  }
+  // snoozeLead is GONE (2026-09-16) — it was the only way to SET a snooze
+  // from the Inbox, and the menu items that called it are removed. Used 8
+  // times in the platform's life against 157 dismissals.
+  //
+  // DELIBERATELY STILL HERE, because 3 leads are snoozed right now and must
+  // keep behaving correctly until they wake naturally:
+  //   · leads.snoozed_until — untouched
+  //   · isSoftRemovedFromInbox's future-snooze test — untouched, so those 3
+  //     stay off the worklist and out of the nav badge
+  //   · Un-snooze on the card's Timeline (shared/Timeline.jsx) — untouched,
+  //     so a snoozed lead can still be woken by hand
+  //   · the snoozedIds session Set below — kept EMPTY rather than deleted, so
+  //     the shared predicate's sessionSets contract is byte-identical; it
+  //     costs nothing and means nothing else had to change.
+  // Removing the way IN was the job. Removing the plumbing was not.
 
   async function dismissLead(p) {
     setBusyId(p.id)
@@ -1190,62 +1221,76 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
         {menuFor === p.id && (
           <RowMenu anchorId={p.id} isMobile={isMobile} onClose={() => setMenuFor(null)}>
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
-              label={<><IconClock size={13} />Snooze until tomorrow</>} />
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 7) }}
-              label={<><IconClock size={13} />Snooze until next week</>} />
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
-              label={<><IconCheck size={13} />Dismiss</>} />
-            {/* The lead→Network door. Sits with the other soft dispositions
-                because that is what it is: "this record doesn't belong in my
-                worklist" — with a better destination than snooze or junk.
-                ONE entry; the sheet asks Add-vs-Move where the consequences
-                can be explained. NOT gated on `linked`: the Jobber-owns-
-                deletion rule covers junk and delete, and neither Add nor Move
-                deletes anything (Move only soft-hides from this list). */}
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setConvertFor(p) }}
-              label={<><IconUsers size={13} />Add to Network…</>} />
-            {/* The label is just "Closed" (Kevin, 2026-09-16). It used to read
-                "Close — not interested", which presupposed one of the very
-                answers the wizard then asks the owner to pick — the lead may
-                have gone elsewhere, gone quiet, or become unreachable. The
-                verb states the outcome and lets the wizard ask the reason.
-                (The `close-lost` key, CloseLostWizard and closed_reason are
-                VOCABULARY, not copy, and are deliberately unchanged.)
+            {/* GROUPED AND EXPLAINED (Kevin, 2026-09-16). Six items, no
+                visible order, no explanation, firing instantly — nobody could
+                tell what Snooze, Dismiss and Junk did, or how Close differed
+                from Junk. The wording and the grouping live in
+                shared/leadDispositions so the client card cannot describe the
+                same four actions differently.
 
-                issue 204 — "Close — not interested": the real disposition for
-                a lead who cancelled / went quiet (Sarah Watts). NOT junk (she
-                was a real lead, not spam), NOT snooze/dismiss (those keep her
-                in the funnel). Founds + closes a Closed Lost engagement so she
-                leaves the Inbox by DECISION, and stops her drips. Same gate as
-                junk: hidden on Jobber-linked rows (Jobber owns their
-                lifecycle) and, via the cluster above, on read-only surfaces. */}
-            {!linked && (
-              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setCloseLostFor(p) }}
-                label={<><IconCheck size={13} />Closed</>} />
-            )}
-            {/* Jobber-owns-deletion rule: no junk door on linked rows
-                (the API 409s it anyway — this keeps the UI honest). Junk is
-                destructive (stops drips), so it's confirm-first: the first
-                pick arms a danger confirm in place rather than firing — a
-                stray click can't junk a lead. Undo still rides the toast. */}
-            {!linked && (
-              confirmJunkId === p.id ? (
-                <>
-                  <div style={{ padding: '6px 10px 4px', fontSize: '12px', color: T.ink.secondary, whiteSpace: 'nowrap' }}>
-                    Mark as junk? Drips stop.
-                  </div>
-                  <MenuRow danger disabled={busyId === p.id}
-                    onPick={() => { setConfirmJunkId(null); setMenuFor(null); markJunk(p) }}
-                    label="Confirm — mark as junk" />
-                  <MenuRow disabled={busyId === p.id}
-                    onPick={() => setConfirmJunkId(null)}
-                    label="Keep lead" />
-                </>
-              ) : (
-                <MenuRow danger disabled={busyId === p.id} onPick={() => setConfirmJunkId(p.id)}
-                  label="Mark as junk" />
-              )
+                SNOOZE IS GONE FROM HERE. It had been used 8 times in the
+                platform's life against 157 dismissals, for two of six slots.
+                The COLUMN and every reader of it stay — 3 leads are snoozed
+                right now and must wake naturally. See leadDispositions.
+
+                CONFIRM BEFORE ACTING: the two that used to write instantly
+                (Dismiss, Mark as junk) arm an in-menu confirm carrying the
+                SAME sentence the row showed. The other two already open a
+                step that explains itself first — the Network sheet spells out
+                Add vs Move, the close wizard asks for a reason — so a confirm
+                there would be a confirm before a confirm. */}
+            {confirmFor && confirmFor.id === p.id ? (
+              <MenuConfirm
+                testid={`menu-confirm-${confirmFor.key}`}
+                prompt={confirmPrompt(confirmFor.key, p.name)}
+                yes={CONFIRM_YES[confirmFor.key]}
+                danger={confirmFor.key === 'junk'}
+                disabled={busyId === p.id}
+                onConfirm={() => {
+                  const k = confirmFor.key
+                  setConfirmFor(null); setMenuFor(null)
+                  if (k === 'dismiss') dismissLead(p)
+                  else if (k === 'junk') markJunk(p)
+                }}
+                onCancel={() => setConfirmFor(null)} />
+            ) : (
+              <>
+                <MenuGroupHeading>{DISPOSITION_GROUPS[0].heading}</MenuGroupHeading>
+                <MenuRow disabled={busyId === p.id} testid="menu-dismiss"
+                  onPick={() => setConfirmFor({ id: p.id, key: 'dismiss' })}
+                  label={<><IconCheck size={13} />{DISPOSITIONS.dismiss.label}</>}
+                  description={DISPOSITIONS.dismiss.description} />
+
+                {/* The lead→Network door. NOT gated on `linked`: the
+                    Jobber-owns-deletion rule covers junk and delete, and
+                    neither Add nor Move deletes anything (Move only
+                    soft-hides from this list). */}
+                <MenuGroupHeading>{DISPOSITION_GROUPS[1].heading}</MenuGroupHeading>
+                <MenuRow disabled={busyId === p.id} testid="menu-network"
+                  onPick={() => { setMenuFor(null); setConvertFor(p) }}
+                  label={<><IconUsers size={13} />{DISPOSITIONS.network.label}</>}
+                  description={DISPOSITIONS.network.description} />
+
+                {/* Close and junk look alike here and are OPPOSITES in the
+                    data — Close keeps a real lost opportunity in reporting,
+                    junk leaves reporting entirely. Both are gated the same
+                    way: hidden on Jobber-linked rows (Jobber owns their
+                    lifecycle) and, via the cluster above, on read-only
+                    surfaces. */}
+                {!linked && <MenuGroupHeading>{DISPOSITION_GROUPS[2].heading}</MenuGroupHeading>}
+                {!linked && (
+                  <MenuRow disabled={busyId === p.id} testid="menu-close"
+                    onPick={() => { setMenuFor(null); setCloseLostFor(p) }}
+                    label={<><IconCheck size={13} />{DISPOSITIONS.close.label}</>}
+                    description={DISPOSITIONS.close.description} />
+                )}
+                {!linked && (
+                  <MenuRow danger disabled={busyId === p.id} testid="menu-junk"
+                    onPick={() => setConfirmFor({ id: p.id, key: 'junk' })}
+                    label={DISPOSITIONS.junk.label}
+                    description={DISPOSITIONS.junk.description} />
+                )}
+              </>
             )}
           </RowMenu>
         )}

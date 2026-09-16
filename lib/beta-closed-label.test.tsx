@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 //
-// ONE LABEL, TWO PLACES: the close action reads "Closed".
+// ONE LABEL, TWO PLACES: the close action reads "Close".
 //
-// It used to read "Close — not interested", which presupposed one of the very
+// It briefly read "Closed" while fixing a worse label. Every other verb in
+// these menus is imperative, so it is "Close".
+//
+// Before that it read "Close — not interested", which presupposed one of the very
 // answers the wizard then asks the owner to pick — the lead may have gone
 // elsewhere, gone quiet, or simply become unreachable. The verb now states
 // the outcome and lets the wizard ask the reason.
@@ -101,7 +104,13 @@ const click = (el: Element | null | undefined) => act(async () => {
 // DOCUMENT-scoped: both menus portal into body.
 const menuButtons = () => [...document.querySelectorAll('button')]
 const menuTexts = () => menuButtons().map(b => (b.textContent || '').trim())
-const itemLabelled = (label: string) => menuButtons().find(b => (b.textContent || '').trim() === label)
+// Menu rows now carry a DESCRIPTION under the label, so a row's textContent
+// is label + sentence. Match the label's own span, and fall back to a testid
+// where one exists — never an exact match on the whole row.
+const itemLabelled = (label: string) => menuButtons().find(b => {
+  const first = b.querySelector('span')
+  return ((first?.textContent) || b.textContent || '').trim() === label
+})
 
 const openInboxMenu = async () => {
   const host = await mount(
@@ -118,27 +127,27 @@ const openCardMenu = async () => {
   return host
 }
 
-describe('both surfaces say "Closed"', () => {
+describe('both surfaces say "Close"', () => {
   it('the Inbox row menu', async () => {
     await openInboxMenu()
-    expect(itemLabelled('Closed')).toBeTruthy()
+    expect(itemLabelled('Close')).toBeTruthy()
   })
 
   it('the client card’s ⋯ menu', async () => {
     await openCardMenu()
-    expect(itemLabelled('Closed')).toBeTruthy()
+    expect(itemLabelled('Close')).toBeTruthy()
   })
 
   it('and they are the SAME label — two surfaces, one action', async () => {
     await openInboxMenu()
-    const fromInbox = (itemLabelled('Closed')!.textContent || '').trim()
+    const fromInbox = (itemLabelled('Close')!.querySelector('span')!.textContent || '').trim()
     await act(async () => { root.unmount() }); root = null; document.body.innerHTML = ''
 
     await openCardMenu()
-    const fromCard = (itemLabelled('Closed')!.textContent || '').trim()
+    const fromCard = (itemLabelled('Close')!.querySelector('span')!.textContent || '').trim()
 
     expect(fromInbox).toBe(fromCard)
-    expect(fromInbox).toBe('Closed')
+    expect(fromInbox).toBe('Close')
   })
 })
 
@@ -168,7 +177,7 @@ describe('"not interested" is gone from what an owner reads', () => {
     // The wizard was checked too: it says "Close as lost", which is the
     // OUTCOME rather than a presupposed reason, so it is left alone.
     await openInboxMenu()
-    await click(itemLabelled('Closed'))
+    await click(itemLabelled('Close'))
     const body = (document.body.textContent || '').toLowerCase()
     expect(body).toContain('close as lost')
     expect(body).not.toContain('not interested')
@@ -178,13 +187,13 @@ describe('"not interested" is gone from what an owner reads', () => {
 describe('copy only — the behaviour underneath is untouched', () => {
   it('the renamed item still opens the same CloseLostWizard', async () => {
     await openInboxMenu()
-    await click(itemLabelled('Closed'))
+    await click(itemLabelled('Close'))
     expect(document.body.textContent).toContain('Close as lost')
   })
 
   it('and still writes the same closed_reason through the same routes', async () => {
     await openInboxMenu()
-    await click(itemLabelled('Closed'))
+    await click(itemLabelled('Close'))
 
     // Drive the wizard: reason step → Next → confirm.
     const next = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Next')

@@ -79,6 +79,7 @@ import { upsertNote, replaceNote, removeNote } from './shared/noteStream'
 import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { useLeadNotesRealtime } from '@/lib/use-lead-notes-realtime'
 import { upsertContact } from './shared/contactStream'
+import { DISPOSITIONS, DISPOSITION_GROUPS, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
 
 const QUIET = T.surface.sunken
@@ -1034,21 +1035,48 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
               origin: 'client_profile_menu',
             },
           }) }] : []),
+          // GROUPED AND EXPLAINED, in the same words the Inbox row menu uses
+          // — both spend shared/leadDispositions, so the two surfaces cannot
+          // describe the same action differently. This menu has no Dismiss
+          // (that is an Inbox-worklist act) and never had Snooze, so it shows
+          // two of the three groups.
+          //
+          // The verb is "Close", imperative like every other item here. It
+          // briefly read "Closed" (ce8202b) while fixing a worse label,
+          // "Close — not interested", which presupposed one of the very
+          // answers the wizard then asks for. The `close-lost` key,
+          // CloseLostWizard and closed_reason are VOCABULARY, not copy, and
+          // stay as they are.
+          //
+          // CLOSE AND JUNK ARE OPPOSITES IN THE DATA — Close founds a Closed
+          // Lost engagement, which stays in reporting as a lost opportunity;
+          // junk sets is_junk, which every loading query filters out, so it
+          // leaves reporting entirely. Merging them would put website spam
+          // permanently into the conversion numbers. That is why junk's
+          // confirmation ends by pointing at Close.
           ...(readOnly ? [] : [
             ...(networkTwin === false
-              ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
+              ? [{ key: 'network-h', heading: DISPOSITION_GROUPS[1].heading },
+                 { key: 'network', label: DISPOSITIONS.network.label,
+                   description: DISPOSITIONS.network.description,
+                   onPick: () => setConvertOpen(true) }]
               : []),
-            // The label is just "Closed" (Kevin, 2026-09-16) — identical to
-            // the Inbox row menu's, because it opens the identical wizard.
-            // "Close — not interested" presupposed one of the answers that
-            // wizard asks for. Key, wizard and closed_reason are unchanged.
-            // issue 204 — "Close — not interested": founds + closes a Closed
-            // Lost engagement for a lead who didn't convert (and stops drips),
-            // instead of mis-filing her as junk. Same gate as junk below:
-            // hidden on Jobber-linked (Jobber owns their lifecycle) and, via
-            // the readOnly wrap above, on read-only surfaces.
-            ...(jobberLinked ? [] : [{ key: 'close-lost', label: 'Closed', onPick: () => setCloseLostOpen(true) }]),
-            ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
+            // Same gate as junk: hidden on Jobber-linked (Jobber owns their
+            // lifecycle) and, via the readOnly wrap above, on read-only
+            // surfaces.
+            ...(jobberLinked ? [] : [
+              { key: 'finish-h', heading: DISPOSITION_GROUPS[2].heading },
+              { key: 'close-lost', label: DISPOSITIONS.close.label,
+                description: DISPOSITIONS.close.description,
+                onPick: () => setCloseLostOpen(true) },
+              { key: 'junk', label: DISPOSITIONS.junk.label,
+                description: DISPOSITIONS.junk.description,
+                danger: true,
+                // Arms in place rather than firing. The undo toast markJunk
+                // already raises is untouched — the confirm is in ADDITION.
+                confirm: { prompt: confirmPrompt('junk', c?.name), yes: CONFIRM_YES.junk, no: CONFIRM_NO },
+                onPick: markJunk },
+            ]),
           ]),
         ]} />
       </div>

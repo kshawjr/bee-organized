@@ -72,7 +72,7 @@ const moreButtons = (host: Element) =>
   [...host.querySelectorAll('button[aria-label="More"]')] as HTMLButtonElement[]
 const openMenu = () => document.querySelector('[data-bee-row-menu]') as HTMLElement | null
 const menuButton = (text: string) =>
-  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
+  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === text)
 
 // The full portal-escape contract for whichever row's menu is open.
 const expectUnclipped = (host: Element) => {
@@ -83,7 +83,7 @@ const expectUnclipped = (host: Element) => {
   expect(host.contains(menu!)).toBe(false)
   expect(menu!.closest('.bee-inbox-row')).toBeNull()
   expect(menu!.style.position).toBe('fixed')
-  for (const label of ['Snooze until tomorrow', 'Snooze until next week', 'Dismiss', 'Mark as junk']) {
+  for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as junk'] /* snooze removed 2026-09-16 */) {
     expect(menuButton(label), `menu offers "${label}"`).toBeTruthy()
   }
   return menu!
@@ -105,6 +105,8 @@ describe('portal escapes the clipped card', () => {
 
     // interactable: a pick actually fires this row's write
     await click(menuButton('Dismiss')!)
+    // Dismiss ARMS a confirmation now (2026-09-16); the write follows the yes.
+    await click(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')!)
     expect(patches).toHaveLength(1)
     expect(Object.keys(patches[0].body)).toEqual(['inbox_dismissed_at'])
     expect(openMenu()).toBeFalsy() // pick closes
@@ -124,6 +126,8 @@ describe('portal escapes the clipped card', () => {
     const lastRow = [...m.host.querySelectorAll('.bee-inbox-row')].pop()!
     const lastName = people.find(p => (lastRow.textContent || '').includes(p.name))!
     await click(menuButton('Dismiss')!)
+    // Dismiss ARMS a confirmation now (2026-09-16); the write follows the yes.
+    await click(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')!)
     expect(patches).toHaveLength(1)
     expect(patches[0].id).toBe(lastName.id)
     await m.unmount()

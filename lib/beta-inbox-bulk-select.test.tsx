@@ -100,7 +100,7 @@ const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 })
 const buttonByText = (host: Element, text: string) =>
-  [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text)
+  [...host.querySelectorAll('button')].find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === text)
 const rowByName = (host: Element, name: string) =>
   [...host.querySelectorAll('.bee-inbox-row')].find(r => (r.textContent || '').includes(name))
 // Row-scoped: the header select-all checkbox is a permanent fixture now,
@@ -110,7 +110,7 @@ const rowCheckboxes = (host: Element) =>
 // The ··· menu portals to <body> (the cards clip overflow) — menu items
 // are queried through the portal container, not the mount host.
 const menuButton = (text: string) =>
-  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
+  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === text)
 
 // Bulk Remove is confirm-first for ANY N now (not just >5): 'Remove (N)'
 // arms the confirm, 'Remove N' commits it. This drives both clicks.

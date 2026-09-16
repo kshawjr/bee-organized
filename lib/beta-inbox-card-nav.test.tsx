@@ -180,9 +180,11 @@ describe('HiveShell — mid-walk disposition (capture-at-open, the decided behav
     const amyRow = rowByName(m.host, 'Amy Newest')
     await click(amyRow.querySelector('button[aria-label="More"]')!)
     const dismiss = [...document.querySelectorAll('[data-bee-row-menu] button')]
-      .find(b => (b.textContent || '').trim() === 'Dismiss')!
+      .find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === 'Dismiss')!
     expect(dismiss).toBeTruthy()
     await click(dismiss)
+    // Dismiss ARMS a confirmation now (2026-09-16); the write follows the yes.
+    await click(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')!)
     await act(async () => { await Promise.resolve() })
     // the dismissal really soft-removed her row from the list…
     expect(rowByName(m.host, 'Amy Newest')).toBeFalsy()

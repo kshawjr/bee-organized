@@ -644,13 +644,15 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
 describe('a new dismissal records who did it', () => {
   const moreButton = (host: Element) => host.querySelector('button[aria-label="More"]') as HTMLButtonElement
   const menuButton = (text: string) =>
-    [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
+    [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === text)
 
   it('asks the server to attribute the touchpoint to the acting session', async () => {
     const p = person({ id: 'nd', name: 'Sarah Mitchell' })
     const m = await mount(inbox([p]))
     await click(moreButton(m.host))
     await click(menuButton('Dismiss')!)
+    // Dismiss ARMS a confirmation now (2026-09-16); the write follows the yes.
+    await click(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')!)
 
     expect(touchpointPosts).toHaveLength(1)
     // The identity itself is resolved server-side from the session — the
@@ -667,6 +669,8 @@ describe('a new dismissal records who did it', () => {
     const m = await mount(inbox([p]))
     await click(moreButton(m.host))
     await click(menuButton('Dismiss')!)
+    // Dismiss ARMS a confirmation now (2026-09-16); the write follows the yes.
+    await click(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')!)
 
     expect(patches).toHaveLength(1)
     expect(Object.keys(patches[0].body)).toEqual(['inbox_dismissed_at'])
