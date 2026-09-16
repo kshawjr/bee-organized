@@ -18,10 +18,15 @@ import React, { useState } from 'react'
 import { relAge } from './shared/engagementStatus'
 import { IconPhone, IconMail } from '@/components/ui/icons'
 import { T } from './shared/tokens'
+import NoteActions, { EditedMark } from './shared/NoteActions'
 
 export const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
-export default function NotesStream({ label, items = [], onPost, placeholder = 'Add a note…', nowMs = Date.now(), readOnly = false }) {
+// noteActionsFor(item) → { canManage, isOwn, onSave, onDelete } for a NOTE
+// row, or null when this stream should offer none. The caller decides who may
+// act, because only it knows the signed-in user; this component only draws
+// what it is handed. Touchpoints never get actions — they are not notes.
+export default function NotesStream({ label, items = [], onPost, placeholder = 'Add a note…', nowMs = Date.now(), readOnly = false, noteActionsFor = null }) {
   const [draft, setDraft] = useState('')
   const post = () => {
     const t = draft.trim()
@@ -49,7 +54,15 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
             {a.tag && <span style={{ fontSize: '11px', color: T.ink.secondary }}> · re: {a.tag}</span>}
             <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
               {a.user_label || '—'} · {relAge(new Date(a.ts).getTime(), nowMs)} ago
+              {/* Quiet, and in the meta line rather than beside the text: the
+                  note is what someone is reading; that it was edited is
+                  provenance, and sits with the other provenance. */}
+              <EditedMark note={a} />
             </span>
+            {!readOnly && noteActionsFor && (() => {
+              const act = noteActionsFor(a)
+              return act ? <NoteActions note={a} {...act} /> : null
+            })()}
           </p>
         ) : (
           <p key={`t-${a.id}`} style={{ fontSize: '12px', color: T.ink.primary, lineHeight: 1.45, display: 'flex', alignItems: 'baseline', gap: '6px' }}>

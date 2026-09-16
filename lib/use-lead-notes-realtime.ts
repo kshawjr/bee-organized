@@ -26,10 +26,31 @@
 // not the primary guard: lead_notes carries its first SELECT policy in
 // migrations/lead_notes_realtime_rls.sql, derived from the lead.
 //
-// INSERT ONLY, for the reason spelled out in noteStream.js: the merge is
-// additive-by-id and converges on the snapshot, so an UPDATE would dedupe to
-// a no-op and a DELETE has no defined meaning for a stream that only ever
-// gains rows. Notes are not edited in the UI today.
+// INSERT ONLY, and this was RE-DECIDED when edit and delete shipped rather
+// than left as an assumption. Notes ARE edited and deleted in the UI now, so
+// the original reasoning ("not edited today") expired. The decision stands,
+// for two harder reasons:
+//
+//   · A DELETE event cannot be authorised here. lead_notes has REPLICA
+//     IDENTITY DEFAULT and RLS enabled, so the old record carries only the
+//     PRIMARY KEY — and Supabase's docs are explicit that with RLS on, even
+//     `replica identity full` does not change that. Our policy authorises a
+//     note through its LEAD, which the old record does not carry, and delete
+//     events are not filterable either. A DELETE path here would be code that
+//     very likely never fires. Building it would be the half-thought thing.
+//
+//   · Shipping UPDATE alone would be WORSE than shipping neither. A watcher
+//     would see edits live but keep a deleted note on screen — so a note
+//     edited and then deleted would show the edit and never leave. "It
+//     disappeared for the author and stayed for everyone else" is precisely
+//     the failure to avoid; one reload for both verbs is coherent, half of it
+//     is not.
+//
+// SO: another watcher sees an edit or a deletion on their next reload. The
+// author's own card updates immediately (noteStream's replaceNote/removeNote).
+// If this is ever revisited, the thing to establish FIRST is whether a DELETE
+// event arrives at all for an RLS-protected table — everything else follows
+// from that answer.
 // ─────────────────────────────────────────────────────────────
 import { useRef } from 'react'
 import { useRealtimeChannel } from '@/lib/use-realtime-channel'

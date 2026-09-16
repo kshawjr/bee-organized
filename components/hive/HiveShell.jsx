@@ -175,6 +175,10 @@ export default function HiveShell({
   locFilter = 'all',
   currentLocationUuid = null,
   currentUserId = null,
+  // Role travels with the id so the client card can decide who may edit or
+  // delete a note without reaching into context (§8.5). The ROUTE is still
+  // the guard; this only decides whether the affordance is drawn.
+  currentUserRole = null,
   // Record-in-URL (client): BeeHub owns the URL (single-page shell). It
   // passes DOWN the client id the URL currently names (urlClientId) so the
   // ClientProfile overlay seeds/clears from the URL (deep-link on load +
@@ -1080,6 +1084,8 @@ export default function HiveShell({
         <ClientProfile
           key={overlay.clientId}
           clientId={overlay.clientId}
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
           readOnly={readOnly}
           siblings={overlay.siblings ?? null}
           onNavigate={(id) => {

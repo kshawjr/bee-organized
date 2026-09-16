@@ -24,8 +24,18 @@ import { IconPin, IconPencil } from '@/components/ui/icons'
 import { WARNING_BG, WARNING_TEXT } from '@/components/ui/tokens'
 import { T } from './tokens'
 import { relAge } from './engagementStatus'
+import NoteActions, { EditedMark } from './NoteActions'
 
-export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel = 'Add a note about this client', nowMs = Date.now(), readOnly = false }) {
+// noteActionsFor(note) → { canManage, isOwn, onSave, onDelete }, or null.
+// Same contract as NotesStream's, so the caller writes the rule once.
+//
+// The controls live in the EXPANDED history ONLY, never on the collapsed
+// band. The band exists to put ONE standing note in front of someone before
+// they act — gate codes, "call after six" — and hanging verbs off it would
+// crowd the single thing it is for, on every card, for everyone. Opening the
+// history is already the deliberate act of coming to manage these, and every
+// note is reachable there including the latest.
+export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel = 'Add a note about this client', nowMs = Date.now(), readOnly = false, noteActionsFor = null }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -112,7 +122,12 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
                   {n.text}
                   <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
                     {[n.user_label || '—', n.created_at ? `${relAge(new Date(n.created_at).getTime(), nowMs)} ago` : null].filter(Boolean).join(' · ')}
+                    <EditedMark note={n} />
                   </span>
+                  {!readOnly && noteActionsFor && (() => {
+                    const act = noteActionsFor(n)
+                    return act ? <NoteActions note={n} {...act} /> : null
+                  })()}
                 </p>
               ))}
             </div>

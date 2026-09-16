@@ -10060,6 +10060,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
+          currentUserRole={hiveCurrentUserCtx?.role || null}
           locationUsers={hiveLocationUsersCtx || []}
           // Location roster ({ id, name }) already in scope for the switcher —
           // the Client List resolves a client's location name from it (no new

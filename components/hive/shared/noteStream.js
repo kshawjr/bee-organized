@@ -62,3 +62,50 @@ export function upsertNote(data, note) {
     ),
   }
 }
+
+// ── editing and deleting, which are NOT the arrival path ──────────
+// upsertNote above answers "a note I have never seen has arrived". These two
+// answer "a note I already have has changed, or is gone" — the opposite
+// question, so they are separate functions rather than flags on that one.
+//
+// DELIBERATELY LOCAL-ONLY. These are called after a CONFIRMED PATCH or DELETE
+// by the person who made it. The realtime hook stays INSERT-only, so another
+// watcher still needs a reload to see an edit or a deletion — see
+// lib/use-lead-notes-realtime.ts for why that is not an oversight.
+
+// Replace a note in place from the server's confirmed row. Searches both
+// buckets by id rather than trusting the incoming kind, so a row whose kind
+// somehow differs cannot be duplicated into the other bucket — the edit path
+// refuses to change kind, and this holds that line even if it ever stopped.
+export function replaceNote(data, note) {
+  if (!data || !note || !note.id) return data
+  let changed = false
+  const next = { ...data }
+  for (const bucket of ['buzz_notes', 'job_notes']) {
+    const cur = data[bucket]
+    if (!Array.isArray(cur)) continue
+    const i = cur.findIndex(n => n && n.id === note.id)
+    if (i === -1) continue
+    const copy = cur.slice()
+    copy[i] = note
+    next[bucket] = copy
+    changed = true
+  }
+  return changed ? next : data
+}
+
+// Drop a note from whichever bucket holds it. Same-reference return when the
+// id is not here, so a stray delete costs no re-render.
+export function removeNote(data, noteId) {
+  if (!data || !noteId) return data
+  let changed = false
+  const next = { ...data }
+  for (const bucket of ['buzz_notes', 'job_notes']) {
+    const cur = data[bucket]
+    if (!Array.isArray(cur)) continue
+    if (!cur.some(n => n && n.id === noteId)) continue
+    next[bucket] = cur.filter(n => n && n.id !== noteId)
+    changed = true
+  }
+  return changed ? next : data
+}
