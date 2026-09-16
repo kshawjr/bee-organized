@@ -506,13 +506,14 @@ describe('action bar — normal (non-loc_other) profile is unchanged', () => {
   )
   const bar = (host: Element) => host.querySelector('[aria-label="Card actions"]')!
 
-  it('keeps the full bar — Call, Log touchpoint, Send to Jobber, New engagement; no Transfer', async () => {
+  it('keeps the bar — Call, Log touchpoint, Send to Jobber; no Transfer, and no New engagement', async () => {
     const { host, unmount } = await mountProfile()
     const text = bar(host).textContent || ''
     expect(text).toContain('Call')
     expect(text).toContain('Log touchpoint')
     expect(text).toContain('Send to Jobber')
-    expect(text).toContain('New engagement')
+    // Removed 2026-09-16 — see beta-remove-new-engagement for the evidence.
+    expect(text).not.toContain('New engagement')
     expect(text).not.toContain('Transfer')
     await unmount()
   })
@@ -528,8 +529,10 @@ describe('action bar — normal (non-loc_other) profile is unchanged', () => {
   it('ActionRow still sizes its grid per-action (each action is a separate child, not one wrapped block)', async () => {
     const { host, unmount } = await mountProfile()
     const grid = bar(host).firstElementChild as HTMLElement
-    // Call + Log touchpoint + Send to Jobber + New engagement = 4 columns.
-    expect(grid.style.gridTemplateColumns).toBe('repeat(4, 1fr)')
+    // Call + Log touchpoint + Send to Jobber = 3 columns. It was 4 until
+    // "New engagement" was removed (2026-09-16); ActionRow sizes from the
+    // CHILD COUNT, so dropping a child really does re-flow the row.
+    expect(grid.style.gridTemplateColumns).toBe('repeat(3, 1fr)')
     await unmount()
   })
 })

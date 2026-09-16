@@ -254,20 +254,11 @@ describe('the Inbox menu is unchanged', () => {
   })
 })
 
-// ── 3) NOT BUILT — recorded so the decision is not lost ───────────
-describe('“New engagement” was left alone, on the evidence', () => {
-  it('still renders for a client with no engagements', async () => {
-    // Kevin's rule would have hidden it here. The measurement says owners use
-    // exactly this to revive an old lead — 30 times in the last 30 days,
-    // across 19 locations — so it stays until he has seen those numbers.
-    profileOver = { engagements: [] }
-    await mount(<ClientProfile clientId="lead-9" onClose={() => {}} />)
-    expect(bodyText()).toContain('New engagement')
-  })
-
-  it('and for a client with one closed engagement', async () => {
-    profileOver = { engagements: [{ id: 'e1', stage: 'Closed Won', title: 'Garage', created_at: daysAgo(90), closed_at: daysAgo(80) }] }
-    await mount(<ClientProfile clientId="lead-9" onClose={() => {}} />)
-    expect(bodyText()).toContain('New engagement')
-  })
-})
+// ── 3) the button is GONE — superseded 2026-09-16 ────────────────
+// This block used to pin that "New engagement" STAYED, recording why I
+// stopped on the stage-based rule. A third look settled it a different way:
+// of 125 hand-founded engagements in 120 days, 47 stayed completely empty and
+// can never move, and the other 78 would have been created by Send to Jobber
+// anyway. Kevin removed the button. The evidence and the layout consequence
+// are pinned in beta-remove-new-engagement; the two tests that lived here
+// asserted the opposite and would now be actively misleading.

@@ -49,7 +49,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip, IconMapPin,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -422,21 +422,6 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
 
   // Manual founding — POST /api/engagements (founded_by='manual'), then
   // swap straight to the new engagement's panel (same overlay slot).
-  async function newEngagement() {
-    if (!c) return
-    setBusy(true)
-    try {
-      const res = await fetch('/api/engagements', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: c.id }),
-      })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setToast({ kind: 'success', msg: 'Engagement created' })
-      if (j.engagement) onOpenEngagement(j.engagement)
-    } catch (e) { setToast({ kind: 'error', msg: `Create failed: ${e.message}` }) }
-    finally { setBusy(false) }
-  }
 
   // Reopen (resurrect) a Closed LOST engagement — the server route
   // re-derives the correct open stage from the records (Closed Won stays
@@ -771,7 +756,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
 
   // Action bar — PINNED (sticky) to the card bottom, visible from every
   // tab: Call (primary) · Log touchpoint · Open in Jobber (Send to
-  // Jobber pre-link) · + New engagement.
+  // Jobber pre-link). "+ New engagement" was the fourth until 2026-09-16 —
+  // see the note at the end of the row for why it went and where the
+  // capability lives now.
   //
   // A loc_other lead is the exception: it isn't ours to work, only to
   // route, so Transfer is its ONLY action and every other door is a dead
@@ -824,11 +811,28 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             <IconMapPin size={14} /> Transfer
           </button>
         )}
-        {!readOnly && !atLocOther && (
-          <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
-            <IconPlus size={14} /> New engagement
-          </button>
-        )}
+        {/* "New engagement" WAS HERE and is gone (Kevin, 2026-09-16). Measured
+            over 120 days: 125 engagements founded by hand, and they split two
+            ways. 78 went on to carry real Jobber records — for those the
+            button was only an early container, and Send to Jobber would have
+            made one anyway. The other 47 stayed COMPLETELY empty: no request,
+            no quote, no job. All 47 sit at Request and can never move, because
+            there is nothing coming from Jobber to attach to them. So the
+            button either duplicated Jobber's own path or produced a permanent
+            empty card.
+
+            THE CAPABILITY IS NOT GONE — only this button. POST
+            /api/engagements still serves NewClientSheet and the Close flow,
+            and NewClientSheet's frame B founds on a MATCHED EXISTING client
+            with the identical call. So a client who will never touch Jobber
+            is still startable: New → search them → found it there. That path
+            is less discoverable than this button was; if owners miss it, the
+            fix is to surface THAT, not to put this back.
+
+            ActionRow sizes its grid from the CHILD COUNT, so removing this
+            takes a normal writable card from four columns to three and the
+            survivors widen. loc_other is untouched — Transfer is still its
+            only action. */}
       </ActionRow>
       {touchOpen && !readOnly && c && (
         <TouchpointModal
