@@ -75,6 +75,8 @@ import NotesStream from './NotesStream'
 import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn, rowActionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
+import { upsertNote } from './shared/noteStream'
+import { useLeadNotesRealtime } from '@/lib/use-lead-notes-realtime'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -296,7 +298,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setData(d => d ? { ...d, buzz_notes: [j.note, ...d.buzz_notes] } : d)
+      setData(d => upsertNote(d, j.note))
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
   }
 
@@ -311,9 +313,27 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setData(d => d ? { ...d, job_notes: [j.note, ...(d.job_notes || [])] } : d)
+      setData(d => upsertNote(d, j.note))
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
   }
+
+  // ── someone ELSE's note, live ────────────────────────────────
+  // Two bees on one client could not see each other write. A note touches
+  // neither the leads row nor touchpoints, so neither existing channel had an
+  // event to carry it; this is its own subscription for that reason.
+  //
+  // It lands through upsertNote — the SAME merge the two composers above now
+  // use — so there is one opinion about how a note joins this card. That is
+  // also the whole duplicate guard: the author's own note is already in state
+  // when their INSERT comes back down the socket, and a bucket that already
+  // holds the id keeps the data reference it had.
+  //
+  // Scoped to THIS client by the channel's lead_id filter, so a note on
+  // another client never reaches the handler; the row's own lead_id is
+  // re-checked inside the hook regardless.
+  useLeadNotesRealtime(clientId, React.useCallback((row) => {
+    setData(d => upsertNote(d, row))
+  }, []))
 
   // Boolean return feeds EditableDesc's inline-edit standard: false
   // keeps the textarea open with the draft after the optimistic revert.
