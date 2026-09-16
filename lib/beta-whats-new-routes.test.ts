@@ -305,7 +305,13 @@ describe('GET /api/help/releases', () => {
       if (q.source) expect(Object.keys(q.source).sort()).toEqual(['admin_response', 'description', 'title', 'type'])
     }
     expect(JSON.stringify(body)).not.toMatch(/"user_id"|"submitter_[a-z]+"|"email"|"full_name"|"first_name"|"created_by":"owner/)
-    expect(body.draft.week_label).toBe('Thu, Sep 3')
+    // THE DRAFT FOLLOWS THE CALENDAR now. This fixture's draft is dated
+    // 2026-09-03, two weeks stale, and GET rolls it to the current week —
+    // which is the whole point of the fix. Asserted against the same helpers
+    // the code uses rather than a literal, so this cannot rot next Thursday.
+    expect(body.draft.week_label).toBe(formatWeekLabel(weekFor(new Date()).publish_on))
+    expect(body.draft.week_label).not.toBe('Thu, Sep 3')
+    expect(body.draft.week_start).toBe(weekFor(new Date()).week_start)
     const lines = [...body.draft.groups.fixed, ...body.draft.groups.new]
     const un = lines.find((i: any) => i.id === 'i-d-2')
     expect(un.unedited).toBe(true)
@@ -374,7 +380,12 @@ describe('editing lines', () => {
     expect(ins).toHaveLength(1)
     expect(ins[0].payload).toMatchObject({ release_id: 'r-draft', group: 'changed', title: 'Timezone is a dropdown', body: 'Arizona is its own entry.', created_by: 'u-kevin' })
     expect(ins[0].payload.edited_at).toBeTruthy()
-    expect(writes('help_releases')).toEqual([]) // the draft already existed
+    // The draft already existed, so nothing INSERTS one. The stale fixture
+    // does get rolled to the current week on the way through, which is an
+    // update of two date columns — never an insert, because
+    // help_releases_one_draft_idx allows exactly one draft.
+    const relWrites = writes('help_releases')
+    expect(relWrites.every((w: any) => w.op !== 'insert')).toBe(true)
   })
 
   it('with no draft open, adding a line opens this week’s draft first', async () => {

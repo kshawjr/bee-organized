@@ -24,6 +24,11 @@ import { isHelpEditorRole } from './help-content'
 
 export { isHelpEditorRole }
 
+// The narrow slice of a Supabase client this module needs. Declared here
+// rather than beside getOrCreateDraft because the roll-forward above uses it
+// too; this file still imports no I/O of its own.
+type MinimalClient = { from: (table: string) => any }
+
 export type ReleaseStatus = 'draft' | 'published'
 export type ReleaseGroup = 'new' | 'changed' | 'fixed' | 'question'
 
@@ -137,6 +142,102 @@ export function formatWeekLabel(publish_on: string): string {
 // Was the note due before today? For the amber "was due Thursday" line.
 export function isOverdue(publish_on: string, now: Date = new Date(), tz: string = RELEASE_TZ): boolean {
   return ymdInZone(now, tz) > publish_on
+}
+
+// ── the draft follows the calendar ────────────────────────────────
+// THE BUG THIS CLOSES. nextWeekAfter only ever ran at PUBLISH. Release 1 went
+// out on 3 Sep; the open draft has never been published, so nothing has
+// advanced it since, and by 16 Sep it still read "week ending Thu, Sep 3" and
+// showed as overdue. Skip a week and the draft is stranded. The date maths was
+// never wrong — weekForYmd, addDays and formatWeekLabel are all correct and
+// deterministic. The bug was WHEN they ran.
+//
+// A draft is a container for news not yet told, and which week it belongs to
+// is a fact about the calendar, not about whether anyone pressed publish. So
+// it is answered on READ: open What's new in any week and the draft is that
+// week's.
+//
+// IT IS AN UPDATE, NEVER AN INSERT, and that is forced by the schema:
+// help_releases_one_draft_idx is a partial unique index on status='draft', so
+// exactly one draft can exist. Rolling forward therefore moves the row's two
+// date columns and nothing else.
+//
+// WHICH IS ALSO WHY THE LINES ARE SAFE. help_release_items attach by
+// release_id, and release_id does not change — so every line already in the
+// draft travels with it, untouched, unduplicated, without being read or
+// rewritten. There are 20 such lines in production right now, 19 of them still
+// in an owner's own words. A fix that stranded or doubled those would be far
+// worse than a wrong date, so the tests pin the count either side of a roll.
+//
+// NOTHING ELSE READS THE DATES. The feedback seed (getOrCreateDraft) and the
+// delete sweep both find the draft by status='draft' and match lines by
+// release_id; neither looks at week_start or publish_on. Verified before this
+// shipped.
+
+/**
+ * The week a draft SHOULD be in, or null when it is already right.
+ * Pure — no clock of its own, no I/O — so the routes and the tests agree.
+ *
+ * Only ever rolls a DRAFT, and only FORWARD: a published release is history
+ * and must keep the week it went out in.
+ */
+export function draftWeekCorrection(
+  draft: Pick<ReleaseRow, 'status' | 'publish_on'>,
+  now: Date = new Date(),
+  tz: string = RELEASE_TZ,
+): { week_start: string; publish_on: string } | null {
+  if (!draft || draft.status !== 'draft') return null
+  // isOverdue IS the whole test. A draft whose publish_on is still ahead of
+  // today is current by definition, and one already in the current week can
+  // never be overdue — so there is no third case to check. An equality guard
+  // stood here briefly and was removed once a sweep over 400 consecutive days
+  // showed it could never fire: unreachable code that no mutation can reach is
+  // code that quietly rots.
+  if (!isOverdue(draft.publish_on, now, tz)) return null
+  return weekFor(now, tz)
+}
+
+/**
+ * Apply that correction. Returns the row as it should now be read — the
+ * updated one, or the original when there was nothing to do.
+ *
+ * NEVER THROWS and never blocks the read: What's new rendering with a stale
+ * date is a blemish, failing to render is an outage. A failed roll logs and
+ * returns the row unchanged.
+ *
+ * Deliberately does NOT stamp updated_by: rolling the week is the calendar
+ * moving, not a person editing, and attributing it to whoever happened to open
+ * the tab would put a reader's name on a line they never touched.
+ */
+export async function rollDraftToCurrentWeek(
+  service: MinimalClient,
+  draft: ReleaseRow,
+  now: Date = new Date(),
+  tz: string = RELEASE_TZ,
+): Promise<ReleaseRow> {
+  const week = draftWeekCorrection(draft, now, tz)
+  if (!week) return draft
+  try {
+    const { data, error } = await service
+      .from('help_releases')
+      .update(week)
+      .eq('id', draft.id)
+      .eq('status', 'draft')   // never move a release that published mid-read
+      .select('*').single()
+    // Keep the row we already have unless the update handed back a COMPLETE
+    // one. A partial or id-less response is not something to read the draft
+    // from — the dates are cosmetic, the identity is not, and an undefined id
+    // here would detach every line that gets written next.
+    const rolled = data as ReleaseRow | null
+    if (error || !rolled?.id) {
+      if (error) console.warn('[whats-new] draft roll-forward failed:', (error as any)?.message ?? error)
+      return { ...draft, ...week }
+    }
+    return rolled
+  } catch (err) {
+    console.warn('[whats-new] draft roll-forward threw:', (err as any)?.message ?? err)
+    return draft
+  }
 }
 
 // ── groups ────────────────────────────────────────────────────────
@@ -307,8 +408,6 @@ export function buildWaggleMessage(
 //
 // `service` is the service-role client (the caller passes it in; this
 // module imports no I/O so it stays testable and tree-shakeable).
-type MinimalClient = { from: (table: string) => any }
-
 export async function getOrCreateDraft(
   service: MinimalClient,
   userId: string | null,
@@ -317,7 +416,10 @@ export async function getOrCreateDraft(
   const { data: existing, error: selErr } = await service
     .from('help_releases').select('*').eq('status', 'draft').limit(1).maybeSingle()
   if (selErr) return { draft: null, error: selErr }
-  if (existing) return { draft: existing as ReleaseRow, error: null }
+  // A seeded line belongs to the week it was seeded IN, so the draft is rolled
+  // here as well as on read — otherwise marking something Fixed would file it
+  // under a week that closed a fortnight ago.
+  if (existing) return { draft: await rollDraftToCurrentWeek(service, existing as ReleaseRow, now), error: null }
 
   const week = weekFor(now)
   const { data: created, error: insErr } = await service

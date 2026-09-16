@@ -16,6 +16,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import {
   isHelpEditorRole, isMissingReleasesTable, shapeRelease,
   type ReleaseRow, type ReleaseItemRow, type ReleaseItemSource,
+  rollDraftToCurrentWeek,
 } from '@/lib/help-releases'
 
 export const runtime = 'nodejs'
@@ -61,7 +62,19 @@ export async function GET() {
   // The draft, with the original report beside every seeded line. Read
   // through the service client and shaped here: this block only ever lands
   // in an EDITOR's payload.
-  const draftRow = releases.find(r => r.status === 'draft') || null
+  // THE DRAFT FOLLOWS THE CALENDAR. nextWeekAfter only runs at publish, so a
+  // draft that has never been published never advances — by 16 Sep the open
+  // one still read "week ending Thu, Sep 3" and showed as overdue. Rolling it
+  // HERE is what makes "open it any week and it is this week's" true without
+  // having to publish the previous one first.
+  //
+  // A GET that writes, deliberately. It is one idempotent UPDATE of two date
+  // columns, only when the draft is actually stale, and the value comes from
+  // the clock rather than from the row — so two editors opening the tab at
+  // once compute the same week and the second write is a no-op. The lines are
+  // not read or touched: they hang off release_id, which does not move.
+  let draftRow = releases.find(r => r.status === 'draft') || null
+  if (draftRow) draftRow = await rollDraftToCurrentWeek(supabaseService, draftRow)
   let draft = null
   if (draftRow) {
     const ids = items.filter(i => i.release_id === draftRow.id && !i.deleted_at && i.feedback_item_id).map(i => i.feedback_item_id as string)

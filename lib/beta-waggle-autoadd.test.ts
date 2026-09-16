@@ -18,6 +18,7 @@
 //     what landed
 //   · nothing else changes: the route writes only help_release_items and
 //     (when opening a week) help_releases; it never names feedback_items
+import { weekFor, formatWeekLabel } from '@/lib/help-releases'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -83,19 +84,30 @@ describe('POST /api/help/releases/lines', () => {
     const body = await res.json()
     expect(body.ok).toBe(true)
     expect(body.line).toEqual({ id: 'i-new', group: 'fixed', title: GOOD.headline, body: GOOD.sentence })
-    expect(body.release).toEqual({ id: 'r-draft', week_start: '2026-09-04', publish_on: '2026-09-10', week_label: 'Thu, Sep 10' })
+    // The DRAFT fixture is dated in the past, and the route now rolls a stale
+    // draft to the current week before writing into it — so a line added
+    // today is filed under today's week, not whichever one the draft was
+    // stranded in. Computed from the same helpers the code uses so this does
+    // not rot next Thursday.
+    const wk = weekFor(new Date())
+    expect(body.release).toEqual({ id: 'r-draft', week_start: wk.week_start, publish_on: wk.publish_on, week_label: formatWeekLabel(wk.publish_on) })
+    // Exactly ONE line is written. The other write is the stale fixture draft
+    // being rolled to the current week — an update of two date columns on
+    // help_releases, never a second line and never a second draft.
     const w = writes()
-    expect(w).toHaveLength(1)
-    expect(w[0].table).toBe('help_release_items')
-    expect(w[0].payload).toMatchObject({ release_id: 'r-draft', group: 'fixed', title: GOOD.headline, body: GOOD.sentence, created_by: null, updated_by: null })
-    expect(w[0].payload.edited_at).toBeTruthy() // written, not "their words"
+    const lineWrites = w.filter((x: any) => x.table === 'help_release_items')
+    expect(lineWrites).toHaveLength(1)
+    expect(w.filter((x: any) => x.table === 'help_releases' && x.op === 'insert')).toHaveLength(0)
+    expect(lineWrites[0].payload).toMatchObject({ release_id: 'r-draft', group: 'fixed', title: GOOD.headline, body: GOOD.sentence, created_by: null, updated_by: null })
+    expect(lineWrites[0].payload.edited_at).toBeTruthy() // written, not "their words"
     expect(h.state.sessionReads).toBe(0)
   })
 
   it('accepts title/body spelling too', async () => {
     const res = await post({ group: 'new', title: 'Clients are allowed to move house', body: 'Change an address and we ask whether they moved or you are fixing a typo.' }, `Bearer ${KEY}`)
     expect(res.status).toBe(201)
-    expect(writes()[0].payload).toMatchObject({ group: 'new', title: 'Clients are allowed to move house' })
+    expect(writes().find((x: any) => x.table === 'help_release_items').payload)
+      .toMatchObject({ group: 'new', title: 'Clients are allowed to move house' })
   })
 
   it('opens this week’s draft (Friday → Thursday) when none is open', async () => {
