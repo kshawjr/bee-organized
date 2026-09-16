@@ -77,6 +77,8 @@ import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
 import { upsertNote } from './shared/noteStream'
 import { useLeadNotesRealtime } from '@/lib/use-lead-notes-realtime'
+import { upsertContact } from './shared/contactStream'
+import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -333,6 +335,21 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // re-checked inside the hook regardless.
   useLeadNotesRealtime(clientId, React.useCallback((row) => {
     setData(d => upsertNote(d, row))
+  }, []))
+
+  // ── someone ELSE's secondary contact, live ───────────────────
+  // Third table with the same gap: a contact writes to lead_contacts and
+  // touches neither the leads row nor anything else a channel watches, so one
+  // bee adding the husband's mobile was invisible to another on the same card.
+  //
+  // upsertContact is the single opinion about how an ARRIVING contact joins
+  // the list, and it refuses an id the list already holds — which is the whole
+  // duplicate guard, since the author's own row is in state before their
+  // INSERT echoes back. ContactsBlock keeps its own array contract for local
+  // edits (add, edit and remove cannot be one insertion); the two converge
+  // because this one never overwrites what is already there.
+  useLeadContactsRealtime(clientId, React.useCallback((row) => {
+    setData(d => upsertContact(d, row))
   }, []))
 
   // Boolean return feeds EditableDesc's inline-edit standard: false

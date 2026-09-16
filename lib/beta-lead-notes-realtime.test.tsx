@@ -197,8 +197,16 @@ const mount = async (props: any = {}) => {
 // Fire a postgres_changes INSERT at the live channel, ENFORCING the channel's
 // filter the way Supabase would — a suite that called the handler blind would
 // pass even with the scope wrong.
+// Select the notes channel by TABLE, never by position. ClientProfile opens
+// more than one channel now (lead_notes and lead_contacts), so
+// channels[channels.length - 1] silently became the WRONG one — these tests
+// failed the moment contacts landed. By table, a third subscription on this
+// card cannot break them again.
+const notesChannel = () => channels.find((c: any) => c.config?.table === 'lead_notes')
+
 const emit = async (row: any) => {
-  const ch = channels[channels.length - 1]
+  const ch = notesChannel()
+  if (!ch) return
   const want = ch.config.filter
   if (want && want !== `lead_id=eq.${row.lead_id}`) return // not delivered
   await act(async () => { ch.handler({ eventType: 'INSERT', new: row }) })
@@ -264,11 +272,12 @@ describe("someone else's note appears on the open card", () => {
 
   it('subscribes on THIS client, not a location', async () => {
     await mount()
-    expect(channels).toHaveLength(1)
-    expect(channels[0].subscribed).toBe(true)
-    expect(channels[0].config.table).toBe('lead_notes')
-    expect(channels[0].config.event).toBe('INSERT')
-    expect(channels[0].config.filter).toBe('lead_id=eq.c1')
+    const ch = notesChannel()
+    expect(ch).toBeDefined()
+    expect(ch.subscribed).toBe(true)
+    expect(ch.config.table).toBe('lead_notes')
+    expect(ch.config.event).toBe('INSERT')
+    expect(ch.config.filter).toBe('lead_id=eq.c1')
   })
 
   it('nothing else on the card is disturbed by the arrival', async () => {
@@ -359,7 +368,7 @@ describe('scope', () => {
     // Belt and braces: the hook re-checks the row's own lead_id, so a filter
     // that ever let a stray row through still cannot land it on this card.
     await mount()
-    const ch = channels[channels.length - 1]
+    const ch = notesChannel()!
     await act(async () => { ch.handler({ eventType: 'INSERT', new: note({ id: 'n-stray', lead_id: 'c-other', text: 'Stray note' }) }) })
     await flush()
 
@@ -379,7 +388,7 @@ describe('scope', () => {
 
   it('removes the channel on unmount', async () => {
     await mount()
-    const ch = channels[0]
+    const ch = notesChannel()
     await act(async () => { root.unmount() })
     ;(root as any) = null
     expect(removed).toContain(ch)
