@@ -58,11 +58,11 @@ const inbox = (people: any[], over: any = {}) => (
   <InboxScreen people={people} engagements={[]} locFilter="all" closeLostReasons={['Went quiet', 'Other']} setToast={() => {}} {...over} />
 )
 
-describe('Close — not interested menu gating (issue 204)', () => {
+describe('the Closed menu item — gating (issue 204)', () => {
   it('present on a normal owned row', async () => {
     const host = await mount(inbox([person()]))
     await click(moreButton(host)!)
-    expect(menuTexts().some(t => t.includes('Close — not interested'))).toBe(true)
+    expect(menuTexts().some(t => t === 'Closed')).toBe(true)
   })
 
   it('hidden on a Jobber-linked row (junk-parity gate)', async () => {
@@ -70,7 +70,7 @@ describe('Close — not interested menu gating (issue 204)', () => {
     await click(moreButton(host)!)
     // menu still opens (snooze/dismiss/network) but the close item is gone —
     // just like Mark as junk, which is also hidden here.
-    expect(menuTexts().some(t => t.includes('Close — not interested'))).toBe(false)
+    expect(menuTexts().some(t => t === 'Closed')).toBe(false)
     expect(menuTexts().some(t => t.includes('Mark as junk'))).toBe(false)
   })
 
@@ -84,7 +84,7 @@ describe('Close — not interested menu gating (issue 204)', () => {
     const host = await mount(inbox([person()]))
     await click(moreButton(host)!)
     const item = [...document.querySelectorAll('[data-bee-row-menu] button')]
-      .find(b => (b.textContent || '').includes('Close — not interested')) as HTMLButtonElement
+      .find(b => (b.textContent || '').trim() === 'Closed') as HTMLButtonElement
     await click(item)
     expect(document.body.textContent).toContain('Close as lost')
   })
@@ -95,7 +95,7 @@ describe('Close — not interested menu gating (issue 204)', () => {
     expect(host.querySelectorAll('.bee-inbox-row').length).toBe(1)
     await click(moreButton(host)!)
     const item = [...document.querySelectorAll('[data-bee-row-menu] button')]
-      .find(b => (b.textContent || '').includes('Close — not interested')) as HTMLButtonElement
+      .find(b => (b.textContent || '').trim() === 'Closed') as HTMLButtonElement
     await click(item)
     // drive the wizard: reason (default) → Next → Close as lost
     const byText = (t: string) => [...document.querySelectorAll('button')].find(b => (b.textContent || '').includes(t)) as HTMLButtonElement

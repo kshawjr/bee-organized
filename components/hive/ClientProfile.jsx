@@ -1038,12 +1038,16 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             ...(networkTwin === false
               ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
               : []),
+            // The label is just "Closed" (Kevin, 2026-09-16) — identical to
+            // the Inbox row menu's, because it opens the identical wizard.
+            // "Close — not interested" presupposed one of the answers that
+            // wizard asks for. Key, wizard and closed_reason are unchanged.
             // issue 204 — "Close — not interested": founds + closes a Closed
             // Lost engagement for a lead who didn't convert (and stops drips),
             // instead of mis-filing her as junk. Same gate as junk below:
             // hidden on Jobber-linked (Jobber owns their lifecycle) and, via
             // the readOnly wrap above, on read-only surfaces.
-            ...(jobberLinked ? [] : [{ key: 'close-lost', label: 'Close — not interested', onPick: () => setCloseLostOpen(true) }]),
+            ...(jobberLinked ? [] : [{ key: 'close-lost', label: 'Closed', onPick: () => setCloseLostOpen(true) }]),
             ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
           ]),
         ]} />

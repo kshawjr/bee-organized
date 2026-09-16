@@ -1205,7 +1205,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 deletes anything (Move only soft-hides from this list). */}
             <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setConvertFor(p) }}
               label={<><IconUsers size={13} />Add to Network…</>} />
-            {/* issue 204 — "Close — not interested": the real disposition for
+            {/* The label is just "Closed" (Kevin, 2026-09-16). It used to read
+                "Close — not interested", which presupposed one of the very
+                answers the wizard then asks the owner to pick — the lead may
+                have gone elsewhere, gone quiet, or become unreachable. The
+                verb states the outcome and lets the wizard ask the reason.
+                (The `close-lost` key, CloseLostWizard and closed_reason are
+                VOCABULARY, not copy, and are deliberately unchanged.)
+
+                issue 204 — "Close — not interested": the real disposition for
                 a lead who cancelled / went quiet (Sarah Watts). NOT junk (she
                 was a real lead, not spam), NOT snooze/dismiss (those keep her
                 in the funnel). Founds + closes a Closed Lost engagement so she
@@ -1214,7 +1222,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 lifecycle) and, via the cluster above, on read-only surfaces. */}
             {!linked && (
               <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setCloseLostFor(p) }}
-                label={<><IconCheck size={13} />Close — not interested</>} />
+                label={<><IconCheck size={13} />Closed</>} />
             )}
             {/* Jobber-owns-deletion rule: no junk door on linked rows
                 (the API 409s it anyway — this keeps the UI honest). Junk is
