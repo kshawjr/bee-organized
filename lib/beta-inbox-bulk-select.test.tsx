@@ -14,7 +14,7 @@
 //   - N>5 confirm step: no writes until confirmed; Keep backs out
 //   - linked exclusion: grayed disabled checkbox ('Managed in
 //     Jobber'), select-all skips linked, row click can't select it,
-//     and the linked row's ··· menu carries no 'Mark as junk'
+//     and the linked row's ··· menu carries no 'Mark as Junk'
 //   - ClientProfile ··· guard: no junk menu on linked
 //   - source guard: the API 409 (jobber_linked_junk_rejected) exists
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -399,17 +399,17 @@ describe('Jobber-linked rows in the Inbox', () => {
     await m.unmount()
   })
 
-  it("linked row's ··· menu has no 'Mark as junk' (Dismiss stays); unlinked keeps it", async () => {
+  it("linked row's ··· menu has no 'Mark as Junk' (Dismiss stays); unlinked keeps it", async () => {
     const linked = person({ name: 'Judy Jobber', jobberRef: '12345' })
     const m = await mount(inbox([linked]))
     await click(m.host.querySelector('button[aria-label="More"]')!)
     expect(menuButton('Dismiss')).toBeTruthy()
-    expect(menuButton('Mark as junk')).toBeFalsy()
+    expect(menuButton('Mark as Junk')).toBeFalsy()
     await m.unmount()
 
     const m2 = await mount(inbox([person({ name: 'Frank Free' })]))
     await click(m2.host.querySelector('button[aria-label="More"]')!)
-    expect(menuButton('Mark as junk')).toBeTruthy()
+    expect(menuButton('Mark as Junk')).toBeTruthy()
     await m2.unmount()
   })
 })
@@ -422,7 +422,7 @@ describe('card menus enforce the linked guard', () => {
     )
     expect(m.host.querySelector('button[aria-label="More"]')).toBeTruthy()
     await click(m.host.querySelector('button[aria-label="More"]')!)
-    expect(buttonByText(m.host, 'Mark as junk')).toBeTruthy()
+    expect(buttonByText(m.host, 'Mark as Junk')).toBeTruthy()
     await m.unmount()
 
     profileOver = { client: { jobber_client_id: 'jc-77' } }
@@ -437,7 +437,7 @@ describe('card menus enforce the linked guard', () => {
     // kind of record that turns out to be a realtor). Assert the rule
     // itself now that the menu's emptiness is no longer a proxy for it.
     await click(m2.host.querySelector('button[aria-label="More"]')!)
-    expect(buttonByText(m2.host, 'Mark as junk')).toBeFalsy()
+    expect(buttonByText(m2.host, 'Mark as Junk')).toBeFalsy()
     expect(buttonByText(m2.host, 'Add to Network…')).toBeTruthy()
     await m2.unmount()
   })

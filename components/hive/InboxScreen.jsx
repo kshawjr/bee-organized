@@ -55,6 +55,7 @@ import { createPortal } from 'react-dom'
 import { deriveClientStatus, enquiryDateOf, isBackAgain } from './shared/clientStatus'
 import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
 import { DISPOSITIONS, DISPOSITION_GROUPS, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
+import { menuRowBox, menuLabelType, menuDescriptionType, menuHeadingType, menuConfirmPromptType } from './shared/menuType'
 import { describeDismissal, dismissalLine, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { isInboxCountable } from './shared/inboxCountable'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
@@ -311,29 +312,19 @@ function AgeInline({ created, nowMs, style = {} }) {
 // the row (which opens the ClientProfile) and off the document
 // outside-click closer.
 function MenuRow({ label, description, danger, disabled, onPick, testid }) {
-  // whiteSpace:nowrap is right for a bare verb and WRONG once a row carries a
-  // sentence under it, so the description wraps and the label does not.
+  // Type comes from shared/menuType so this row and the client card's cannot
+  // drift. The label is the choice and carries the weight AND the danger
+  // colour; the description is support and is always neutral. Nothing sets a
+  // fontSize on the <button> — the globals.css 16px floor would discard it.
   return (
     <button disabled={disabled} data-testid={testid}
       onClick={(ev) => { ev.stopPropagation(); onPick() }}
       onMouseEnter={(ev) => { ev.currentTarget.style.background = T.surface.hover }}
       onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent' }}
-      style={{
-        display: 'block', width: '100%',
-        padding: '7px 10px', border: 'none', background: 'transparent',
-        borderRadius: T.radius.control, fontFamily: 'inherit',
-        cursor: 'pointer', textAlign: 'left',
-      }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '7px',
-        fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap',
-        color: danger ? T.state.danger.strong : T.ink.primary }}>
-        {label}
-      </span>
+      style={menuRowBox}>
+      <span data-menu-label style={menuLabelType(danger)}>{label}</span>
       {description && (
-        <span style={{ display: 'block', marginTop: '2px', fontSize: '11.5px', lineHeight: 1.4,
-          color: T.ink.quiet, whiteSpace: 'normal', maxWidth: '30ch' }}>
-          {description}
-        </span>
+        <span data-menu-description style={menuDescriptionType}>{description}</span>
       )}
     </button>
   )
@@ -342,12 +333,7 @@ function MenuRow({ label, description, danger, disabled, onPick, testid }) {
 // The section heading above each group. Not a button — it is a label, so it
 // is not focusable and not clickable.
 function MenuGroupHeading({ children }) {
-  return (
-    <p style={{ padding: '7px 10px 3px', fontSize: '10.5px', fontWeight: 600,
-      letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted, whiteSpace: 'nowrap' }}>
-      {children}
-    </p>
-  )
+  return <p data-menu-heading style={{ ...menuHeadingType, whiteSpace: 'nowrap' }}>{children}</p>
 }
 
 // The in-menu confirmation. This is the pattern the junk door ALREADY used
@@ -358,10 +344,9 @@ function MenuGroupHeading({ children }) {
 function MenuConfirm({ prompt, yes, danger, disabled, onConfirm, onCancel, testid }) {
   return (
     <div data-testid={testid} style={{ padding: '4px 2px' }}>
-      <p style={{ padding: '4px 10px 6px', fontSize: '11.5px', lineHeight: 1.45,
-        color: danger ? T.state.danger.strong : T.ink.secondary, whiteSpace: 'normal', maxWidth: '32ch' }}>
-        {prompt}
-      </p>
+      {/* Neutral even when destructive: the red belongs on the verb below,
+          not on the sentence explaining it. */}
+      <p data-menu-confirm-prompt style={menuConfirmPromptType}>{prompt}</p>
       <MenuRow danger={danger} disabled={disabled} onPick={onConfirm} label={yes} testid={`${testid}-yes`} />
       <MenuRow disabled={disabled} onPick={onCancel} label={CONFIRM_NO} testid={`${testid}-no`} />
     </div>

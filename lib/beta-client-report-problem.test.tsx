@@ -122,7 +122,7 @@ describe('role visibility — everyone can report; write items stay gated', () =
     const labels = menuLabels(host)
     expect(labels).toContain('Report a problem with this client')
     expect(labels).toContain('Add to Network…')
-    expect(labels).toContain('Mark as junk')
+    expect(labels).toContain('Mark as Junk')
     await unmount()
   })
 
@@ -135,7 +135,7 @@ describe('role visibility — everyone can report; write items stay gated', () =
     const labels = menuLabels(host)
     expect(labels).toContain('Report a problem with this client')
     expect(labels).not.toContain('Add to Network…')
-    expect(labels).not.toContain('Mark as junk')
+    expect(labels).not.toContain('Mark as Junk')
     // …and it still fires (non-mutating, allowed read-only).
     await click(btn(host, 'Report a problem with this client')!)
     expect(onReportProblem).toHaveBeenCalledTimes(1)
@@ -155,7 +155,7 @@ describe('issue-120 gap — the menu is never empty', () => {
     const labels = menuLabels(host)
     expect(labels).toContain('Report a problem with this client')
     expect(labels).not.toContain('Add to Network…')
-    expect(labels).not.toContain('Mark as junk')
+    expect(labels).not.toContain('Mark as Junk')
     await unmount()
   })
 })

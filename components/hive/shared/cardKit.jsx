@@ -21,6 +21,7 @@
 import React, { useEffect, useState } from 'react'
 import { IconDots } from '@/components/ui/icons'
 import { T } from './tokens'
+import { menuRowBox, menuLabelType, menuDescriptionType, menuHeadingType, menuConfirmPromptType } from './menuType'
 
 export function MicroLabel({ children }) {
   return (
@@ -186,10 +187,9 @@ export function CardMenu({ items = [], label = 'More' }) {
                 // cannot name the client or point at another action.
                 return (
                   <div data-testid={`menu-confirm-${armedItem.key}`} style={{ padding: '4px 2px' }}>
-                    <p style={{ padding: '4px 10px 6px', fontSize: '11.5px', lineHeight: 1.45,
-                      color: armedItem.danger ? T.state.danger.strong : T.ink.secondary, maxWidth: '32ch' }}>
-                      {armedItem.confirm.prompt}
-                    </p>
+                    {/* Neutral even when destructive — the red belongs on
+                        the verb below, not on the sentence explaining it. */}
+                    <p data-menu-confirm-prompt style={menuConfirmPromptType}>{armedItem.confirm.prompt}</p>
                     <MenuRow close={() => setOpen(false)} onArm={() => {}}
                       item={{ key: `${armedItem.key}-yes`, testid: `menu-confirm-${armedItem.key}-yes`,
                         label: armedItem.confirm.yes, danger: armedItem.danger,
@@ -231,22 +231,18 @@ function MenuRow({ item, close, onArm }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'block', width: '100%', textAlign: 'left',
+        ...menuRowBox,
         padding: item.description ? '7px 10px' : '8px 10px',
-        border: 'none', borderRadius: T.radius.control,
         background: hover ? T.surface.hover : 'transparent',
-        fontFamily: 'inherit', cursor: 'pointer',
       }}
     >
-      <span style={{ display: 'block', fontSize: '13px', fontWeight: 500,
-        color: item.danger ? T.state.danger.strong : T.ink.primary }}>
-        {item.label}
-      </span>
+      {/* Same shared type as the Inbox row menu — see shared/menuType. The
+          label carries the weight and the danger colour; the description is
+          support and stays neutral. No fontSize on the <button>: the
+          globals.css 16px floor would discard it. */}
+      <span data-menu-label style={menuLabelType(item.danger)}>{item.label}</span>
       {item.description && (
-        <span style={{ display: 'block', marginTop: '2px', fontSize: '11.5px', lineHeight: 1.4,
-          color: T.ink.quiet, maxWidth: '30ch' }}>
-          {item.description}
-        </span>
+        <span data-menu-description style={menuDescriptionType}>{item.description}</span>
       )}
     </button>
   )
@@ -254,12 +250,7 @@ function MenuRow({ item, close, onArm }) {
 
 // The group heading. A label, not a control: not focusable, not clickable.
 function MenuHeading({ children }) {
-  return (
-    <p style={{ padding: '7px 10px 3px', fontSize: '10.5px', fontWeight: 600,
-      letterSpacing: '0.6px', textTransform: 'uppercase', color: T.ink.muted }}>
-      {children}
-    </p>
-  )
+  return <p data-menu-heading style={menuHeadingType}>{children}</p>
 }
 
 // InlineToast (BeeHub scope) renders {msg} verbatim, so a React node

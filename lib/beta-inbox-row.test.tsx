@@ -144,7 +144,7 @@ describe('ghost icon actions', () => {
     await click(byLabel(m.host, 'More')!)
     const menu = document.querySelector('[data-bee-row-menu]')
     expect(menu, 'menu rides the portal to <body>').toBeTruthy()
-    for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as junk'] /* snooze removed 2026-09-16 */) {
+    for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as Junk'] /* snooze removed 2026-09-16 */) {
       expect([...menu!.querySelectorAll('button')].some(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === label),
         `overflow must still offer "${label}"`).toBe(true)
     }

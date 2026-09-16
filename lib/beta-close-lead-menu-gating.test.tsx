@@ -74,7 +74,7 @@ describe('the Closed menu item — gating (issue 204)', () => {
     // menu still opens (snooze/dismiss/network) but the close item is gone —
     // just like Mark as junk, which is also hidden here.
     expect(document.querySelector('[data-testid="menu-close"]')).toBeFalsy()
-    expect(menuTexts().some(t => t.includes('Mark as junk'))).toBe(false)
+    expect(menuTexts().some(t => t.includes('Mark as Junk'))).toBe(false)
   })
 
   it('absent on a read-only surface (no ··· cluster at all)', async () => {

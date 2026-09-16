@@ -177,7 +177,7 @@ describe('restyle behavior intact', () => {
     // The open menu portals to <body> (the cards clip overflow).
     const menu = document.querySelector('[data-bee-row-menu]')
     expect(menu).toBeTruthy()
-    for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as junk'] /* snooze removed 2026-09-16 */) {
+    for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as Junk'] /* snooze removed 2026-09-16 */) {
       expect([...menu!.querySelectorAll('button')].some(b => ((b.querySelector('span')?.textContent) || b.textContent || '').trim() === label)).toBe(true)
     }
     expect(onOpenPerson).not.toHaveBeenCalled()

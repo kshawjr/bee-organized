@@ -83,7 +83,7 @@ const expectUnclipped = (host: Element) => {
   expect(host.contains(menu!)).toBe(false)
   expect(menu!.closest('.bee-inbox-row')).toBeNull()
   expect(menu!.style.position).toBe('fixed')
-  for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as junk'] /* snooze removed 2026-09-16 */) {
+  for (const label of ['Dismiss', 'Add to Network…', 'Close', 'Mark as Junk'] /* snooze removed 2026-09-16 */) {
     expect(menuButton(label), `menu offers "${label}"`).toBeTruthy()
   }
   return menu!

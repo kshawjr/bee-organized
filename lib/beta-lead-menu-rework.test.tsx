@@ -241,7 +241,7 @@ describe('nothing is written until it is confirmed', () => {
   it('the card menu confirms junk too, with the same pointer', async () => {
     await openCard()
     const junk = byTestId('menu-junk') || [...document.querySelectorAll('button')]
-      .find(b => (b.querySelector('span')?.textContent || '').trim() === 'Mark as junk')
+      .find(b => (b.querySelector('span')?.textContent || '').trim() === 'Mark as Junk')
     await click(junk)
     expect(bodyText()).toContain(JUNK_POINTS_TO_CLOSE)
     expect(writes.some(w => w.body && w.body.is_junk === true)).toBe(false)

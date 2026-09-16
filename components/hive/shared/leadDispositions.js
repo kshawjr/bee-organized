@@ -94,7 +94,11 @@ export const DISPOSITIONS = {
   },
   junk: {
     key: 'junk',
-    label: 'Mark as junk',
+    // Capital J (Kevin, 2026-09-16): Junk is a PLACE here — the Recycle Bin
+    // the record moves to — not a description of it. The confirmation and its
+    // verb carry the same capital so the label and its own confirmation can
+    // never read as two different things.
+    label: 'Mark as Junk',
     // Verified: is_junk true → the Recycle Bin, drips stopped
     // (drip-lifecycle stopActiveDripsForLead 'junk'), and filtered out of
     // every loading query, so out of the numbers.
@@ -123,7 +127,7 @@ export function confirmPrompt(key, name) {
     // THE POINTER TO CLOSE IS THE POINT. Close and junk are opposites in the
     // data and look alike in a menu; the moment someone is about to choose
     // wrong is the cheapest place to catch it.
-    return `Mark ${who} as junk? ${DISPOSITIONS.junk.description} Their drip emails stop. ${JUNK_POINTS_TO_CLOSE}`
+    return `Mark ${who} as Junk? ${DISPOSITIONS.junk.description} Their drip emails stop. ${JUNK_POINTS_TO_CLOSE}`
   }
   return null
 }
@@ -131,5 +135,5 @@ export function confirmPrompt(key, name) {
 export const JUNK_POINTS_TO_CLOSE =
   'If they were a real person who just didn’t go ahead, use Close instead.'
 
-export const CONFIRM_YES = { dismiss: 'Yes, dismiss', junk: 'Yes, mark as junk' }
+export const CONFIRM_YES = { dismiss: 'Yes, dismiss', junk: 'Yes, mark as Junk' }
 export const CONFIRM_NO = 'Keep it'
