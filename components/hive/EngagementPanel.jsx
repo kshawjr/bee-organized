@@ -78,7 +78,7 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
-import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
+import { MicroLabel, ActionRow, actionBtn, metaValueBtn, rowActionBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
 import AddressField from './shared/AddressField'
@@ -631,6 +631,23 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     ...(!readOnly ? [
       !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
       eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
+      // The owing override, second entry point. The inline control below was
+      // too quiet to find — 61 engagements qualify and about $192k reads as
+      // owed — so it is offered here as well.
+      //
+      // SAME FLOW, NOT A SECOND COPY: this sets the SAME `wizard` state the
+      // inline control sets, so both open one CloseWonWizard with
+      // overBalance, ask the one mandatory reason, and commit through the one
+      // write. There is no second reason step to drift.
+      //
+      // GATED ON fpCase === 'owing', which is Final Processing AND invoices
+      // not settled — the same predicate the inline control and the
+      // explanatory sentence read. A fully-paid or never-invoiced Final
+      // Processing engagement already has the ordinary Mark won button, and
+      // offering "close it anyway" beside it would invite an owner to reach
+      // for an override they do not need. Every other stage yields a null
+      // fpCase, so this is absent there without its own stage check.
+      fpCase === 'owing' && { key: 'won-over-balance', label: OWING_CLOSE_ACTION, icon: <IconCheck size={15} />, onClick: () => setWizard('won-over-balance') },
     ].filter(Boolean) : []),
   ] : []
 
@@ -1158,21 +1175,39 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           <p style={{ fontSize: '12px', fontWeight: 600, color: T.ink.primary }}>{fpExplainer.title}</p>
           <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5 }}>{FINAL_PROCESSING_LEAD}</p>
           <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5 }}>{fpExplainer.body}</p>
-          {/* THE DELIBERATE SECOND ACTION. Kevin's ruling: if the owner
-              says it is paid in Jobber and Bee Hub disagrees, they can
-              close it. NOT the Mark won button promoted — a quiet text
-              action, so someone closing forty settled deals cannot hit
-              this one by muscle memory. It opens the SAME CloseWonWizard
-              (overBalance), which asks for the mandatory reason; there
-              is no second close path. bee-small-action releases the
-              globals.css 16px button floor to 12px, matching the quiet
-              row-verbs on ClientProfile / NetworkPersonRecord — this
-              must read as chrome beside the 16px accent button. */}
+          {/* THE DELIBERATE SECOND ACTION. Kevin's ruling stands: if the
+              owner says it is paid in Jobber and Bee Hub disagrees, they can
+              close it — but this is never the Mark won button promoted.
+              It opens the SAME CloseWonWizard (overBalance) and the same
+              mandatory reason; there is no second close path.
+              
+              IT WAS TOO QUIET. Borderless and transparent, it read as fine
+              print and owners did not find it. It now carries real button
+              chrome — rowActionBtn's border + raised surface, the card's
+              existing SECONDARY idiom (the Reopen verb on ClientProfile uses
+              the same shape) — with accent-deep label so it reads as offered
+              rather than merely available.
+              
+              WHAT IT IS DELIBERATELY NOT:
+                · not filled. Mark won is a solid T.accent.fg button; this is
+                  outlined on T.surface.raised. Bordered-beside-filled is the
+                  ordinary secondary/primary pair, unmistakably the lesser.
+                · not full width, and not in Mark won's slot. On an owing
+                  engagement Mark won is ABSENT, so a full-width control here
+                  would sit exactly where the muscle memory of someone closing
+                  forty settled deals lands. Left-aligned inside the
+                  explanation keeps it attached to the sentence that justifies
+                  it and away from that spot.
+                · not larger. bee-small-action releases the globals.css 16px
+                  button floor to 12px (lockstep with T.badge.actionFont),
+                  which is what rowActionBtn's own users set — the chrome
+                  changed, the type did not. */}
           {fpCase === 'owing' && !readOnly && (
             <button type="button" className="bee-small-action" data-bee-close-over-balance
               onClick={() => setWizard('won-over-balance')}
-              style={{ alignSelf: 'flex-start', marginTop: '3px', padding: '4px 0', border: 'none', background: 'transparent',
-                color: T.accent.deep, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+              style={{ ...rowActionBtn(), marginLeft: 0, alignSelf: 'flex-start', marginTop: '6px',
+                gap: '6px', color: T.accent.deep }}>
+              <IconCheck size={13} />
               {OWING_CLOSE_ACTION}
             </button>
           )}
