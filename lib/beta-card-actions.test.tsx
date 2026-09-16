@@ -208,55 +208,17 @@ describe('marketing opt-out (PreferencesBlock)', () => {
 })
 
 // ═══ D) snooze ═════════════════════════════════════════════════
-describe('snooze (PreferencesBlock)', () => {
-  it('preset snooze PATCHes snoozed_until (+note); Timeline pickup rides the leadPatchMap seam', async () => {
-    const onPatched = vi.fn()
-    const { host, unmount } = await mount(
-      <PreferencesBlock client={CLIENT() as any} openCount={0} onPatched={onPatched} setToast={() => {}} nowMs={now} />
-    )
-    await click(btn(host, 'Snooze…')!)
-    await typeIn(host.querySelector('select[aria-label="Snooze length"]')!, '2w')
-    await typeIn(host.querySelector('input[aria-label="Snooze note"]')!, 'Traveling until August')
-    await click(btn(host, 'Snooze')!)
-    expect(calls).toHaveLength(1)
-    expect(calls[0].body.snoozed_note).toBe('Traveling until August')
-    const until = new Date(calls[0].body.snoozed_until).getTime()
-    expect(Math.abs(until - (now + 14 * 86400000))).toBeLessThan(60000) // 2 weeks out
-    expect(onPatched).toHaveBeenCalledWith({ snoozed_until: calls[0].body.snoozed_until, snoozed_note: 'Traveling until August' })
-    // the propagation seam translates for the Inbox + Timeline consumers
-    expect(leadColsToPersonFields({ snoozed_until: calls[0].body.snoozed_until })).toEqual({ snoozeUntil: calls[0].body.snoozed_until })
-    await unmount()
-  })
+// SNOOZE IS GONE FROM THE CARD (2026-09-16). The three tests that drove the
+// Preferences snooze control — preset PATCH, un-snooze nulling both columns,
+// and the custom-date guard — went with it: they exercised a control that no
+// longer exists, not a rule that still holds.
+//
+// What still holds is pinned elsewhere, deliberately: leads.snoozed_until and
+// isSoftRemovedFromInbox's future-snooze test in beta-inbox-actions, and the
+// Timeline's Un-snooze — now the ONLY hand-operated exit — in
+// beta-card-three-changes. 3 leads are snoozed in production and must still
+// wake correctly and stay wake-able.
 
-  it('un-snooze nulls BOTH columns; the note shows italic while snoozed', async () => {
-    const onPatched = vi.fn()
-    const { host, unmount } = await mount(
-      <PreferencesBlock client={{ ...CLIENT(), snoozed_until: inDays(5), snoozed_note: 'Back after the move' } as any}
-        openCount={0} onPatched={onPatched} setToast={() => {}} nowMs={now} />
-    )
-    expect(host.textContent).toContain('Snoozed until')
-    expect(host.textContent).toContain('Back after the move')
-    await click(btn(host, 'Un-snooze')!)
-    expect(calls).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), method: 'PATCH', body: { snoozed_until: null, snoozed_note: null } }])
-    expect(onPatched).toHaveBeenCalledWith({ snoozed_until: null, snoozed_note: null })
-    await unmount()
-  })
-
-  it('custom date requires a date — no junk PATCH without one', async () => {
-    const toasts: any[] = []
-    const { host, unmount } = await mount(
-      <PreferencesBlock client={CLIENT() as any} openCount={0} onPatched={() => {}} setToast={(t: any) => toasts.push(t)} nowMs={now} />
-    )
-    await click(btn(host, 'Snooze…')!)
-    await typeIn(host.querySelector('select[aria-label="Snooze length"]')!, 'custom')
-    await click(btn(host, 'Snooze')!)
-    expect(calls).toEqual([])
-    expect(toasts.at(-1).kind).toBe('error')
-    await unmount()
-  })
-})
-
-// ═══ B) drip controls ══════════════════════════════════════════
 describe('drip controls', () => {
   it('preferences row: Pause hits drip-pause (the flag-synced route, never a bare leads PATCH)', async () => {
     const onPatched = vi.fn()
@@ -486,7 +448,6 @@ describe('ClientProfile wires the live blocks', () => {
     // The lead-level "Assigned to" row is gone — no assignee picker here.
     expect(host.textContent).not.toContain('Assigned to')
     expect(btn(host, 'Opt out…')).toBeTruthy()
-    expect(btn(host, 'Snooze…')).toBeTruthy()
     expect(btn(host, '+ Add contact')).toBeTruthy()
     expect(host.querySelector('button[aria-label="Add tag"]')).toBeTruthy()
     await unmount()

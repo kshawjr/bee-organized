@@ -42,7 +42,7 @@
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
 import { T } from './shared/tokens'
-import { describeDismissal, dismissalLine, stillNurturing } from './shared/dismissalFacts'
+import { describeDismissal, dismissalLine, stillNurturing, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel, vitalsAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -453,6 +453,43 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
       setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
     } catch (e) { setToast({ kind: 'error', msg: `Reopen failed: ${e.message}` }) }
     finally { setBusy(false) }
+  }
+
+  // ── Dismiss, from the card ───────────────────────────────────
+  // Inbox-only until now. It writes the SAME field, logs the SAME audit
+  // touchpoint with the SAME label and actor, and raises the SAME undo toast
+  // as the Inbox row action — including actor:'session', without which the
+  // row records WHEN but never WHO (the gap that left 84 historical
+  // dismissals unattributable).
+  //
+  // WHAT "DISMISS" MEANS OFF THE INBOX, since the card opens from the client
+  // list and from an engagement too: the same thing. The field is
+  // inbox_dismissed_at and the effect is always "leaves the Inbox worklist,
+  // stays a live client" — it is a property of the LEAD, not of the screen
+  // you happened to be on. So the approved wording holds unchanged
+  // everywhere: "your worklist" is the Inbox whether or not you are looking
+  // at it. Nothing about the copy needed a second version.
+  async function dismissLead() {
+    if (!c) return
+    try {
+      await patchLead({ inbox_dismissed_at: new Date().toISOString() })
+      onLeadPatched(c.id, { inbox_dismissed_at: new Date().toISOString() })
+      // Audit trail, fire-and-forget exactly as the Inbox does it: the
+      // dismissal itself has already landed and must not fail on the log.
+      fetch('/api/touchpoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: c.id, kind: 'system', method: 'system', label: DISMISS_BUTTON_LABEL, actor: 'session' }),
+      }).then(r => { if (!r.ok) console.warn('Failed to log dismiss touchpoint') })
+        .catch(() => console.warn('Failed to log dismiss touchpoint'))
+      setToast(undoToast('Dismissed', async () => {
+        try {
+          await patchLead({ inbox_dismissed_at: null })
+          onLeadPatched(c.id, { inbox_dismissed_at: null })
+          setToast({ kind: 'success', msg: `${c.name} restored` })
+        } catch (e) { setToast({ kind: 'error', msg: `Undo failed: ${e.message}` }) }
+      }))
+    } catch (e) { setToast({ kind: 'error', msg: `Dismiss failed: ${e.message}` }) }
   }
 
   async function markJunk() {
@@ -1055,6 +1092,23 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           // permanently into the conversion numbers. That is why junk's
           // confirmation ends by pointing at Close.
           ...(readOnly ? [] : [
+            // DISMISS, now on the card too (Kevin, 2026-09-16). It was
+            // Inbox-only, which meant an owner looking at a lead from the
+            // client list had to go find it in the worklist to take it off
+            // the worklist. Same action, same field, same confirmation, same
+            // group — all of it out of leadDispositions, so the two menus
+            // cannot describe it differently.
+            //
+            // Not gated on jobberLinked, matching the Inbox: dismissing is a
+            // hold on OUR worklist and deletes nothing, so the
+            // Jobber-owns-deletion rule (which gates junk and Close) does not
+            // apply to it.
+            { key: 'offlist-h', heading: DISPOSITION_GROUPS[0].heading },
+            { key: 'dismiss', label: DISPOSITIONS.dismiss.label,
+              description: DISPOSITIONS.dismiss.description,
+              testid: 'menu-dismiss',
+              confirm: { prompt: confirmPrompt('dismiss', c?.name), yes: CONFIRM_YES.dismiss, no: CONFIRM_NO },
+              onPick: dismissLead },
             ...(networkTwin === false
               ? [{ key: 'network-h', heading: DISPOSITION_GROUPS[1].heading },
                  { key: 'network', label: DISPOSITIONS.network.label,
@@ -1068,9 +1122,11 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
               { key: 'finish-h', heading: DISPOSITION_GROUPS[2].heading },
               { key: 'close-lost', label: DISPOSITIONS.close.label,
                 description: DISPOSITIONS.close.description,
+                testid: 'menu-close',
                 onPick: () => setCloseLostOpen(true) },
               { key: 'junk', label: DISPOSITIONS.junk.label,
                 description: DISPOSITIONS.junk.description,
+                testid: 'menu-junk',
                 danger: true,
                 // Arms in place rather than firing. The undo toast markJunk
                 // already raises is untouched — the confirm is in ADDITION.

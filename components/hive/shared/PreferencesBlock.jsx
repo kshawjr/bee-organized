@@ -7,11 +7,10 @@
 //     're-subscribe' commits immediately, no dialog (Kevin's rule:
 //     friction on the destructive direction only).
 //     PATCH /api/leads/:id { marketing_opt_out }.
-//   snooze — presets (1w/2w/1m/3m) + custom date + optional note →
-//     PATCH { snoozed_until, snoozed_note } (both whitelisted);
-//     un-snooze nulls both. The Timeline tab reads snoozed_until on its
-//     own fetch; propagation to Inbox rides onPatched → leadPatchMap's
-//     snoozed_until → snoozeUntil mapping.
+//   snooze — GONE from this block (Kevin, 2026-09-16). The column and every
+//     reader of it remain; the only hand-operated exit is now the Timeline
+//     tab's "Snoozed until …" item and its Un-snooze action. See the note at
+//     the render site.
 //   nurture drip — row HIDDEN with live business (v4 rule). Otherwise
 //     five states in precedence order (issue 112 added the first two,
 //     issue 243 the fourth):
@@ -37,7 +36,6 @@ import React, { useState } from 'react'
 import { IconPlayerPause, IconMail } from '@/components/ui/icons'
 import { T } from './tokens'
 import { MicroLabel, rowActionBtn } from './cardKit'
-import { fmtShort } from './engagementStatus'
 
 const QUIET = T.surface.sunken
 
@@ -45,12 +43,6 @@ const QUIET = T.surface.sunken
 // T.badge.height so it sits level with the +Add / +Tag pills above).
 const rowBtn = rowActionBtn
 
-const SNOOZE_PRESETS = [
-  { key: '1w', label: '1 week', days: 7 },
-  { key: '2w', label: '2 weeks', days: 14 },
-  { key: '1m', label: '1 month', days: 30 },
-  { key: '3m', label: '3 months', days: 90 },
-]
 
 // issue 112 — a terminally-stopped nurture drip must read in plain English, never
 // as the raw stopped_reason enum. `reason` = why the sequence ended; `guide` =
@@ -89,12 +81,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
   const c = client
   const [busy, setBusy] = useState(false)
   const [confirmOptOut, setConfirmOptOut] = useState(false)
-  const [snoozeOpen, setSnoozeOpen] = useState(false)
-  const [snoozePick, setSnoozePick] = useState('1w')
-  const [snoozeDate, setSnoozeDate] = useState('')
-  const [snoozeNote, setSnoozeNote] = useState('')
 
-  const snoozed = !!(c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs)
 
   // issue 112 — nurture-drip lifecycle. The panel historically read only
   // leads.paused (c.paused), so every TERMINAL stop (hard_bounce et al.,
@@ -136,33 +123,6 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
     } finally { setBusy(false) }
   }
 
-  async function saveSnooze() {
-    const preset = SNOOZE_PRESETS.find(p => p.key === snoozePick)
-    const until = snoozePick === 'custom'
-      ? (snoozeDate ? new Date(`${snoozeDate}T09:00:00`).toISOString() : null)
-      : new Date(nowMs + preset.days * 86400000).toISOString()
-    if (!until) { setToast({ kind: 'error', msg: 'Pick a snooze date' }); return }
-    setBusy(true)
-    try {
-      await patchLead({ snoozed_until: until, snoozed_note: snoozeNote.trim() || null })
-      onPatched({ snoozed_until: until, snoozed_note: snoozeNote.trim() || null })
-      setSnoozeOpen(false); setSnoozeNote('')
-      setToast({ kind: 'success', msg: `Snoozed until ${fmtShort(until)}` })
-    } catch (e) {
-      setToast({ kind: 'error', msg: `Snooze failed: ${e.message}` })
-    } finally { setBusy(false) }
-  }
-
-  async function unSnooze() {
-    setBusy(true)
-    try {
-      await patchLead({ snoozed_until: null, snoozed_note: null })
-      onPatched({ snoozed_until: null, snoozed_note: null })
-      setToast({ kind: 'success', msg: 'Snooze cleared' })
-    } catch (e) {
-      setToast({ kind: 'error', msg: `Un-snooze failed: ${e.message}` })
-    } finally { setBusy(false) }
-  }
 
   // Pause/Activate through the dedicated routes (NOT the leads PATCH):
   // they keep the paused flag and the progress-row state in lockstep,
@@ -180,7 +140,6 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
     } finally { setBusy(false) }
   }
 
-  const inputStyle = { padding: '6px 9px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised, outline: 'none' }
 
   return (
     <div style={{ background: QUIET, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -204,42 +163,21 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
         )}
       </div>
 
-      {/* Snooze — presets + custom date + note; un-snooze clears both. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <p style={{ fontSize: '12px', color: snoozed ? T.state.warning.deep : T.ink.secondary, minWidth: 0 }}>
-            {snoozed ? `Snoozed until ${fmtShort(c.snoozed_until)}` : 'Not snoozed'}
-          </p>
-          {readOnly ? null : snoozed ? (
-            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={unSnooze}>Un-snooze</button>
-          ) : !snoozeOpen && (
-            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setSnoozeOpen(true)}>Snooze…</button>
-          )}
-        </div>
-        {snoozed && (c.snoozed_note || '').trim() && (
-          <p title={c.snoozed_note.trim()} style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            “{c.snoozed_note.trim()}”
-          </p>
-        )}
-        {snoozeOpen && !snoozed && !readOnly && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              <select value={snoozePick} onChange={e => setSnoozePick(e.target.value)} aria-label="Snooze length" style={inputStyle}>
-                {SNOOZE_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-                <option value="custom">Custom date…</option>
-              </select>
-              {snoozePick === 'custom' && (
-                <input type="date" value={snoozeDate} onChange={e => setSnoozeDate(e.target.value)} aria-label="Snooze until" style={inputStyle} />
-              )}
-            </div>
-            <input value={snoozeNote} onChange={e => setSnoozeNote(e.target.value)} placeholder="Note (optional)…" aria-label="Snooze note" style={inputStyle} />
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button className="bee-small-action" style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={saveSnooze}>Snooze</button>
-              <button className="bee-small-action" style={{ ...rowBtn(), marginLeft: 0, color: T.ink.muted }} disabled={busy} onClick={() => setSnoozeOpen(false)}>Cancel</button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* SNOOZE IS GONE FROM THE CARD (Kevin, 2026-09-16). cd03c92 removed the
+          two Inbox menu items and kept this row; the ruling is that snooze
+          goes, not just the menu entries. The status line, Un-snooze, the
+          Snooze… picker and its note are all removed.
+
+          WHAT STAYS, because 3 leads are snoozed in production right now and
+          must wake correctly AND stay wake-able by hand:
+            · leads.snoozed_until / snoozed_note — untouched
+            · isSoftRemovedFromInbox's future-snooze test — untouched, so
+              those 3 stay off the worklist until their date passes
+            · the Timeline's "Snoozed until …" item and its Un-snooze action
+              (shared/Timeline.jsx) — untouched, and now the ONLY way to wake
+              one by hand. That is why this row could go: the exit did not
+              live here alone.
+          Removing the way IN was the job. */}
 
       {/* Nurture drip — hidden with live business (v4 rule). issue 112: three
           states ahead of the paused/active flag. STOPPED (terminal — bounce,

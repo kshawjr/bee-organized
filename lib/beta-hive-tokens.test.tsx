@@ -374,7 +374,7 @@ describe('small-action TYPE scale (#59 round 2)', () => {
     const noop = () => {}
     const cases: Array<[string, React.ReactElement, number]> = [
       // Opt out… / Snooze… / Pause
-      ['PreferencesBlock', <PreferencesBlock client={{ id: 'x', marketing_opt_out: false, snoozed_until: null, snoozed_note: null, paused: false }} openCount={0} onPatched={noop} setToast={noop} />, 3],
+      ['PreferencesBlock', <PreferencesBlock client={{ id: 'x', marketing_opt_out: false, snoozed_until: null, snoozed_note: null, paused: false }} openCount={0} onPatched={noop} setToast={noop} />, 2],
       // pill ✗ + the "+ Tag" affordance
       ['TagsRow', <TagsRow leadId="x" tags={[{ id: 't1', label: 'VIP' }]} options={[]} onChange={noop} setToast={noop} />, 2],
       // + Add contact
