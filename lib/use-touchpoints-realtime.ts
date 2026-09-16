@@ -32,8 +32,8 @@
 // the one thing peopleTouchPatch's header tells us not to build. The snapshot
 // remains the authority; this only shortens the wait for it.
 // ─────────────────────────────────────────────────────────────
-import { useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase'
+import { useRef } from 'react'
+import { useRealtimeChannel } from '@/lib/use-realtime-channel'
 
 // The flat touchpoints row, as postgres_changes delivers it. Only the fields
 // touchpointToTimelineEntry projects, plus the lead_id that says whose it is.
@@ -57,26 +57,13 @@ export function useTouchpointsRealtime(
   const onInsertRef = useRef(onInsert)
   onInsertRef.current = onInsert
 
-  useEffect(() => {
-    if (!locFilter) return
-
-    // Realtime is an ENHANCEMENT: the Hive renders from its server-rendered
-    // set and router.refresh()/focus is the backstop. createClient() THROWS
-    // when the NEXT_PUBLIC_SUPABASE_* vars are missing, and this runs in a
-    // passive effect during commit — unguarded, a config gap would take the
-    // whole tree down to buy live touchpoints. Degrade to no-realtime
-    // instead, loudly.
-    let supabase: ReturnType<typeof createClient>
-    try {
-      supabase = createClient()
-    } catch (e) {
-      console.error('[realtime] touchpoints: no supabase client, live touchpoints are off:', e)
-      return
-    }
-
+  // Opened through use-realtime-channel so the token is attached BEFORE the
+  // join. This channel happened to win the startup race by ~73ms and looked
+  // fine; that was luck, not design, and on a slower load it would have joined
+  // anonymously exactly as leads did.
+  useRealtimeChannel(locFilter, 'touchpoints', (supabase) => {
     const scoped = locFilter !== 'all'
-
-    const channel = supabase
+    return supabase
       .channel(`touchpoints:${scoped ? locFilter : 'all'}`)
       .on(
         'postgres_changes',
@@ -86,7 +73,7 @@ export function useTouchpointsRealtime(
           table: 'touchpoints',
           ...(scoped ? { filter: `location_uuid=eq.${locFilter}` } : {}),
         },
-        (payload) => {
+        (payload: any) => {
           const row = payload.new as TouchpointRealtimeRow
           // A row with no id can't be deduped, and one with no lead_id has
           // nobody to belong to. Either way there is nothing safe to merge.
@@ -94,10 +81,5 @@ export function useTouchpointsRealtime(
           onInsertRef.current(row)
         }
       )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [locFilter])
+  })
 }

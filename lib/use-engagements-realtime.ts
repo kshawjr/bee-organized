@@ -15,8 +15,8 @@
 // baseById, so an INSERT would be swallowed anyway — new-engagement-appears
 // is its own build. DELETE needs REPLICA IDENTITY FULL to carry an id.
 // ─────────────────────────────────────────────────────────────
-import { useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase'
+import { useRef } from 'react'
+import { useRealtimeChannel } from '@/lib/use-realtime-channel'
 
 export type EngagementRealtimeEvent = {
   engagementId: string
@@ -38,32 +38,28 @@ export function useEngagementsRealtime(
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
-  useEffect(() => {
-    // Realtime is an ENHANCEMENT: the board renders from its server-rendered
-    // set and the focus/visibility trigger is the backstop. createClient()
-    // THROWS when the NEXT_PUBLIC_SUPABASE_* vars are missing, and this runs
-    // in a passive effect during HiveShell's commit — unguarded, a config gap
-    // would take the whole board down to buy live moves. Degrade to the focus
-    // trigger instead, loudly.
-    let supabase: ReturnType<typeof createClient>
-    try {
-      supabase = createClient()
-    } catch (e) {
-      console.error('[realtime] engagements: no supabase client, live stage moves are off:', e)
-      return
-    }
+  // Scope: filter server-side when the board is pinned to one location.
+  // When locFilter is 'all' (super_admin/corporate) we subscribe UNFILTERED
+  // and let RLS scope delivery rather than opening a channel per visible
+  // location: the engagements SELECT policy already admits admins to every
+  // row and fences everyone else to location_uuid = their own, so RLS
+  // produces exactly the 'all' set for the people who can hold 'all'. A
+  // single-location filter here would be plain wrong, and a channel fan-out
+  // would duplicate a guarantee the database already makes.
+  const scoped = !!locFilter && locFilter !== 'all'
 
-    // Scope: filter server-side when the board is pinned to one location.
-    // When locFilter is 'all' (super_admin/corporate) we subscribe UNFILTERED
-    // and let RLS scope delivery rather than opening a channel per visible
-    // location: the engagements SELECT policy already admits admins to every
-    // row and fences everyone else to location_uuid = their own, so RLS
-    // produces exactly the 'all' set for the people who can hold 'all'. A
-    // single-location filter here would be plain wrong, and a channel fan-out
-    // would duplicate a guarantee the database already makes.
-    const scoped = !!locFilter && locFilter !== 'all'
-
-    const channel = supabase
+  // Opened through use-realtime-channel so the access token is attached
+  // BEFORE the join — see that file: a channel that joins anonymously is
+  // accepted, reports SUBSCRIBED, and then delivers nothing.
+  //
+  // `locFilter ?? 'all'` is deliberate and is NOT the same guard the other
+  // hooks use. This hook has never had an `if (!locFilter) return`: a board
+  // with no location vocabulary yet still subscribes, unfiltered, and leans
+  // on RLS. Passing the bare locFilter would newly make that case subscribe
+  // to nothing — a silent behaviour change to the board. `scoped` above is
+  // still computed from the REAL locFilter, so the filter itself is unchanged.
+  useRealtimeChannel(locFilter ?? 'all', 'engagements', (supabase) =>
+    supabase
       .channel(`engagements:${scoped ? locFilter : 'all'}`)
       .on(
         'postgres_changes',
@@ -73,16 +69,11 @@ export function useEngagementsRealtime(
           table: 'engagements',
           ...(scoped ? { filter: `location_uuid=eq.${locFilter}` } : {}),
         },
-        (payload) => {
+        (payload: any) => {
           const engagementId = (payload.new as any)?.id
           if (!engagementId) return
           onChangeRef.current({ engagementId })
         }
       )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [locFilter])
+  )
 }

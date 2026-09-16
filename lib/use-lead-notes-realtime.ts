@@ -31,8 +31,8 @@
 // a no-op and a DELETE has no defined meaning for a stream that only ever
 // gains rows. Notes are not edited in the UI today.
 // ─────────────────────────────────────────────────────────────
-import { useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase'
+import { useRef } from 'react'
+import { useRealtimeChannel } from '@/lib/use-realtime-channel'
 
 // The flat lead_notes row, as postgres_changes delivers it.
 export type LeadNoteRealtimeRow = {
@@ -54,23 +54,12 @@ export function useLeadNotesRealtime(
   const onInsertRef = useRef(onInsert)
   onInsertRef.current = onInsert
 
-  useEffect(() => {
-    if (!leadId) return
-
-    // Realtime is an ENHANCEMENT: the card renders from its own fetch and a
-    // reload is the backstop. createClient() THROWS when the
-    // NEXT_PUBLIC_SUPABASE_* vars are missing, and this runs in a passive
-    // effect during commit — unguarded, a config gap would take the client
-    // card down to buy live notes. Degrade to no-realtime instead, loudly.
-    let supabase: ReturnType<typeof createClient>
-    try {
-      supabase = createClient()
-    } catch (e) {
-      console.error('[realtime] lead notes: no supabase client, live notes are off:', e)
-      return
-    }
-
-    const channel = supabase
+  // Opened through use-realtime-channel so the access token is attached
+  // BEFORE the join. That matters more here than anywhere: lead_notes' RLS
+  // policy grants to `authenticated` only, so an anonymous join would be
+  // accepted and then deliver nothing at all.
+  useRealtimeChannel(leadId, 'lead notes', (supabase) =>
+    supabase
       .channel(`lead_notes:${leadId}`)
       .on(
         'postgres_changes',
@@ -80,7 +69,7 @@ export function useLeadNotesRealtime(
           table: 'lead_notes',
           filter: `lead_id=eq.${leadId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const row = payload.new as LeadNoteRealtimeRow
           // No id means nothing to dedupe on; a mismatched lead_id means the
           // row is not this card's, whatever the filter let through.
@@ -88,10 +77,5 @@ export function useLeadNotesRealtime(
           onInsertRef.current(row)
         }
       )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [leadId])
+  )
 }

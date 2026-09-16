@@ -56,6 +56,12 @@ vi.mock('@/lib/supabase', () => ({
       channels.push(ch)
       return ch
     },
+      // The channel is opened through use-realtime-channel, which awaits
+      // supabase.realtime.setAuth() so the join carries the access token.
+      // Without this the hook's try/catch would swallow a TypeError and these
+      // suites would go on passing while every channel joined ANONYMOUSLY —
+      // which is the exact failure beta-realtime-auth exists to catch.
+      realtime: { setAuth: async () => {} },
       removeChannel: (ch: any) => { removed.push(ch) },
     }
   },

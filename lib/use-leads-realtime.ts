@@ -20,8 +20,8 @@
 // owners to their own location via the locations slug-join, so unfiltered
 // delivery produces exactly the 'all' set for the people who can hold 'all'.
 // ─────────────────────────────────────────────────────────────
-import { useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase'
+import { useRef } from 'react'
+import { useRealtimeChannel } from '@/lib/use-realtime-channel'
 
 export type LeadsRealtimeEvent = {
   type: 'INSERT' | 'UPDATE' | 'DELETE'
@@ -40,26 +40,13 @@ export function useLeadsRealtime(
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
-  useEffect(() => {
-    if (!locFilter) return
-
-    // Realtime is an ENHANCEMENT: the Hive renders from its server-rendered
-    // set and router.refresh()/focus is the backstop. createClient() THROWS
-    // when the NEXT_PUBLIC_SUPABASE_* vars are missing, and this runs in a
-    // passive effect during commit — unguarded, a config gap would take the
-    // whole tree down to buy live leads. Degrade to no-realtime instead,
-    // loudly.
-    let supabase: ReturnType<typeof createClient>
-    try {
-      supabase = createClient()
-    } catch (e) {
-      console.error('[realtime] leads: no supabase client, live leads are off:', e)
-      return
-    }
-
+  // Opening the channel is use-realtime-channel's job: it awaits the access
+  // token before joining, which is the whole of the anon-join bug. THIS
+  // channel is the one that was caught joining without a token — it
+  // subscribes first, so it lost the startup race every time.
+  useRealtimeChannel(locFilter, 'leads', (supabase) => {
     const scoped = locFilter !== 'all'
-
-    const channel = supabase
+    return supabase
       .channel(`leads:${scoped ? locFilter : 'all'}`)
       .on(
         'postgres_changes',
@@ -69,7 +56,7 @@ export function useLeadsRealtime(
           table: 'leads',
           ...(scoped ? { filter: `location_uuid=eq.${locFilter}` } : {}),
         },
-        (payload) => {
+        (payload: any) => {
           const leadId = (payload.new as any)?.id || (payload.old as any)?.id
           if (!leadId) return
           onChangeRef.current({
@@ -78,10 +65,5 @@ export function useLeadsRealtime(
           })
         }
       )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [locFilter])
+  })
 }
