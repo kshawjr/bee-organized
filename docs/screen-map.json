@@ -444,7 +444,7 @@
       "note": "The current Clients surface. HiveScreen in BeeHub.jsx is the older board that still renders for roles without beta access — check components/hive/shared/betaGate.js before assuming which one a reporter is looking at.",
       "lines": [
         148,
-        1120
+        1122
       ]
     },
     {
@@ -609,8 +609,8 @@
         "the customer record"
       ],
       "lines": [
-        100,
-        1127
+        101,
+        1101
       ]
     },
     {
@@ -912,8 +912,8 @@
         "the invoice section"
       ],
       "lines": [
-        255,
-        1269
+        257,
+        1299
       ]
     },
     {

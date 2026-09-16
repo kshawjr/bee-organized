@@ -77,6 +77,25 @@ export function upsertNote(data, note) {
 // buckets by id rather than trusting the incoming kind, so a row whose kind
 // somehow differs cannot be duplicated into the other bucket — the edit path
 // refuses to change kind, and this holds that line even if it ever stopped.
+// The list primitives. EngagementPanel holds its notes at children.notes
+// rather than in these buckets, so it cannot use replaceNote/removeNote
+// below — but it CAN use these, which means both screens share one opinion
+// about what "replace in place" and "drop it" mean, and both return the SAME
+// array reference when there is nothing to do.
+export function replaceInList(list, note) {
+  if (!Array.isArray(list) || !note || !note.id) return list
+  const i = list.findIndex(n => n && n.id === note.id)
+  if (i === -1) return list
+  const copy = list.slice()
+  copy[i] = note
+  return copy
+}
+
+export function removeFromList(list, noteId) {
+  if (!Array.isArray(list) || !noteId) return list
+  return list.some(n => n && n.id === noteId) ? list.filter(n => n && n.id !== noteId) : list
+}
+
 export function replaceNote(data, note) {
   if (!data || !note || !note.id) return data
   let changed = false
@@ -84,11 +103,9 @@ export function replaceNote(data, note) {
   for (const bucket of ['buzz_notes', 'job_notes']) {
     const cur = data[bucket]
     if (!Array.isArray(cur)) continue
-    const i = cur.findIndex(n => n && n.id === note.id)
-    if (i === -1) continue
-    const copy = cur.slice()
-    copy[i] = note
-    next[bucket] = copy
+    const swapped = replaceInList(cur, note)
+    if (swapped === cur) continue
+    next[bucket] = swapped
     changed = true
   }
   return changed ? next : data
@@ -103,8 +120,9 @@ export function removeNote(data, noteId) {
   for (const bucket of ['buzz_notes', 'job_notes']) {
     const cur = data[bucket]
     if (!Array.isArray(cur)) continue
-    if (!cur.some(n => n && n.id === noteId)) continue
-    next[bucket] = cur.filter(n => n && n.id !== noteId)
+    const dropped = removeFromList(cur, noteId)
+    if (dropped === cur) continue
+    next[bucket] = dropped
     changed = true
   }
   return changed ? next : data

@@ -98,7 +98,14 @@ export async function GET(
     supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
     // Engagement-scoped notes (kind='job' via the panel composer); newest
     // first. Degrades to [] pre-migration (query errors, data stays null).
-    supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('engagement_id', id).order('created_at', { ascending: false }).limit(50),
+    // select('*') rather than a column list, for the same two reasons the
+    // client profile route uses it: the panel needs user_id to decide who may
+    // edit or delete a note (the route is still the real guard), and it needs
+    // edited_at to show that a note was edited — a column applied by hand
+    // (migrations/lead_notes_edited_at.sql). NAMING edited_at here would make
+    // this whole request fail until that migration runs, taking the panel
+    // down with it; '*' simply returns whatever columns exist.
+    supabaseService.from('lead_notes').select('*').eq('engagement_id', id).order('created_at', { ascending: false }).limit(50),
     // Client-level buzz timeline for the strip's bee drawer.
     supabaseService.from('lead_notes').select('id, text, user_label, created_at').eq('lead_id', engagement.client_id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
     // THIS engagement's touchpoints — interleaved with notes in the

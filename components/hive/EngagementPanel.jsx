@@ -61,12 +61,14 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
+import { makeNoteActionsFor } from './shared/noteActionsRule'
+import { replaceInList, removeFromList } from './shared/noteStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import TouchpointModal from './TouchpointModal'
@@ -252,7 +254,7 @@ function ClientEngagementRow({ row, current }) {
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false, onReportProblem = () => {} }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], currentUserId = null, currentUserRole = null, onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -390,6 +392,34 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       setToast({ kind: 'error', msg: `Touchpoint failed: ${e.message}` })
     } finally { setBusy(false) }
   }
+
+  // ── editing and deleting a note, here too ────────────────────
+  // Recent activity is the SAME NotesStream the client card renders, and for
+  // a while only the card handed it noteActionsFor — so an owner who reached
+  // a note from an engagement (most of the time, including from the Inbox)
+  // could not touch it.
+  //
+  // The RULE is shared (shared/noteActionsRule); only the state adapter is
+  // local, because this panel holds notes at children.notes rather than in
+  // the card's buzz_notes / job_notes buckets. The list primitives are shared
+  // too, so "replace in place" and "drop it" mean one thing in both screens.
+  //
+  // NOT EVERY ROW IS A NOTE. This stream mixes real notes with touchpoints —
+  // "Address added → …", "Client created", stage changes, the audit trail.
+  // Two things keep verbs off those: NotesStream only calls this for items it
+  // tagged t === 'note', and the shared rule refuses kind === 'system' and
+  // anything without an id. Offering a delete on the record of something that
+  // happened is the failure being guarded against.
+  //
+  // currentUserId / currentUserRole are PROPS (§8.5) — card pieces stay free
+  // of React context so they can be mounted anywhere.
+  const noteActionsFor = useMemo(() => makeNoteActionsFor({
+    currentUserId,
+    currentUserRole,
+    onEdited: (row) => setData(d => d ? { ...d, children: { ...d.children, notes: replaceInList(d.children?.notes, row) } } : d),
+    onDeleted: (id) => setData(d => d ? { ...d, children: { ...d.children, notes: removeFromList(d.children?.notes, id) } } : d),
+    setToast,
+  }), [currentUserId, currentUserRole, setToast])
 
   // Engagement-SCOPED recent slice: this engagement's notes + touches.
   const activity = [
@@ -846,7 +876,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
       {/* Recent activity — engagement-scoped quick-glance slice +
           composer; the merged past/future stream is the Timeline tab. */}
-      <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} readOnly={readOnly} />
+      <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} readOnly={readOnly} noteActionsFor={noteActionsFor} />
     </div>
   )
 

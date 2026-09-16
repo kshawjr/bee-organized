@@ -1041,6 +1041,8 @@ export default function HiveShell({
           mount reset (scrollTop 0 + body lock) covers every open/swap */}
       {overlay?.type === 'engagement' && (
         <EngagementPanel
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
           key={overlay.engagement.id}
           engagementId={overlay.engagement.id}
           seed={overlay.engagement}

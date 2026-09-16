@@ -76,6 +76,7 @@ import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn, rowActionBtn } f
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
 import { upsertNote, replaceNote, removeNote } from './shared/noteStream'
+import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { useLeadNotesRealtime } from '@/lib/use-lead-notes-realtime'
 import { upsertContact } from './shared/contactStream'
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
@@ -353,50 +354,23 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   }, []))
 
   // ── editing and deleting a note ──────────────────────────────
-  // WHO MAY ACT is decided once, here, and handed to both surfaces so the
-  // buzz band and the activity stream cannot disagree. It mirrors the route's
-  // rule (lib/lead-note-edit): author, or admin. The route re-checks it —
-  // this only decides whether the affordance is drawn, and a forged request
-  // is refused server-side whatever this returns.
+  // The rule itself lives in shared/noteActionsRule — EngagementPanel's
+  // Recent activity spends the SAME one, so the two screens cannot disagree
+  // about who may act or about which stream items are notes at all. All this
+  // supplies is where the answer lands: the card's buzz_notes / job_notes
+  // buckets.
   //
-  // System notes are excluded here as well as at the route: they are the
-  // audit trail, and offering a verb the server will refuse is worse than
-  // offering none.
   // currentUserId / currentUserRole arrive as PROPS, never from React
   // context: §8.5 (pinned by beta-card-tabs) keeps card pieces context-free
   // so they can be mounted anywhere. That guard greps this whole FILE for the
   // hook's name, prose included — so this comment does not spell it either.
-  const noteActionsFor = React.useCallback((note) => {
-    if (!note || !note.id || note.kind === 'system') return null
-    const isOwn = !!currentUserId && note.user_id === currentUserId
-    const canManage = isOwn || currentUserRole === 'admin' || currentUserRole === 'super_admin'
-    if (!canManage) return null
-    return {
-      canManage,
-      isOwn,
-      onSave: async (text) => {
-        const res = await fetch(`/api/lead-notes/${note.id}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        })
-        const j = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-        // Replace in place from the CONFIRMED row, so the edited marker and
-        // the saved text are the server's, never a guess at them.
-        setData(d => replaceNote(d, j.note))
-        setToast({ kind: 'success', msg: 'Note updated' })
-      },
-      onDelete: async () => {
-        const res = await fetch(`/api/lead-notes/${note.id}`, { method: 'DELETE' })
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}))
-          throw new Error(j?.error || `HTTP ${res.status}`)
-        }
-        setData(d => removeNote(d, note.id))
-        setToast({ kind: 'success', msg: 'Note deleted' })
-      },
-    }
-  }, [currentUserId, currentUserRole, setToast])
+  const noteActionsFor = React.useMemo(() => makeNoteActionsFor({
+    currentUserId,
+    currentUserRole,
+    onEdited: (row) => setData(d => replaceNote(d, row)),
+    onDeleted: (id) => setData(d => removeNote(d, id)),
+    setToast,
+  }), [currentUserId, currentUserRole, setToast])
 
   // Boolean return feeds EditableDesc's inline-edit standard: false
   // keeps the textarea open with the draft after the optimistic revert.
