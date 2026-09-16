@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
+import { useLocationBroadcast } from "@/lib/use-location-broadcast"
 import { US_TIMEZONES, normalizeTimezoneLabel } from "@/lib/us-timezones"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
@@ -36920,6 +36921,46 @@ if (Array.isArray(initialPeople)) return
   useEffect(() => {
     if (Array.isArray(initialTransferPeople)) setTransferPeople(initialTransferPeople)
   }, [initialTransferPeople])
+
+  // ── a transferred lead reaches BOTH ends, live ────────────────
+  // postgres_changes does not carry a transfer. For an UPDATE, Supabase must
+  // be able to show the row to the subscriber in BOTH its old and new state;
+  // the leads policy is location-scoped, so before the move the lead sits
+  // where the RECEIVING user cannot see it and the row event is never
+  // delivered. The transfer route therefore broadcasts the move directly.
+  //
+  // This sits BELOW transferPeople on purpose — it is the only writer besides
+  // the server prop, and the origin half of the fix needs it: a loc_other
+  // lead lives in that array and nothing realtime ever touched it, so a third
+  // person watching the unrouted queue never saw a lead leave.
+  //
+  // ARRIVAL REUSES handleLeadsRealtime. Not a second refetch-and-merge path —
+  // the SAME one, so the same upsertRealtimePerson dedupes by id and a lead
+  // named by BOTH the broadcast and a postgres_changes event (should the row
+  // event arrive after all, for an admin or if the diagnosis above is wrong)
+  // renders one card, not two.
+  const handleLeadMoved = React.useCallback(({ leadId, fromLocationUuid, toLocationUuid }) => {
+    // The unrouted queue is cross-location by nature and renders in EVERY
+    // scope, so a moved lead leaves it for every watcher — including the
+    // all-locations view, which is where corp actually works that queue.
+    setTransferPeople(prev => prev.some(p => p.id === leadId) ? prev.filter(p => p.id !== leadId) : prev)
+    // 'all' loads no per-location records, so there is nothing else to do
+    // there: the transfer queue above is the whole of what that view shows.
+    if (locFilter === 'all') return
+    if (fromLocationUuid === locFilter) {
+      // Leaving: drop the row rather than refetching one this viewer may no
+      // longer be allowed to read.
+      setPeople(prev => removeRealtimePerson(prev, leadId))
+      return
+    }
+    if (toLocationUuid === locFilter) {
+      // Arriving: the ordinary refetch-and-merge, as if the row event had
+      // been delivered.
+      handleLeadsRealtime({ type: 'UPDATE', leadId })
+    }
+  }, [locFilter, handleLeadsRealtime])
+
+  useLocationBroadcast(locFilter, handleLeadMoved)
   // Follow-up reminders are client-side ephemeral state (added via the
   // "+ Reminder" button; not yet persisted server-side). Previously seeded
   // with a mock loc_kc array, which surfaced fake clients (Lisa Patel, etc.)

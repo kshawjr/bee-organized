@@ -62,6 +62,7 @@ import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 import { TRANSFER_IN_LABEL } from '@/lib/enquiry-exit'
+import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
 
 export const runtime = 'nodejs'
 
@@ -174,6 +175,30 @@ export async function POST(
   }
 
   const warnings: string[] = []
+
+  // ─── Tell both ends, live ─────────────────────────────────────
+  // The move has committed, so every open Hive can be told directly rather
+  // than waiting to notice. This exists because postgres_changes does NOT
+  // carry a transfer to the destination: for an UPDATE, Supabase must be able
+  // to show the row to the subscriber in BOTH its old and new state, and
+  // before the move the lead sits at a location the receiving user's RLS
+  // cannot see. The row event is never delivered, so the card never arrived
+  // until a reload.
+  //
+  // Sent FIRST, before the touchpoint and the emails, because it is the part
+  // a human is waiting on — an owner staring at their Inbox. The rest of this
+  // handler is bookkeeping and notification that nobody is watching in real
+  // time.
+  //
+  // BEST EFFORT, exactly like the touchpoint and the notify below: the
+  // transfer is already durable, so a broadcast that fails is a warning, never
+  // a 500. The lead is correct in the database and a reload still shows it.
+  const broadcast = await broadcastLeadMoved({
+    leadId: id,
+    fromLocationUuid: existing.location_uuid ?? null,
+    toLocationUuid: dest.id,
+  })
+  if (!broadcast) warnings.push('live_broadcast_failed')
 
   // ─── System touchpoint on the lead (records the move) ─────────
   try {

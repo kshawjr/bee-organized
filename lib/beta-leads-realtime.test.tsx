@@ -230,12 +230,51 @@ const mount = async (props: any) => {
 // filter would pass even with the scope wrong — which is the entire bug here.
 // `locationUuid` is the row's own location; the event reaches the handler only
 // if the channel would really have delivered it.
-const emit = async (eventType: string, id: string, locationUuid = 'loc-uuid-1') => {
+//
+// A ROW HAS TWO STATES, and this harness used to pretend it had one. The old
+// version took a single `locationUuid`, checked the channel filter against it,
+// and so silently assumed the new value alone decides delivery. That made a
+// location CHANGE unrepresentable — the one case that matters for a transfer —
+// and it is why the update-map overstated confidence in stage moves: the suite
+// was green about a question it could not ask.
+//
+// `opts.from` now names the OLD state's location; it defaults to the new one,
+// so an ordinary same-location change reads exactly as before.
+//
+// THE DELIVERY RULE, and what it is grounded in. Supabase's Postgres Changes
+// troubleshooting guide says RLS "generally has to allow both the old and new
+// row state" for an UPDATE, and our leads policy is location-scoped, so a
+// scoped subscriber only sees the change when BOTH states sit at their
+// location. That is modelled below. It matches the behaviour Kevin observed in
+// a two-browser test — the transferred lead never arrived — but the MECHANISM
+// is documented-and-consistent, not something this repo has proven live. The
+// broadcast path exists precisely so the feature does not depend on which
+// mechanism is really at work.
+const emit = async (
+  eventType: string,
+  id: string,
+  locationUuid = 'loc-uuid-1',
+  opts: { from?: string } = {}
+) => {
   const ch = channels[channels.length - 1]
+  const toLoc = locationUuid                 // the row AFTER the change
+  const fromLoc = opts.from ?? locationUuid  // the row BEFORE it
   const want = ch.config.filter
-  if (want && want !== `location_uuid=eq.${locationUuid}`) return // not delivered
+  if (want) {
+    const matches = (loc: string) => want === `location_uuid=eq.${loc}`
+    // INSERT has no old state; DELETE has no new one; UPDATE needs both.
+    const delivered =
+      eventType === 'INSERT' ? matches(toLoc)
+      : eventType === 'DELETE' ? matches(fromLoc)
+      : matches(toLoc) && matches(fromLoc)
+    if (!delivered) return
+  }
   await act(async () => {
-    ch.handler({ eventType, new: { id, location_uuid: locationUuid }, old: { id, location_uuid: locationUuid } })
+    ch.handler({
+      eventType,
+      new: { id, location_uuid: toLoc },
+      old: { id, location_uuid: fromLoc },
+    })
   })
   await flush()
   await flush()
@@ -725,5 +764,61 @@ describe('UPDATE and DELETE behave exactly as they did before this build', () =>
     await emit('DELETE', 'p-unknown')
     expect(text()).toContain('Sarah Mitchell')
     expect(rowCount()).toBe(1)
+  })
+})
+
+// ── what the old harness could not ask ────────────────────────────
+// These are the tests the single-location `emit` made unwritable. They are
+// the reason the update map said stage moves work "both ways" with high
+// confidence: that confidence was about the CODE path — handleLeadsRealtime
+// does not branch on what changed — and never about delivery.
+describe('a lead CHANGING location is not carried by postgres_changes', () => {
+  it('a transfer does not reach the RECEIVING location', async () => {
+    // The observed bug, now expressible. The row's new state matches this
+    // watcher's filter, but its old state does not, so nothing is delivered
+    // and the card never appears. This is why the transfer route broadcasts.
+    leadById['p-moved'] = person({ id: 'p-moved', name: 'Transferred Tess', locationId: 'loc-uuid-2' })
+    await mount({ locFilter: 'loc-uuid-2', initialPeople: [] })
+
+    await emit('UPDATE', 'p-moved', 'loc-uuid-2', { from: 'loc-uuid-1' })
+
+    expect(text()).not.toContain('Transferred Tess')
+    expect(leadFetches).toEqual([]) // never even refetched
+  })
+
+  it('a transfer does not reach the ORIGIN location either', async () => {
+    // The mirror image, and the reason a third person watching the origin
+    // never saw the lead leave: the old state matches, the new one does not.
+    leadById['p1'] = person()
+    await mount({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+    expect(text()).toContain('Sarah Mitchell')
+
+    await emit('UPDATE', 'p1', 'loc-uuid-2', { from: 'loc-uuid-1' })
+
+    expect(text()).toContain('Sarah Mitchell') // still there — nothing arrived
+  })
+
+  it('an ordinary same-location UPDATE is still delivered', async () => {
+    // The control. Stage moves, name edits and dismissals do not change
+    // location, so both states sit at this watcher's location and the event
+    // lands — which is why those have always worked.
+    leadById['p1'] = person({ name: 'Renamed Rita' })
+    await mount({ locFilter: 'loc-uuid-1', initialPeople: [person()] })
+
+    await emit('UPDATE', 'p1', 'loc-uuid-1')
+
+    expect(text()).toContain('Renamed Rita')
+    expect(leadFetches).toEqual(['p1'])
+  })
+
+  it("an 'all' watcher is unaffected — an unfiltered channel has no old/new to reconcile", async () => {
+    // Corporate/admin subscribe UNFILTERED, so neither candidate explanation
+    // (RLS on the old row, or filter semantics) keeps a transfer from them.
+    leadById['p-moved'] = person({ id: 'p-moved', name: 'Transferred Tess', locationId: 'loc-uuid-2' })
+    await mount({ locFilter: 'all', initialPeople: [] })
+
+    await emit('UPDATE', 'p-moved', 'loc-uuid-2', { from: 'loc-uuid-1' })
+
+    expect(text()).toContain('Transferred Tess')
   })
 })

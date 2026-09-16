@@ -65,9 +65,22 @@ vi.mock('@/lib/drip-lifecycle', () => ({
   stopActiveDripsForLead: vi.fn(async () => {}),
   startDripForLead: vi.fn(async () => {}),
 }))
+// The live broadcast that tells both ends of the move. Stubbed here for the
+// same reason notifyNewLead is: this suite is about the ENDPOINT's logic, not
+// about transport. Unstubbed it would report failure under vitest (no
+// NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY) and push a warning
+// onto every success response. The transport, its payload and its
+// best-effort contract are covered in beta-transfer-broadcast.
+vi.mock('@/lib/realtime-broadcast', () => ({
+  broadcastLeadMoved: vi.fn(async () => true),
+  locationTopic: (uuid: string) => `location:${uuid}`,
+  ALL_LOCATIONS_TOPIC: 'location:all',
+  LEAD_MOVED_EVENT: 'lead_moved',
+}))
 
 import { POST } from '@/app/api/leads/[id]/transfer/route'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 
@@ -129,6 +142,8 @@ beforeEach(() => {
   h.reset()
   authUser.current = { id: 'u1' }
   vi.mocked(notifyNewLead).mockClear()
+  vi.mocked(broadcastLeadMoved).mockClear()
+  vi.mocked(broadcastLeadMoved).mockResolvedValue(true)
   vi.mocked(stopActiveDripsForLead).mockClear()
   vi.mocked(startDripForLead).mockClear()
   vi.mocked(locationHasOperationalStaff).mockClear()
@@ -198,6 +213,15 @@ describe('transfer endpoint — active destination', () => {
     expect(j.drip_enrolled).toBe(true)
     expect(j.drip_skipped_reason).toBeUndefined()
     expect(j.warnings).toBeUndefined()
+
+    // Both ends are told live, with the ORIGIN it came from and the
+    // DESTINATION it landed at — the receiving Inbox cannot learn this from
+    // postgres_changes (see beta-transfer-broadcast).
+    expect(broadcastLeadMoved).toHaveBeenCalledWith({
+      leadId: 'lead-1',
+      fromLocationUuid: 'loc-other-uuid',
+      toLocationUuid: 'dest-uuid',
+    })
   })
 
   it('reports drip_not_enrolled_after_start when the verify finds no active row', async () => {
