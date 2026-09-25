@@ -139,6 +139,16 @@ export function formatWeekLabel(publish_on: string): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(utcFromYmd(publish_on))
 }
 
+// "Fri, Sep 25" — TODAY, for the open draft's heading. Kevin runs the note
+// when he likes, so the draft is labelled with the day he is looking at it,
+// not the Thursday its week ends on (which read as a week away on a Friday).
+// A LABEL ONLY: it reads the clock and nothing else — never the draft's
+// week_start/publish_on, which still drive the roll-forward below. A
+// published release keeps its week ("Week ending …", the Slack header).
+export function draftDateLabel(now: Date = new Date(), tz: string = RELEASE_TZ): string {
+  return formatWeekLabel(ymdInZone(now, tz))
+}
+
 // Was the note due before today? For the amber "was due Thursday" line.
 export function isOverdue(publish_on: string, now: Date = new Date(), tz: string = RELEASE_TZ): boolean {
   return ymdInZone(now, tz) > publish_on

@@ -33,7 +33,7 @@ import BeeLoader from '@/components/hive/shared/BeeLoader'
 import { IconPlus, IconPencil } from '@/components/ui/icons'
 import ReleaseItemForm from '@/components/help/ReleaseItemForm'
 import WagglePreview from '@/components/help/WagglePreview'
-import { GROUP_ORDER, GROUP_LABEL, GROUP_EMOJI } from '@/lib/help-releases'
+import { GROUP_ORDER, GROUP_LABEL, GROUP_EMOJI, draftDateLabel } from '@/lib/help-releases'
 
 const iconBtn = {
   width: '44px', height: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -127,7 +127,7 @@ function DraftCard({ draft, onEditItem, onAddItem, onEditSummary, onPreview }) {
       style={{ background: T.surface.raised, border: `1px solid ${T.ink.primary}`, borderRadius: T.radius.inset, padding: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
         <h2 style={{ fontFamily: 'Georgia,serif', fontSize: '19px', fontWeight: 600, color: T.ink.primary, margin: 0, flex: 1 }}>
-          This week · ending {draft.week_label}
+          {draftDateLabel()}
         </h2>
         <Chip family="amber">Draft</Chip>
       </div>
