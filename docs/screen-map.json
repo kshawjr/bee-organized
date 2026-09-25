@@ -3260,8 +3260,8 @@
       ],
       "note": "The draft fills itself three ways: PATCH /api/admin/feedback/[id] moving an item INTO shipped seeds a change line and INTO answered seeds a question line (lib/help-releases seedReleaseItemFromFeedback) — title verbatim, edited_at NULL = 'their words', never shown to owners or posted, never a name; and a Claude Code session adds a written line after a push via scripts/waggle-add.mjs → POST /api/help/releases/lines (bearer WAGGLE_WRITE_KEY, created_by NULL, 'From a deploy' chip). Published releases carry a sequential number editors see and owners never do. Owners get published weeks only; the server decides (GET /api/help/releases).",
       "lines": [
-        160,
-        242
+        163,
+        245
       ]
     },
     {

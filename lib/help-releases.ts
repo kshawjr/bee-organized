@@ -143,10 +143,22 @@ export function formatWeekLabel(publish_on: string): string {
 // when he likes, so the draft is labelled with the day he is looking at it,
 // not the Thursday its week ends on (which read as a week away on a Friday).
 // A LABEL ONLY: it reads the clock and nothing else — never the draft's
-// week_start/publish_on, which still drive the roll-forward below. A
-// published release keeps its week ("Week ending …", the Slack header).
+// week_start/publish_on, which still drive the roll-forward below.
 export function draftDateLabel(now: Date = new Date(), tz: string = RELEASE_TZ): string {
   return formatWeekLabel(ymdInZone(now, tz))
+}
+
+// "Fri, Sep 25" — the day a release was PUBLISHED, for its card. Same reason
+// as the draft: Kevin publishes when he likes, so "Week ending Thu, Oct 1" on
+// a post that went out on Friday 25 Sep pointed a week into the future.
+// published_at is the timestamp the publish route stamps; the day is counted
+// in New York, like the week. A LABEL ONLY — week_start/publish_on and the
+// week_label the API sends are untouched. '' when there is no usable stamp,
+// so the card can fall back to its week.
+export function publishedDateLabel(published_at: string | null | undefined, tz: string = RELEASE_TZ): string {
+  const d = new Date(String(published_at || ''))
+  if (!published_at || Number.isNaN(d.getTime())) return ''
+  return formatWeekLabel(ymdInZone(d, tz))
 }
 
 // Was the note due before today? For the amber "was due Thursday" line.

@@ -99,7 +99,7 @@ describe('the tab', () => {
     const tabs = qa(host, '[role="tab"]').map(t => [t.textContent, t.getAttribute('aria-selected')])
     expect(tabs).toEqual([['Help', 'false'], ['What’s new', 'true'], ['My requests', 'false']])
     expect(f.mock.calls.some(c => String(c[0]).startsWith('/api/help/releases'))).toBe(true)
-    expect(host.textContent).toContain('Week ending Thu, Aug 27')
+    expect(host.textContent).toContain('Published Thu, Aug 27')
     await unmount()
   })
 })
