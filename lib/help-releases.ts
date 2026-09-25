@@ -161,6 +161,17 @@ export function publishedDateLabel(published_at: string | null | undefined, tz: 
   return formatWeekLabel(ymdInZone(d, tz))
 }
 
+// "Fri, Sep 25, 2026" — TODAY, for the Slack header. The post is built at
+// PREVIEW time, before published_at exists, so the only honest date it can
+// carry is the day it is being written — which is the day it goes out. Kevin
+// posted on Fri 25 Sep and the header said "week ending Thu, Sep 24" while the
+// card said another date; now the header, the card and the draft all say the
+// day. The year is there because a Slack channel is read long after the fact.
+export function waggleDateLabel(now: Date = new Date(), tz: string = RELEASE_TZ): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    .format(utcFromYmd(ymdInZone(now, tz)))
+}
+
 // Was the note due before today? For the amber "was due Thursday" line.
 export function isOverdue(publish_on: string, now: Date = new Date(), tz: string = RELEASE_TZ): boolean {
   return ymdInZone(now, tz) > publish_on
@@ -377,9 +388,9 @@ export type WaggleLeftOut = { id: string; title: string; reason: 'their_words' |
 // and the answer, both in Kevin's rewrite; "a few of you asked" is his to
 // write, and the seed never carries who asked.
 export function buildWaggleMessage(
-  release: Pick<ReleaseRow, 'publish_on' | 'summary'>,
+  release: Pick<ReleaseRow, 'summary'>,
   items: Array<Pick<ReleaseItemRow, 'id' | 'group' | 'title' | 'body' | 'edited_at' | 'deleted_at'> & { created_at?: string; position?: number }>,
-  opts: { variant?: number } = {},
+  opts: { variant?: number; now?: Date } = {},
 ): { text: string; included: number; leftOut: WaggleLeftOut[]; variant: number } {
   const v = ((Number(opts.variant) || 0) % WAGGLE_VARIANTS + WAGGLE_VARIANTS) % WAGGLE_VARIANTS
   const order = (a: { created_at?: string; position?: number }, b: { created_at?: string; position?: number }) =>
@@ -397,7 +408,7 @@ export function buildWaggleMessage(
   const included = GROUP_ORDER.reduce((n, g) => n + byGroup[g].length, 0)
 
   const lines: string[] = []
-  lines.push(`🐝 *The Waggle* · week ending ${formatWeekLabel(release.publish_on)}`)
+  lines.push(`🐝 *The Waggle* · ${waggleDateLabel(opts.now)}`)
   const summary = String(release.summary ?? '').trim()
   lines.push(slackEscape(summary || OPENERS[v % OPENERS.length]))
   for (const g of CHANGE_GROUPS) {

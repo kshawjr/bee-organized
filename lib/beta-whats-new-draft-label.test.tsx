@@ -12,7 +12,9 @@
 //     current week, and its week_start/publish_on are what they were
 //   · a published release's card says the day it was PUBLISHED — Kevin put
 //     one out on Fri 25 Sep and it read "Week ending Thu, Oct 1". Its
-//     week_label and the Slack header still carry the week (labels only).
+//     week_label still carries the week (labels only).
+//   · the Slack header says the day it is written — "Fri, Sep 25, 2026" —
+//     not the week; it is built before published_at exists
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -22,7 +24,7 @@ import { act } from 'react-dom/test-utils'
 
 import WhatsNew from '@/components/help/WhatsNew'
 import {
-  draftDateLabel, publishedDateLabel, draftWeekCorrection, formatWeekLabel, weekFor, shapeRelease, buildWaggleMessage,
+  draftDateLabel, publishedDateLabel, waggleDateLabel, draftWeekCorrection, formatWeekLabel, weekFor, shapeRelease, buildWaggleMessage,
 } from '@/lib/help-releases'
 
 // Friday 25 Sep 2026, midday in New York.
@@ -155,10 +157,43 @@ describe('the week underneath is unchanged — this is a label', () => {
     expect(shaped.published_at).toBe('2026-09-25T14:00:00Z') // owners get it — the card needs it
   })
 
-  it('a published release\'s week_label and Slack header still say its week', () => {
+  it('a published release\'s week_label still says its week', () => {
     const pub = { id: 'r-pub', week_start: '2026-09-18', publish_on: '2026-09-24', status: 'published', summary: null } as any
     expect(shapeRelease(pub, [], { forOwner: true }).week_label).toBe('Thu, Sep 24')
-    const built = buildWaggleMessage(pub, [line({ id: 'p1', release_id: 'r-pub' })] as any)
-    expect(built.text.split('\n')[0]).toBe('🐝 *The Waggle* · week ending Thu, Sep 24')
+  })
+})
+
+describe('the Slack header says today\'s date, not the week', () => {
+  it('waggleDateLabel is the card\'s format plus the year, counted in New York', () => {
+    expect(waggleDateLabel(FRI)).toBe('Fri, Sep 25, 2026')
+    expect(waggleDateLabel(FRI)).toBe(`${draftDateLabel(FRI)}, 2026`)
+    // 11:30pm Friday in New York is already Saturday in UTC — still Friday.
+    expect(waggleDateLabel(new Date('2026-09-26T03:30:00Z'))).toBe('Fri, Sep 25, 2026')
+  })
+
+  it('Kevin\'s case: posting on Fri 25 Sep says Fri 25 Sep — not "week ending Thu, Sep 24", not Oct 1', () => {
+    // The release's own week deliberately disagrees with the day: the header
+    // must ignore it.
+    const built = buildWaggleMessage(EARLY as any, [line({ id: 'e1', release_id: 'r-early' })] as any, { now: FRI })
+    const head = built.text.split('\n')[0]
+    expect(head).toBe('🐝 *The Waggle* · Fri, Sep 25, 2026')
+    expect(head).not.toContain('week ending')
+    expect(head).not.toContain('Oct 1')
+  })
+
+  it('with no clock passed, it reads today — the routes pass none', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T15:00:00Z')) // Tue 6 Oct
+    const built = buildWaggleMessage({ summary: null } as any, [line({ id: 'x1' })] as any)
+    expect(built.text.split('\n')[0]).toBe('🐝 *The Waggle* · Tue, Oct 6, 2026')
+  })
+
+  it('the card still shows its publish date, whatever day the header was built', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T15:00:00Z'))
+    stubFetch({ releases: [EARLY], draft: null, canEdit: false })
+    const { host, unmount } = await mount(<WhatsNew />)
+    expect(host.querySelector('[data-whatsnew-release="r-early"] h2')?.textContent).toBe('Published Fri, Sep 25')
+    await unmount()
   })
 })

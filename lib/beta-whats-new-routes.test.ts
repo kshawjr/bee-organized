@@ -181,9 +181,9 @@ describe('the group map and the input rules', () => {
 
 describe('the Slack post is assembled from the edited lines — nothing else', () => {
   const release = { publish_on: '2026-09-03', summary: null }
-  it('heads with The Waggle and the week, groups the lines, leaves out the unedited and the sentence-less', () => {
-    const built = buildWaggleMessage(release, draftItems())
-    expect(built.text.split('\n')[0]).toBe('🐝 *The Waggle* · week ending Thu, Sep 3')
+  it('heads with The Waggle and today\'s date, groups the lines, leaves out the unedited and the sentence-less', () => {
+    const built = buildWaggleMessage(release, draftItems(), { now: new Date('2026-09-25T16:00:00Z') })
+    expect(built.text.split('\n')[0]).toBe('🐝 *The Waggle* · Fri, Sep 25, 2026')
     expect(built.text).toContain('✅ *Fixed*')
     expect(built.text).toContain('• *Archiving a quote in Jobber closes the deal as Closed Lost.* — No more moving it by hand.')
     expect(built.included).toBe(4) // one change + three questions
