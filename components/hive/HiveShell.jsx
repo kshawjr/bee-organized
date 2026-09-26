@@ -627,8 +627,8 @@ export default function HiveShell({
   // already know, so nothing client-side surfaces that new engagement: the
   // card would sit in the Inbox, stale, until a reload. So on each confirmed
   // send we poll the SAME ?open=1 set the focus sweep fetches until the
-  // founded engagement appears, then inject it into sessionEngagements — the
-  // very seam onFounded uses to make a card appear without reload. On match
+  // founded engagement appears, then inject it into sessionEngagements, so
+  // the card appears without a reload. On match
   // the lead derives Active and leaves the Inbox (and the badge + board
   // correct) from that one injection; on cap we settle to a calm state and let
   // SSR-on-next-load be the backstop. The poll LOGIC lives in the pure
@@ -637,21 +637,30 @@ export default function HiveShell({
   // TRIGGER: jobberLinks. BeeHub stashes { jobber_client_id, … } there on
   // EVERY confirmed send (the stale-button fix) and threads it down, so a new
   // key is an unambiguous "a send just succeeded for this client" signal —
-  // no new callback needed. A send that already has an open engagement (a
-  // founded-not-sent panel send, or a returning client) is skipped: there is
-  // nothing to wait for, its card isn't in the Inbox.
+  // no new callback needed. A send that rode an existing engagement (the
+  // panel's founded-not-sent send — jobberLinks carries its engagement_id)
+  // is skipped: nothing new will be founded. Every other send — including a
+  // returning client's "New job in Jobber" — waits for an engagement id the
+  // client did NOT already have (knownIds), because the new request founds a
+  // SECOND engagement beside the open one (rule 1).
   const [settledSendIds, setSettledSendIds] = useState(() => new Set())
-  // clientIds already begun tracking (jobberLinks accumulates). Baselined to
-  // the keys PRESENT AT MOUNT so ONLY keys added afterward — i.e. a send that
-  // happened during this mount — ever enqueue. jobberLinks lives in BeeHub and
+  // Sends already begun tracking, keyed per SEND (sendKey: client + the ids
+  // that send created + its stamp), not per client — a second send for the
+  // same client replaces its jobberLinks entry and must enqueue again.
+  // Baselined to the sends PRESENT AT MOUNT so ONLY sends made afterward — i.e.
+  // during this mount — ever enqueue. jobberLinks lives in BeeHub and
   // outlives this dynamically-imported shell, and may carry pre-existing keys
   // (a remount after an earlier send, or server-seeded links): a lead sent
   // long ago whose engagement has since CLOSED has a link and no OPEN
   // engagement, so an empty baseline would misread it as a fresh send and poll
   // 90s finding nothing. The lazy null-check initializes exactly once.
   const sentHandledRef = useRef(null)
-  if (sentHandledRef.current === null) sentHandledRef.current = new Set(Object.keys(jobberLinks || {}))
-  const pendingSendsRef = useRef([])         // [{ clientId, startedAt }]
+  const sendKey = (clientId, link) =>
+    `${clientId}:${link?.jobber_request_id || link?.jobber_job_id || ''}:${link?.sent_at || ''}`
+  if (sentHandledRef.current === null) {
+    sentHandledRef.current = new Set(Object.entries(jobberLinks || {}).map(([id, link]) => sendKey(id, link)))
+  }
+  const pendingSendsRef = useRef([])         // [{ clientId, startedAt, knownIds }]
   const sendPollTimerRef = useRef(null)
   const sendPollActiveRef = useRef(false)
   const runSendPollRef = useRef(null)
@@ -659,12 +668,12 @@ export default function HiveShell({
   // switch mid-poll must not fetch the wrong scope).
   const locFilterRef = useRef(locFilter)
   locFilterRef.current = locFilter
-  // Client ids that ALREADY carry an open engagement this render — used to
-  // skip sends that need no wait. Held in a ref so the jobberLinks effect can
-  // read the latest without taking `openFiltered` (a new array each render) as
-  // a dependency and re-firing on every board change.
-  const openEngagementClientIdsRef = useRef(new Set())
-  openEngagementClientIdsRef.current = new Set(openFiltered.map(e => e.client_id))
+  // The open engagements on the board this render — a send snapshots its
+  // client's ids from here as knownIds. Held in a ref so the jobberLinks
+  // effect can read the latest without taking `openFiltered` (a new array
+  // each render) as a dependency and re-firing on every board change.
+  const openEngagementsRef = useRef([])
+  openEngagementsRef.current = openFiltered
 
   const runSendPoll = useCallback(async () => {
     sendPollTimerRef.current = null
@@ -688,7 +697,7 @@ export default function HiveShell({
       const now = Date.now()
       const { injects, stillPending, settled } = reconcileSentPolls(pendingSendsRef.current, openRows, now, SEND_POLL_CAP_MS)
       if (injects.length > 0) {
-        // Inject via the onFounded seam — a card appears without reload, the
+        // Inject into sessionEngagements — a card appears without reload, the
         // lead derives Active out of the Inbox, and the badge/board follow.
         setSessionEngagements(prev => {
           const have = new Set(prev.map(e => e.id))
@@ -720,11 +729,16 @@ export default function HiveShell({
 
   useEffect(() => {
     let added = false
-    for (const clientId of Object.keys(jobberLinks || {})) {
-      if (sentHandledRef.current.has(clientId)) continue
-      sentHandledRef.current.add(clientId)
-      if (openEngagementClientIdsRef.current.has(clientId)) continue // nothing to wait for
-      pendingSendsRef.current = [...pendingSendsRef.current, { clientId, startedAt: Date.now() }]
+    for (const [clientId, link] of Object.entries(jobberLinks || {})) {
+      const key = sendKey(clientId, link)
+      if (sentHandledRef.current.has(key)) continue
+      sentHandledRef.current.add(key)
+      if (link?.engagement_id) continue // rode an existing engagement — nothing new to wait for
+      const knownIds = openEngagementsRef.current.filter(e => e.client_id === clientId).map(e => e.id)
+      pendingSendsRef.current = [
+        ...pendingSendsRef.current.filter(p => p.clientId !== clientId),
+        { clientId, startedAt: Date.now(), knownIds },
+      ]
       added = true
     }
     if (added && !sendPollTimerRef.current && !sendPollActiveRef.current) {
@@ -1018,12 +1032,6 @@ export default function HiveShell({
           onOpenClient={(clientId) => { setNewClientOpen(false); openClient(clientId) }}
           onOpenEngagement={(e) => { setNewClientOpen(false); openEngagement(e) }}
           onSendToJobber={onSendToJobber}
-          onFounded={(engRow) => {
-            // CONFIRMED founding only — the real returned engagement row
-            // (board shape) merges into the session set; the sheet stays
-            // open on frame F for the send-or-keep-local next step.
-            setSessionEngagements(prev => prev.some(x => x.id === engRow.id) ? prev : [engRow, ...prev])
-          }}
           onCreated={(leadRow) => {
             // CONFIRMED insert only — map the real returned row (never an
             // optimistic stub), hand it up through onPersonCreated so the

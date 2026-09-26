@@ -499,37 +499,41 @@ describe('NewClientSheet frames', () => {
     await unmount()
   })
 
-  it('frame D fires ONLY when the match has 1+ open engagement — and its confirm gates a REAL second founding', async () => {
+  it('frame D fires ONLY when the match has 1+ open engagement — and its confirm gates the send (never a local founding)', async () => {
     const p = person({ id: 'p1' })
+    const onSend = vi.fn()
     // 1+ open → confirm frame with the locked copy
     const withOpen = await mount(
-      <NewClientSheet people={[p]} engagements={[openEng('p1')]} locFilter="loc-uuid-1" onClose={() => {}} />
+      <NewClientSheet people={[p]} engagements={[openEng('p1')]} locFilter="loc-uuid-1" onClose={() => {}} onSendToJobber={onSend} />
     )
     await type(withOpen.host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click([...withOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new engagement'))!)
-    expect(foundedBodies, 'must NOT found before confirm').toHaveLength(0)
+    await click([...withOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new job in Jobber'))!)
+    expect(onSend, 'must NOT send before confirm').not.toHaveBeenCalled()
     expect(withOpen.host.textContent).toContain('This client has an open engagement')
-    expect(withOpen.host.textContent).toContain('creates a second, concurrent engagement — both stay active.')
-    expect(buttonByText(withOpen.host, 'Start another engagement')).toBeTruthy()
+    expect(withOpen.host.textContent).toContain('A new job goes to Jobber as a new request and becomes a second engagement — both stay active.')
+    expect(buttonByText(withOpen.host, 'Start another job in Jobber')).toBeTruthy()
     expect(buttonByText(withOpen.host, 'Open existing instead')).toBeTruthy()
-    // Confirm → a REAL second engagement founds under the EXISTING lead:
-    // POST /api/engagements, never the retired duplicate-leads-row path.
-    await click(buttonByText(withOpen.host, 'Start another engagement')!)
-    expect(foundedBodies).toHaveLength(1)
-    expect(foundedBodies[0].client_id).toBe('p1')
+    // Confirm → the EXISTING person goes to the send. Nothing founds here
+    // (the webhook founds on the request) and never the retired
+    // duplicate-leads-row path.
+    await click(buttonByText(withOpen.host, 'Start another job in Jobber')!)
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0][0].id).toBe('p1')
+    expect(foundedBodies).toHaveLength(0)
     expect(createdBodies, 'must NEVER POST /api/leads for a returning client').toHaveLength(0)
     await withOpen.unmount()
 
-    // zero open → D skipped entirely, founding fires straight away
+    // zero open → D skipped entirely, the send fires straight away
     installFetch()
+    onSend.mockClear()
     const noOpen = await mount(
-      <NewClientSheet people={[p]} engagements={[]} locFilter="loc-uuid-1" onClose={() => {}} />
+      <NewClientSheet people={[p]} engagements={[]} locFilter="loc-uuid-1" onClose={() => {}} onSendToJobber={onSend} />
     )
     await type(noOpen.host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click([...noOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new engagement'))!)
+    await click([...noOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new job in Jobber'))!)
     expect(noOpen.host.textContent).not.toContain('This client has an open engagement')
-    expect(foundedBodies).toHaveLength(1)
-    expect(foundedBodies[0].client_id).toBe('p1')
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(foundedBodies).toHaveLength(0)
     expect(createdBodies).toHaveLength(0)
     await noOpen.unmount()
   })

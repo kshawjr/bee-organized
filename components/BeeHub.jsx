@@ -10147,6 +10147,13 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
                   [betaSendPerson.person.id]: {
                     jobber_client_id: result.jobber_client_id,
                     jobber_request_id: result.jobber_request_id || null,
+                    jobber_job_id: result.jobber_job_id || null,
+                    // The after-send poll keys on these: engagement_id means
+                    // the send rode an existing engagement (nothing new will
+                    // be founded); sent_at makes each send distinct, so a
+                    // client's SECOND send (a new job) is tracked too.
+                    engagement_id: betaSendPerson.engagementId || null,
+                    sent_at: Date.now(),
                   },
                 }))
               }
@@ -24372,6 +24379,11 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
+  // The phone sheet's own Send to Jobber. This screen renders outside the
+  // desktop shell, so the shell's send modal (BeeHub's betaSendPerson) is
+  // not mounted here — without this the sheet got onSendToJobber={null} and
+  // a returning client's only exit was "Keep local", an empty card.
+  const [fabSendPerson, setFabSendPerson] = useState(null)
   // Admin-managed option lists for the FAB's NewClientSheet — the same
   // /api/lookups load HiveShell does, fetched lazily on FIRST open so
   // Home mounts pay nothing. Without it the sheet's Source select has no
@@ -25099,16 +25111,27 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
           setShowNewLead(false)
           if (person && onOpenRecord) onOpenRecord(person)
         }}
-        onFounded={()=>{ /* board state lives in the shell — the founded
-          engagement is real server-side and shows on next Clients load */ }}
         onOpenClient={(clientId)=>{
           const p = people.find(x=>x.id===clientId)
           setShowNewLead(false)
           if (p && onOpenRecord) onOpenRecord(p)
         }}
         onOpenEngagement={()=>{ setShowNewLead(false); if (onOpenHive) onOpenHive({ tab:'engagements' }) }}
-        onSendToJobber={null}
+        onSendToJobber={p=>setFabSendPerson(p)}
         readOnly={isReadOnly}
+      />}
+      {fabSendPerson&&<SendToJobberModal
+        person={fabSendPerson}
+        onDone={(patch)=>{
+          // Same merge + persist the desktop onDone makes (updatePerson →
+          // patchLeadAPI, which keeps only API fields such as stage); the
+          // engagement the webhook founds shows on the next Clients load.
+          setPeople(prev=>prev.map(x=>x.id===fabSendPerson.id?{ ...x, ...patch }:x))
+          patchLeadAPI(fabSendPerson.id, patch)
+          setToast({ kind:'success', msg:`${fabSendPerson.name} sent to Jobber` })
+          setFabSendPerson(null)
+        }}
+        onClose={()=>setFabSendPerson(null)}
       />}
       {toast && <InlineToast {...toast} />}
       <BottomNav />

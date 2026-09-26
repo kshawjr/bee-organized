@@ -119,6 +119,15 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   const isMobile = useIsMobile()
 
   const [step, setStep] = useState(person.jobberClient ? 'history' : 'action')
+  // Is this person ALREADY a Jobber client? jobberClient (the history step's
+  // shape) is never populated from real data — mapLeadToPerson sets it null —
+  // so the real signal is jobberRef, the lead's jobber_client_id (or, after a
+  // send this session, the REQ-/JOB- ref the patch sets; either way linked).
+  // The send route reuses the linked client and never creates one, so the
+  // copy must say so. The JC- label shows only when the ref is the client id.
+  const linkedClientLabel = person.jobberClient?.clientId
+    || (/^\d+$/.test(String(person.jobberRef || '')) ? `JC-${person.jobberRef}` : null)
+  const alreadyLinked = !!(person.jobberClient || person.jobberRef)
   const [action, setAction] = useState(null)
   const [includeAssessment, setIncludeAssessment] = useState(!!person.assessment)
   const [assessmentType, setAssessmentType] = useState(person.assessmentType || 'in-person')
@@ -402,7 +411,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
 
         {step === 'action' && (
           <>
-            <p style={{ fontSize: '13px', color: T.ink.muted }}>{person.jobberClient ? `For ${person.jobberClient.clientId}` : 'A new client will be created in Jobber.'}</p>
+            <p style={{ fontSize: '13px', color: T.ink.muted }}>{alreadyLinked ? `New work on their existing Jobber client${linkedClientLabel ? ` · ${linkedClientLabel}` : ''}.` : 'A new client will be created in Jobber.'}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {ACTIONS.map(a => (
                 <Tile key={a.key} Icon={a.Icon} label={a.title} sub={a.desc} selected={action === a.key} onSelect={() => setAction(a.key)} />
@@ -601,8 +610,8 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             <div>
               <label style={lbl}>This will create in Jobber</label>
               <div style={{ background: T.surface.sunken, borderRadius: T.radius.inset, padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {person.jobberClient ? (
-                  <CreateRow title={`Existing client · ${person.jobberClient.clientId}`} detail="Reused — no new client created" muted />
+                {alreadyLinked ? (
+                  <CreateRow title={`Existing client${linkedClientLabel ? ` · ${linkedClientLabel}` : ''}`} detail="Reused — no new client created" muted />
                 ) : (
                   <CreateRow title="New client" detail={person.name} />
                 )}

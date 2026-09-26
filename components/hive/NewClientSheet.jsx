@@ -5,43 +5,46 @@
 // no imports from BeeHub). Renders through OverlayShell so it inherits
 // the dvh sheet geometry, scroll reset, body lock, and header X.
 //
-// DOCTRINE (updated 2026-07-04 — founding decoupled from Send): "New"
+// DOCTRINE (updated 2026-09-26 — every job goes to Jobber): "New"
 // creates a PERSON for a genuinely new inquiry (frame C), and the lookup
 // is a HARD gate — frame A always comes before any create (the
-// anti-dupe). For a RETURNING client (frames B/D) the primary action is
-// a REAL local founding: POST /api/engagements founds a new engagement
-// UNDER THE EXISTING LEAD (founded_by='manual', lib/engagements.ts).
-// Send to Jobber is the optional NEXT step (frame F) — push now, or keep
-// the engagement local (cash/off-Jobber work) and send later from the
-// engagement. The old returning-client path — minting a duplicate leads
-// row via POST /api/leads and letting the webhook found asynchronously —
-// is RETIRED: it stranded duplicates in the Inbox and 400'd at send on
-// leads_jobber_client_id_location_idx (which stays — it's the guardrail;
-// founding from the existing lead routes around it).
+// anti-dupe). For a RETURNING client (frames B/D) the one action is
+// "Start new job in Jobber": it opens Send to Jobber for the EXISTING
+// lead, which creates the request on their Jobber client, and the
+// REQUEST_CREATE webhook founds the new engagement (rule 1 — a second
+// request is a second engagement, beside any open one).
+//
+// There is no local-only founding here any more. Until 2026-09-26 frame B
+// founded an empty engagement first (POST /api/engagements, founded_by=
+// 'manual') and frame F offered Send or "Keep local for now". Kevin's
+// ruling: no work skips Jobber, so "Keep local" only ever made a card
+// that could never become real work — the same empty card the removed
+// "+ New engagement" button made (47 of them by 2026-09-16, and 5 more
+// through this sheet after the button went). Founding now happens only
+// when Jobber has the request, so an empty card cannot be made here.
+//
+// The older returning-client path — minting a duplicate leads row via
+// POST /api/leads — stays RETIRED: it stranded duplicates in the Inbox
+// and 400'd at send on leads_jobber_client_id_location_idx.
 //
 // Frames (routed by the lookup, all downstream of the search field):
 //   A — search input. Matches as you type against the loaded people
 //       prop (see shared/clientMatch.js for the phone-storage story).
 //   B — match found: returning client, matched-on line, open-engagement
-//       count + last contact, start-new / open-profile actions.
+//       count + last contact, new-job-in-Jobber / open-profile actions.
 //   C — no match: create the PERSON with founding-viable fields only.
 //       The authoritative DB match query re-runs right before the insert.
 //       Source='Referral' opens ReferrerPicker (match-or-create) and the
 //       link rides the POST as referred_by_kind/referred_by_id.
-//   D — matched client has 1+ OPEN engagement: concurrent-engagement
-//       confirm — now gating a REAL second founding (rule 1: a distinct
-//       concurrent row, both stay active), not a cosmetic duplicate.
-//   F — founded: confirmed from the real returned engagement row; offers
-//       Send to Jobber (push) or Keep local for now (send available
-//       later). The person derives Active (open engagement) and the
-//       engagement shows on the Board in Request — the founded-not-sent
-//       signal; no new status exists for it.
+//   D — matched client has 1+ OPEN engagement: concurrent-work confirm
+//       before the send — the new request founds a SECOND engagement
+//       (rule 1), both stay active.
 //
 // The merge seams: frame C hands the REAL returned lead row up through
 // onCreated (never an optimistic stub — phantom Inbox rows); frames B/D
-// hand the REAL returned engagement row up through onFounded so the
-// board shows it without a reload. This module never reaches into
-// BeeHub (§8.5).
+// hand the person to onSendToJobber and close — the caller's send flow
+// owns the rest, including surfacing the founded card. This module never
+// reaches into BeeHub (§8.5).
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -55,7 +58,7 @@ import { lastActivityTs } from './shared/engagementStatus'
 import { matchPeople, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
 import { createClient } from '@/lib/supabase'
 import { composeLeadAddress } from '@/lib/lead-address'
-import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend, IconMapPin } from '@/components/ui/icons'
+import { IconSearch, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend, IconMapPin } from '@/components/ui/icons'
 import { inp, lbl } from './shared/formKit'
 import { T } from './shared/tokens'
 
@@ -158,7 +161,6 @@ export default function NewClientSheet({
   lookupOptions = { sources: [], projectTypes: [] },
   onClose = () => {},
   onCreated = () => {},
-  onFounded = () => {},
   onPartnerCreated = () => {},
   onOpenClient = () => {},
   onOpenEngagement = () => {},
@@ -185,7 +187,6 @@ export default function NewClientSheet({
   const [pickReferrer, setPickReferrer] = useState(false)
   const [pickedId, setPickedId] = useState(null) // multi-match: which B row is active
   const [confirming, setConfirming] = useState(false) // frame D
-  const [founded, setFounded] = useState(null) // frame F: { engagement, person }
   const [dbMatch, setDbMatch] = useState(null) // pre-insert gate hit not in the loaded set
   const [busy, setBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
@@ -206,7 +207,7 @@ export default function NewClientSheet({
   const qDigits = q.replace(/\D/g, '')
   const searched = q.includes('@') ? q.length >= 3 : (qDigits.length >= 7 || q.length >= 2)
 
-  const frame = founded ? 'F' : confirming ? 'D' : match ? 'B' : (searched && !dbMatch) ? 'C' : 'A'
+  const frame = confirming ? 'D' : match ? 'B' : (searched && !dbMatch) ? 'C' : 'A'
 
   // Frame B/D derived facts — session rowPatches already applied upstream.
   const openEngs = useMemo(() => {
@@ -353,9 +354,8 @@ export default function NewClientSheet({
         ...buildAddressFields(),
       })
       // Frame C stays person-world by design: a genuinely NEW inquiry
-      // lands in the Inbox as a person (doctrine above). Manual founding
-      // (founded_by='manual', now real) belongs to the returning-client
-      // frames B/D — see foundEngagementFor.
+      // lands in the Inbox as a person (doctrine above), and Send to Jobber
+      // from there creates the first request.
       onCreated(lead)
     } catch (e) {
       setErrorMsg(String(e?.message || e))
@@ -364,44 +364,20 @@ export default function NewClientSheet({
     }
   }
 
-  // Frame B/D "start engagement" — the REAL founding write, decoupled
-  // from Send to Jobber: POST /api/engagements founds a NEW engagement
-  // under the EXISTING lead's id (founded_by='manual'). Never POST
-  // /api/leads here — the retired duplicate-row path minted a second
-  // leads row that 400'd at send on leads_jobber_client_id_location_idx
-  // and stranded the duplicate in the Inbox. Each call is a distinct
-  // concurrent engagement (rule 1) — frame D's confirm gates creation,
-  // it never reuses the open one.
-  async function foundEngagementFor(m) {
-    if (busy) return
-    setErrorMsg(null)
-    setBusy(true)
-    try {
-      const res = await fetch('/api/engagements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: m.person.id }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json?.engagement) throw new Error(json?.error || `HTTP ${res.status}`)
-      // Confirmed from the REAL returned row (never an optimistic stub) —
-      // hand it up so the board shows it without a reload, then offer the
-      // next step (frame F).
-      onFounded(json.engagement, m.person)
-      setConfirming(false)
-      setFounded({ engagement: json.engagement, person: m.person })
-      setToast({ kind: 'success', msg: `Engagement started for ${m.person.name || 'client'}` })
-    } catch (e) {
-      setErrorMsg(String(e?.message || e))
-      setConfirming(false)
-    } finally {
-      setBusy(false)
-    }
+  // Frame B/D "Start new job in Jobber" — hands the EXISTING person to the
+  // send flow and closes. Nothing is written here: the send creates the
+  // request on their Jobber client and the webhook founds the engagement.
+  // No onSendToJobber means no way to make real work, so the action is not
+  // offered at all (never a local-only fallback).
+  function startJobInJobber(m) {
+    if (!onSendToJobber || readOnly) return
+    onSendToJobber(m.person)
+    onClose()
   }
 
-  const startEngagement = (m) => {
+  const startNewJob = (m) => {
     if (openEngs.length > 0) setConfirming(true)
-    else foundEngagementFor(m)
+    else startJobInJobber(m)
   }
 
   const activeMatch = dbMatch || match
@@ -436,7 +412,7 @@ export default function NewClientSheet({
       )}
 
       {/* Frame B — returning client */}
-      {(frame === 'B' || dbMatch) && activeMatch && !confirming && !founded && (
+      {(frame === 'B' || dbMatch) && activeMatch && !confirming && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><Badge tint={AMBER} icon={<IconUserCheck size={13} />} label="Returning client" /></div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -483,10 +459,12 @@ export default function NewClientSheet({
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button style={{ ...primaryBtn, opacity: (readOnly || busy) ? 0.6 : 1 }} disabled={readOnly || busy} onClick={() => startEngagement(activeMatch)}>
-              <IconPlus size={14} /> Start new engagement
-            </button>
-            <button style={secondaryBtn} onClick={() => onOpenClient(activeMatch.person.id)}>
+            {onSendToJobber && (
+              <button style={{ ...primaryBtn, opacity: readOnly ? 0.6 : 1 }} disabled={readOnly} onClick={() => startNewJob(activeMatch)}>
+                <IconSend size={14} /> Start new job in Jobber
+              </button>
+            )}
+            <button style={onSendToJobber ? secondaryBtn : primaryBtn} onClick={() => onOpenClient(activeMatch.person.id)}>
               Open client profile
             </button>
           </div>
@@ -676,13 +654,15 @@ export default function NewClientSheet({
           </div>
           <p style={{ fontSize: '13px', color: T.ink.strong, lineHeight: 1.5 }}>
             {activeMatch.person.name} has an engagement started {fmtDate(openEngs[0]?.created_at) || '—'} that's still open.
-            Starting a new one creates a second, concurrent engagement — both stay active.
+            A new job goes to Jobber as a new request and becomes a second engagement — both stay active.
           </p>
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button style={{ ...primaryBtn, opacity: (readOnly || busy) ? 0.6 : 1 }} disabled={readOnly || busy} onClick={() => foundEngagementFor(activeMatch)}>
-              Start another engagement
-            </button>
+            {onSendToJobber && (
+              <button style={{ ...primaryBtn, opacity: readOnly ? 0.6 : 1 }} disabled={readOnly} onClick={() => startJobInJobber(activeMatch)}>
+                <IconSend size={14} /> Start another job in Jobber
+              </button>
+            )}
             <button style={secondaryBtn} onClick={() => (openEngs[0] ? onOpenEngagement(openEngs[0]) : setConfirming(false))}>
               Open existing instead
             </button>
@@ -690,30 +670,6 @@ export default function NewClientSheet({
         </div>
       )}
 
-      {/* Frame F — founded; Send is the optional next step. The board
-          already shows the engagement (onFounded fired on the confirmed
-          write); the person derives Active. 'Keep local' is a real exit:
-          cash/off-Jobber work stays a full engagement with no Jobber
-          link, send available later from the engagement panel. */}
-      {frame === 'F' && founded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><Badge tint={GREEN} icon={<IconCheck size={13} />} label="Engagement started" /></div>
-          <p style={{ fontSize: '13px', color: T.ink.strong, lineHeight: 1.5 }}>
-            {founded.person.name}&rsquo;s new engagement is on the board in Request.
-            Send it to Jobber now, or keep it local — you can send any time from the engagement.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {onSendToJobber && (
-              <button style={primaryBtn} onClick={() => { onSendToJobber(founded.person, { engagementId: founded.engagement.id }); onClose() }}>
-                <IconSend size={14} /> Send to Jobber
-              </button>
-            )}
-            <button style={onSendToJobber ? secondaryBtn : primaryBtn} onClick={onClose}>
-              Keep local for now
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 

@@ -236,6 +236,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   // 403s a franchise user viewing a loc_other lead, and the transfer endpoint
   // is the load-bearing gate, so surfacing the action on the slug is enough.
   const atLocOther = c?.location_id === 'loc_other'
+  // "New job in Jobber" (Engagements header) — a linked client's second
+  // piece of work. Same gates as the action bar's Send.
+  const canStartNewJob = !!c && jobberLinked && !readOnly && !atLocOther && !!onSendToJobber
   const transferSubline = c
     ? [
         [[c.city, c.state].filter(Boolean).join(', '), c.zip].filter(Boolean).join(' '),
@@ -653,9 +656,24 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />
       </div>
 
-      {/* Engagements */}
+      {/* Engagements — "New job in Jobber" sits on this header, beside the
+          work it adds to, and NOT in the action bar where "+ New engagement"
+          was. That button made a local card and sent nothing; this one opens
+          Send to Jobber for the client's EXISTING Jobber record, and the
+          request that lands founds a second engagement beside any open one
+          (the kitchen-then-bedroom call). Linked clients only: an unlinked
+          client's first job is the action bar's Send to Jobber, the same
+          send, so offering both would be two doors to one room. */}
       <div>
-        <MicroLabel>Engagements · {agg?.total_count ?? engagements.length} · {agg?.open_count ?? open.length} open</MicroLabel>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+          <MicroLabel>Engagements · {agg?.total_count ?? engagements.length} · {agg?.open_count ?? open.length} open</MicroLabel>
+          {canStartNewJob && (
+            <button type="button" aria-label="New job in Jobber" disabled={busy} onClick={() => onSendToJobber(c.id)}
+              style={{ ...rowActionBtn(), gap: '5px', color: T.accent.fg }}>
+              <IconSend size={12} /> New job in Jobber
+            </button>
+          )}
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {open.map(e => {
             const chip = deriveStatusChip(e, { nowMs })
@@ -821,13 +839,12 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             button either duplicated Jobber's own path or produced a permanent
             empty card.
 
-            THE CAPABILITY IS NOT GONE — only this button. POST
-            /api/engagements still serves NewClientSheet and the Close flow,
-            and NewClientSheet's frame B founds on a MATCHED EXISTING client
-            with the identical call. So a client who will never touch Jobber
-            is still startable: New → search them → found it there. That path
-            is less discoverable than this button was; if owners miss it, the
-            fix is to surface THAT, not to put this back.
+            ITS REPLACEMENT (2026-09-26) is "New job in Jobber" on the
+            Engagements header above: it creates the request on the client's
+            existing Jobber record and the webhook founds the engagement, so
+            it cannot make an empty card. Kevin's ruling the same day: no work
+            skips Jobber, so there is no local-only start anywhere — the New
+            sheet's "Keep local for now" went too. Do not put this back.
 
             ActionRow sizes its grid from the CHILD COUNT, so removing this
             takes a normal writable card from four columns to three and the

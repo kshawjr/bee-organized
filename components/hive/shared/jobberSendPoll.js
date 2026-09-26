@@ -13,9 +13,8 @@
 //
 // THE FIX (targeted, NOT a realtime-INSERT rebuild): after a send, HiveShell
 // polls the same ?open=1 set the focus sweep already fetches until the
-// founded engagement appears, then injects it into sessionEngagements — the
-// exact seam NewClientSheet's onFounded uses to make a card appear without a
-// reload. The moment it lands the row derives Active and leaves on its own,
+// founded engagement appears, then injects it into sessionEngagements, so
+// the card appears without a reload. The moment it lands the row derives Active and leaves on its own,
 // and the badge + board correct themselves from the same injection.
 //
 // This module is the PURE, React-free heart of that loop (same rationale as
@@ -48,7 +47,11 @@ export function pollDelayForElapsed(elapsedMs) {
 
 // Reconcile one poll tick.
 //
-//   pending   [{ clientId, startedAt }]  — sends awaiting their engagement
+//   pending   [{ clientId, startedAt, knownIds? }] — sends awaiting their
+//             engagement. knownIds = the client's engagement ids ALREADY open
+//             when the send went out: a returning client's new job founds a
+//             SECOND engagement, so the first open row for the client is not
+//             the answer — the answer is the one that wasn't there before.
 //   openRows  the ?open=1 board rows this tick fetched
 //   nowMs     current epoch ms (passed in so this stays pure/testable)
 //   capMs     give-up threshold (defaults to SEND_POLL_CAP_MS)
@@ -73,7 +76,8 @@ export function reconcileSentPolls(pending, openRows, nowMs, capMs = SEND_POLL_C
   const settled = []
   for (const entry of pending || []) {
     if (!entry || !entry.clientId) continue
-    const match = rows.find(r => r && r.id && r.client_id === entry.clientId)
+    const known = entry.knownIds || []
+    const match = rows.find(r => r && r.id && r.client_id === entry.clientId && !known.includes(r.id))
     if (match) { injects.push(match); continue }
     if (nowMs - entry.startedAt >= capMs) { settled.push(entry.clientId); continue }
     stillPending.push(entry)

@@ -8,7 +8,10 @@
 //   2. Validate body (creation_type + scheduled_assessment_at if needed)
 //   3. Resolve lead + location + assigned hub_user (for jobber_user_id)
 //   4. Extract primary address from lead.addresses (or legacy fields)
-//   5. Search Jobber for a client by email
+//   5. Find the Jobber client:
+//        - lead already linked (jobber_client_id) → read THAT client back and
+//          reuse it; never search, never create (the duplicate-client fix)
+//      otherwise search Jobber by email:
 //        - found AND email exact match → reuse, optionally update name/phone
 //        - found but no email match    → create new client
 //        - not found                   → create new client
@@ -42,7 +45,7 @@ import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
 import { isLocationReadOnly } from '@/lib/read-only-access'
-import { upsertServiceRequest, upsertJob } from '@/lib/jobber-import'
+import { upsertServiceRequest, upsertJob, encodeJobberId } from '@/lib/jobber-import'
 import { attachToEngagement } from '@/lib/engagements'
 import {
   buildContactEditFields,
@@ -184,6 +187,22 @@ const FIND_CLIENT_QUERY = /* GraphQL */ `
         emails { id address primary }
         phones { id number primary }
       }
+    }
+  }
+`
+
+// The stored link, read back directly. Same node shape as FIND_CLIENT_QUERY
+// so the contact write-back diffs against it identically. `client(id:)` is the
+// entry point GET_CLIENT_PROPERTIES_QUERY already relies on.
+const GET_CLIENT_BY_ID_QUERY = /* GraphQL */ `
+  query GetClientById($clientId: EncodedId!) {
+    client(id: $clientId) {
+      id
+      firstName
+      lastName
+      companyName
+      emails { id address primary }
+      phones { id number primary }
     }
   }
 `
@@ -605,13 +624,40 @@ export async function POST(
   const phone     = (lead.phone || '').trim()
 
   // ─────────────────────────────────────────────────────────────────
-  // 1. SEARCH for an existing client by email
+  // 1. FIND the Jobber client — the stored link first, email second
   // ─────────────────────────────────────────────────────────────────
   let jobberClientGlobalId: string | null = null
   let matchStatus: 'matched_existing' | 'new_client' = 'new_client'
   let matchedClientNode: any = null
 
-  if (email) {
+  // A lead that already carries jobber_client_id IS that Jobber client. The
+  // email search used to run regardless, so a linked client with no email
+  // (1,262 of them, 2026-09-26) or a different email in Jobber fell through to
+  // clientCreate — a DUPLICATE Jobber client — and the writeback below then
+  // moved our link onto it. The link is read back directly and never searched
+  // around: if Jobber can't return it the send stops, because every fallback
+  // from here creates the duplicate. (A client deleted in Jobber doesn't land
+  // here — CLIENT_DESTROY nulls the link, so the send takes the email path.)
+  const storedClientId: string | null = lead.jobber_client_id ? String(lead.jobber_client_id) : null
+  if (storedClientId) {
+    const byId = await jobberGraphQL(locationSlug, GET_CLIENT_BY_ID_QUERY, {
+      clientId: encodeJobberId('Client', storedClientId),
+    })
+    const linked = byId.data?.client || null
+    if (byId.errors?.length || !linked?.id) {
+      return fail(
+        'client_search',
+        `This client is linked to Jobber client JC-${storedClientId}, but Jobber did not return it` +
+        (byId.errors?.length ? ` (${byId.errors[0]?.message || 'lookup failed'})` : '') +
+        `. Nothing was sent, so no duplicate was created. Check the client still exists in Jobber, then try again.`,
+        409,
+        { jobber_client_id: storedClientId },
+      )
+    }
+    jobberClientGlobalId = linked.id
+    matchStatus = 'matched_existing'
+    matchedClientNode = linked
+  } else if (email) {
     const search = await jobberGraphQL(locationSlug, FIND_CLIENT_QUERY, {
       searchTerm: email,
     })

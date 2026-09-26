@@ -192,12 +192,16 @@ describe('the capability survives — this removed a button, not a route', () =>
     expect(wiz).toContain('reuse_open')
   })
 
-  it('NewClientSheet still founds — including on a MATCHED EXISTING client', () => {
-    // This is the answer to "is there any way left to start work on a client
-    // who will never touch Jobber": yes — New → search them → found it there.
+  it('NewClientSheet no longer founds at all — a returning client goes to Jobber (2026-09-26)', () => {
+    // Superseded: this used to pin frame B's local founding as "the way to
+    // start work on a client who will never touch Jobber". Kevin's ruling
+    // 2026-09-26: no such work exists. The sheet now hands the existing
+    // person to Send to Jobber, and the webhook founds on the request — so
+    // it can no longer make the empty card this button made.
     const sheet = readFileSync(join(process.cwd(), 'components/hive/NewClientSheet.jsx'), 'utf8')
-    expect(sheet).toContain("fetch('/api/engagements'")
-    expect(sheet).toContain('foundEngagementFor')
-    expect(sheet).toContain('m.person.id')   // an existing matched person
+    expect(sheet).not.toContain("fetch('/api/engagements'")
+    expect(sheet).not.toContain('foundEngagementFor')
+    expect(sheet).not.toContain('Keep local for now</')
+    expect(sheet).toContain('onSendToJobber(m.person)')
   })
 })

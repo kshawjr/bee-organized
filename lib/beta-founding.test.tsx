@@ -1,19 +1,14 @@
 // @vitest-environment happy-dom
 // Decoupled engagement founding (founded_by='manual') — the returning-
 // client fix. Covers:
-//   - frame B "Start new engagement" founds under the EXISTING lead id
-//     (POST /api/engagements) — NO second leads row, ever
-//   - the founded engagement is a DISTINCT concurrent row (rule 1),
-//     never a reuse of the open one
-//   - frame F next step: Send to Jobber carries { engagementId }; works
-//     for Jobber-linked returning clients (the canSend unlock is scoped
-//     to the founded engagement, not people-world)
+//   - frames B/D "Start new job in Jobber" hand the EXISTING person to the
+//     send and found NOTHING locally (2026-09-26 — no work skips Jobber;
+//     "Keep local for now" and frame F are gone) — NO second leads row
 //   - people-world gates unchanged: Inbox still hides Send on
 //     Jobber-linked people (no blanket canSend removal)
 //   - EngagementPanel offers Send ONLY on founded-not-sent engagements
 //     (zero work records, not terminal)
-//   - HiveShell merges the founded row → Board shows it in Request; the
-//     person derives Active (no new status invented)
+//   - HiveShell's New sheet sends rather than founds
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -127,84 +122,78 @@ const buttonContaining = (host: Element, text: string) =>
 beforeEach(() => installFetch())
 afterEach(() => { panelData = null; document.body.style.overflow = '' })
 
-// ═══ the founding write ════════════════════════════════════
-describe('NewClientSheet — decoupled founding (frames B/D → F)', () => {
-  it('frame B founds under the EXISTING lead id — no leads row, real engagement, onFounded gets the returned row', async () => {
-    const onFounded = vi.fn()
-    const { host, unmount } = await mount(
-      <NewClientSheet people={[person()]} engagements={[]} locFilter="loc-uuid-1" onClose={() => {}} onFounded={onFounded} />
-    )
-    await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click(buttonContaining(host, 'Start new engagement')!)
-
-    expect(leadPosts, 'must NOT POST /api/leads for a returning client').toHaveLength(0)
-    expect(foundPosts).toHaveLength(1)
-    expect(foundPosts[0]).toMatchObject({ client_id: 'p1' })
-    expect(onFounded).toHaveBeenCalledTimes(1)
-    const [engRow] = onFounded.mock.calls[0]
-    expect(engRow.id).toBe('eng-founded-1') // the REAL returned row
-    expect(engRow.client_id).toBe('p1')
-    expect(engRow.founded_by).toBe('manual')
-    expect(engRow.stage).toBe('Request')
-    // Frame F: founded, send-or-keep-local next step
-    expect(host.textContent).toContain('Engagement started')
-    expect(host.textContent).toContain('on the board in Request')
-    expect(buttonByText(host, 'Keep local for now')).toBeTruthy()
-    await unmount()
-  })
-
-  it('frame D confirm founds a DISTINCT second engagement, concurrent with the open one (rule 1)', async () => {
-    const existing = openEng('p1')
-    const onFounded = vi.fn()
-    const { host, unmount } = await mount(
-      <NewClientSheet people={[person()]} engagements={[existing]} locFilter="loc-uuid-1" onClose={() => {}} onFounded={onFounded} />
-    )
-    await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click(buttonContaining(host, 'Start new engagement')!)
-    expect(host.textContent).toContain('This client has an open engagement')
-    await click(buttonByText(host, 'Start another engagement')!)
-
-    expect(foundPosts).toHaveLength(1)
-    expect(leadPosts).toHaveLength(0)
-    const [engRow] = onFounded.mock.calls[0]
-    expect(engRow.id).not.toBe(existing.id) // a new row — never a reuse/overwrite
-    expect(engRow.client_id).toBe(existing.client_id) // same client, both stay active
-    await unmount()
-  })
-
-  it('frame F Send to Jobber works for a Jobber-LINKED returning client and carries { engagementId }', async () => {
-    const p = person({ jobberRef: '12345' }) // linked — old people-world gate hid Send entirely
+// ═══ a returning client's new job goes to Jobber (2026-09-26) ═══
+// Kevin's ruling: no work skips Jobber. Frames B/D used to found a local
+// engagement first (POST /api/engagements) and frame F offered "Keep local
+// for now" — which only ever made a card that could never become real work.
+// Now the sheet founds NOTHING: it hands the EXISTING person to the send
+// flow, the request lands on their Jobber client, and the webhook founds the
+// engagement. These pin that no local founding and no "Keep local" survive.
+describe('NewClientSheet — a returning client\'s new job goes straight to Jobber', () => {
+  it('frame B "Start new job in Jobber" sends the EXISTING person and founds nothing locally', async () => {
+    const p = person({ jobberRef: '12345' }) // linked — the kitchen-then-bedroom client
     const onSend = vi.fn()
     const onClose = vi.fn()
     const { host, unmount } = await mount(
       <NewClientSheet people={[p]} engagements={[]} locFilter="loc-uuid-1" onClose={onClose} onSendToJobber={onSend} />
     )
     await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click(buttonContaining(host, 'Start new engagement')!)
+    expect(buttonContaining(host, 'Start new engagement'), 'the local-founding action is gone').toBeFalsy()
+    await click(buttonContaining(host, 'Start new job in Jobber')!)
 
-    const send = buttonContaining(host, 'Send to Jobber')
-    expect(send, 'Send must be offered on the founded engagement').toBeTruthy()
-    await click(send!)
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(onSend.mock.calls[0][0].id).toBe('p1') // the EXISTING person — no duplicate
-    expect(onSend.mock.calls[0][1]).toEqual({ engagementId: 'eng-founded-1' })
+    expect(onSend.mock.calls[0][1], 'no engagementId: the request founds its own engagement').toBeUndefined()
     expect(onClose).toHaveBeenCalled()
-    expect(leadPosts, 'the send path never writes a second leads row').toHaveLength(0)
+    expect(foundPosts, 'no local engagement is founded — the empty-card path is gone').toHaveLength(0)
+    expect(leadPosts, 'never a second leads row').toHaveLength(0)
     await unmount()
   })
 
-  it('frame F Keep local for now closes without sending — the engagement stays, send available later', async () => {
+  it('frame D (client already has open work) confirms, then sends — still no local founding', async () => {
+    const existing = openEng('p1')
     const onSend = vi.fn()
-    const onClose = vi.fn()
     const { host, unmount } = await mount(
-      <NewClientSheet people={[person()]} engagements={[]} locFilter="loc-uuid-1" onClose={onClose} onSendToJobber={onSend} />
+      <NewClientSheet people={[person()]} engagements={[existing]} locFilter="loc-uuid-1" onClose={() => {}} onSendToJobber={onSend} />
     )
     await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click(buttonContaining(host, 'Start new engagement')!)
-    await click(buttonByText(host, 'Keep local for now')!)
-    expect(onClose).toHaveBeenCalled()
-    expect(onSend).not.toHaveBeenCalled()
-    expect(foundPosts).toHaveLength(1) // the engagement was still founded
+    await click(buttonContaining(host, 'Start new job in Jobber')!)
+    expect(host.textContent).toContain('This client has an open engagement')
+    expect(host.textContent).toContain('becomes a second engagement')
+    expect(onSend, 'the confirm gates the send').not.toHaveBeenCalled()
+    await click(buttonContaining(host, 'Start another job in Jobber')!)
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0][0].id).toBe('p1')
+    expect(foundPosts).toHaveLength(0)
+    expect(leadPosts).toHaveLength(0)
+    await unmount()
+  })
+
+  it('"Keep local for now" exists in no frame — B, D, or after the send', async () => {
+    const onSend = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} engagements={[openEng('p1')]} locFilter="loc-uuid-1" onClose={() => {}} onSendToJobber={onSend} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
+    expect(host.textContent).not.toContain('Keep local') // frame B
+    await click(buttonContaining(host, 'Start new job in Jobber')!)
+    expect(host.textContent).not.toContain('Keep local') // frame D
+    await click(buttonContaining(host, 'Start another job in Jobber')!)
+    expect(host.textContent).not.toContain('Keep local') // after
+    expect(host.textContent).not.toContain('Engagement started')
+    await unmount()
+  })
+
+  it('with no send wired, the sheet offers no start at all — never a local-only fallback', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} engagements={[]} locFilter="loc-uuid-1" onClose={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
+    expect(buttonContaining(host, 'Start new job')).toBeFalsy()
+    expect(buttonContaining(host, 'Start new engagement')).toBeFalsy()
+    expect(buttonContaining(host, 'Open client profile')).toBeTruthy()
+    expect(foundPosts).toHaveLength(0)
     await unmount()
   })
 })
@@ -290,20 +279,20 @@ describe('Founded engagement surfacing — Active person, board row, no new stat
     expect(deriveClientStatus(sent, new Set())).not.toBe('Active')
   })
 
-  it('HiveShell: founding via the sheet puts the engagement on the Board in Request without a reload', async () => {
+  it('HiveShell: the New sheet hands a returning client to the send — no card is made before Jobber has the request', async () => {
+    const onSend = vi.fn()
     const { host, unmount } = await mount(
-      <HiveShell people={[person()]} engagements={[]} locFilter="all" currentLocationUuid="loc-uuid-1" />
+      <HiveShell people={[person()]} engagements={[]} locFilter="all" currentLocationUuid="loc-uuid-1" onSendToJobber={onSend} />
     )
-    // Board lens (default) starts empty
     expect(host.textContent).not.toContain('Sarah Mitchell')
     await click(host.querySelector('button[aria-label="New client"]')!)
     await type(host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
-    await click(buttonContaining(host, 'Start new engagement')!)
-    expect(host.textContent).toContain('Engagement started')
-    await click(buttonByText(host, 'Keep local for now')!)
-    // The sheet closed; the founded row rides sessionEngagements → Board.
-    expect(host.textContent).toContain('Sarah Mitchell')
-    expect(foundPosts).toHaveLength(1)
+    await click(buttonContaining(host, 'Start new job in Jobber')!)
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0][0].id).toBe('p1')
+    // Nothing founded locally, so the board stays empty until the webhook's
+    // engagement lands (the after-send poll surfaces it).
+    expect(foundPosts).toHaveLength(0)
     expect(leadPosts).toHaveLength(0)
     await unmount()
   })

@@ -1000,7 +1000,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       // Hand the CONFIRMED touchpoint UP (§8.5 direction rule — the same
-      // real-row discipline as onFounded/onCreated, never a stub). HiveShell
+      // real-row discipline as onCreated, never a stub). HiveShell
       // layers it onto the people snapshot, so this row moves New →
       // Attempting instantly AND the directory chip and the badge re-derive
       // with it. The Inbox no longer keeps its own private truth.
