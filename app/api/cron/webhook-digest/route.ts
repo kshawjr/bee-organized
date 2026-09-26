@@ -6,18 +6,15 @@
 // separately by the ~5-minute watermark cron (app/api/cron/failure-alerts,
 // issue 159); this digest is the once-a-day rundown.
 //
-// Queries the last 24h of webhook sync_log activity (same enrichment as
-// the admin Webhooks tab) and posts a Slack digest that LEADS with
-// lead-intake health (website→Bee Hub, running in parallel with Zoho)
-// and re-presents Jobber webhook sync underneath. See lib/webhook-digest
-// for the classification: only leads/events that DIDN'T LAND drive the
-// headline; token-race self-heals are calm background noise.
+// Reports ONLY what Kevin should know about but that is not an emergency:
+// Jobber changes that never landed after their retries, and things that are
+// STUCK (stalled imports, sends held for a missing rate or booking link,
+// locations still disconnected from Jobber). See lib/webhook-digest for the
+// rule and for what is deliberately never a line.
 //
-// SUPPRESS WHEN QUIET: if nothing landed and nothing failed in the
-// window (a truly quiet window, or one whose only activity was token
-// self-heals), the digest is suppressed and NOTHING is posted — a digest
-// arriving should mean there was activity. Returns 200 { posted:false,
-// suppressed:true } so the cron doesn't page.
+// SILENT WHEN EVERY COUNT IS ZERO: no "all healthy" message, ever. Returns
+// 200 { posted:false, suppressed:true } and still writes the heartbeat row,
+// so a quiet day and a dead cron stay distinguishable in System health.
 //
 // Auth: same convention as send-drips — Vercel cron sends
 // `Authorization: Bearer <CRON_SECRET>`; manual testing also accepts
@@ -42,6 +39,8 @@ import { fetchBookingLinkHealth } from '@/lib/booking-link-health'
 import { resolveInternalOrigin, probeInternalOriginGated } from '@/lib/internal-origin'
 import { postSlackMessage } from '@/lib/slack'
 import { recordDigestRun } from '@/lib/digest-runs'
+import { supabaseService } from '@/lib/supabase-service'
+import { parseReconnectStamp } from '@/lib/jobber-reconnect'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -111,11 +110,28 @@ export async function GET(req: NextRequest) {
     // lib/booking-link. Also never throws (degrades to empty).
     const bookingLinkHealth = await fetchBookingLinkHealth()
 
+    // Locations still waiting on a Jobber reconnect (the instant rail alerted
+    // when they were stamped; this is the daily "still broken"). Best-effort:
+    // a failed read degrades to none rather than killing the digest.
+    let reconnectLocations: Array<{ location_id: string; name: string | null }> = []
+    try {
+      const { data } = await supabaseService
+        .from('locations')
+        .select('location_id, name, last_sync_status')
+      reconnectLocations = ((data as any[]) || [])
+        .filter(l => parseReconnectStamp(l.last_sync_status) != null)
+        .map(l => ({ location_id: l.location_id, name: l.name ?? null }))
+    } catch (err: any) {
+      console.error('[cron webhook-digest] reconnect read failed (non-fatal)', err?.message || err)
+    }
+
     digest = buildWebhookDigest({
       events,
       appUrl,
       windowLabel: 'last 24h',
+      nowMs,
       rateHealth,
+      reconnect: { locations: reconnectLocations },
       bookingLinkHealth,
       importHealth: {
         failed: importJobs.failed,
@@ -131,12 +147,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'digest_query_failed' }, { status: 500 })
   }
 
-  // ─── Suppress a quiet / self-heal-only window ──────────────────
-  // A digest arriving should mean there was activity. Nothing to say →
+  // ─── Silent when every count is zero ───────────────────────────
+  // A digest arriving should mean something needs a look. Nothing to say →
   // post nothing (200, not a failure).
   if (digest.suppressed) {
     console.log(
-      `[cron webhook-digest] window=24h suppressed (quiet window) self_heals=${digest.selfHeals}`,
+      `[cron webhook-digest] window=24h suppressed (nothing to report) leadsIn=${digest.leadsLanded} ` +
+        `jobberLanded=${digest.jobberLanded} recovered=${digest.selfHeals}`,
     )
     // Persist the heartbeat even when nothing is posted — a quiet window is
     // still proof the cron is alive. Fail-soft (never throws, no-ops
@@ -154,34 +171,28 @@ export async function GET(req: NextRequest) {
     // Slack itself errored (bad URL, 4xx/5xx) — surface as a failure so
     // it shows up in Vercel's cron logs.
     return NextResponse.json(
-      { error: 'slack_post_failed', detail: post.error, allClear: digest.allClear },
+      { error: 'slack_post_failed', detail: post.error },
       { status: 502 },
     )
   }
 
   console.log(
-    `[cron webhook-digest] window=24h posted=${post.ok} allClear=${digest.allClear} ` +
-      `leadsIn=${digest.leadsLanded} leadsFailed=${digest.leadsFailed} ` +
-      `jobberLanded=${digest.jobberLanded} jobberDidntLand=${digest.jobberDidntLand} ` +
+    `[cron webhook-digest] window=24h posted=${post.ok} neverLanded=${digest.neverLanded} ` +
+      `reconnectRequired=${digest.reconnectRequired} ` +
       `importFailed=${digest.importFailed} importStalled=${digest.importStalled} importOriginGated=${digest.importOriginGated} ` +
       `rateMissing=${digest.rateMissing} bookingLinkMissing=${digest.bookingLinkMissing} ` +
-      `selfHeals=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
+      `recovered=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
   )
   return NextResponse.json({
     ok: true,
     posted: post.ok,
     ...(post.skipped ? { skipped: post.skipped } : {}),
     suppressed: false,
-    allClear: digest.allClear,
-    leadsLanded: digest.leadsLanded,
-    leadsFailed: digest.leadsFailed,
-    jobberLanded: digest.jobberLanded,
-    jobberDidntLand: digest.jobberDidntLand,
-    importFailed: digest.importFailed,
+    neverLanded: digest.neverLanded,
+    reconnectRequired: digest.reconnectRequired,
     importStalled: digest.importStalled,
     importOriginGated: digest.importOriginGated,
     rateMissing: digest.rateMissing,
     bookingLinkMissing: digest.bookingLinkMissing,
-    selfHeals: digest.selfHeals,
   })
 }

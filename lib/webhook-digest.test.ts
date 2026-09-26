@@ -1,36 +1,37 @@
 // @vitest-environment node
 //
-// Slack webhook digest (runs once daily — issue 159) — formatter unit
-// tests + source pins for the cron route.
+// Daily ops digest (runs once daily — issue 159, rebuilt Sept 2026) —
+// formatter unit tests + source pins for the cron route.
 //
-// The redesigned digest LEADS with lead-intake health and re-presents
-// Jobber sync underneath. What these tests pin:
+// THE RULE: the digest carries only what is wrong-but-not-urgent, and posts
+// NOTHING when every count is zero. What these tests pin:
 //
-//   1) Clean window → ✅ "Leads healthy" headline, right counts, fires
-//      (not suppressed).
-//   2) A real didn't-land (lead OR Jobber) → ⚠️ headline naming it.
-//   3) Token-race self-heals (reauth fail → success on the same entity
-//      within the window) are NOT failures: they never reach the ⚠️
-//      headline; a self-heal-ONLY window is suppressed; when a digest
-//      fires for other reasons the self-heals show as a calm line.
-//   4) A genuine reauth expiry (no following success) IS a real
-//      didn't-land and is flagged loud.
-//   5) Quiet window → suppressed entirely (post nothing).
-//   6) loc_other spike detection.
-//   7) Cron route pins: 24h window, suppression no-post, CRON_SECRET
-//      fail-closed, missing SLACK_WEBHOOK_URL 200 no-op, and vercel.json
-//      registers the "0 10 * * *" (once-daily) schedule.
+//   1) A busy healthy day (leads in, Jobber landed, self-heals, no-op
+//      deletes) → suppressed. No "Leads healthy" headline exists any more.
+//   2) NEVER LANDED: a Jobber change with no later success for the same
+//      record (whatever topic the retry came under) is a line; one that
+//      recovered is not; a failure inside the retry grace waits.
+//   3) Failed leads are NOT a daily line (they alert instantly).
+//   4) STUCK: imports stalled / bouncing / origin gated, rate + booking-link
+//      holds, locations still disconnected from Jobber. A FAILED import is not
+//      a daily line (instant rail).
+//   5) Cron route pins: 24h window, suppression no-post, CRON_SECRET
+//      fail-closed, missing SLACK_WEBHOOK_URL 200 no-op, "0 10 * * *".
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildWebhookDigest, SELF_HEAL_WINDOW_MS } from '@/lib/webhook-digest'
+import { buildWebhookDigest, findNeverLanded, RETRY_GRACE_MS } from '@/lib/webhook-digest'
 import type { WebhookLogEvent } from '@/lib/webhook-observability'
+
+const NOW = Date.parse('2026-07-18T12:00:00Z')
+const HOUR = 60 * 60 * 1000
+const at = (ms: number) => new Date(ms).toISOString()
 
 function ev(over: Partial<WebhookLogEvent>): WebhookLogEvent {
   return {
     id: Math.random().toString(36).slice(2),
-    created_at: '2026-07-18T12:00:00Z',
+    created_at: at(NOW - 6 * HOUR),
     topic: 'JOB_UPDATE',
     friendly: 'Job updated',
     skipped: false,
@@ -52,205 +53,125 @@ function ev(over: Partial<WebhookLogEvent>): WebhookLogEvent {
   }
 }
 
-// A landed website lead (topic=LEAD_INTAKE, success).
-const leadIn = (slug: string, over: Partial<WebhookLogEvent> = {}) =>
-  ev({
-    topic: 'LEAD_INTAKE',
-    friendly: 'Lead intake',
-    processed: true,
-    landed: 'landed',
-    location_id: slug,
-    location_name: slug,
-    jobber_item: null,
-    ...over,
-  })
+const leadIn = (slug: string) =>
+  ev({ topic: 'LEAD_INTAKE', friendly: 'Lead intake', location_id: slug, location_name: slug, jobber_item: null })
 
-// A failed website lead.
-const leadFail = (slug: string | null, reason: string, over: Partial<WebhookLogEvent> = {}) =>
-  ev({
-    topic: 'LEAD_INTAKE',
-    friendly: 'Lead intake',
-    processed: false,
-    landed: null,
-    error: reason,
-    reason,
-    location_id: slug,
-    location_name: slug,
-    intake_slug: slug === null ? 'acme-typo' : null,
-    jobber_item: null,
-    ...over,
-  })
+const leadFail = (reason: string) =>
+  ev({ topic: 'LEAD_INTAKE', friendly: 'Lead intake', processed: false, landed: null, error: reason, reason, location_id: null, jobber_item: null })
+
+const fail = (over: Partial<WebhookLogEvent> = {}) =>
+  ev({ processed: false, landed: null, error: 'job_fetch: no_valid_jobber_token', reason: 'job_fetch: no_valid_jobber_token', ...over })
 
 const APP = 'https://beehub.example.com'
+const digest = (events: WebhookLogEvent[], extra: any = {}) =>
+  buildWebhookDigest({ events, appUrl: APP, nowMs: NOW, ...extra })
 
-describe('buildWebhookDigest — clean window', () => {
-  it('leads with a ✅ "Leads healthy" headline and fires', () => {
-    const d = buildWebhookDigest({
-      events: [leadIn('boulder-01'), leadIn('boulder-01'), leadIn('denver-02'), ev({}), ev({})],
-      appUrl: APP,
-    })
-    expect(d.suppressed).toBe(false)
+describe('silence — nothing wrong means nothing sent', () => {
+  it('a busy healthy day is suppressed with empty text', () => {
+    const d = digest([
+      leadIn('loc_kc'), leadIn('loc_other'), leadIn('loc_other'),
+      ev({ jobber_item: '1' }), ev({ topic: 'QUOTE_UPDATE', jobber_item: '2' }),
+      // token self-heal under a DIFFERENT topic (the Nova shape)
+      fail({ topic: 'QUOTE_APPROVED', jobber_item: '3', created_at: at(NOW - 5 * HOUR) }),
+      ev({ topic: 'QUOTE_UPDATE', jobber_item: '3', created_at: at(NOW - 5 * HOUR + 600) }),
+      // a no-matching-lead no-op
+      ev({ topic: 'REQUEST_DESTROY', landed: null, jobber_item: '4' }),
+    ])
+    expect(d.suppressed).toBe(true)
     expect(d.allClear).toBe(true)
+    expect(d.text).toBe('')
+    expect(d.selfHeals).toBe(1)             // recorded on the heartbeat, never posted
     expect(d.leadsLanded).toBe(3)
-    expect(d.leadsFailed).toBe(0)
-    expect(d.jobberLanded).toBe(2)
-    expect(d.jobberDidntLand).toBe(0)
-    expect(d.headline).toContain(':white_check_mark: Leads healthy — 3 in, 0 didn')
-    expect(d.headline).toContain('Jobber: 2 landed')
-    expect(d.text).toContain('*:inbox_tray: Lead intake*')
-    expect(d.text).toContain('boulder-01 ×2')
-    expect(d.text).toContain('*:wrench: Jobber sync*')
-    expect(d.text).toContain('2 landed, 0 didn')
   })
-})
 
-describe('buildWebhookDigest — real didn\'t-land drives ⚠️', () => {
-  it('a failed lead flips the headline to ⚠️ and lists the failure', () => {
-    const d = buildWebhookDigest({
-      events: [leadIn('boulder-01'), leadFail(null, 'location_not_found slug=acme-typo')],
-      appUrl: APP,
-    })
-    expect(d.suppressed).toBe(false)
-    expect(d.allClear).toBe(false)
+  it('no events at all is suppressed', () => {
+    expect(digest([]).suppressed).toBe(true)
+  })
+
+  it('a failed LEAD is not a daily line — it alerted instantly', () => {
+    const d = digest([leadFail('full_name required email_present=true')])
+    expect(d.suppressed).toBe(true)
     expect(d.leadsFailed).toBe(1)
-    expect(d.headline).toContain(":warning:")
-    expect(d.headline).toContain("1 lead DIDN'T LAND")
-    expect(d.text).toContain('• :warning: 1 didn')
-    expect(d.text).toContain('acme-typo — location_not_found')
-  })
-
-  it('a Jobber failure drives ⚠️ and names the Jobber count', () => {
-    const d = buildWebhookDigest({
-      events: [
-        leadIn('boulder-01'),
-        ev({ processed: false, landed: null, error: 'quote_fetch: boom', reason: 'quote_fetch: boom',
-             topic: 'QUOTE_UPDATE', friendly: 'Quote updated', client_name: 'Joe Green',
-             location_name: 'Northwest Arkansas', jobber_item: '55' }),
-      ],
-      appUrl: APP,
-    })
-    expect(d.allClear).toBe(false)
-    expect(d.jobberDidntLand).toBe(1)
-    expect(d.headline).toContain("1 Jobber event DIDN'T LAND")
-    expect(d.text).toContain('Northwest Arkansas: Joe Green — Quote updated (QUOTE_UPDATE): quote_fetch: boom')
-  })
-
-  it('counts a processed-but-stuck row as a Jobber didn\'t-land', () => {
-    const d = buildWebhookDigest({
-      events: [ev({ landed: 'stuck', topic: 'JOB_CREATE', friendly: 'Job created', client_name: 'Cindy' })],
-      appUrl: APP,
-    })
-    expect(d.jobberDidntLand).toBe(1)
-    expect(d.text).toContain("Cindy — Job created (JOB_CREATE): processed but didn't land")
   })
 })
 
-describe('buildWebhookDigest — token self-heals', () => {
-  // A reauth failure at T followed by a success on the SAME entity 30s
-  // later = a token-race self-heal.
-  const reauthFail = ev({
-    created_at: '2026-07-18T12:00:00Z',
-    processed: false, landed: null,
-    error: 'jobber_reauth_required', reason: 'jobber_reauth_required',
-    topic: 'JOB_UPDATE', jobber_item: '900', location_name: 'Portland',
-  })
-  const healSuccess = ev({
-    created_at: '2026-07-18T12:00:30Z',
-    processed: true, landed: 'landed',
-    topic: 'JOB_UPDATE', jobber_item: '900', location_name: 'Portland',
-  })
-
-  it('classifies fail→success on the same entity as a self-heal, not a failure or a landed event', () => {
-    const d = buildWebhookDigest({
-      events: [leadIn('boulder-01'), reauthFail, healSuccess],
-      appUrl: APP,
-    })
-    // Real activity (the lead) keeps it firing, but the self-heal is neither
-    // a failure nor an extra landed Jobber event.
+describe('never landed', () => {
+  it('a failure with no later success is reported, grouped under its location', () => {
+    const d = digest([fail({ client_name: 'Karie Johnson', location_name: 'Carmel', topic: 'REQUEST_UPDATE', friendly: 'Request updated', jobber_item: '77' })])
     expect(d.suppressed).toBe(false)
-    expect(d.allClear).toBe(true)
-    expect(d.jobberDidntLand).toBe(0)
-    expect(d.jobberLanded).toBe(0)
-    expect(d.selfHeals).toBe(1)
-    expect(d.headline).not.toContain(':warning:')
-    expect(d.text).toContain(':recycle: 1 token self-heal — Portland (expected, no action)')
+    expect(d.neverLanded).toBe(1)
+    expect(d.headline).toBe(':clipboard: Daily check — 1 Jobber change never landed')
+    expect(d.text).toContain('Carmel: Karie Johnson — Request updated: the Jobber connection blipped and no retry came')
+    expect(d.text).toContain('/admin?adminTab=webhooks&whFilter=failures&whWindow=24h')
+    expect(d.text).not.toMatch(/healthy|self-heal|token expired|reconnect/i)
   })
 
-  it('SUPPRESSES a window whose only activity was self-heals', () => {
-    const d = buildWebhookDigest({ events: [reauthFail, healSuccess], appUrl: APP })
-    expect(d.suppressed).toBe(true)
-    expect(d.headline).not.toContain(':warning:')
+  it('a processed-but-stuck row with no later landing is reported', () => {
+    const d = digest([ev({ topic: 'PROPERTY_UPDATE', friendly: 'Property updated', landed: 'stuck', jobber_item: '88' })])
+    expect(d.neverLanded).toBe(1)
+    expect(d.text).toContain("processed but didn't reach its state")
   })
 
-  it('a reauth failure OUTSIDE the heal window is a genuine expiry — real didn\'t-land, flagged loud', () => {
-    const lateSuccess = ev({
-      created_at: new Date(Date.parse(reauthFail.created_at) + SELF_HEAL_WINDOW_MS + 60_000).toISOString(),
-      processed: true, landed: 'landed', topic: 'JOB_UPDATE', jobber_item: '900', location_name: 'Portland',
-    })
-    const d = buildWebhookDigest({ events: [reauthFail, lateSuccess], appUrl: APP })
-    expect(d.selfHeals).toBe(0)
-    expect(d.jobberDidntLand).toBe(1)
-    expect(d.jobberLanded).toBe(1) // the late success is a genuine separate landing
-    expect(d.headline).toContain(':warning:')
-    expect(d.text).toContain(':key: token expired — reconnect')
+  it('two failures sharing ONE retry both count as recovered (the Greensboro shape)', () => {
+    const r = findNeverLanded([
+      fail({ jobber_item: '9', created_at: at(NOW - 3 * HOUR) }),
+      fail({ jobber_item: '9', created_at: at(NOW - 3 * HOUR + 4) }),
+      ev({ jobber_item: '9', created_at: at(NOW - 3 * HOUR + 460) }),
+    ], NOW)
+    expect(r.neverLanded).toEqual([])
+    expect(r.recoveredCount).toBe(2)
   })
 
-  it('a reauth failure with NO following success at all is a genuine expiry (e.g. loc_kc)', () => {
-    const d = buildWebhookDigest({
-      events: [ev({ processed: false, landed: null, error: 'jobber_reauth_required',
-                    reason: 'jobber_reauth_required', topic: 'INVOICE_UPDATE', friendly: 'Invoice updated',
-                    jobber_item: '77', location_id: 'loc_kc', location_name: 'Kansas City' })],
-      appUrl: APP,
-    })
-    expect(d.selfHeals).toBe(0)
-    expect(d.jobberDidntLand).toBe(1)
-    expect(d.headline).toContain(':warning:')
-    expect(d.text).toContain('Kansas City')
-    expect(d.text).toContain(':key: token expired — reconnect')
+  it('a retry 9m48s later still counts as recovered (the Temecula shape)', () => {
+    const r = findNeverLanded([
+      fail({ jobber_item: '10', created_at: at(NOW - 3 * HOUR) }),
+      ev({ jobber_item: '10', created_at: at(NOW - 3 * HOUR + 588_000) }),
+    ], NOW)
+    expect(r.neverLanded).toEqual([])
+  })
+
+  it('a success BEFORE the failure does not heal it', () => {
+    const r = findNeverLanded([
+      ev({ jobber_item: '11', created_at: at(NOW - 4 * HOUR) }),
+      fail({ jobber_item: '11', created_at: at(NOW - 3 * HOUR) }),
+    ], NOW)
+    expect(r.neverLanded).toHaveLength(1)
+  })
+
+  it('repeated failures of one record are one line', () => {
+    const r = findNeverLanded([
+      fail({ jobber_item: '12', created_at: at(NOW - 4 * HOUR) }),
+      fail({ jobber_item: '12', created_at: at(NOW - 3 * HOUR) }),
+    ], NOW)
+    expect(r.neverLanded).toHaveLength(1)
+  })
+
+  it('a failure younger than the retry grace is left for tomorrow', () => {
+    const r = findNeverLanded([fail({ jobber_item: '13', created_at: at(NOW - RETRY_GRACE_MS + 60_000) })], NOW)
+    expect(r.neverLanded).toEqual([])
+  })
+
+  it('a non-token error keeps its own reason', () => {
+    const d = digest([fail({ error: 'invoice_not_found_in_jobber', reason: 'invoice_not_found_in_jobber', jobber_item: '14' })])
+    expect(d.text).toContain('invoice_not_found_in_jobber')
   })
 })
 
-describe('buildWebhookDigest — quiet window suppresses', () => {
-  it('sends nothing when there were no events at all', () => {
-    const d = buildWebhookDigest({ events: [], appUrl: APP })
-    expect(d.suppressed).toBe(true)
-    expect(d.leadsLanded).toBe(0)
-    expect(d.jobberLanded).toBe(0)
-  })
-})
-
-describe('buildWebhookDigest — loc_other spike detection', () => {
-  it('labels a normal loc_other share "(normal)"', () => {
-    const d = buildWebhookDigest({
-      events: [leadIn('boulder-01'), leadIn('denver-02'), leadIn('aspen-03'), leadIn('loc_other')],
-      appUrl: APP,
-    })
-    expect(d.locOtherLeads).toBe(1)
-    expect(d.locOtherSpike).toBe(false)
-    expect(d.text).toContain('loc_other ×1 (normal)')
+describe('still disconnected from Jobber', () => {
+  it('a stamped location is a daily line and un-suppresses', () => {
+    const d = digest([], { reconnect: { locations: [{ location_id: 'loc_kc', name: 'Kansas City' }] } })
+    expect(d.suppressed).toBe(false)
+    expect(d.reconnectRequired).toBe(1)
+    expect(d.text).toContain('Jobber still disconnected')
+    expect(d.text).toContain('Kansas City — reconnect Jobber in Settings')
   })
 
-  it('flags a spike when loc_other dominates the window', () => {
-    const d = buildWebhookDigest({
-      events: [leadIn('boulder-01'), leadIn('loc_other'), leadIn('loc_other'), leadIn('loc_other')],
-      appUrl: APP,
-    })
-    expect(d.locOtherLeads).toBe(3)
-    expect(d.locOtherSpike).toBe(true)
-    expect(d.text).toContain('loc_other ×3 :warning: spike')
-    // A spike is a leads-section flag, not a headline driver (nothing failed).
-    expect(d.headline).toContain(':white_check_mark:')
-  })
-
-  it('does not flag a spike below the volume floor (avoids 1-of-1 = 100%)', () => {
-    const d = buildWebhookDigest({ events: [leadIn('loc_other')], appUrl: APP })
-    expect(d.locOtherSpike).toBe(false)
-    expect(d.text).toContain('loc_other ×1 (normal)')
+  it('none stamped → nothing', () => {
+    expect(digest([], { reconnect: { locations: [] } }).suppressed).toBe(true)
   })
 })
 
 describe('buildWebhookDigest — import health (item 2/3)', () => {
-  const NOW = Date.parse('2026-07-18T12:00:00Z')
   const failedJob = (over: any = {}) => ({
     location_id: 'loc_scottsdale', phase: 'writing', error_message: 'Token: jobber_reauth_required',
     processed_records: 607, total_records: 709, ...over,
@@ -261,19 +182,14 @@ describe('buildWebhookDigest — import health (item 2/3)', () => {
     ...over,
   })
 
-  it('a FAILED import un-suppresses an otherwise-quiet window and drives ⚠️', () => {
+  it('a FAILED import is NOT a daily line — it alerted instantly; counted for the heartbeat only', () => {
     const d = buildWebhookDigest({
       events: [], appUrl: APP,
       importHealth: { failed: [failedJob()], stalled: [], originGated: false, nowMs: NOW },
     })
-    expect(d.suppressed).toBe(false)          // quiet webhooks, but an import failed
-    expect(d.allClear).toBe(false)
+    expect(d.suppressed).toBe(true)
     expect(d.importFailed).toBe(1)
-    expect(d.headline).toContain(':warning:')
-    expect(d.headline).toContain('1 import FAILED')
-    expect(d.text).toContain('*:package: Imports*')
-    expect(d.text).toContain('loc_scottsdale — writing (607/709)')
-    expect(d.text).toContain('jobber_reauth_required')
+    expect(d.text).toBe('')
   })
 
   it('a STALLED import is reported with how long it has been stuck', () => {
@@ -283,7 +199,7 @@ describe('buildWebhookDigest — import health (item 2/3)', () => {
     })
     expect(d.suppressed).toBe(false)
     expect(d.importStalled).toBe(1)
-    expect(d.headline).toContain('1 import STALLED')
+    expect(d.headline).toContain('1 import stalled')
     expect(d.text).toContain('loc_temecula — writing (300/709) — stuck 18m')
   })
 
@@ -294,7 +210,7 @@ describe('buildWebhookDigest — import health (item 2/3)', () => {
     })
     expect(d.suppressed).toBe(false)
     expect(d.importOriginGated).toBe(true)
-    expect(d.headline).toContain('import origin SSO-GATED')
+    expect(d.headline).toContain('imports cannot self-resume')
     expect(d.text).toContain(':rotating_light:')
     expect(d.text).toContain('NEXT_PUBLIC_APP_URL')
     expect(d.text).toContain('https://dep123.vercel.app')
@@ -311,15 +227,13 @@ describe('buildWebhookDigest — import health (item 2/3)', () => {
     expect(d.text).not.toContain(':package: Imports')
   })
 
-  it('healthy imports do not disturb an otherwise-firing digest', () => {
+  it('healthy imports beside a landed lead still post nothing', () => {
     const d = buildWebhookDigest({
-      events: [leadIn('boulder-01')], appUrl: APP,
+      events: [leadIn('boulder-01')], appUrl: APP, nowMs: NOW,
       importHealth: { failed: [], stalled: [], originGated: false, nowMs: NOW },
     })
-    expect(d.suppressed).toBe(false)
-    expect(d.allClear).toBe(true)             // lead landed, no problems anywhere
-    expect(d.headline).toContain(':white_check_mark:')
-    expect(d.text).not.toContain(':package: Imports')
+    expect(d.suppressed).toBe(true)
+    expect(d.text).toBe('')
   })
 
   // ── continuation bounces: a broken handoff must be VISIBLE ──────
@@ -398,6 +312,11 @@ describe('cron route + registration pins', () => {
   it('queries the 24h window (daily cadence — issue 159)', () => {
     expect(route).toContain("fetchWebhookLogEvents({ window: '24h' })")
     expect(route).toContain("windowLabel: 'last 24h'")
+  })
+
+  it('wires the still-disconnected locations into the digest', () => {
+    expect(route).toContain('parseReconnectStamp(')
+    expect(route).toContain('reconnect: { locations: reconnectLocations }')
   })
 
   it('suppresses a quiet window by posting nothing', () => {

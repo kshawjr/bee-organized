@@ -1,40 +1,55 @@
 // lib/failure-alerts.ts
 // ─────────────────────────────────────────────────────────────
-// Instant failure alerts (issue 159). The webhook digest is now once daily;
-// this is the real-time channel. app/api/cron/failure-alerts runs every
-// ~5 min, and this module decides what — if anything — to post to Slack.
+// Instant alerts. app/api/cron/failure-alerts runs every ~5 min, and this
+// module decides what — if anything — to post to Kevin's ops channel.
 //
-// ALLOWLIST, not a denylist. We alert on exactly seven hard, actionable
-// failures and NOTHING else. This is the whole difference between a channel
-// Kevin reads and one he mutes:
-//   1. sync_log landed_status='not_landed' — a webhook processed without
-//      error but the record never reached its intended state.
-//   2. import_jobs that transitioned to 'failed', EXCLUDING user cancels
-//      ('Cancelled by user' — a deliberate stop, not a failure).
-//   3. a GENUINE Jobber token expiry — a reauth failure with NO following
-//      self-heal. Detection reuses the digest's classifyDigestEvents /
-//      SELF_HEAL_WINDOW_MS verbatim; we do not re-derive the token logic.
-//   4. ASSESSMENT_TEAM_MISMATCH breadcrumbs (issue 144/147) — the send
-//      succeeded but the assessment team didn't fully apply.
-//   5. a STRANDED CHECKOUT (issue 312) — an owner completed Stripe checkout,
-//      the session came back unpaid, and STRANDED_CHECKOUT_MS later their
-//      location still is not active. See the window note below.
-//   6. a SLACK LEAD ALERT that failed to post (notification_log channel=slack
-//      send_status=failed). Nothing retries a Slack post, so every one of
-//      these is a lead a team permanently never heard about — the Aug 2026
-//      audit found 18 channel_not_found failures across 7 locations in 30
-//      days (5 at Portland alone) that surfaced to no one. First failure
-//      alerts; the watermark makes each row alert exactly once, and one line
-//      per location per window keeps a busy channel from flooding the post.
-//   7. an EMAIL HELD for a BLANK SUBJECT (issue 316) that has stayed held for
-//      HELD_SUBJECT_ALERT_MS — the hold itself is correct (better held than
-//      "(no subject)" in a client's inbox) and self-clears the moment a
-//      subject is saved, so a fresh hold is NOT an incident: the owner may be
-//      mid-edit, and the lead badge / cron counters already show it. A hold
-//      still uncleared 6 hours after the send came due means nobody noticed —
-//      that is the silent gap this alerts on. Same alert-moment windowing as
-//      the stranded checkout (due_at + HELD_SUBJECT_ALERT_MS through the
-//      (since, cutoff] watermark), so each held send alerts exactly once.
+// THE RULE (Sept 2026 rebuild): alert instantly on what only Kevin can fix,
+// ONE MESSAGE PER PROBLEM. Batch what he should know about into the daily
+// digest (lib/webhook-digest). Say nothing about what fixes itself or belongs
+// to someone else. The rebuild was measured, not guessed — see the notes on
+// each exclusion below.
+//
+// INSTANT (an allowlist — nothing else reaches this rail):
+//   1. LEAD DIDN'T ARRIVE — a LEAD_INTAKE sync_log row that failed
+//      (full_name required, location_slug required, location_not_found…).
+//      That is Kevin's web form; nobody else can fix it, and the person who
+//      filled it in is waiting on a reply that will never come.
+//   2. OWNER REPORT — a bug or question an owner filed (feedback_items
+//      type bug/question, not internal). Features wait for the triage screen.
+//   3. JOBBER RECONNECT REQUIRED — a location whose refresh token Jobber
+//      rejected for good. lib/jobber performRefresh stamps
+//      locations.last_sync_status 'RECONNECT REQUIRED — … @ <iso>' only after
+//      the race-loss check (#102) finds no sibling rotated the token, so the
+//      stamp IS the non-recovering case. One alert per stamp, keyed on the
+//      stamp's own time (lib/jobber-reconnect); the next successful refresh
+//      overwrites it.
+//   4. IMPORT FAILED — import_jobs status='failed', excluding user cancels.
+//   5. ASSESSMENT_TEAM_MISMATCH — the send landed, the team didn't apply.
+//   6. STRANDED CHECKOUT (issue 312) — see the window note below.
+//   7. EMAIL HELD ≥ HELD_SUBJECT_ALERT_MS FOR A BLANK SUBJECT (issue 316).
+// (Stripe payment failures post instantly from app/api/webhooks/stripe
+//  itself, one message each — they never needed this rail.)
+//
+// NEVER, deliberately:
+//   • INDIVIDUAL TOKEN FAILURES. Measured over 7 days to 2026-09-26: 33
+//     no_valid_jobber_token failures, 31 back within ~1 second; the location
+//     was working again within a second EVERY time. The old per-record
+//     self-heal check (same topic + same Jobber item within 5 min) missed the
+//     recovery whenever two failures shared one retry, the retry came under a
+//     different topic, or it took 9m48s — and paged "token expired —
+//     reconnect Jobber" 7 times that week for locations that were fine. The
+//     only token state that does not recover is the RECONNECT REQUIRED stamp
+//     (kind 3); that is the whole token signal now.
+//   • SLACK LEAD-ALERT FAILURES (notification_log channel='slack' failed).
+//     Every one is channel_not_found / not_in_channel on the OWNER's Slack;
+//     the fix is theirs (invite the app, or reconnect), not Kevin's. The
+//     Settings Slack card is where that surfaces.
+//   • sync_log not_landed — moved to the daily digest as "never landed".
+//     26 in 30 days, almost all PROPERTY_UPDATE former-address syncs; stuck,
+//     not an emergency.
+//   • raw status='error' transients, notification_log EMAIL failures,
+//     rate/booking-link holds, subject holds younger than 6h, the Slack TEST
+//     button, status='partial' — unchanged from issue 159.
 //
 // THE STRANDED-CHECKOUT WINDOW — 90 minutes, and why not days.
 //
@@ -59,62 +74,39 @@
 // and the cron's 5-min cadence plus 5-min settle puts the alert in Slack about
 // 100 minutes after checkout, while the owner is still in the session.
 //
-// A bank payer that nobody force-activates IS locked out and DOES alert — that
-// is correct, not a false positive: it is the same alert Kevin already acts on
-// by force-activating, and it fires exactly once per session, never repeats.
-//
-// DELIBERATELY EXCLUDED (would drown the useful signal):
-//   • raw sync_log status='error' — overwhelmingly self-healing webhook
-//     token-race transients (135/30d). Only a genuine, un-healed expiry (3)
-//     or a recorded not_landed (1) gets through.
-//   • notification_log EMAIL send_status='failed' — hourly-retried transients
-//     capped by the drip auto-stop (#73), historically dominated by fake test
-//     leads (294/7d at the issue-159 audit). The ONE notification_log slice
-//     this module reads is channel='slack' + send_status='failed' (kind 6
-//     above — real, never-retried, and no longer test noise: every failed
-//     Slack row in the Aug 2026 audit was a genuine channel_not_found);
-//     email rows stay excluded.
-//   • email holds for a missing RATE or BOOKING LINK — same hold mechanics as
-//     the subject hold, but those gaps are owner content choices with their
-//     own digest sections; only the subject hold has shipped a client-visible
-//     incident (July 2026 "(no subject)"), so only it earns the instant rail.
-//   • a subject hold YOUNGER than HELD_SUBJECT_ALERT_MS — mid-edit, already
-//     visible on the lead badge and cron counters. See kind 7.
-//   • the Slack TEST button (app/api/locations/[id]/slack-test) — its result
-//     is shown to the clicking owner in the UI and is deliberately never
-//     written to notification_log, so a failed test can't re-alert here.
-//   • status='partial' — never written in prod (all-time 0). Add once seen.
-//
 // DEDUPE = a stored watermark (lib/alert-runs). Each run considers only rows
-// created after the last watermark and at-or-before a settle cutoff of
-// now-SELF_HEAL_WINDOW_MS, so:
-//   • every failure is evaluated in exactly one window → alerted once, and
-//   • a reauth failure has its full 5-min self-heal window to resolve before
-//     we call it a genuine expiry — a token race that heals at minute 2 is
-//     never alerted.
-// The formatter (selectNewAlerts / buildAlertMessage) is pure so the
-// windowing + allowlist are unit-testable without Slack or Supabase.
+// whose alert moment is after the last watermark and at-or-before a settle
+// cutoff of now-ALERT_SETTLE_MS, so every problem is evaluated in exactly one
+// window → alerted once. Every item's `ts` IS that windowed moment, which is
+// what lets the route advance the watermark item-by-item when a post fails
+// part-way (watermarkAfterPosting).
+// The selector and message builder are pure so the allowlist is unit-testable
+// without Slack or Supabase.
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
 import { fetchWebhookLogEvents, type WebhookLogEvent } from './webhook-observability'
-import { classifyDigestEvents, SELF_HEAL_WINDOW_MS } from './webhook-digest'
+import { SELF_HEAL_WINDOW_MS } from './webhook-digest'
+import { parseReconnectStamp } from './jobber-reconnect'
 
-// The watermark trails now() by this settle window so token-race self-heals
-// resolve before we alert. Reuse the digest's window verbatim — same 5 min.
+export { parseReconnectStamp }
+
+// The watermark trails now() by this settle window so a row written a moment
+// ago (and anything joined to it) has landed before we judge it.
 export const ALERT_SETTLE_MS = SELF_HEAL_WINDOW_MS
 
-// Cap the lines in a single Slack post; overflow is summarised. A run that
-// surfaces more than this is an incident, and the count still tells the story.
-export const MAX_ALERT_LINES = 12
+// One message per problem — but a run that surfaces more than this many is an
+// incident, not a list, and the rest go into one closing summary message
+// rather than flooding the channel.
+export const MAX_ALERT_MESSAGES = 10
 
 export type AlertKind =
-  | 'not_landed'
+  | 'lead_failed'
+  | 'owner_report'
+  | 'reconnect_required'
   | 'import_failed'
-  | 'token_expired'
   | 'assessment_mismatch'
   | 'checkout_stranded'
-  | 'slack_failed'
   | 'email_held'
 
 // How long an owner may sit on an unpaid checkout before it is a strand.
@@ -131,8 +123,8 @@ export const HELD_SUBJECT_ALERT_MS = 6 * 60 * 60_000
 
 export type AlertItem = {
   kind: AlertKind
-  ts: number       // ms — used for ordering + the once-only window boundary
-  text: string     // one phone-readable line, no emoji bullet (added at render)
+  ts: number       // ms — the windowed alert moment (ordering + watermark)
+  text: string     // one phone-readable line, no emoji (added at render)
 }
 
 // Raw import_jobs failure row (fetchImportFailures).
@@ -164,12 +156,21 @@ export type PendingCheckoutRow = {
 // slug → the one billing fact the strand check needs: is the owner in?
 export type LocationBillingState = { status: string | null }
 
-// Raw notification_log Slack failure row (fetchSlackSendFailures).
-export type SlackFailureRow = {
-  location_slug?: string | null
-  lead_name?: string | null
-  error?: string | null
+// An owner-filed bug or question (fetchOwnerReports). location_id is the
+// locations.id uuid, not the slug.
+export type OwnerReportRow = {
+  type?: string | null
+  title?: string | null
+  location_id?: string | null
   created_at?: string | null
+  is_internal?: boolean | null
+}
+
+// A location whose Jobber connection needs a human reconnect. stamped_at is
+// parsed out of last_sync_status (parseReconnectStamp).
+export type ReconnectRow = {
+  location_id: string
+  stamped_at: string
 }
 
 // A send currently held for a blank subject (fetchHeldSubjectEmails). due_at
@@ -190,9 +191,6 @@ const clean = (s: string, max = 140) => s.replace(/\s+/g, ' ').trim().slice(0, m
 
 const locLabel = (slug: string | null | undefined, locName: Map<string, string>) =>
   (slug && locName.get(slug)) || slug || 'Unknown account'
-
-const whoLabel = (e: WebhookLogEvent) =>
-  e.client_name || (e.jobber_item ? `Jobber #${e.jobber_item}` : 'record')
 
 const progressOf = (j: ImportFailedRow) =>
   j.total_records ? ` (${j.processed_records || 0}/${j.total_records})` : ''
@@ -215,46 +213,33 @@ const ageLabel = (ms: number) => {
 const sessionShort = (id: string | null | undefined) =>
   id ? `${id.slice(0, 22)}…` : 'unknown session'
 
-// Slack error code → what Kevin can actually do about it. Every failure in
-// the Aug 2026 audit was channel_not_found (owners picking a private channel
-// on Slack's own OAuth screen — the bot is never in it); the rest are the
-// codes the per-location bot transport already logs distinctly. Unknown
-// codes pass through raw. (This module only READS the logged rows — it never
-// touches the bot transport itself; a 312-era pin enforces that.)
-const slackFailureHint = (error: string | null | undefined): string => {
-  switch (error) {
-    case 'channel_not_found':
-      return "Slack can't see the channel (likely private — the owner must invite the Bee Hub app to it, or reconnect to a public channel)"
-    case 'not_in_channel':
-      return 'the bot is not in the channel — the owner must invite it in Slack'
-    case 'is_archived':
-      return 'the channel is archived — the owner must reconnect to a live one'
-    case 'invalid_auth':
-    case 'token_revoked':
-    case 'account_inactive':
-      return 'the Slack connection is dead — the owner must reconnect'
-    default:
-      return clean(error || 'unknown Slack error', 80)
-  }
+// The intake route writes the reason as `error=<code> <detail>`; say what the
+// code means for the person who filled in the form, then keep the raw detail
+// so Kevin can find the submission.
+const leadFailureWhy = (reason: string): string => {
+  if (/full_name required/i.test(reason)) return 'the form sent no name'
+  if (/location_slug required/i.test(reason)) return 'the form sent no location'
+  if (/location_not_found/i.test(reason)) return "the form's location matches no Bee Hub location"
+  return 'the intake rejected it'
 }
 
 // ── the pure selector ──────────────────────────────────────────────
-// Given the raw sources already fetched for the run, return the alert lines
+// Given the raw sources already fetched for the run, return the alert items
 // that are BOTH allowlisted AND newly-committed in (sinceMs, cutoffMs]. Pure:
 // no Supabase, no Slack — the unit-test surface for windowing + allowlist.
 export function selectNewAlerts(input: {
-  events: WebhookLogEvent[]        // enriched inbound webhook events
+  events: WebhookLogEvent[]        // enriched inbound sync_log events
   importFailed: ImportFailedRow[]  // import_jobs status='failed' rows
   mismatches: MismatchRow[]        // sync_log ASSESSMENT_TEAM_MISMATCH rows
   locName: Map<string, string>     // slug → display name
-  // issue 312 — optional so every pre-312 caller and test is unchanged.
   pendingCheckouts?: PendingCheckoutRow[]           // sync_log awaiting-async rows
   locBilling?: Map<string, LocationBillingState>    // slug → subscription state
   resolvedSessions?: Set<string>                    // sessions with a later terminal row
-  // silent-sends rail — optional for the same every-prior-caller reason.
-  slackFailures?: SlackFailureRow[]                 // notification_log slack failed rows
   heldEmails?: HeldSubjectEmailRow[]                // sends held for a blank subject
+  ownerReports?: OwnerReportRow[]                   // feedback_items bug/question rows
+  reconnects?: ReconnectRow[]                       // locations stamped RECONNECT REQUIRED
   locNameByUuid?: Map<string, string>               // locations.id (uuid) → display name
+  appUrl?: string                                   // for the triage link on owner reports
   sinceMs: number
   cutoffMs: number                 // = nowMs - ALERT_SETTLE_MS
   nowMs: number
@@ -262,46 +247,59 @@ export function selectNewAlerts(input: {
   const {
     events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs,
     pendingCheckouts = [], locBilling, resolvedSessions,
-    slackFailures = [], heldEmails = [], locNameByUuid,
+    heldEmails = [], ownerReports = [], reconnects = [], locNameByUuid, appUrl = '',
   } = input
   const items: AlertItem[] = []
+  const uuidLabel = (id: string | null | undefined) =>
+    (id && locNameByUuid?.get(id)) || 'Unknown account'
 
-  // (1) not_landed — a webhook that processed but never reached its state.
+  // (1) a lead that never arrived — one message per failed submission.
+  // Only LEAD_INTAKE rows: every other failed sync_log row is Jobber's, and
+  // those either retry on their own or end up in the daily "never landed".
   for (const e of events) {
-    if (e.landed !== 'stuck') continue
+    if (e.topic !== 'LEAD_INTAKE' || e.processed) continue
     const t = Date.parse(e.created_at)
     if (!inWindow(t, sinceMs, cutoffMs)) continue
+    const reason = clean(e.reason || e.error || 'unknown error', 120)
+    const where = e.location_id ? ` — ${locLabel(e.location_id, locName)}` : ''
     items.push({
-      kind: 'not_landed',
+      kind: 'lead_failed',
       ts: t,
-      text: `Didn't land — ${locLabel(e.location_id, locName)}: ${whoLabel(e)} · ${e.friendly}`,
+      text: `A website lead didn't arrive${where}: ${leadFailureWhy(reason)} (${reason})`,
     })
   }
 
-  // (3) genuine Jobber token expiry — reuse the digest's token/self-heal
-  // logic verbatim. Feed classifyDigestEvents a settle-bounded slice:
-  //   • FAILURES only if settled (created_at ≤ cutoff) — a not-yet-settled
-  //     reauth failure might still heal, so it waits for the next window.
-  //   • SUCCESSES up to now — a heal for an in-window failure lands within
-  //     5 min after it, i.e. ≤ cutoff + 5min = now.
-  // Every tokenExpired problem it returns is therefore in-window, settled,
-  // and un-healed — a genuine expiry, counted exactly once.
-  const settleSlice = events.filter(e => {
-    const t = Date.parse(e.created_at)
-    if (!(t > sinceMs && t <= nowMs)) return false
-    return e.processed ? true : t <= cutoffMs
-  })
-  const { jobberProblems } = classifyDigestEvents(settleSlice)
-  for (const p of jobberProblems) {
-    if (!p.tokenExpired) continue
+  // (2) an owner reported a bug or asked a question.
+  for (const r of ownerReports) {
+    if (r.is_internal === true) continue
+    if (r.type !== 'bug' && r.type !== 'question') continue
+    const t = Date.parse(r.created_at || '')
+    if (!inWindow(t, sinceMs, cutoffMs)) continue
+    const what = r.type === 'bug' ? 'reported a bug' : 'asked a question'
+    const link = appUrl ? ` <${appUrl}/?feedback=1|Open feedback>` : ''
     items.push({
-      kind: 'token_expired',
-      ts: cutoffMs, // classify drops the source ts; the window filter above already fixed uniqueness
-      text: `Jobber token expired — ${p.location} — reconnect Jobber`,
+      kind: 'owner_report',
+      ts: t,
+      text: `${uuidLabel(r.location_id)} ${what}: "${clean(r.title || '(no title)', 100)}"${link}`,
     })
   }
 
-  // (2) import failed, excluding deliberate user cancels.
+  // (3) Jobber reconnect required — keyed on the stamp's own time, so a
+  // location that stays dead alerts once, not every run.
+  for (const r of reconnects) {
+    const t = Date.parse(r.stamped_at)
+    if (!inWindow(t, sinceMs, cutoffMs)) continue
+    items.push({
+      kind: 'reconnect_required',
+      ts: t,
+      text:
+        `Jobber disconnected — ${locLabel(r.location_id, locName)}: Jobber rejected the saved login ` +
+        `and it will not recover by itself. Nothing syncs with Jobber for this location until ` +
+        `Jobber is reconnected in Settings.`,
+    })
+  }
+
+  // (4) import failed, excluding deliberate user cancels.
   for (const j of importFailed) {
     if (/cancelled by user/i.test(j.error_message || '')) continue
     const t = Date.parse(j.completed_at || '')
@@ -313,7 +311,7 @@ export function selectNewAlerts(input: {
     })
   }
 
-  // (4) ASSESSMENT_TEAM_MISMATCH — the send landed but the team didn't apply.
+  // (5) ASSESSMENT_TEAM_MISMATCH — the send landed but the team didn't apply.
   for (const r of mismatches) {
     const t = Date.parse(r.created_at || '')
     if (r.created_at && !inWindow(t, sinceMs, cutoffMs)) continue
@@ -327,12 +325,12 @@ export function selectNewAlerts(input: {
     })
   }
 
-  // (5) stranded checkout (issue 312) — an owner paid and never got in.
+  // (6) stranded checkout (issue 312) — an owner paid and never got in.
   //
   // The alert moment is NOT when the row was written, it is when the row went
   // stale: created_at + STRANDED_CHECKOUT_MS. Windowing that derived instant
-  // through the same (since, cutoff] watermark the other four kinds use means
-  // a strand is evaluated in exactly one run and alerted exactly once, even
+  // through the same (since, cutoff] watermark the other kinds use means a
+  // strand is evaluated in exactly one run and alerted exactly once, even
   // though the row itself is 90 minutes older than the window it fires in.
   for (const pc of pendingCheckouts) {
     const createdMs = Date.parse(pc.created_at || '')
@@ -367,37 +365,6 @@ export function selectNewAlerts(input: {
     })
   }
 
-  // (6) Slack lead alert failed — one line per LOCATION per window, carrying
-  // the count: five leads into a dead Portland channel is one problem, not
-  // five, and the fix (invite the bot / reconnect) is per-location. Rows are
-  // windowed on created_at like every immediate kind; the group's ts is its
-  // latest row so ordering stays stable.
-  const slackByLoc = new Map<string, { n: number; ts: number; lead: string | null; error: string | null }>()
-  for (const f of slackFailures) {
-    const t = Date.parse(f.created_at || '')
-    if (!inWindow(t, sinceMs, cutoffMs)) continue
-    const key = f.location_slug || ''
-    const g = slackByLoc.get(key) ?? { n: 0, ts: t, lead: null, error: null }
-    g.n++
-    if (t >= g.ts) {
-      g.ts = t
-      g.lead = f.lead_name ?? g.lead
-      g.error = f.error ?? g.error
-    }
-    slackByLoc.set(key, g)
-  }
-  for (const [slug, g] of Array.from(slackByLoc.entries())) {
-    const who =
-      g.n === 1
-        ? `${clean(g.lead || 'a lead', 60)}'s lead alert never posted`
-        : `${g.n} lead alerts never posted`
-    items.push({
-      kind: 'slack_failed',
-      ts: g.ts,
-      text: `Slack alert failed — ${locLabel(slug || null, locName)}: ${who} — ${slackFailureHint(g.error)}`,
-    })
-  }
-
   // (7) email held for a blank subject — alert-moment windowing, exactly the
   // stranded-checkout idiom: the moment is due_at + HELD_SUBJECT_ALERT_MS,
   // evaluated in the one run whose (since, cutoff] contains it. The fetcher
@@ -408,12 +375,11 @@ export function selectNewAlerts(input: {
     if (!Number.isFinite(dueMs)) continue
     if (!inWindow(dueMs + HELD_SUBJECT_ALERT_MS, sinceMs, cutoffMs)) continue
     const who = clean(held.lead_name || 'a lead', 60)
-    const loc = (held.location_uuid && locNameByUuid?.get(held.location_uuid)) || 'Unknown account'
     items.push({
       kind: 'email_held',
       ts: dueMs + HELD_SUBJECT_ALERT_MS,
       text:
-        `Email held ${ageLabel(nowMs - dueMs)} — ${loc}: ${who}'s ${held.source} email has a ` +
+        `Email held ${ageLabel(nowMs - dueMs)} — ${uuidLabel(held.location_uuid)}: ${who}'s ${held.source} email has a ` +
         `blank subject — it releases itself the moment a subject is saved on the template or step`,
     })
   }
@@ -422,25 +388,53 @@ export function selectNewAlerts(input: {
 }
 
 // ── the pure message builder ────────────────────────────────────────
-// Zero items → null (a quiet window posts NOTHING). Otherwise one compact
-// Slack message: a header count + one line per failure, capped.
+// ONE MESSAGE PER PROBLEM. Zero items → [] (a quiet window posts NOTHING).
+// Past MAX_ALERT_MESSAGES the remainder becomes one summary message, so a
+// burst reads as an incident instead of burying the channel.
 const EMOJI: Record<AlertKind, string> = {
-  not_landed: ':warning:',
+  lead_failed: ':inbox_tray:',
+  owner_report: ':speech_balloon:',
+  reconnect_required: ':electric_plug:',
   import_failed: ':x:',
-  token_expired: ':key:',
   assessment_mismatch: ':busts_in_silhouette:',
   checkout_stranded: ':hourglass_flowing_sand:',
-  slack_failed: ':no_bell:',
   email_held: ':envelope:',
 }
 
-export function buildAlertMessage(items: AlertItem[]): { text: string; count: number } | null {
-  if (items.length === 0) return null
-  const header = `:rotating_light: ${items.length} failure${items.length > 1 ? 's' : ''} to check`
-  const lines = items.slice(0, MAX_ALERT_LINES).map(i => `• ${EMOJI[i.kind]} ${i.text}`)
-  const more = items.length - MAX_ALERT_LINES
-  if (more > 0) lines.push(`_…plus ${more} more_`)
-  return { text: `${header}\n${lines.join('\n')}`, count: items.length }
+export type AlertMessage = { text: string; items: AlertItem[] }
+
+export function buildAlertMessages(items: AlertItem[]): AlertMessage[] {
+  const out: AlertMessage[] = items
+    .slice(0, MAX_ALERT_MESSAGES)
+    .map(i => ({ text: `${EMOJI[i.kind]} ${i.text}`, items: [i] }))
+  const rest = items.slice(MAX_ALERT_MESSAGES)
+  if (rest.length > 0) {
+    out.push({
+      text:
+        `:rotating_light: …and ${rest.length} more problem${rest.length > 1 ? 's' : ''} in the same few minutes:\n` +
+        rest.map(i => `• ${EMOJI[i.kind]} ${i.text}`).join('\n'),
+      items: rest,
+    })
+  }
+  return out
+}
+
+// Where the watermark may safely move after posting messages in order and
+// stopping at the first Slack error. Everything posted is behind it; nothing
+// unposted is. Because every item's ts is its windowed moment, the answer is
+// the largest posted ts that is strictly below the smallest unposted ts —
+// or `sinceMs` if even that would skip an unposted item.
+export function watermarkAfterPosting(opts: {
+  sinceMs: number
+  cutoffMs: number
+  posted: AlertItem[]
+  unposted: AlertItem[]
+}): number {
+  const { sinceMs, cutoffMs, posted, unposted } = opts
+  if (unposted.length === 0) return Math.max(sinceMs, cutoffMs)
+  const firstUnposted = Math.min(...unposted.map(i => i.ts))
+  const safe = posted.map(i => i.ts).filter(t => t < firstUnposted)
+  return safe.length ? Math.max(sinceMs, ...safe) : sinceMs
 }
 
 // ── fetch helpers (mirrors lib/import-health: injectable supabase) ──
@@ -551,25 +545,23 @@ export async function fetchCheckoutResolutions(
   return resolved
 }
 
-// The one notification_log slice this module reads: Slack lead alerts that
-// FAILED. Scoped hard on channel + send_status by design — email failures,
-// skips, and mutes must never reach the rail (see the exclusion note in the
-// header). Windowed on created_at like the other immediate sources.
-export async function fetchSlackSendFailures(
+// Owner-filed bugs and questions in the window. Features are left out here
+// (they wait for triage, not for Kevin's phone); internal items are filtered
+// in the selector so a pre-migration row without is_internal still counts.
+export async function fetchOwnerReports(
   supabase: typeof supabaseService,
   sinceIso: string,
   cutoffIso: string,
-): Promise<SlackFailureRow[]> {
+): Promise<OwnerReportRow[]> {
   const { data } = await supabase
-    .from('notification_log')
-    .select('location_slug, lead_name, error, created_at')
-    .eq('channel', 'slack')
-    .eq('send_status', 'failed')
+    .from('feedback_items')
+    .select('type, title, location_id, created_at, is_internal')
+    .in('type', ['bug', 'question'])
     .gt('created_at', sinceIso)
     .lte('created_at', cutoffIso)
     .order('created_at', { ascending: true })
     .limit(50)
-  return (data as SlackFailureRow[]) ?? []
+  return (data as OwnerReportRow[]) ?? []
 }
 
 // Sends currently HELD for a blank subject whose ALERT MOMENT
@@ -745,29 +737,35 @@ export async function fetchHeldSubjectEmails(
   return out
 }
 
-// One locations read, three maps: the slug-keyed display names every alert
-// kind uses, the uuid-keyed names the held-email lines need (leads carry
-// location_uuid, not the slug), and the subscription state the strand check
-// needs.
-async function fetchLocationDirectory(supabase: typeof supabaseService): Promise<{
+// One locations read, four answers: the slug-keyed display names every alert
+// kind uses, the uuid-keyed names the held-email and owner-report lines need
+// (those rows carry locations.id, not the slug), the subscription state the
+// strand check needs, and which locations carry a RECONNECT REQUIRED stamp.
+export async function fetchLocationDirectory(supabase: typeof supabaseService): Promise<{
   names: Map<string, string>
   namesByUuid: Map<string, string>
   billing: Map<string, LocationBillingState>
+  reconnects: ReconnectRow[]
 }> {
-  const { data } = await supabase.from('locations').select('id, location_id, name, subscription_status')
+  const { data } = await supabase
+    .from('locations')
+    .select('id, location_id, name, subscription_status, last_sync_status')
   const names = new Map<string, string>()
   const namesByUuid = new Map<string, string>()
   const billing = new Map<string, LocationBillingState>()
+  const reconnects: ReconnectRow[] = []
   for (const l of (data as any[]) || []) {
     names.set(l.location_id, l.name || l.location_id)
     if (l.id) namesByUuid.set(l.id, l.name || l.location_id)
     billing.set(l.location_id, { status: l.subscription_status ?? null })
+    const stamped = parseReconnectStamp(l.last_sync_status)
+    if (stamped != null) reconnects.push({ location_id: l.location_id, stamped_at: new Date(stamped).toISOString() })
   }
-  return { names, namesByUuid, billing }
+  return { names, namesByUuid, billing, reconnects }
 }
 
 // ── the run collector (route entrypoint) ────────────────────────────
-// Fetches the three raw sources + the location-name map for the window, then
+// Fetches every raw source + the location directory for the window, then
 // runs the pure selector. cutoff trails now() by ALERT_SETTLE_MS; sinceMs is
 // the prior watermark. An empty (settled) window short-circuits to no work.
 export async function collectFailureAlerts(opts: {
@@ -775,6 +773,7 @@ export async function collectFailureAlerts(opts: {
   sinceMs: number
   supabase?: typeof supabaseService
   fetchEvents?: typeof fetchWebhookLogEvents
+  appUrl?: string
 }): Promise<{ items: AlertItem[]; cutoffMs: number }> {
   const supabase = opts.supabase ?? supabaseService
   const fetchEvents = opts.fetchEvents ?? fetchWebhookLogEvents
@@ -786,16 +785,16 @@ export async function collectFailureAlerts(opts: {
 
   // '24h' bounds the enriched read while comfortably covering (since, now];
   // the (sinceMs, cutoffMs] filter — not the fetch window — is the real dedup
-  // boundary. A cron outage longer than 24h would drop older not_landed /
-  // token detail here; the daily digest is the backstop for that tail.
-  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, slackFailures, heldEmails] =
+  // boundary. A cron outage longer than 24h would drop older failed-lead
+  // detail here; the admin Webhooks tab still has every row.
+  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, ownerReports, heldEmails] =
     await Promise.all([
       fetchEvents({ window: '24h' }),
       fetchImportFailures(supabase, sinceIso, cutoffIso),
       fetchAssessmentMismatches(supabase, sinceIso, cutoffIso),
       fetchLocationDirectory(supabase),
       fetchPendingCheckouts(supabase, opts.sinceMs, cutoffMs),
-      fetchSlackSendFailures(supabase, sinceIso, cutoffIso),
+      fetchOwnerReports(supabase, sinceIso, cutoffIso),
       fetchHeldSubjectEmails(supabase, opts.sinceMs, cutoffMs),
     ])
 
@@ -811,9 +810,11 @@ export async function collectFailureAlerts(opts: {
     pendingCheckouts,
     locBilling: directory.billing,
     resolvedSessions,
-    slackFailures,
     heldEmails,
+    ownerReports,
+    reconnects: directory.reconnects,
     locNameByUuid: directory.namesByUuid,
+    appUrl: opts.appUrl,
     sinceMs: opts.sinceMs,
     cutoffMs,
     nowMs: opts.nowMs,

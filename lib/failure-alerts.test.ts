@@ -1,17 +1,17 @@
 // @vitest-environment node
 //
-// Instant failure alerts (issue 159) — the ~5-min watermark cron.
-// What these tests pin:
+// Instant failure alerts (issue 159, rebuilt Sept 2026) — the ~5-min
+// watermark cron. What these tests pin:
 //
-//   1) Each ALLOWLISTED signal fires: sync_log not_landed, import_jobs
-//      failed, a genuine Jobber token expiry, ASSESSMENT_TEAM_MISMATCH.
+//   1) Each ALLOWLISTED signal fires: a failed website lead, a Jobber
+//      RECONNECT REQUIRED stamp, import_jobs failed, ASSESSMENT_TEAM_MISMATCH.
 //   2) The watermark advances and does NOT re-alert: an item alerted in one
 //      window is gone from the next (its ts is at-or-before the new since).
-//   3) NON-allowlisted noise stays silent: a self-healing token race, a raw
+//   3) NON-allowlisted noise stays silent: ANY individual token failure
+//      (healed or not), not_landed rows (a daily line now), a raw
 //      status='error' non-token failure, and a user-cancelled import.
-//   4) A quiet window posts NOTHING (buildAlertMessage → null).
-//   5) The token-expiry settle: a reauth failure newer than now-5min is not
-//      yet settled and does not fire until its window commits.
+//   4) A quiet window posts NOTHING (buildAlertMessages → []).
+//   5) The settle: a failed lead newer than now-5min waits for its window.
 //   6) Fetch + source pins: import_jobs status/type + cancel handling, the
 //      ASSESSMENT_TEAM_MISMATCH scoped on the message (both directions),
 //      never reads notification_log, never writes sync_log, CRON_SECRET
@@ -30,8 +30,9 @@ vi.mock('@/lib/supabase-service', () => ({
 
 import {
   selectNewAlerts,
-  buildAlertMessage,
+  buildAlertMessages,
   collectFailureAlerts,
+  MAX_ALERT_MESSAGES,
   fetchImportFailures,
   fetchAssessmentMismatches,
   ALERT_SETTLE_MS,
@@ -84,16 +85,15 @@ const base = {
 }
 
 describe('selectNewAlerts — each allowlisted signal fires', () => {
-  it('sync_log not_landed → a "Didn\'t land" alert', () => {
+  it('a failed LEAD_INTAKE row → a "lead didn\'t arrive" alert', () => {
     const items = selectNewAlerts({
       ...base,
-      events: [ev({ topic: 'QUOTE_UPDATE', friendly: 'Quote updated', landed: 'stuck', client_name: 'Jane Doe' })],
+      events: [ev({ topic: 'LEAD_INTAKE', processed: false, landed: null, location_id: null, jobber_item: null, error: 'full_name required email_present=true', reason: 'full_name required email_present=true' })],
     })
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('not_landed')
-    expect(items[0].text).toContain("Didn't land")
-    expect(items[0].text).toContain('Kansas City')
-    expect(items[0].text).toContain('Jane Doe')
+    expect(items[0].kind).toBe('lead_failed')
+    expect(items[0].text).toContain("didn't arrive")
+    expect(items[0].text).toContain('full_name required')
   })
 
   it('import_jobs failed → an "Import failed" alert', () => {
@@ -109,14 +109,14 @@ describe('selectNewAlerts — each allowlisted signal fires', () => {
     expect(items[0].text).toContain('Jobber 500')
   })
 
-  it('a genuine reauth expiry (no following success) → a "token expired" alert', () => {
+  it('a RECONNECT REQUIRED stamp in the window → a "Jobber disconnected" alert', () => {
     const items = selectNewAlerts({
       ...base,
-      events: [ev({ topic: 'QUOTE_UPDATE', processed: false, landed: null, error: 'reauth required', reason: 'reauth', jobber_item: '999' })],
+      reconnects: [{ location_id: 'loc_kc', stamped_at: iso(inWin) }],
     })
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('token_expired')
-    expect(items[0].text).toContain('Jobber token expired')
+    expect(items[0].kind).toBe('reconnect_required')
+    expect(items[0].text).toContain('Jobber disconnected')
     expect(items[0].text).toContain('Kansas City')
   })
 
@@ -138,6 +138,22 @@ describe('selectNewAlerts — each allowlisted signal fires', () => {
 })
 
 describe('selectNewAlerts — noise stays silent (allowlist, not denylist)', () => {
+  it('a sync_log not_landed row does NOT fire — it is a daily "never landed" line now', () => {
+    const items = selectNewAlerts({
+      ...base,
+      events: [ev({ topic: 'PROPERTY_UPDATE', friendly: 'Property updated', landed: 'stuck' })],
+    })
+    expect(items).toEqual([])
+  })
+
+  it('an un-healed reauth failure with no RECONNECT stamp does NOT fire', () => {
+    const items = selectNewAlerts({
+      ...base,
+      events: [ev({ topic: 'QUOTE_UPDATE', processed: false, landed: null, error: 'reauth required', reason: 'reauth', jobber_item: '999' })],
+    })
+    expect(items).toEqual([])
+  })
+
   it('a self-healing token race (reauth fail → success on the same entity within 5min) does NOT fire', () => {
     const items = selectNewAlerts({
       ...base,
@@ -167,44 +183,43 @@ describe('selectNewAlerts — noise stays silent (allowlist, not denylist)', () 
 
   it('a quiet window posts nothing', () => {
     expect(selectNewAlerts({ ...base })).toEqual([])
-    expect(buildAlertMessage([])).toBeNull()
+    expect(buildAlertMessages([])).toEqual([])
   })
 })
 
-describe('selectNewAlerts — settle: a not-yet-settled reauth failure waits', () => {
-  // The same reauth failure (created at 11:57) under two windows. The gate is
-  // the CUTOFF, not the wall clock: it fires only once its window commits past
-  // it — giving its 5-min self-heal chance time to elapse first.
+describe('selectNewAlerts — settle: a not-yet-settled row waits', () => {
+  // The same failed lead (11:57) under two windows. The gate is the CUTOFF,
+  // not the wall clock: it fires only once its window commits past it.
   const failAt = NOW - 3 * MIN // 11:57
-  const reauth = () => [ev({ topic: 'QUOTE_UPDATE', processed: false, landed: null, error: 'reauth', reason: 'reauth', jobber_item: '999', created_at: iso(failAt) })]
+  const lead = () => [ev({ topic: 'LEAD_INTAKE', processed: false, landed: null, location_id: null, jobber_item: null, error: 'location_slug required', reason: 'location_slug required', created_at: iso(failAt) })]
 
-  it('does NOT fire while the failure is newer than the cutoff (still settling)', () => {
+  it('does NOT fire while the row is newer than the cutoff (still settling)', () => {
     const items = selectNewAlerts({
       ...base,
-      sinceMs: NOW - 4 * MIN,         // 11:56
-      cutoffMs: NOW - 4 * MIN + 30_000, // 11:56:30 — 11:57 is beyond it
+      sinceMs: NOW - 4 * MIN,
+      cutoffMs: NOW - 4 * MIN + 30_000,
       nowMs: NOW,
-      events: reauth(),
+      events: lead(),
     })
     expect(items).toEqual([])
   })
 
-  it('DOES fire once its window commits past the failure', () => {
+  it('DOES fire once its window commits past the row', () => {
     const items = selectNewAlerts({
       ...base,
-      sinceMs: NOW - 4 * MIN,         // 11:56
-      cutoffMs: NOW,                  // 12:00 — 11:57 is now settled
+      sinceMs: NOW - 4 * MIN,
+      cutoffMs: NOW,
       nowMs: NOW + 5 * MIN,
-      events: reauth(),
+      events: lead(),
     })
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('token_expired')
+    expect(items[0].kind).toBe('lead_failed')
   })
 })
 
 describe('watermark advances and does not re-alert', () => {
   it('an item alerted in one window is absent from the next window', () => {
-    const stuck = ev({ topic: 'QUOTE_UPDATE', friendly: 'Quote updated', landed: 'stuck', created_at: iso(inWin) })
+    const stuck = ev({ topic: 'LEAD_INTAKE', processed: false, landed: null, location_id: null, jobber_item: null, reason: 'full_name required', created_at: iso(inWin) })
 
     // Run 1: window (SINCE, CUTOFF] contains the 11:52 event → fires.
     const run1 = selectNewAlerts({ ...base, events: [stuck], sinceMs: SINCE, cutoffMs: CUTOFF, nowMs: NOW })
@@ -217,22 +232,25 @@ describe('watermark advances and does not re-alert', () => {
   })
 })
 
-describe('buildAlertMessage', () => {
-  const item = (over: Partial<AlertItem>): AlertItem => ({ kind: 'not_landed', ts: inWin, text: 'x', ...over })
+describe('buildAlertMessages — one message per problem', () => {
+  const item = (over: Partial<AlertItem>): AlertItem => ({ kind: 'lead_failed', ts: inWin, text: 'x', ...over })
 
-  it('renders a header count + one bullet per item', () => {
-    const msg = buildAlertMessage([
-      item({ kind: 'not_landed', text: "Didn't land — A: rec · Quote updated" }),
+  it('renders each item as its own message with its icon', () => {
+    const msgs = buildAlertMessages([
+      item({ kind: 'lead_failed', text: "A website lead didn't arrive" }),
       item({ kind: 'import_failed', text: 'Import failed — B: boom' }),
-    ])!
-    expect(msg.count).toBe(2)
-    expect(msg.text).toContain('2 failures to check')
-    expect(msg.text).toContain('• :warning: ')
-    expect(msg.text).toContain('• :x: ')
+    ])
+    expect(msgs).toHaveLength(2)
+    expect(msgs[0].text).toBe(":inbox_tray: A website lead didn't arrive")
+    expect(msgs[1].text).toBe(':x: Import failed — B: boom')
   })
 
-  it('singular header for one item', () => {
-    expect(buildAlertMessage([item({})])!.text).toContain('1 failure to check')
+  it('past the cap, the rest go into ONE summary message instead of flooding', () => {
+    const many = Array.from({ length: MAX_ALERT_MESSAGES + 3 }, (_, i) => item({ text: `lead ${i}` }))
+    const msgs = buildAlertMessages(many)
+    expect(msgs).toHaveLength(MAX_ALERT_MESSAGES + 1)
+    expect(msgs.at(-1)!.text).toContain('…and 3 more problems')
+    expect(msgs.at(-1)!.items).toHaveLength(3)
   })
 })
 
@@ -295,11 +313,14 @@ describe('collectFailureAlerts', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('wires the three sources + location names through the selector', async () => {
+  it('wires the sources + location directory through the selector', async () => {
     const { supabase } = makeSupabase({
       import_jobs: [{ location_id: 'loc_kc', error_message: 'boom', completed_at: iso(inWin) }],
       sync_log: [],
-      locations: [{ location_id: 'loc_kc', name: 'Kansas City' }],
+      locations: [{
+        location_id: 'loc_kc', name: 'Kansas City',
+        last_sync_status: `RECONNECT REQUIRED — Jobber rejected refresh token (401) @ ${iso(inWin).slice(0, 19)}`,
+      }],
     })
     const fetchEvents = vi.fn(async () => ({
       events: [ev({ topic: 'QUOTE_UPDATE', landed: 'stuck', created_at: iso(inWin) })],
@@ -307,7 +328,7 @@ describe('collectFailureAlerts', () => {
     }))
     const out = await collectFailureAlerts({ nowMs: NOW, sinceMs: SINCE, supabase, fetchEvents: fetchEvents as any })
     const kinds = out.items.map(i => i.kind).sort()
-    expect(kinds).toEqual(['import_failed', 'not_landed'])
+    expect(kinds).toEqual(['import_failed', 'reconnect_required'])
     // location name resolved from the injected locations table
     expect(out.items.every(i => i.text.includes('Kansas City'))).toBe(true)
   })
@@ -335,14 +356,11 @@ describe('cron route + registration pins', () => {
     expect(lib).not.toContain('writeSyncLog(')
   })
 
-  it('is an allowlist: the ONLY notification_log read is the slack-failed slice', () => {
-    // The silent-sends rail deliberately opened ONE notification_log slice:
-    // channel='slack' + send_status='failed' (fetchSlackSendFailures). Email
-    // rows stay excluded — pin that the module queries the table exactly once
-    // and that the one query is scoped to that slice, and the route not at all.
-    expect(lib.match(/from\('notification_log'\)/g)).toHaveLength(1)
-    expect(lib).toContain(".eq('channel', 'slack')")
-    expect(lib).toContain(".eq('send_status', 'failed')")
+  it('is an allowlist: notification_log is never read (Slack channel failures are the owner\'s fix)', () => {
+    // The Sept 2026 rebuild closed the one notification_log slice the
+    // silent-sends rail had opened (channel='slack' failed): every such row is
+    // an owner's private channel, which Kevin cannot fix.
+    expect(lib).not.toContain("from('notification_log')")
     expect(route).not.toContain("from('notification_log')")
     // The original allowlisted sources ARE still queried.
     expect(lib).toContain("from('import_jobs')")

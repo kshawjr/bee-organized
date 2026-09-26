@@ -32,7 +32,7 @@ vi.mock('@/lib/supabase-service', () => ({
 
 import {
   selectNewAlerts,
-  buildAlertMessage,
+  buildAlertMessages,
   fetchPendingCheckouts,
   fetchCheckoutResolutions,
   collectFailureAlerts,
@@ -321,11 +321,11 @@ describe('the alert says what the owner is experiencing', () => {
     expect(text).toContain('cs_live_a1ZGpe2rgeKq0J')
   })
 
-  it('renders through the existing ops message builder with its own icon', () => {
-    const msg = buildAlertMessage(items)!
-    expect(msg.count).toBe(1)
-    expect(msg.text).toContain(':hourglass_flowing_sand:')
-    expect(msg.text).toContain('1 failure to check')
+  it('renders through the ops message builder as its own message with its own icon', () => {
+    const msgs = buildAlertMessages(items)
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0].text).toContain(':hourglass_flowing_sand:')
+    expect(msgs[0].text).toContain('Owner stuck at checkout')
   })
 })
 

@@ -102,7 +102,7 @@ describe('webhook digest integration', () => {
     expect(digest.suppressed).toBe(false)
     expect(digest.allClear).toBe(false)
     expect(digest.bookingLinkMissing).toBe(1)
-    expect(digest.headline).toContain('NO LINK')
+    expect(digest.headline).toContain('sends held for no booking link')
     expect(digest.text).toContain('Booking link missing')
   })
 

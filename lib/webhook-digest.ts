@@ -1,74 +1,66 @@
 // lib/webhook-digest.ts
 // ─────────────────────────────────────────────────────────────
-// Pure formatter for the Slack webhook digest (runs once daily — see
-// app/api/cron/webhook-digest). The cron fetches the enriched events for
-// the window and posts whatever this returns; keeping the formatting pure
-// keeps it unit-testable without Slack or Supabase.
+// Pure formatter for the once-daily ops digest (app/api/cron/webhook-digest).
+// The cron fetches the sources and posts whatever this returns; keeping the
+// formatting pure keeps it unit-testable without Slack or Supabase.
 //
-// REDESIGN (migration-watch): the digest now LEADS with lead-intake
-// health (the website→Bee Hub door that runs in parallel with Zoho) and
-// re-presents Jobber webhook sync underneath. Two ideas drive the whole
-// file:
+// THE RULE (Sept 2026 rebuild): the digest carries only what Kevin should
+// KNOW ABOUT but that is not an emergency — and it says NOTHING when every
+// count is zero. Instant problems (a lead that didn't arrive, an owner's bug,
+// a Jobber reconnect, a failed import…) go out on their own the moment they
+// happen (lib/failure-alerts) and are not repeated here.
 //
-//   1. REAL PROBLEMS ONLY drive the headline. A "real problem" is a lead
-//      that DIDN'T LAND or a Jobber event that DIDN'T LAND. Everything
-//      that landed — including events that briefly failed a token race
-//      and then succeeded on retry — is calm background noise.
+// WHAT IT CARRIES, each section only when non-zero:
+//   • NEVER LANDED — a Jobber change that failed (or processed but never
+//     reached its state) and never came through on a later retry. A record
+//     that recovered is not a problem and is not mentioned.
+//   • STUCK — imports stalled / bouncing / origin SSO-gated; locations whose
+//     sends are held for a missing rate or booking link; locations still
+//     waiting on a Jobber reconnect.
 //
-//   2. TOKEN-RACE SELF-HEALS are not failures. When a Jobber event fails
-//      with a reauth/401 error and the SAME entity succeeds again within
-//      SELF_HEAL_WINDOW_MS, that pair is a self-heal: the token refreshed
-//      mid-flight and Jobber's retry landed. Both rows are consumed —
-//      neither counts as landed nor as a failure. They surface only as a
-//      calm "expected, no action" line, and never in the headline.
-//      A reauth failure with NO following success is a GENUINE expiry
-//      (dead refresh token, e.g. loc_kc) — that IS a real didn't-land and
-//      is flagged loud.
-//
-// SUPPRESSION: if nothing landed and nothing failed (a quiet window, or a
-// window whose only activity was self-heals), the digest is `suppressed`
-// and the cron posts nothing — a digest arriving should mean there was
-// activity worth a glance. Self-heal counts are still surfaced when a
-// digest fires for other reasons.
+// WHAT IT NEVER CARRIES:
+//   • "healthy" rundowns — leads in, Jobber events landed, loc_other shares.
+//     A daily message that says nothing is wrong trains the reader to skip
+//     it, and then it is skipped on the day it matters.
+//   • token self-heals, or any individual token failure (see lib/failure-
+//     alerts — 31 of 33 in a week were back within a second).
+//   • "no matching lead" no-ops. Measured 2026-09-26 over 7 days: ~250, of
+//     which ~213 were one Portland user deleting ~200 old requests in Jobber
+//     in two hours, and 20 were PROPERTY_CREATE arriving seconds before
+//     Bee Hub had linked a brand-new client (all 20 clients exist). They are
+//     normal activity, so they are not a line.
 // ─────────────────────────────────────────────────────────────
 
 import type { WebhookLogEvent } from './webhook-observability'
 
-// A reauth/401 failure that is followed by a success on the SAME entity
-// within this window is treated as a token-race self-heal, not a failure.
-// Jobber retries a webhook a few times with backoff; a concurrent request
-// refreshing the token means the retry lands seconds-to-minutes later.
-// Kept short relative to the 3h digest window so two genuinely-separate
-// events on one entity are never mistaken for a heal.
+// How long the instant rail waits for a row to settle before judging it
+// (lib/failure-alerts ALERT_SETTLE_MS reuses this).
 export const SELF_HEAL_WINDOW_MS = 5 * 60 * 1000
 
-// loc_other is the catch-all/testing slug. Some volume there is normal;
-// call it out as a spike only when it dominates the window AND there is
-// enough total volume for the ratio to mean something (a 1-of-1 window
-// shouldn't read as a 100% spike).
-export const LOC_OTHER_SLUG = 'loc_other'
-export const LOC_OTHER_SPIKE_RATIO = 0.3
-export const LOC_OTHER_SPIKE_FLOOR = 4
+// A Jobber change that failed less than this long ago may still be retried —
+// Jobber retries with backoff, and one prod retry took 9m48s. Younger
+// failures are left for tomorrow's digest (its 24h window still covers them)
+// rather than reported as never-landed while a retry is on its way.
+export const RETRY_GRACE_MS = 30 * 60 * 1000
 
 const TOKEN_ERR_RE = /reauth|no_valid_jobber_token|\b401\b/i
 
-const MAX_LEAD_FAIL_LINES = 10
-const MAX_JOBBER_PROBLEM_LINES = 10
+const MAX_NEVER_LANDED_LINES = 10
 
 export type WebhookDigest = {
-  suppressed: boolean       // true → cron posts nothing
-  allClear: boolean         // no real problems (may still fire for the calm rundown)
+  suppressed: boolean       // true → cron posts nothing (every count is zero)
+  allClear: boolean         // same as suppressed: nothing to report
   headline: string
-  // counts (also logged by the cron route)
+  // heartbeat counters (digest_runs) — recorded, never posted
   leadsLanded: number
   leadsFailed: number
   jobberLanded: number
-  jobberDidntLand: number
-  selfHeals: number
+  jobberDidntLand: number   // = neverLanded (the digest_runs column name predates the rebuild)
+  selfHeals: number         // failures that recovered on a later retry
   locOtherLeads: number
-  locOtherSpike: boolean
-  // import health (added to the digest; 0 / false when healthy)
-  importFailed: number
+  // what the digest reports
+  neverLanded: number
+  importFailed: number      // heartbeat only — failed imports alert instantly
   importStalled: number
   importOriginGated: boolean
   // active locations on rate-quoting default paths (-a/-b) with a blank
@@ -77,15 +69,17 @@ export type WebhookDigest = {
   // active locations on booking default paths (-b/-d) with a blank
   // calendar_link — their booking sends are HELD by lib/booking-link
   bookingLinkMissing: number
+  // locations still stamped RECONNECT REQUIRED (lib/jobber-reconnect)
+  reconnectRequired: number
   text: string
 }
 
 // ── import health section (item 2/3) ─────────────────────────────
 // The import pipeline reports into this SAME ops digest (never the per-lead
 // notification path). Only PROBLEMS produce output — a healthy import window
-// adds nothing (no lines, no un-suppress). Three problem classes:
-//   • failed  — jobs that ended failed in the window (cancel, token/throttle
-//               death, or the sweeper's max-lifetime fail-out)
+// adds nothing (no lines, no un-suppress). A FAILED import is not here: it is
+// an instant alert (lib/failure-alerts), and repeating it the next morning
+// would be the noise this digest exists to avoid. What stays is what is STUCK:
 //   • stalled — jobs still running with a claim staler than the alert window
 //   • origin gated — the internal re-poke origin is SSO-gated, so EVERY
 //     self-resume bounces (the Scottsdale root cause). This escalates the
@@ -144,7 +138,9 @@ export function buildImportHealthSection(
   const bounced = input.bounced ?? []
   const bouncedCount = bounced.reduce((n, b) => n + (b.count || 0), 0)
   const originGated = input.originGated === true
-  const hasProblems = failedCount > 0 || stalledCount > 0 || originGated || bouncedCount > 0
+  // failedCount is still counted for the heartbeat row, but it is not a
+  // daily problem — the instant rail already said it.
+  const hasProblems = stalledCount > 0 || originGated || bouncedCount > 0
   if (!hasProblems) return { lines: [], failedCount, stalledCount, originGated, hasProblems: false }
 
   const lines: string[] = [`*:package: Imports* (${windowLabel})`]
@@ -155,17 +151,6 @@ export function buildImportHealthSection(
         `imports cannot self-resume; every sweeper re-poke bounces. ` +
         `Set NEXT_PUBLIC_APP_URL to the non-SSO custom domain.`,
     )
-  }
-
-  if (failedCount > 0) {
-    lines.push(`• :x: ${failedCount} failed:`)
-    for (const j of input.failed.slice(0, MAX_IMPORT_LINES)) {
-      const loc = j.location_id || 'unknown'
-      const reason = (j.error_message || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 160)
-      lines.push(`    • ${loc} — ${j.phase || 'unknown'}${progressOf(j)}: ${reason}`)
-    }
-    const more = failedCount - MAX_IMPORT_LINES
-    if (more > 0) lines.push(`    _…plus ${more} more_`)
   }
 
   if (stalledCount > 0) {
@@ -254,133 +239,88 @@ export function buildBookingLinkHealthSection(
   return { lines, missingCount: rows.length, hasProblems: true }
 }
 
-// ── classification ────────────────────────────────────────────
+// ── still-waiting-on-reconnect section ───────────────────────────
+// The instant rail alerts the moment a location is stamped; this is the
+// daily reminder that it is STILL stamped. Healthy → invisible.
+export type ReconnectDigestInput = {
+  locations: Array<{ location_id?: string | null; name?: string | null }>
+}
 
-type LeadFailure = { slug: string; reason: string }
-type JobberProblem = {
+export function buildReconnectSection(
+  input: ReconnectDigestInput | undefined,
+): { lines: string[]; count: number } {
+  const rows = input?.locations ?? []
+  if (rows.length === 0) return { lines: [], count: 0 }
+  const lines: string[] = [`*:electric_plug: Jobber still disconnected* (nothing syncs until reconnected)`]
+  for (const r of rows) {
+    lines.push(`    • ${r.name || r.location_id || 'unknown'} — reconnect Jobber in Settings`)
+  }
+  return { lines, count: rows.length }
+}
+
+// ── never landed ─────────────────────────────────────────────────
+
+export type NeverLanded = {
   location: string
   who: string
   friendly: string
-  topic: string
   reason: string
-  tokenExpired: boolean     // genuine reauth failure with no following success
+  at: number
 }
-type SelfHeal = { location: string; topic: string }
 
 const ts = (e: WebhookLogEvent) => Date.parse(e.created_at) || 0
 
-// entity identity for self-heal pairing: same topic + same Jobber item.
-// jobber_item is extractJobberId(jobber_record_id) and is identical on the
-// failing and the healing row (both carry item=<itemId>); entity_id can
-// differ (a healed success may resolve a lead_id the failure didn't).
-const entityKey = (e: WebhookLogEvent) =>
-  `${e.topic}::${e.jobber_item || e.entity_id || e.id}`
+// A Jobber record is the same record whatever topic the retry arrives under
+// (QUOTE_APPROVED fails, QUOTE_UPDATE lands) — so the key is the item alone.
+const itemKey = (e: WebhookLogEvent) => e.jobber_item || e.entity_id || e.id
 
-const isTokenErr = (e: WebhookLogEvent) =>
-  TOKEN_ERR_RE.test(`${e.error || ''} ${e.reason || ''}`)
+const recovered = (e: WebhookLogEvent) => e.processed && e.landed !== 'stuck'
 
 const locName = (e: WebhookLogEvent) =>
   e.location_name || e.location_id || 'Unknown account'
 
-const leadSlug = (e: WebhookLogEvent) =>
-  e.location_id || e.intake_slug || 'unknown'
-
 const who = (e: WebhookLogEvent) =>
   e.client_name || (e.jobber_item ? `Jobber #${e.jobber_item}` : 'Unknown record')
 
-export function classifyDigestEvents(events: WebhookLogEvent[]) {
-  const leadEvents = events.filter(e => e.topic === 'LEAD_INTAKE')
-  const jobberEvents = events.filter(e => e.topic !== 'LEAD_INTAKE')
-
-  // ── leads ──────────────────────────────────────────────────
-  const landedByLocation = new Map<string, number>()
-  const leadFailures: LeadFailure[] = []
-  for (const e of leadEvents) {
-    if (e.processed) {
-      const slug = leadSlug(e)
-      landedByLocation.set(slug, (landedByLocation.get(slug) || 0) + 1)
-    } else {
-      leadFailures.push({
-        slug: leadSlug(e),
-        reason: e.reason || e.error || 'unknown error',
-      })
-    }
+// Jobber changes that failed or never reached their state AND never came
+// through on a later row for the same record. One entry per record (its
+// latest failure). Lead intake is excluded — a failed lead is an instant
+// alert, not a daily line.
+export function findNeverLanded(
+  events: WebhookLogEvent[],
+  nowMs: number,
+): { neverLanded: NeverLanded[]; recoveredCount: number } {
+  const jobber = events.filter(e => e.topic !== 'LEAD_INTAKE')
+  const latestOk = new Map<string, number>()
+  for (const e of jobber) {
+    if (!recovered(e)) continue
+    const k = itemKey(e)
+    latestOk.set(k, Math.max(latestOk.get(k) ?? 0, ts(e)))
   }
-  let leadsLanded = 0
-  landedByLocation.forEach(n => { leadsLanded += n })
-  const locOtherLeads = landedByLocation.get(LOC_OTHER_SLUG) || 0
-  const locOtherSpike =
-    leadsLanded >= LOC_OTHER_SPIKE_FLOOR &&
-    locOtherLeads / leadsLanded > LOC_OTHER_SPIKE_RATIO
-
-  // ── jobber self-heal pairing ───────────────────────────────
-  // Walk ascending so a failure is only ever paired with a LATER success.
-  const asc = [...jobberEvents].sort((a, b) => ts(a) - ts(b))
-  const successesByKey = new Map<string, { e: WebhookLogEvent; used: boolean }[]>()
-  for (const e of asc) {
-    if (e.processed && e.landed !== 'stuck') {
-      const key = entityKey(e)
-      const list = successesByKey.get(key) || []
-      list.push({ e, used: false })
-      successesByKey.set(key, list)
-    }
+  const byItem = new Map<string, WebhookLogEvent>()
+  let recoveredCount = 0
+  for (const e of jobber) {
+    if (recovered(e)) continue
+    if ((latestOk.get(itemKey(e)) ?? 0) > ts(e)) { recoveredCount++; continue }
+    if (nowMs - ts(e) < RETRY_GRACE_MS) continue
+    const k = itemKey(e)
+    const prev = byItem.get(k)
+    if (!prev || ts(e) > ts(prev)) byItem.set(k, e)
   }
-  const consumedSuccess = new Set<WebhookLogEvent>()
-  const consumedFailure = new Set<WebhookLogEvent>()
-  const selfHeals: SelfHeal[] = []
-  for (const e of asc) {
-    if (e.processed || !isTokenErr(e)) continue
-    const cands = successesByKey.get(entityKey(e)) || []
-    const heal = cands.find(
-      c => !c.used && ts(c.e) > ts(e) && ts(c.e) - ts(e) <= SELF_HEAL_WINDOW_MS,
-    )
-    if (heal) {
-      heal.used = true
-      consumedSuccess.add(heal.e)
-      consumedFailure.add(e)
-      selfHeals.push({ location: locName(e), topic: e.topic || 'UNKNOWN' })
-    }
-  }
-
-  // ── jobber landed / didn't-land ────────────────────────────
-  let jobberLanded = 0
-  const jobberProblems: JobberProblem[] = []
-  for (const e of jobberEvents) {
-    if (e.processed && e.landed !== 'stuck') {
-      if (!consumedSuccess.has(e)) jobberLanded += 1
-    } else if (!e.processed) {
-      if (consumedFailure.has(e)) continue // self-healed — not a problem
-      jobberProblems.push({
-        location: locName(e),
-        who: who(e),
-        friendly: e.friendly,
-        topic: e.topic || 'UNKNOWN',
-        reason: e.reason || e.error || 'unknown error',
-        tokenExpired: isTokenErr(e), // reauth with no heal = genuine expiry
-      })
-    } else {
-      // processed but landed === 'stuck' → didn't reach its intended state
-      jobberProblems.push({
-        location: locName(e),
-        who: who(e),
-        friendly: e.friendly,
-        topic: e.topic || 'UNKNOWN',
-        reason: "processed but didn't land",
-        tokenExpired: false,
-      })
-    }
-  }
-
-  return {
-    leadsLanded,
-    landedByLocation,
-    leadFailures,
-    locOtherLeads,
-    locOtherSpike,
-    jobberLanded,
-    jobberProblems,
-    selfHeals,
-  }
+  const neverLanded = Array.from(byItem.values())
+    .sort((a, b) => ts(a) - ts(b))
+    .map(e => ({
+      location: locName(e),
+      who: who(e),
+      friendly: e.friendly,
+      reason: e.processed
+        ? "processed but didn't reach its state"
+        : TOKEN_ERR_RE.test(`${e.error || ''} ${e.reason || ''}`)
+          ? 'the Jobber connection blipped and no retry came'
+          : (e.reason || e.error || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 120),
+      at: ts(e),
+    }))
+  return { neverLanded, recoveredCount }
 }
 
 // ── formatting ────────────────────────────────────────────────
@@ -391,147 +331,87 @@ export function buildWebhookDigest(opts: {
   events: WebhookLogEvent[]
   appUrl: string          // e.g. https://app.example.com (no trailing slash)
   windowLabel?: string    // human label for the query window
+  nowMs?: number          // defaults to Date.now(); tests pin it
   importHealth?: ImportHealthInput   // import pipeline health (item 2/3)
   rateHealth?: RateHealthDigestInput // blank-rate hold rollup (lib/rate-health)
   bookingLinkHealth?: BookingLinkHealthDigestInput // missing-link hold rollup (lib/booking-link-health)
+  reconnect?: ReconnectDigestInput   // locations still stamped RECONNECT REQUIRED
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 24h'
-  const c = classifyDigestEvents(opts.events)
+  const nowMs = opts.nowMs ?? Date.now()
 
-  const leadsFailed = c.leadFailures.length
-  const jobberDidntLand = c.jobberProblems.length
-
+  const { neverLanded, recoveredCount } = findNeverLanded(opts.events, nowMs)
   const imp = buildImportHealthSection(opts.importHealth, windowLabel)
   const rate = buildRateHealthSection(opts.rateHealth)
   const booking = buildBookingLinkHealthSection(opts.bookingLinkHealth)
+  const reconnect = buildReconnectSection(opts.reconnect)
 
-  const realProblems =
-    leadsFailed + jobberDidntLand +
-    (imp.hasProblems ? 1 : 0) + (rate.hasProblems ? 1 : 0) + (booking.hasProblems ? 1 : 0)
-  const allClear = realProblems === 0
+  // Heartbeat counters — recorded on digest_runs, never posted.
+  const leads = opts.events.filter(e => e.topic === 'LEAD_INTAKE')
+  const leadsLanded = leads.filter(e => e.processed).length
+  const leadsFailed = leads.length - leadsLanded
+  const locOtherLeads = leads.filter(e => e.processed && e.location_id === 'loc_other').length
+  const jobberLanded = opts.events.filter(e => e.topic !== 'LEAD_INTAKE' && recovered(e)).length
 
-  // Suppress a quiet window OR a self-heal-only window: nothing landed and
-  // nothing failed. Self-heal rows are consumed above, so a window whose
-  // only activity was self-heals has zero landed + zero failed here. An import
-  // PROBLEM un-suppresses even when webhooks are quiet — but a healthy import
-  // window contributes nothing (imp.hasProblems is false), so success is silent.
-  const suppressed =
-    c.leadsLanded === 0 &&
-    leadsFailed === 0 &&
-    c.jobberLanded === 0 &&
-    jobberDidntLand === 0 &&
-    !imp.hasProblems &&
-    !rate.hasProblems &&
-    !booking.hasProblems
+  // THE SILENCE RULE. Every reportable count, and nothing else: a day with
+  // leads flowing and Jobber syncing but nothing wrong posts NOTHING.
+  const problems =
+    neverLanded.length + (imp.hasProblems ? 1 : 0) + rate.missingCount +
+    booking.missingCount + reconnect.count
+  const suppressed = problems === 0
 
-  // ── headline (real problems only) ──────────────────────────
-  let headline: string
-  if (allClear) {
-    headline =
-      `:white_check_mark: Leads healthy — ${c.leadsLanded} in, 0 didn't land` +
-      ` · Jobber: ${c.jobberLanded} landed`
-  } else {
-    const parts: string[] = []
-    if (leadsFailed > 0) parts.push(`${plural(leadsFailed, 'lead')} DIDN'T LAND`)
-    if (jobberDidntLand > 0) parts.push(`${plural(jobberDidntLand, 'Jobber event')} DIDN'T LAND`)
-    if (imp.originGated) parts.push(`import origin SSO-GATED`)
-    if (imp.failedCount > 0) parts.push(`${plural(imp.failedCount, 'import')} FAILED`)
-    if (imp.stalledCount > 0) parts.push(`${plural(imp.stalledCount, 'import')} STALLED`)
-    if (rate.missingCount > 0) parts.push(`${plural(rate.missingCount, 'location')} on rate-quoting paths with NO RATE (sends held)`)
-    if (booking.missingCount > 0) parts.push(`${plural(booking.missingCount, 'location')} on booking paths with NO LINK (sends held)`)
-    headline = `:warning: ${parts.join(' + ')} — check`
-  }
+  const parts: string[] = []
+  if (neverLanded.length) parts.push(`${plural(neverLanded.length, 'Jobber change')} never landed`)
+  if (reconnect.count) parts.push(`${plural(reconnect.count, 'location')} still disconnected from Jobber`)
+  if (imp.originGated) parts.push('imports cannot self-resume')
+  if (imp.stalledCount) parts.push(`${plural(imp.stalledCount, 'import')} stalled`)
+  if (!imp.originGated && !imp.stalledCount && imp.hasProblems) parts.push('import re-pokes bouncing')
+  if (rate.missingCount) parts.push(`${plural(rate.missingCount, 'location')} with sends held for no rate`)
+  if (booking.missingCount) parts.push(`${plural(booking.missingCount, 'location')} with sends held for no booking link`)
+  const headline = suppressed ? '' : `:clipboard: Daily check — ${parts.join(' · ')}`
 
-  // ── leads section ──────────────────────────────────────────
-  const leadLines: string[] = [`*:inbox_tray: Lead intake* (${windowLabel})`]
-  if (c.leadsLanded === 0) {
-    leadLines.push('• 0 landed')
-  } else {
-    const byLoc = Array.from(c.landedByLocation.entries()).sort((a, b) => b[1] - a[1])
-    const parts = byLoc.map(([slug, n]) => {
-      if (slug === LOC_OTHER_SLUG) {
-        return c.locOtherSpike
-          ? `${slug} ×${n} :warning: spike (${Math.round((n / c.leadsLanded) * 100)}% of leads)`
-          : `${slug} ×${n} (normal)`
+  // ── never-landed section, grouped by location ──────────────
+  const neverLines: string[] = []
+  if (neverLanded.length) {
+    neverLines.push(`*:warning: Never landed* (${windowLabel}) — failed, and no retry came through`)
+    const byLoc = new Map<string, NeverLanded[]>()
+    for (const n of neverLanded) byLoc.set(n.location, [...(byLoc.get(n.location) || []), n])
+    let shown = 0
+    for (const [loc, list] of Array.from(byLoc.entries())) {
+      for (const n of list) {
+        if (shown >= MAX_NEVER_LANDED_LINES) break
+        neverLines.push(`    • ${loc}: ${n.who} — ${n.friendly}: ${n.reason}`)
+        shown++
       }
-      return `${slug} ×${n}`
-    })
-    leadLines.push(`• ${c.leadsLanded} landed — ${parts.join(', ')}`)
-  }
-  if (leadsFailed > 0) {
-    leadLines.push(`• :warning: ${leadsFailed} didn't land:`)
-    for (const f of c.leadFailures.slice(0, MAX_LEAD_FAIL_LINES)) {
-      leadLines.push(`    • ${f.slug} — ${f.reason}`)
     }
-    const more = leadsFailed - MAX_LEAD_FAIL_LINES
-    if (more > 0) leadLines.push(`    _…plus ${more} more_`)
+    const more = neverLanded.length - shown
+    if (more > 0) neverLines.push(`    _…plus ${more} more_`)
+    neverLines.push(`<${appUrl}/admin?adminTab=webhooks&whFilter=failures&whWindow=24h|Open the webhook dashboard>`)
   }
 
-  // ── jobber section ─────────────────────────────────────────
-  const jobberLines: string[] = [
-    `*:wrench: Jobber sync* (${windowLabel})`,
-    `• ${c.jobberLanded} landed, ${jobberDidntLand} didn't land`,
-  ]
-  if (jobberDidntLand > 0) {
-    for (const p of c.jobberProblems.slice(0, MAX_JOBBER_PROBLEM_LINES)) {
-      const tail = p.tokenExpired
-        ? `${p.reason} :key: token expired — reconnect`
-        : p.reason
-      jobberLines.push(`    • ${p.location}: ${p.who} — ${p.friendly} (${p.topic}): ${tail}`)
-    }
-    const more = jobberDidntLand - MAX_JOBBER_PROBLEM_LINES
-    if (more > 0) jobberLines.push(`    _…plus ${more} more_`)
-  }
-  if (c.selfHeals.length > 0) {
-    // Name the locations once each, with a count if a location repeated.
-    const byLoc = new Map<string, number>()
-    for (const s of c.selfHeals) byLoc.set(s.location, (byLoc.get(s.location) || 0) + 1)
-    const names = Array.from(byLoc.entries())
-      .map(([loc, n]) => (n > 1 ? `${loc} ×${n}` : loc))
-      .join(', ')
-    jobberLines.push(
-      `• :recycle: ${plural(c.selfHeals.length, 'token self-heal')} — ${names} (expected, no action)`,
-    )
-  }
-
-  // Deep link into the admin Webhooks tab, pre-filtered to failures when
-  // there are any (else the didn't-land bucket).
-  const filter = jobberDidntLand > 0 ? 'failures' : 'stuck'
-  const link = `${appUrl}/admin?adminTab=webhooks&whFilter=${filter}&whWindow=24h`
-
-  // Import section only appears when there's an import problem to act on.
-  const importBlock = imp.lines.length ? `${imp.lines.join('\n')}\n\n` : ''
-  // Same rule for the blank-rate section: healthy → invisible.
-  const rateBlock = rate.lines.length ? `${rate.lines.join('\n')}\n\n` : ''
-  // Same rule for the missing-booking-link section: healthy → invisible.
-  const bookingBlock = booking.lines.length ? `${booking.lines.join('\n')}\n\n` : ''
-
-  const text =
-    `${headline}\n\n` +
-    `${leadLines.join('\n')}\n\n` +
-    `${jobberLines.join('\n')}\n\n` +
-    importBlock +
-    rateBlock +
-    bookingBlock +
-    `<${link}|Open the webhook dashboard>`
+  const blocks = [neverLines, reconnect.lines, imp.lines, rate.lines, booking.lines]
+    .filter(l => l.length)
+    .map(l => l.join('\n'))
+  const text = suppressed ? '' : [headline, ...blocks].join('\n\n')
 
   return {
     suppressed,
-    allClear,
+    allClear: suppressed,
     headline,
-    leadsLanded: c.leadsLanded,
+    leadsLanded,
     leadsFailed,
-    jobberLanded: c.jobberLanded,
-    jobberDidntLand,
-    selfHeals: c.selfHeals.length,
-    locOtherLeads: c.locOtherLeads,
-    locOtherSpike: c.locOtherSpike,
+    jobberLanded,
+    jobberDidntLand: neverLanded.length,
+    selfHeals: recoveredCount,
+    locOtherLeads,
+    neverLanded: neverLanded.length,
     importFailed: imp.failedCount,
     importStalled: imp.stalledCount,
     importOriginGated: imp.originGated,
     rateMissing: rate.missingCount,
     bookingLinkMissing: booking.missingCount,
+    reconnectRequired: reconnect.count,
     text,
   }
 }

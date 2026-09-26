@@ -83,7 +83,7 @@ describe('digest — blank-rate section', () => {
     expect(digest.suppressed).toBe(false)
     expect(digest.allClear).toBe(false)
     expect(digest.rateMissing).toBe(1)
-    expect(digest.headline).toContain('1 location on rate-quoting paths with NO RATE (sends held)')
+    expect(digest.headline).toContain('1 location with sends held for no rate')
     expect(digest.text).toContain('Hourly rate missing')
     expect(digest.text).toContain('Seattle — organizing-b, moving-b')
   })
