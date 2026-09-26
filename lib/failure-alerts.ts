@@ -14,8 +14,11 @@
 //      (full_name required, location_slug required, location_not_found…).
 //      That is Kevin's web form; nobody else can fix it, and the person who
 //      filled it in is waiting on a reply that will never come.
-//   2. OWNER REPORT — a bug or question an owner filed (feedback_items
-//      type bug/question, not internal). Features wait for the triage screen.
+//   2. OWNER REPORT — anything an owner files: a bug, a question, or a
+//      feature idea (feedback_items, not internal). One message per report,
+//      carrying who, where, the title, a trimmed description, the screen it
+//      was filed from and the screenshot count — enough to judge urgency
+//      without opening Bee Hub. See ownerReportText for the shape and why.
 //   3. JOBBER RECONNECT REQUIRED — a location whose refresh token Jobber
 //      rejected for good. lib/jobber performRefresh stamps
 //      locations.last_sync_status 'RECONNECT REQUIRED — … @ <iso>' only after
@@ -124,7 +127,8 @@ export const HELD_SUBJECT_ALERT_MS = 6 * 60 * 60_000
 export type AlertItem = {
   kind: AlertKind
   ts: number       // ms — the windowed alert moment (ordering + watermark)
-  text: string     // one phone-readable line, no emoji (added at render)
+  text: string     // phone-readable text, no leading emoji (added at render)
+  emoji?: string   // overrides the per-kind icon (owner reports: one per type)
 }
 
 // Raw import_jobs failure row (fetchImportFailures).
@@ -156,14 +160,19 @@ export type PendingCheckoutRow = {
 // slug → the one billing fact the strand check needs: is the owner in?
 export type LocationBillingState = { status: string | null }
 
-// An owner-filed bug or question (fetchOwnerReports). location_id is the
-// locations.id uuid, not the slug.
+// An owner-filed report (fetchOwnerReports). location_id is the
+// locations.id uuid, not the slug. owner_name is resolved from hub_users by
+// the fetcher; context is the id-only whitelist lib/feedback-context writes.
 export type OwnerReportRow = {
   type?: string | null
   title?: string | null
+  description?: string | null
   location_id?: string | null
   created_at?: string | null
   is_internal?: boolean | null
+  attachments?: unknown[] | null
+  context?: { screen?: string | null; origin?: string | null; kind?: string | null; stage?: string | null; lead_id?: string | null } | null
+  owner_name?: string | null
 }
 
 // A location whose Jobber connection needs a human reconnect. stamped_at is
@@ -223,6 +232,86 @@ const leadFailureWhy = (reason: string): string => {
   return 'the intake rejected it'
 }
 
+// ── owner report message ─────────────────────────────────────────
+//
+// WHAT KEVIN SEES, AND WHY. The old alerts were too thin to judge urgency
+// from, so this errs toward detail — but stays a phone screen, not a wall:
+//
+//   :beetle: *BUG* — Jane Smith, Portland
+//   *Calendar will not load*
+//   > It spins forever when I open Tuesday. Two clients are booked …
+//   Filed from Clients (on a client's Request-stage job) · 2 screenshots
+//   <…/admin?adminTab=feedback|Open the Feedback list> — no link to a single report exists yet
+//
+//   • The TYPE leads, in capitals, with its own icon — a bug and an idea
+//     must be told apart before reading a word.
+//   • The description is cut at OWNER_REPORT_DESC_MAX (300) characters, on a
+//     word boundary, with a visible "…" when cut. Measured on every report
+//     filed so far: median 115 characters, 90th percentile 260, longest 509
+//     — so 300 shows ~9 in 10 reports whole, and the cut ones still give the
+//     gist. Line breaks are kept (up to 4 lines) because owners write steps.
+//   • The link is the ADMIN Feedback list, labelled as the list. The admin
+//     tab reads no per-report parameter, so pretending to deep-link would be
+//     a lie. It must never be /?feedback=1: that is the OWNER's reply-email
+//     link and now redirects to the owner's own Help › My requests page —
+//     which is where this alert pointed until this fix.
+export const OWNER_REPORT_DESC_MAX = 300
+const OWNER_REPORT_DESC_LINES = 4
+export const FEEDBACK_TRIAGE_PATH = '/admin?adminTab=feedback'
+
+const REPORT_TYPE: Record<string, { label: string; emoji: string }> = {
+  bug: { label: 'BUG', emoji: ':beetle:' },
+  question: { label: 'QUESTION', emoji: ':question:' },
+  feature: { label: 'IDEA', emoji: ':bulb:' },
+}
+
+export function trimDescription(raw: string | null | undefined, max = OWNER_REPORT_DESC_MAX): string {
+  const lines = String(raw || '')
+    .split(/\r?\n/)
+    .map(l => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  let text = lines.slice(0, OWNER_REPORT_DESC_LINES).join('\n')
+  let cut = lines.length > OWNER_REPORT_DESC_LINES
+  if (text.length > max) {
+    const hard = text.slice(0, max)
+    const soft = hard.slice(0, Math.max(hard.lastIndexOf(' '), hard.lastIndexOf('\n')))
+    text = (soft.length > max * 0.6 ? soft : hard).trimEnd()
+    cut = true
+  }
+  return cut ? `${text} …` : text
+}
+
+const filedFrom = (ctx: OwnerReportRow['context']): string | null => {
+  if (!ctx) return null
+  const screen = ctx.screen ? String(ctx.screen) : null
+  const onRecord =
+    ctx.kind === 'engagement'
+      ? `on a client's ${ctx.stage ? `${ctx.stage}-stage ` : ''}job`
+      : ctx.lead_id
+        ? 'on a client record'
+        : null
+  if (screen && onRecord) return `${screen} (${onRecord})`
+  return screen || onRecord
+}
+
+export function ownerReportText(r: OwnerReportRow, locationName: string, appUrl: string): { text: string; emoji: string } {
+  const t = REPORT_TYPE[r.type || ''] || { label: String(r.type || 'REPORT').toUpperCase(), emoji: ':speech_balloon:' }
+  const who = clean(r.owner_name || 'An owner', 60)
+  const lines = [`*${t.label}* — ${who}, ${locationName}`, `*${clean(r.title || '(no title)', 100)}*`]
+  const desc = trimDescription(r.description)
+  if (desc) lines.push(desc.split('\n').map(l => `> ${l}`).join('\n'))
+  const n = Array.isArray(r.attachments) ? r.attachments.length : 0
+  const shots = n === 0 ? 'no screenshots' : `${n} screenshot${n > 1 ? 's' : ''}`
+  const from = filedFrom(r.context)
+  lines.push(from ? `Filed from ${from} · ${shots}` : `Screen not recorded · ${shots}`)
+  lines.push(
+    appUrl
+      ? `<${appUrl}${FEEDBACK_TRIAGE_PATH}|Open the Feedback list> — no link to a single report exists yet`
+      : `Open Admin › Feedback — no link to a single report exists yet`,
+  )
+  return { text: lines.join('\n'), emoji: t.emoji }
+}
+
 // ── the pure selector ──────────────────────────────────────────────
 // Given the raw sources already fetched for the run, return the alert items
 // that are BOTH allowlisted AND newly-committed in (sinceMs, cutoffMs]. Pure:
@@ -236,7 +325,7 @@ export function selectNewAlerts(input: {
   locBilling?: Map<string, LocationBillingState>    // slug → subscription state
   resolvedSessions?: Set<string>                    // sessions with a later terminal row
   heldEmails?: HeldSubjectEmailRow[]                // sends held for a blank subject
-  ownerReports?: OwnerReportRow[]                   // feedback_items bug/question rows
+  ownerReports?: OwnerReportRow[]                   // feedback_items rows filed by owners
   reconnects?: ReconnectRow[]                       // locations stamped RECONNECT REQUIRED
   locNameByUuid?: Map<string, string>               // locations.id (uuid) → display name
   appUrl?: string                                   // for the triage link on owner reports
@@ -269,19 +358,15 @@ export function selectNewAlerts(input: {
     })
   }
 
-  // (2) an owner reported a bug or asked a question.
+  // (2) an owner filed a report — bug, question or idea. Windowed on
+  // created_at, so editing a report later (updated_at) never re-alerts, and a
+  // deleted one simply is not there to find.
   for (const r of ownerReports) {
     if (r.is_internal === true) continue
-    if (r.type !== 'bug' && r.type !== 'question') continue
     const t = Date.parse(r.created_at || '')
     if (!inWindow(t, sinceMs, cutoffMs)) continue
-    const what = r.type === 'bug' ? 'reported a bug' : 'asked a question'
-    const link = appUrl ? ` <${appUrl}/?feedback=1|Open feedback>` : ''
-    items.push({
-      kind: 'owner_report',
-      ts: t,
-      text: `${uuidLabel(r.location_id)} ${what}: "${clean(r.title || '(no title)', 100)}"${link}`,
-    })
+    const { text, emoji } = ownerReportText(r, uuidLabel(r.location_id), appUrl)
+    items.push({ kind: 'owner_report', ts: t, text, emoji })
   }
 
   // (3) Jobber reconnect required — keyed on the stamp's own time, so a
@@ -406,13 +491,13 @@ export type AlertMessage = { text: string; items: AlertItem[] }
 export function buildAlertMessages(items: AlertItem[]): AlertMessage[] {
   const out: AlertMessage[] = items
     .slice(0, MAX_ALERT_MESSAGES)
-    .map(i => ({ text: `${EMOJI[i.kind]} ${i.text}`, items: [i] }))
+    .map(i => ({ text: `${i.emoji || EMOJI[i.kind]} ${i.text}`, items: [i] }))
   const rest = items.slice(MAX_ALERT_MESSAGES)
   if (rest.length > 0) {
     out.push({
       text:
         `:rotating_light: …and ${rest.length} more problem${rest.length > 1 ? 's' : ''} in the same few minutes:\n` +
-        rest.map(i => `• ${EMOJI[i.kind]} ${i.text}`).join('\n'),
+        rest.map(i => `• ${i.emoji || EMOJI[i.kind]} ${i.text.split('\n')[0]}`).join('\n'),
       items: rest,
     })
   }
@@ -545,9 +630,10 @@ export async function fetchCheckoutResolutions(
   return resolved
 }
 
-// Owner-filed bugs and questions in the window. Features are left out here
-// (they wait for triage, not for Kevin's phone); internal items are filtered
-// in the selector so a pre-migration row without is_internal still counts.
+// Every report owners filed in the window — bug, question and feature idea
+// alike — plus the filer's name from hub_users (a second read, only when
+// there is something to name). Internal items are filtered in the selector
+// so a pre-migration row without is_internal still counts.
 export async function fetchOwnerReports(
   supabase: typeof supabaseService,
   sinceIso: string,
@@ -555,13 +641,31 @@ export async function fetchOwnerReports(
 ): Promise<OwnerReportRow[]> {
   const { data } = await supabase
     .from('feedback_items')
-    .select('type, title, location_id, created_at, is_internal')
-    .in('type', ['bug', 'question'])
+    .select('user_id, type, title, description, location_id, created_at, is_internal, attachments, context')
     .gt('created_at', sinceIso)
     .lte('created_at', cutoffIso)
     .order('created_at', { ascending: true })
     .limit(50)
-  return (data as OwnerReportRow[]) ?? []
+  const rows = (data as any[]) ?? []
+  if (!rows.length) return []
+
+  const userIds = Array.from(new Set(rows.map(r => r.user_id).filter(Boolean)))
+  const nameById = new Map<string, string>()
+  if (userIds.length) {
+    const { data: users } = await supabase
+      .from('hub_users')
+      .select('id, full_name, first_name, last_name, email')
+      .in('id', userIds)
+    for (const u of (users as any[]) ?? []) {
+      const name =
+        (u.full_name && String(u.full_name).trim()) ||
+        [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
+        u.email ||
+        ''
+      if (name) nameById.set(u.id, name)
+    }
+  }
+  return rows.map(r => ({ ...r, owner_name: nameById.get(r.user_id) ?? null }))
 }
 
 // Sends currently HELD for a blank subject whose ALERT MOMENT

@@ -5,8 +5,8 @@
 // the once-daily webhook digest (issue 159).
 //
 // Posts one Slack message PER PROBLEM for an allowlist of things only Kevin
-// can fix — a website lead that never arrived, an owner's bug report or
-// question, a Jobber connection that needs reconnecting, a failed import, an
+// can fix — a website lead that never arrived, any report an owner files
+// (bug, question or feature idea), a Jobber connection that needs reconnecting, a failed import, an
 // assessment-team mismatch, a stranded checkout (issue 312), and an email
 // held ≥6h for a blank subject (issue 316). See lib/failure-alerts for the
 // allowlist and what is deliberately NEVER alerted (individual token

@@ -7,7 +7,8 @@
 // log reader and the Slack transport faked, and count the Slack posts.
 //
 //   1) each instant trigger fires ITS OWN message (a failed lead, an owner's
-//      bug, an owner's question, a Jobber reconnect)
+//      report, a Jobber reconnect) — the owner-report message itself is
+//      pinned in detail by lib/beta-owner-report-alert.test.ts
 //   2) a self-healing token expiry produces NO message — including the three
 //      shapes that fooled the old per-record check (two failures sharing one
 //      retry, a retry under a different topic, a retry after 9m48s)
@@ -154,29 +155,6 @@ describe('instant — each trigger is its own message', () => {
     expect(p.find(t => t.includes('full_name required'))).toContain('sent no name')
     expect(p.find(t => t.includes('location_slug required'))).toContain('sent no location')
     expect(p.find(t => t.includes('location_not_found'))).toContain('matches no Bee Hub location')
-  })
-
-  it("an owner's bug and an owner's question → two messages, named by location", async () => {
-    db.tables.feedback_items = [
-      { type: 'bug', title: 'Calendar will not load', location_id: 'uuid-portland', created_at: iso(IN_WIN), is_internal: false },
-      { type: 'question', title: 'How do I add a second address?', location_id: 'uuid-nova', created_at: iso(IN_WIN + MIN), is_internal: false },
-    ]
-    await failureAlerts(req('/api/cron/failure-alerts'))
-    const p = posts()
-    expect(p).toHaveLength(2)
-    expect(p[0]).toContain('Portland reported a bug')
-    expect(p[0]).toContain('Calendar will not load')
-    expect(p[1]).toContain('Nova asked a question')
-    expect(p[1]).toContain('https://beehive.example.com/?feedback=1')
-  })
-
-  it('a feature request or an internal item does not page', async () => {
-    db.tables.feedback_items = [
-      { type: 'feature', title: 'Dark mode', location_id: 'uuid-nova', created_at: iso(IN_WIN), is_internal: false },
-      { type: 'bug', title: 'Kevin note', location_id: 'uuid-nova', created_at: iso(IN_WIN), is_internal: true },
-    ]
-    await failureAlerts(req('/api/cron/failure-alerts'))
-    expect(posts()).toHaveLength(0)
   })
 
   it('a lead failure and a bug in the same run are two messages, not one list', async () => {
