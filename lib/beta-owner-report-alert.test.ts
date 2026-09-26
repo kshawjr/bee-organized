@@ -236,19 +236,21 @@ describe('an edited or deleted report does NOT re-alert', () => {
   })
 })
 
-describe('the 5am queue digest is unchanged', () => {
-  it('produces exactly the message it produced before this change', () => {
+describe('the 5am queue digest: only its link changed', () => {
+  // Pinned at a65d887 with the old /?feedback=1 link; the link is the ONE
+  // thing the digest-link fix changed. Every other word must stay put.
+  it('produces exactly the same message, now with the admin link', () => {
     const r = buildNudge({
       summary: { open: 46, closed: 10, total: 56, counts: { new: 36, stale: 4, working: 3, inHand: 3 }, oldestNewDays: 51, oldestStaleDays: 20 },
       oldestNewDays: 51,
-      triageUrl: `${APP}/?feedback=1`,
+      triageUrl: `${APP}/admin?adminTab=feedback`,
     })
     expect(r.post).toEqual({
       text: 'Feedback — where the queue stands',
       attachments: [{
         color: '#d97706',
         fallback: '46 open feedback items',
-        text: `46 open · 36 not looked at · 4 gone quiet · 3 in progress\nOldest untouched: 51 days.\n<${APP}/?feedback=1|Open triage>`,
+        text: `46 open · 36 not looked at · 4 gone quiet · 3 in progress\nOldest untouched: 51 days.\n<${APP}/admin?adminTab=feedback|Open triage>`,
       }],
     })
   })

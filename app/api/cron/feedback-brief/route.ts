@@ -55,6 +55,8 @@ import { buildNudge, buildAlert } from '@/lib/feedback-nudge'
 import { decideUnopenedAlert } from '@/lib/feedback-unopened'
 import { recordFeedbackBriefRun, fetchFeedbackAlertState, recordFeedbackUnopenedRun } from '@/lib/digest-runs'
 import screenMap from '@/docs/screen-map.json'
+// Kevin's link is the admin Feedback list — never the owner's /?feedback=1.
+import { FEEDBACK_TRIAGE_PATH } from '@/lib/feedback-triage-link'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -120,7 +122,7 @@ export async function GET(req: NextRequest) {
       alertedBefore: state.unopenedAlertedBefore,
     })
     if (decision.event) {
-      const alertPost = buildAlert(decision.event, `${appUrl}/?feedback=1`)
+      const alertPost = buildAlert(decision.event, `${appUrl}${FEEDBACK_TRIAGE_PATH}`)
       if (alertPost) {
         const sent = await postSlackMessage(alertPost.text, alertPost.attachments)
         await recordFeedbackUnopenedRun(
@@ -172,7 +174,7 @@ export async function GET(req: NextRequest) {
   const nudge = buildNudge({
     summary: brief.summary,
     oldestNewDays: brief.summary.oldestNewDays,
-    triageUrl: `${appUrl}/?feedback=1`,
+    triageUrl: `${appUrl}${FEEDBACK_TRIAGE_PATH}`,
   })
   if (nudge.suppressed || !nudge.post) {
     console.log(`[cron feedback-brief] nudge suppressed (${nudge.reason || 'nothing to say'})`)

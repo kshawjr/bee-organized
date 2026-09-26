@@ -49,6 +49,7 @@ import {
 } from './feedback-queues'
 import { isInternalItem } from './feedback-internal'
 import { placeFeedbackItem, type PlacementIndex, type Placement } from './feedback-placement'
+import { FEEDBACK_TRIAGE_PATH } from './feedback-triage-link'
 
 export interface BriefItem {
   id?: string | null
@@ -318,7 +319,7 @@ function renderBrief(o: {
   // ONCE, in the header — not on every row. There is no per-item deep link to
   // give: triage is one screen, so the same URL on all 28 lines would be 28
   // identical lines of padding, and padding is what stops the brief being read.
-  if (o.appUrl) out.push(`triage: ${o.appUrl}/?feedback=1`)
+  if (o.appUrl) out.push(`triage: ${o.appUrl}${FEEDBACK_TRIAGE_PATH}`)
 
   for (const g of GROUPS) {
     const group = o.groups.find(x => x.type === g.type)

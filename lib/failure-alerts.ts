@@ -91,6 +91,7 @@ import { supabaseService } from './supabase-service'
 import { fetchWebhookLogEvents, type WebhookLogEvent } from './webhook-observability'
 import { SELF_HEAL_WINDOW_MS } from './webhook-digest'
 import { parseReconnectStamp } from './jobber-reconnect'
+import { FEEDBACK_TRIAGE_PATH } from './feedback-triage-link'
 
 export { parseReconnectStamp }
 
@@ -257,7 +258,7 @@ const leadFailureWhy = (reason: string): string => {
 //     which is where this alert pointed until this fix.
 export const OWNER_REPORT_DESC_MAX = 300
 const OWNER_REPORT_DESC_LINES = 4
-export const FEEDBACK_TRIAGE_PATH = '/admin?adminTab=feedback'
+export { FEEDBACK_TRIAGE_PATH }
 
 const REPORT_TYPE: Record<string, { label: string; emoji: string }> = {
   bug: { label: 'BUG', emoji: ':beetle:' },
