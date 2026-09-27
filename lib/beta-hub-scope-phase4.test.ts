@@ -52,6 +52,7 @@ function makeDb(tables: Record<string, any[]>) {
         return b
       },
       eq(col: string, val: any) { rows = rows.filter(r => r[col] === val); return b },
+      neq(col: string, val: any) { rows = rows.filter(r => r[col] !== val); return b },
       is(col: string, val: any) { rows = rows.filter(r => val === null ? r[col] == null : r[col] === val); return b },
       gt(col: string, val: any) { rows = rows.filter(r => Number(r[col]) > Number(val)); return b },
       gte(col: string, val: any) { rows = rows.filter(r => String(r[col]) >= String(val)); return b },

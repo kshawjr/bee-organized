@@ -132,7 +132,8 @@ async function enrichBoardRows(baseRows: any[]): Promise<any[]> {
   ])
   const quotesByEng = byEng(quotesRaw)
   const jobsByEng = byEng(jobsRaw)
-  const invoicesByEng = byEng(invoicesRaw)
+  // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
+  const invoicesByEng = byEng(invoicesRaw.filter((i: any) => i.status !== 'deleted'))
   const assessmentsByEng = byEng(assessmentsRaw)
   const serviceReqsByEng = byEng(serviceReqsRaw)
 

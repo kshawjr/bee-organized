@@ -24,6 +24,7 @@ import { isUnbookedJobStatus } from './jobber-import'
 import { resolveLeadAssignees } from './lead-assignment'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 import { invoicesFullyPaid } from '@/components/hive/shared/engagementStatus'
+import { isDeletedInvoice, keepsCollectedMoney, invoicesForReasoning } from '@/components/hive/shared/invoiceDeleted'
 
 export type EngagementStage =
   | 'Request'
@@ -160,7 +161,10 @@ export function deriveEngagementStage(
   const mode = opts.mode ?? 'live'
   const now = opts.nowMs ?? Date.now()
   const closeWonOnDone = opts.closeWonOnDone ?? true
-  const { sr, quotes, jobs, invoices } = children
+  const { sr, quotes, jobs } = children
+  // Invoices deleted in Jobber are not part of the deal (invoiceDeleted.js);
+  // a paid-then-deleted one reads as the paid invoice it was.
+  const invoices = invoicesForReasoning(children.invoices) as EngagementChildren['invoices']
 
   const liveJobs = jobs.filter(j => !jobDeleted(j))
   // See invoiceMoneyIn above: an action-required job on an engagement with
@@ -827,16 +831,40 @@ export async function resolveEngagementForChild(params: {
 // (which recomputes money only, never stage). paid_amount is what came in
 // on each invoice (all of it when paid; payments + deposit on an unpaid one
 // once Jobber's amounts are read); balance_owing is what is still owed.
+//
+// Invoices DELETED in Jobber (components/hive/shared/invoiceDeleted.js) owe
+// nothing and are left out — except one deleted AFTER it was paid, which
+// keeps its invoiced and collected money (Kevin's ruling: the client did
+// pay). Neither kind ever adds to balance_owing.
 export function rollUpInvoiceMoney(
-  invoices: Array<{ total?: any; paid_amount?: any; balance_owing?: any }>,
+  all: Array<{ status?: any; paid_at?: any; total?: any; paid_amount?: any; balance_owing?: any }>,
 ): { total_invoiced: number; total_paid: number; balance_owing: number } {
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
+  const invoices = all.filter(i => !isDeletedInvoice(i))
+  const kept = all.filter(keepsCollectedMoney)
   return {
-    total_invoiced: invoices.reduce((s, i) => s + num(i.total), 0),
-    total_paid: invoices.reduce((s, i) => s + num(i.paid_amount), 0),
+    total_invoiced: invoices.reduce((s, i) => s + num(i.total), 0) + kept.reduce((s, i) => s + num(i.total), 0),
+    total_paid: invoices.reduce((s, i) => s + num(i.paid_amount), 0) + kept.reduce((s, i) => s + num(i.paid_amount), 0),
     balance_owing: invoices.reduce(
       (s, i) => s + (i.balance_owing != null ? num(i.balance_owing) : num(i.total) - num(i.paid_amount)), 0),
   }
+}
+
+// Recompute an engagement's three money figures from its invoices and write
+// them — MONEY ONLY. Never reads or writes stage: used where something
+// about the invoices changed but nothing about the work did (an invoice
+// deleted in Jobber). Fail-soft: returns false on any error.
+export async function refreshEngagementMoney(engagementId: string): Promise<boolean> {
+  const { data, error } = await supabaseService
+    .from('invoices')
+    .select('status, paid_at, total, paid_amount, balance_owing')
+    .eq('engagement_id', engagementId)
+  if (error) return false
+  const { error: upErr } = await supabaseService
+    .from('engagements')
+    .update({ ...rollUpInvoiceMoney(data ?? []), updated_at: new Date().toISOString() })
+    .eq('id', engagementId)
+  return !upErr
 }
 
 // ── stage advance ─────────────────────────────────────────────────

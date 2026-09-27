@@ -27,6 +27,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { stageDisplayLabel } from './stageConfig'
+import { isDeletedInvoice } from './invoiceDeleted'
 
 export const WRITTEN_OFF = 'written_off'
 export const WRITTEN_OFF_LABEL = 'Written off'
@@ -74,7 +75,8 @@ const num = (v) => (v == null ? 0 : Number(v) || 0)
 export function writtenOffAmountFromInvoices(invoices = []) {
   let total = 0
   for (const i of invoices || []) {
-    if (!i || i.status === 'paid') continue
+    // paid, or deleted in Jobber (invoiceDeleted.js): nothing to write off
+    if (!i || i.status === 'paid' || isDeletedInvoice(i)) continue
     if (i.status === 'bad_debt') {
       total += Math.max(0, num(i.total) - num(i.paid_amount))
     } else {

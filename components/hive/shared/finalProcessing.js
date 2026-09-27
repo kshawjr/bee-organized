@@ -38,6 +38,7 @@
 
 import { invoicesSettled, WON_OVER_BALANCE } from './closeEngagement'
 import { hasBadDebt, writtenOffAmountFromInvoices, writtenOffInJobberExplainer } from './writtenOff'
+import { invoicesForReasoning, liveInvoices } from './invoiceDeleted'
 
 export { WON_OVER_BALANCE }
 
@@ -50,8 +51,10 @@ const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 // button come from the same rows. A paid invoice contributes nothing
 // even if a stale balance_owing lingers on it (that is exactly what
 // invoicesSettled forgives).
+//
+// An invoice DELETED in Jobber owes nothing and is not counted.
 export function owedOnInvoices(invoices = []) {
-  return (invoices || []).reduce(
+  return liveInvoices(invoices).reduce(
     (sum, i) => sum + (i?.status === 'paid' ? 0 : Number(i?.balance_owing) || 0),
     0,
   )
@@ -69,7 +72,8 @@ export function owedOnInvoices(invoices = []) {
 // invoice's balance is $0 afterwards, its full total before).
 export function finalProcessingCase(engagement, invoices = []) {
   if (!engagement || engagement.stage !== FINAL_PROCESSING) return null
-  const list = invoices || []
+  // Deleted-in-Jobber invoices are not part of the deal (invoiceDeleted.js).
+  const list = invoicesForReasoning(invoices)
   if (!invoicesSettled(list)) {
     const stillOwedElsewhere = owedOnInvoices(list.filter(i => i?.status !== 'bad_debt')) > 0
     return hasBadDebt(list) && !stillOwedElsewhere ? 'written_off' : 'owing'

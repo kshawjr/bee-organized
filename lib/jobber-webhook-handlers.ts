@@ -78,7 +78,10 @@
 //   INVOICE_PAID     → 'Closed Won'     forward-only + stop drip (kept
 //                                       defensively; Jobber signals payment
 //                                       via INVOICE_UPDATE in practice)
-//   INVOICE_DESTROY  → (no change)      null jobber_invoice_id on lead
+//   INVOICE_DESTROY  → (no change)      null jobber_invoice_id on lead +
+//                                       mark the invoice row deleted ($0
+//                                       owing; paid keeps its money) +
+//                                       recompute money only
 //   CLIENT_UPDATE    → (no change)      refresh name/email/phone. ALSO (#122):
 //                                       isArchived true → stamp leads.archived_at
 //                                       (lead drops off Inbox/active board) +
@@ -145,8 +148,10 @@ import {
   resolveEngagementForChild,
   attachToEngagement,
   maybeAdvanceEngagementStage,
+  refreshEngagementMoney,
 } from './engagements'
 import { readLeadMoneyTotals } from './lead-paid-total'
+import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/invoiceDeleted'
 import type { LocationRow } from './jobber-webhook'
 
 export type HandlerCtx = {
@@ -1252,10 +1257,58 @@ export async function handleJobDestroy(ctx: HandlerCtx): Promise<HandlerResult> 
   return res
 }
 
-// INVOICE_DESTROY → null jobber_invoice_id
-export function handleInvoiceDestroy(ctx: HandlerCtx) {
+// INVOICE_DESTROY → null jobber_invoice_id on the lead, AND mark the
+// invoices row deleted + recompute the money on its deal and its person.
+//
+// Before 2026-09-27 the invoices ROW was left untouched — unpaid, full
+// balance — so every deleted invoice kept showing as owed (13 of them,
+// $26,008, most replaced in Jobber by an invoice that was then paid). The
+// row is now marked by deletedInvoicePatch (components/hive/shared/
+// invoiceDeleted.js): status 'deleted', $0 owing; a PAID invoice keeps its
+// collected money (Kevin's ruling). Then the deal's and the person's money
+// totals are recomputed — MONEY ONLY: refreshEngagementMoney never touches
+// stage, so a deletion can never move a deal.
+//
+// The id arrives ENCODED (base64 gid) — decode it before matching the
+// numeric jobber_invoice_id we store. Fail-soft: the row marking never
+// fails the webhook; the lead nullify above already landed.
+export async function handleInvoiceDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.INVOICE_DESTROY
-  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'INVOICE_DESTROY')
+  const res = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'INVOICE_DESTROY')
+  try {
+    const numeric = extractJobberId(ctx.itemId) || ctx.itemId
+    const { data: rows, error } = await supabaseService
+      .from('invoices')
+      .select('id, engagement_id, lead_id, status')
+      .eq('jobber_invoice_id', numeric)
+      .eq('location_id', ctx.location.location_id)
+    if (error) throw new Error(error.message)
+    const marked = (rows || []).filter(r => !isDeletedInvoice(r))
+    for (const row of marked) {
+      await supabaseService
+        .from('invoices')
+        .update({ ...deletedInvoicePatch(row), updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (row.engagement_id) await refreshEngagementMoney(row.engagement_id)
+      if (row.lead_id) {
+        const money = await readLeadMoneyTotals(row.lead_id)
+        if (money.ok) {
+          await supabaseService.from('leads')
+            .update({ paid_amount: money.paidAmount, balance_owing: money.balanceOwing, updated_at: new Date().toISOString() })
+            .eq('id', row.lead_id)
+        }
+      }
+    }
+    if (marked.length) {
+      res.note = `${res.note || 'INVOICE_DESTROY'}; marked ${marked.length} invoice row(s) deleted + recomputed money (stage untouched)`
+    }
+  } catch (err: any) {
+    console.warn('[jobber-webhook] INVOICE_DESTROY invoice-row cleanup failed (webhook still processed)', {
+      itemId: ctx.itemId,
+      error: err?.message || String(err),
+    })
+  }
+  return res
 }
 
 // ASSESSMENT_DESTROY → null jobber_assessment_id (keep jobber_request_id)

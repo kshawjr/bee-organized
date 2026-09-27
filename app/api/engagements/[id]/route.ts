@@ -87,7 +87,9 @@ export async function GET(
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
-    supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
+    // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js) — the panel's list,
+    // Final Processing, Mark won and the owing override all read this.
+    supabaseService.from('invoices').select('*').eq('engagement_id', id).neq('status', 'deleted').order('issued_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('leads').select('id, name, first_name, last_name, company, jobber_client_id, email, phone, address, city, state, zip, request_details, source, referred_by_kind, referred_by_id').eq('id', engagement.client_id).maybeSingle(),
     // ONE query for every engagement this client has — it already
     // powered lifetime paid / prior count / other-open. Widened (NOT

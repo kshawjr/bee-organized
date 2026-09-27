@@ -266,7 +266,7 @@ export async function buildAllOverview(
   // renders: unpaid AND issued more than INVOICE_AGING_DAYS ago (8 rows today).
   const { rows: agingRows, truncated: agingTrunc } = await pageAll(
     db, 'invoices',
-    (q: any) => q.gt('balance_owing', 0).lt('issued_at', agingBefore),
+    (q: any) => q.gt('balance_owing', 0).lt('issued_at', agingBefore).neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
     CANDIDATE_MAX,
   )
   let agingTotal = 0
@@ -283,7 +283,7 @@ export async function buildAllOverview(
   // Outstanding is EVERY unpaid balance, not just the aging ones — a different
   // number from agingTotal on purpose, exactly as the scoped Home computes it.
   const { rows: unpaidRows, truncated: unpaidTrunc } = await pageAll(
-    db, 'invoices', (q: any) => q.gt('balance_owing', 0), CANDIDATE_MAX,
+    db, 'invoices', (q: any) => q.gt('balance_owing', 0).neq('status', 'deleted'), CANDIDATE_MAX, // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
   )
   const outstandingTotal = unpaidRows.reduce(
     (s: number, i: any) => s + (Number(i.balance_owing) > 0 ? Number(i.balance_owing) : 0), 0)

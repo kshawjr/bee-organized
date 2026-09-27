@@ -70,7 +70,8 @@ export async function GET(
       .eq('lead_id', id),
     supabaseService.from('invoices')
       .select('id, total, status, balance_owing, issued_at, paid_at, engagement_id')
-      .eq('lead_id', id),
+      .eq('lead_id', id)
+      .neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
     supabaseService.from('assessments')
       .select('id, scheduled_at, status, completed_at, engagement_id')
       .eq('lead_id', id),

@@ -27,8 +27,9 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { isDeletedInvoice, keepsCollectedMoney } from '@/components/hive/shared/invoiceDeleted'
 
-type InvoiceMoney = { status?: string | null; total?: number | string | null; paid_amount?: number | string | null; balance_owing?: number | string | null }
+type InvoiceMoney = { status?: string | null; paid_at?: string | null; total?: number | string | null; paid_amount?: number | string | null; balance_owing?: number | string | null }
 
 /**
  * Lifetime paid total from invoice rows: the sum of paid_amount over the
@@ -36,8 +37,11 @@ type InvoiceMoney = { status?: string | null; total?: number | string | null; pa
  * "never paid" stays distinct from "paid, then refunded to zero".
  * Rounded to cents so float noise never reads as a mismatch.
  */
+//
+// A paid invoice later DELETED in Jobber still counts (invoiceDeleted.js —
+// Kevin's ruling: the client did pay). An unpaid deleted one never does.
 export function sumPaidInvoices(invoices: InvoiceMoney[]): number | null {
-  const paid = invoices.filter(i => (i.status ?? null) === 'paid')
+  const paid = invoices.filter(i => (i.status ?? null) === 'paid' || keepsCollectedMoney(i))
   if (paid.length === 0) return null
   const total = paid.reduce((s, i) => s + (Number(i.paid_amount) || 0), 0)
   return Math.round(total * 100) / 100
@@ -53,7 +57,10 @@ export function sumPaidInvoices(invoices: InvoiceMoney[]): number | null {
  * note (negative total) makes the sum negative, and it stays negative: the
  * engagement shows the same figure. null when the lead has no invoice.
  */
-export function sumBalanceOwing(invoices: InvoiceMoney[]): number | null {
+//
+// Invoices DELETED in Jobber owe nothing and are left out entirely.
+export function sumBalanceOwing(all: InvoiceMoney[]): number | null {
+  const invoices = all.filter(i => !isDeletedInvoice(i))
   if (invoices.length === 0) return null
   const num = (v: unknown) => (v == null ? 0 : Number(v) || 0)
   const total = invoices.reduce(
@@ -71,7 +78,7 @@ export async function readLeadMoneyTotals(
 ): Promise<{ ok: true; paidAmount: number | null; balanceOwing: number | null } | { ok: false; error: string }> {
   const { data, error } = await supabaseService
     .from('invoices')
-    .select('status, total, paid_amount, balance_owing')
+    .select('status, paid_at, total, paid_amount, balance_owing')
     .eq('lead_id', leadId)
   if (error) return { ok: false, error: error.message }
   const rows = data ?? []

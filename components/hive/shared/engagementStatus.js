@@ -369,7 +369,12 @@ export function deriveStatusChip(e, opts = {}) {
   }
   const quotes = e.quotes || []
   const jobs = e.jobs || []
-  const invoices = e.invoices || []
+  // Invoices deleted in Jobber are not part of the deal; a paid one that was
+  // later deleted reads as paid (invoiceDeleted.js invoicesForReasoning —
+  // repeated here because this module takes no imports; beta-deleted-
+  // invoices pins the two to the same answers).
+  const invoices = (e.invoices || []).flatMap(i =>
+    i?.status !== 'deleted' ? [i] : i?.paid_at != null ? [{ ...i, status: 'paid', balance_owing: 0 }] : [])
 
   switch (e.stage) {
     case 'Request': {

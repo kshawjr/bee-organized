@@ -19,6 +19,7 @@
 
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
 import { WRITTEN_OFF } from './writtenOff'
+import { invoicesForReasoning } from './invoiceDeleted'
 
 // Close-LOST reasons are ADMIN-CONFIGURED (lookups category
 // 'closed_lost_reasons'): the wizard renders those labels and stores the
@@ -50,7 +51,11 @@ export const OTHER_LOST_REASON = 'Other'
 // owing" there means "we gave up", not "we were paid". Letting it through
 // would put Mark won on a deal that was written off. Those deals close as
 // Written off instead (writtenOff.js).
-export function invoicesSettled(invoices = []) {
+//
+// Invoices DELETED in Jobber are not there (invoiceDeleted.js); a paid one
+// that was later deleted still reads as paid.
+export function invoicesSettled(all = []) {
+  const invoices = invoicesForReasoning(all)
   return invoices.length === 0 ||
     invoices.every(i => i.status === 'paid' || (i.status !== 'bad_debt' && Number(i.balance_owing) === 0))
 }

@@ -81,6 +81,7 @@ const { rollUpInvoiceMoney } = await import(pathToFileURL(ROOT + '/lib/engagemen
 const { sumPaidInvoices, sumBalanceOwing } = await import(pathToFileURL(ROOT + '/lib/lead-paid-total.ts').href)
 const wo = await import(pathToFileURL(ROOT + '/components/hive/shared/writtenOff.js').href)
 const fp = await import(pathToFileURL(ROOT + '/components/hive/shared/finalProcessing.js').href)
+const inv_deleted = await import(pathToFileURL(ROOT + '/components/hive/shared/invoiceDeleted.js').href)
 
 async function sb(path, opts = {}) {
   const res = await fetch(`${SB_URL}/rest/v1/${path}`, {
@@ -202,7 +203,10 @@ for (const inv of unpaid) {
   try { r = await askJobber(inv.location_id, inv.jobber_invoice_id) } catch (e) { r = { errors: [{ message: e.message }] } }
   await sleep(300)
   const j = r?.data?.invoice
-  if (!j) { unreadable.push({ id: inv.id, slug: inv.location_id, error: r?.errors?.[0]?.message || 'not found' }); continue }
+  // Jobber answering "OK, no invoice" with NO error means the invoice was
+  // deleted there — an answer, not a mystery (it used to say "not found").
+  // Handled by scripts/repair-deleted-invoices.mjs, not here.
+  if (!j) { unreadable.push({ id: inv.id, slug: inv.location_id, error: r?.errors?.[0]?.message || inv_deleted.DELETED_IN_JOBBER_MESSAGE }); continue }
   jobberNow[inv.id] = j
   const jobberStatus = String(j.invoiceStatus || '').toUpperCase()
   const ourStatus = inv.status
@@ -266,7 +270,12 @@ const storedOwed = invoiceChanges.reduce((s, c) => s + (c.before.balance_owing |
 const realOwed = invoiceChanges.reduce((s, c) => s + (c.after.balance_owing || 0), 0)
 console.log(`unpaid invoices: ${unpaid.length} · asked Jobber: ${Object.keys(jobberNow).length} · skipped (no valid token): ${Object.values(skippedLocations).reduce((a, b) => a + b, 0)} at ${Object.keys(skippedLocations).length} locations`)
 if (Object.keys(skippedLocations).length) console.log(`   skipped: ${Object.entries(skippedLocations).map(([k, v]) => `${k} (${v})`).join(', ')}`)
-if (unreadable.length) console.log(`   could not read: ${unreadable.length} — ${unreadable.slice(0, 5).map(u => `${u.slug} ${u.error}`).join('; ')}`)
+if (unreadable.length) {
+  const gone = unreadable.filter(u => u.error === inv_deleted.DELETED_IN_JOBBER_MESSAGE)
+  const other = unreadable.filter(u => u.error !== inv_deleted.DELETED_IN_JOBBER_MESSAGE)
+  if (gone.length) console.log(`   deleted in Jobber (left for scripts/repair-deleted-invoices.mjs): ${gone.length} — ${Object.entries(gone.reduce((m, u) => ((m[u.slug] = (m[u.slug] || 0) + 1), m), {})).map(([k, v]) => `${k} ${v}`).join(', ')}`)
+  if (other.length) console.log(`   could not read: ${other.length} — ${other.map(u => `${u.slug} ${u.error}`).join('; ')}`)
+}
 if (statusMismatch.length) console.log(`   PAID in Jobber but unpaid here (left alone — status is the webhook's job): ${statusMismatch.length}`)
 const balanceMoves = invoiceChanges.filter(c => !same(c.before.balance_owing, c.after.balance_owing))
 const receivedOnly = invoiceChanges.length - balanceMoves.length

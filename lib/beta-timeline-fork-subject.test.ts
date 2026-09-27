@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
     const call: Call = { table, ops: [] }
     state.calls.push(call)
     const b: any = {}
-    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'or', 'not', 'range', 'ilike', 'is', 'limit', 'order', 'lte', 'in']) {
+    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'neq', 'or', 'not', 'range', 'ilike', 'is', 'limit', 'order', 'lte', 'in']) {
       b[m] = (...args: any[]) => { call.ops.push([m, args]); return b }
     }
     b.maybeSingle = () => { call.ops.push(['maybeSingle', []]); return Promise.resolve(resp) }

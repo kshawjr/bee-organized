@@ -275,7 +275,7 @@ export async function GET(
     const [q, j, inv, ass] = await Promise.all([
       supabaseService.from('quotes').select('id, engagement_id, status, total, sent_at, approved_at').in('engagement_id', openIds),
       supabaseService.from('jobs').select('id, engagement_id, status, title, scheduled_start, completed_at').in('engagement_id', openIds),
-      supabaseService.from('invoices').select('id, engagement_id, status, total, balance_owing').in('engagement_id', openIds),
+      supabaseService.from('invoices').select('id, engagement_id, status, total, balance_owing').in('engagement_id', openIds).neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
       supabaseService.from('assessments').select('id, engagement_id, scheduled_at, status, completed_at').in('engagement_id', openIds),
     ])
     const group = (rows: any[] | null) => {
