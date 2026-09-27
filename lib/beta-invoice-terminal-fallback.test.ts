@@ -175,6 +175,7 @@ describe('#98 — quotes and jobs are unaffected (rule 6 is invoice-only)', () =
     h.enqueue('jobs', { engagement_id: null })    // readEngagementIdOf('jobs')
     h.enqueue('engagements', [])                  // findOpen → none
     h.enqueue('engagements', [], { count: 0 })    // priorCount
+    h.enqueue('engagements', [])                  // rule 4b: no deal closed by job deletion lately
     // foundEngagement path (childTable !== 'invoices'):
     h.enqueue('jobs', { id: 'job-db-1', engagement_id: null, created_at: '2026-01-01' }) // founding child read
     h.enqueue('leads', { id: 'client-1', location_uuid: 'loc-uuid-1', location_id: 'loc_kc', name: 'X' })

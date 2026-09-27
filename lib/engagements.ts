@@ -785,6 +785,22 @@ export async function resolveEngagementForChild(params: {
     return openEng.id
   }
 
+  // 4b. A JOB for a client whose deal was closed only because its jobs were
+  //     deleted, recently: that is the work remade in Jobber — land it on
+  //     that deal (the caller reopens it) instead of founding a second one.
+  if (childTable === 'jobs') {
+    const closedByDeletion = await findJobDeletedCloseForClient(leadId)
+    if (closedByDeletion) {
+      await logFounding({
+        locationSlug: params.locationSlug ?? null,
+        engagementId: closedByDeletion.id,
+        foundedBy: 'job',
+        note: `job ${childId}: no open engagement — attached to the deal closed by job deletion in the last 14 days (the work remade in Jobber)`,
+      })
+      return closedByDeletion.id
+    }
+  }
+
   // 5. Invoices get no implicit founding (the founded_by CHECK has no
   //    'invoice' value by design). Rule 6 instead: an invoice is real money
   //    that must land on the client's deal even after every engagement has
@@ -907,6 +923,14 @@ export function stageAdvanceFor(
   return { advance, patch }
 }
 
+// The live replacement check, loaded lazily so this module's import graph
+// (and every test that mocks it) is unchanged. lib/deleted-job-replacement.ts.
+async function confirmDeletedJobClose(args: Parameters<typeof import('./deleted-job-replacement').deletedJobCloseConfirmed>[0]) {
+  const { deletedJobCloseConfirmed } = await import('./deleted-job-replacement')
+  return deletedJobCloseConfirmed(args)
+}
+
+
 // Recompute the engagement's stage from its own children and apply it
 // only when it is forward progress on ENGAGEMENT_STAGE_RANK. Also
 // refreshes the money roll-ups (cheap, and keeps weekly billing live).
@@ -934,7 +958,7 @@ export function stageAdvanceFor(
 export async function maybeAdvanceEngagementStage(
   engagementId: string,
   opts: { mode?: 'live' | 'backfill' } = {},
-): Promise<{ advanced: boolean; stage?: EngagementStage }> {
+): Promise<{ advanced: boolean; stage?: EngagementStage; held?: string }> {
   const { data: eng } = await supabaseService
     .from('engagements')
     .select('id, stage, closed_reason, client_id')
@@ -943,9 +967,9 @@ export async function maybeAdvanceEngagementStage(
   if (!eng) return { advanced: false }
 
   const [srRes, quotesRes, jobsRes, invoicesRes] = await Promise.all([
-    supabaseService.from('service_requests').select('requested_at, created_at').eq('engagement_id', engagementId).limit(1),
-    supabaseService.from('quotes').select('status, sent_at, approved_at, created_at').eq('engagement_id', engagementId),
-    supabaseService.from('jobs').select('status, completed_at, scheduled_start, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('service_requests').select('jobber_request_id, requested_at, created_at').eq('engagement_id', engagementId).limit(1),
+    supabaseService.from('quotes').select('jobber_quote_id, status, sent_at, approved_at, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('jobs').select('jobber_job_id, status, completed_at, scheduled_start, created_at').eq('engagement_id', engagementId),
     supabaseService.from('invoices').select('status, total, paid_amount, balance_owing, paid_at, issued_at, created_at').eq('engagement_id', engagementId),
   ])
   const invoices = invoicesRes.data ?? []
@@ -957,7 +981,7 @@ export async function maybeAdvanceEngagementStage(
   const staleLostRecoverable =
     eng.stage === 'Closed Lost' && eng.closed_reason === 'stale_on_import'
   const closeWonOnDone = mode === 'backfill' || staleLostRecoverable
-  const derived = deriveEngagementStage({
+  const children = {
     sr: srRes.data?.[0] ?? null,
     quotes: quotesRes.data ?? [],
     jobs: jobsRes.data ?? [],
@@ -966,7 +990,37 @@ export async function maybeAdvanceEngagementStage(
     // an archived quote closes the deal. Its own guard (all quotes archived,
     // no jobs, no invoices) makes it inert on job/invoice events. Reopen and
     // drift recovery call deriveEngagementStage directly WITHOUT this flag.
-  }, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: true })
+  }
+  let derived = deriveEngagementStage(children, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: true })
+
+  // THE LIVE REPLACEMENT CHECK (2026-09-27). A deletion closes the deal only
+  // once Jobber confirms the client has no job that could be the work
+  // remade (lib/deleted-job-replacement.ts). Asked only when the close would
+  // actually happen (forward move, 'job_deleted'); anything short of a clear
+  // "no" leaves the deal where it was. A job remade AFTER the close is
+  // handled by reopenIfClosedByJobDeletion below.
+  let heldNote: string | null = null
+  if (derived.closed_reason === 'job_deleted' && stageAdvanceFor(eng, derived).advance) {
+    const check = await confirmDeletedJobClose({
+      clientId: eng.client_id,
+      jobs: children.jobs,
+      quotes: children.quotes,
+      serviceRequests: srRes.data ?? [],
+    })
+    if (!check.confirmed) {
+      heldNote = check.reason
+      derived = deriveEngagementStage(children, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: false })
+    }
+  }
+  if (heldNote) {
+    await writeSyncLog({
+      location_id: 'unknown',
+      entity_id: engagementId,
+      entity_type: 'engagement',
+      status: 'success',
+      message: `[engagement:job_deleted] every job deleted but NOT closed — ${heldNote}`,
+    })
+  }
 
   const { advance, patch: stagePatch } = stageAdvanceFor(eng, derived)
   const patch: Record<string, any> = {
@@ -993,7 +1047,112 @@ export async function maybeAdvanceEngagementStage(
       console.error('[engagements] returning-sequence stop failed', { engagementId, err })
     }
   }
-  return advance ? { advanced: true, stage: derived.stage } : { advanced: false }
+  if (advance) return { advanced: true, stage: derived.stage }
+  return heldNote ? { advanced: false, held: heldNote } : { advanced: false }
+}
+
+// ── a job remade after a deletion closed its deal (2026-09-27) ─────────
+//
+// The live replacement check (above) cannot see a job made AFTER the
+// deletion — and on the 56 real deletions, 19 of 28 same-person jobs made
+// within a week came after it (mostly 1–10 minutes, some up to 5 days). So
+// the close has to be undoable by the one event that proves it wrong: a new
+// live job for that client.
+//
+// WHERE A REMADE JOB LANDS (resolveEngagementForChild), traced 2026-09-27:
+//   · made from the same request or quote → rules 1/2 attach it to the
+//     CLOSED deal, where forward-only never moves it: live work hidden on a
+//     Closed Lost card. reopenIfClosedByJobDeletion reopens it.
+//   · made fresh on the client (the common case in the data) → rule 4 finds
+//     no open deal and FOUNDS A SECOND ONE. The rule-4 fallback now first
+//     looks for a deal closed by job deletion in the last
+//     JOB_DELETED_REOPEN_WINDOW_MS and lands the job there instead.
+//
+// Only Closed Lost 'job_deleted' — a machine close — is ever reopened this
+// way. A human close, a written-off deal and Closed Won never are.
+export const JOB_DELETED_REOPEN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+
+export async function findJobDeletedCloseForClient(
+  clientId: string,
+  nowMs: number = Date.now(),
+): Promise<{ id: string } | null> {
+  const { data } = await supabaseService
+    .from('engagements')
+    .select('id, closed_at')
+    .eq('client_id', clientId)
+    .eq('stage', 'Closed Lost')
+    .eq('closed_reason', 'job_deleted')
+    .order('closed_at', { ascending: false })
+    .limit(1)
+  const row = (data as any)?.[0]
+  if (!row) return null
+  const closedAt = ts(row.closed_at)
+  return closedAt && nowMs - closedAt <= JOB_DELETED_REOPEN_WINDOW_MS ? { id: row.id } : null
+}
+
+// Reopen a deal that was closed ONLY because its jobs were deleted, once a
+// live job sits on it again. Re-derives exactly like the manual Reopen
+// (live mode, never auto-Won: a finished + paid deal rests at Final
+// Processing), writes a stage_change touchpoint (nobody clicked) and a
+// sync_log line. Guarded on the row still being a job-deletion close.
+export async function reopenIfClosedByJobDeletion(
+  engagementId: string,
+): Promise<{ reopened: boolean; stage?: EngagementStage }> {
+  const { data: eng } = await supabaseService
+    .from('engagements')
+    .select('id, stage, closed_reason, client_id, location_uuid')
+    .eq('id', engagementId)
+    .maybeSingle()
+  if (!eng || eng.stage !== 'Closed Lost' || eng.closed_reason !== 'job_deleted') return { reopened: false }
+
+  const [srRes, quotesRes, jobsRes, invoicesRes] = await Promise.all([
+    supabaseService.from('service_requests').select('requested_at, created_at').eq('engagement_id', engagementId).limit(1),
+    supabaseService.from('quotes').select('status, sent_at, approved_at, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('jobs').select('status, completed_at, scheduled_start, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('invoices').select('status, total, paid_amount, balance_owing, paid_at, issued_at, created_at').eq('engagement_id', engagementId),
+  ])
+  const jobs = jobsRes.data ?? []
+  if (!jobs.some((j: any) => !isDeletedJob(j))) return { reopened: false } // still no live work
+  const derived = deriveEngagementStage({
+    sr: srRes.data?.[0] ?? null, quotes: quotesRes.data ?? [], jobs, invoices: invoicesRes.data ?? [],
+  }, { mode: 'live', closeWonOnDone: false })
+  if (derived.stage === 'Closed Lost' || derived.stage === 'Closed Won') return { reopened: false }
+
+  const nowIso = new Date().toISOString()
+  const { data: written, error } = await supabaseService
+    .from('engagements')
+    .update({
+      stage: derived.stage,
+      stage_entered_at: nowIso,
+      closed_at: null,
+      closed_reason: null,
+      closed_note: null,
+      nurture_started_at: null,
+      ...rollUpInvoiceMoney(invoicesRes.data ?? []),
+      updated_at: nowIso,
+    })
+    .eq('id', engagementId)
+    .eq('stage', 'Closed Lost')
+    .eq('closed_reason', 'job_deleted')
+    .select('id')
+  if (error || !(written as any)?.length) return { reopened: false }
+
+  await supabaseService.from('touchpoints').insert({
+    lead_id: eng.client_id,
+    location_uuid: eng.location_uuid,
+    engagement_id: engagementId,
+    kind: 'stage_change',
+    label: `Reopened: Closed Lost → ${derived.stage} (the job was remade in Jobber)`,
+    occurred_at: nowIso,
+  })
+  await writeSyncLog({
+    location_id: 'unknown',
+    entity_id: engagementId,
+    entity_type: 'engagement',
+    status: 'success',
+    message: `[engagement:job_remade] a live job arrived on a deal closed by job deletion — reopened to ${derived.stage}`,
+  })
+  return { reopened: true, stage: derived.stage }
 }
 
 // ── drift recovery (panel-open re-derive) ─────────────────────────

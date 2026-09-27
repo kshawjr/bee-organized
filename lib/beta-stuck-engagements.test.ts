@@ -133,6 +133,12 @@ describe('deleted jobs close on their own', () => {
     h.enqueue('quotes', [])
     h.enqueue('jobs', [{ status: 'deleted', completed_at: null }])
     h.enqueue('invoices', [])
+    // 2026-09-27: the close is confirmed with Jobber first — the client has
+    // no other job (lib/deleted-job-replacement.ts).
+    h.enqueue('leads', null) // the nullify's lead UPDATE consumes a slot
+    h.enqueue('leads', { jobber_client_id: '999', location_id: 'loc_test' })
+    const { jobberGraphQL } = await import('@/lib/jobber')
+    ;(jobberGraphQL as any).mockResolvedValueOnce({ data: { client: { id: 'c', jobs: { nodes: [] } } } })
     const res = await handleJobDestroy({
       topic: 'JOB_DESTROY', itemId: '777', accountId: 'a', occurredAt: 'x',
       location: { id: 'loc-uuid', location_id: 'loc_test', name: 'Test' },

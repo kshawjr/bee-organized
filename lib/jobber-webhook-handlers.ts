@@ -67,8 +67,12 @@
 //   JOB_COMPLETE     → 'Closed Won'     forward-only + stop drip
 //   JOB_DESTROY      → 'Closed Lost'    null jobber_job_id on lead + mark
 //                    ('job_deleted')    the job row deleted + re-derive: only
-//                                       when EVERY job is deleted and nothing
-//                                       was invoiced (forward-only, Reopen-able)
+//                                       when EVERY job is deleted, nothing
+//                                       was invoiced, AND Jobber confirms the
+//                                       client has no replacement job
+//                                       (forward-only, Reopen-able; a job
+//                                       remade later reopens it — see
+//                                       reopenIfClosedByJobDeletion)
 //   INVOICE_CREATE   → (no change)      stamp invoice_created_at +
 //                                       balance_owing
 //   INVOICE_UPDATE   → 'Closed Won' when the refreshed invoiceStatus is
@@ -152,6 +156,7 @@ import {
   attachToEngagement,
   maybeAdvanceEngagementStage,
   refreshEngagementMoney,
+  reopenIfClosedByJobDeletion,
 } from './engagements'
 import { readLeadMoneyTotals } from './lead-paid-total'
 import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/invoiceDeleted'
@@ -639,6 +644,10 @@ async function handleJobCore(
     })
     if (engId) {
       await attachToEngagement('jobs', jRes.id, engId)
+      // A live job on a deal that a job deletion closed: the work was
+      // remade in Jobber — reopen it (engagements.ts reopenIfClosedByJobDeletion;
+      // a no-op on every other deal).
+      await reopenIfClosedByJobDeletion(engId)
       await maybeAdvanceEngagementStage(engId)
     }
   } catch (err: any) {
@@ -1240,6 +1249,14 @@ export function handleQuoteDestroy(ctx: HandlerCtx) {
 // handleInvoiceDestroy does. The re-derive (maybeAdvanceEngagementStage)
 // also recomputes the deal's money from its invoices; a job carries no
 // money of its own, so the person's totals do not change.
+//
+// THE REPLACEMENT CHECK (2026-09-27). Before the re-derive closes a deal,
+// Jobber is asked whether the client has a job that could be the work
+// remade (lib/deleted-job-replacement.ts); if so, or if Jobber can't be
+// read, the deal stays open and res.note says why. That catches a job
+// remade BEFORE the deletion. One remade AFTER it (19 of 28 in the real
+// data) reopens the deal when it arrives — handleJobCore →
+// reopenIfClosedByJobDeletion. Nothing here waits.
 export async function handleJobDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.JOB_DESTROY
   const res = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'JOB_DESTROY')
@@ -1252,15 +1269,20 @@ export async function handleJobDestroy(ctx: HandlerCtx): Promise<HandlerResult> 
       .eq('location_id', ctx.location.location_id)
     if (error) throw new Error(error.message)
     const marked = (rows || []).filter(r => !isDeletedJob(r))
+    const held: string[] = []
     for (const row of marked) {
       await supabaseService
         .from('jobs')
         .update({ status: JOB_DELETED, updated_at: new Date().toISOString() })
         .eq('id', row.id)
-      if (row.engagement_id) await maybeAdvanceEngagementStage(row.engagement_id)
+      if (row.engagement_id) {
+        const adv = await maybeAdvanceEngagementStage(row.engagement_id)
+        if (adv.held) held.push(adv.held)
+      }
     }
     if (marked.length) {
       res.note = `${res.note || 'JOB_DESTROY'}; marked ${marked.length} job row(s) deleted + re-derived engagement`
+      if (held.length) res.note += `; NOT closed — ${held.join('; ')}`
     }
   } catch (err: any) {
     console.warn('[jobber-webhook] JOB_DESTROY job-row cleanup failed (webhook still processed)', {

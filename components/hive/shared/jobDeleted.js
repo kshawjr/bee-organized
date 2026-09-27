@@ -60,6 +60,10 @@ export function liveJobs(list) {
 // cannot see — on another deal, or missing from Bee Hub altogether.
 //
 // clientJobs: [{ id (numeric string), jobStatus, createdAt }]
+/**
+ * @param {{ clientJobs?: any[], deletedJobberIds?: string[], deletedCreatedAt?: string | null, onThisDeal?: string[] }} [args]
+ * @returns {any[]}
+ */
 export function findReplacementJobs({ clientJobs = [], deletedJobberIds = [], deletedCreatedAt = null, onThisDeal = [] } = {}) {
   const gone = new Set([...(deletedJobberIds || []), ...(onThisDeal || [])].map(String))
   const since = deletedCreatedAt ? Date.parse(deletedCreatedAt) : NaN
@@ -73,6 +77,7 @@ export function findReplacementJobs({ clientJobs = [], deletedJobberIds = [], de
 
 // May a deal move because its jobs were deleted? Only when Jobber was read
 // and has no replacement. Unreadable is not "gone": it holds.
+/** @param {{ readable: boolean, replacements?: any[] }} args */
 export function deletedJobMoveDecision({ readable, replacements = [] }) {
   if (!readable) return 'hold_unreadable'
   if ((replacements || []).length > 0) return 'hold_replacement'

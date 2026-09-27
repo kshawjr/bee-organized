@@ -49,7 +49,11 @@ vi.mock('@/lib/drip-lifecycle', () => ({ applyDripSideEffects: vi.fn(async () =>
 vi.mock('@/lib/jobber-disconnect', () => ({ disconnectJobberFromLocation: vi.fn(async () => ({ error: null })) }))
 
 import { handleJobDestroy } from '@/lib/jobber-webhook-handlers'
-import { deriveEngagementStage, stageAdvanceFor } from '@/lib/engagements'
+import {
+  deriveEngagementStage, stageAdvanceFor, maybeAdvanceEngagementStage, reopenIfClosedByJobDeletion,
+  findJobDeletedCloseForClient, resolveEngagementForChild, JOB_DELETED_REOPEN_WINDOW_MS,
+} from '@/lib/engagements'
+import { jobberGraphQL } from '@/lib/jobber'
 import {
   isDeletedJob, liveJobs, JOB_DELETED, findReplacementJobs, deletedJobMoveDecision,
 } from '@/components/hive/shared/jobDeleted'
@@ -73,6 +77,8 @@ const paidInv = (total: number) => ({ status: 'paid', total, paid_amount: total,
 // row write, then maybeAdvance's five reads (jobs as they are AFTER the mark).
 function destroyScenario(engagement: any, jobsAfter: any[], invoices: any[] = [], quotes: any[] = []) {
   h.enqueue('leads', { id: 'lead-1' })
+  h.enqueue('leads', null)                                                  // the nullify's lead UPDATE
+  h.enqueue('leads', { jobber_client_id: '999', location_id: 'loc_dallas' }) // the replacement check's read (only if it runs)
   h.enqueue('jobs', [{ id: 'job-1', engagement_id: engagement.id, status: 'upcoming' }])
   h.enqueue('jobs', null)
   h.enqueue('engagements', engagement)
@@ -81,6 +87,9 @@ function destroyScenario(engagement: any, jobsAfter: any[], invoices: any[] = []
   h.enqueue('jobs', jobsAfter)
   h.enqueue('invoices', invoices)
 }
+
+const jobberClientHas = (nodes: any[]) => (jobberGraphQL as any).mockResolvedValueOnce({ data: { client: { id: 'gid-c', jobs: { nodes } } } })
+const jobGid = (n: string) => Buffer.from(`gid://Jobber/Job/${n}`).toString('base64')
 
 // ── 1. the id ─────────────────────────────────────────────────────────────
 describe('JOB_DESTROY matches on the DECODED id — the bug that hid for months', () => {
@@ -116,6 +125,7 @@ describe('JOB_DESTROY matches on the DECODED id — the bug that hid for months'
 describe('every job deleted, nothing invoiced → Closed Lost "job deleted", Reopen-able', () => {
   it('via the webhook: the deal closes with its reason and note; money rolled up from invoices', async () => {
     destroyScenario({ id: 'eng-1', stage: 'Job in Progress', closed_reason: null, client_id: 'lead-1' }, [{ status: 'deleted', completed_at: null }])
+    jobberClientHas([])   // Jobber: the client has no other job
     await handleJobDestroy(ctx(gid('155590816')))
     const patch = updates('engagements')[0]
     expect(patch.stage).toBe('Closed Lost')
@@ -276,5 +286,163 @@ describe('the 14 Closed Won deals with no job left are untouched', () => {
     expect(src).toMatch(/const EXECUTE = argv\.includes\('--execute'\)/)   // dry run unless asked
     expect(src).toMatch(/--undo/)
     expect(src).toMatch(/job\(id:\$id\)\{id jobStatus\}/)                     // each job re-checked in Jobber at run time
+  })
+})
+
+// ── 6. the live replacement check (2026-09-27) ─────────────────────────────
+describe('before a deletion closes a deal, Jobber is asked whether the work was remade', () => {
+  const JIP = { id: 'eng-9', stage: 'Job in Progress', closed_reason: null, client_id: 'lead-1' }
+  const deletedJob = [{ jobber_job_id: '155590816', status: 'deleted', completed_at: null, created_at: '2026-09-20T00:00:00Z' }]
+
+  it('a deletion with a LIVE replacement in Jobber does not close the deal', async () => {
+    destroyScenario(JIP, deletedJob)
+    jobberClientHas([{ id: jobGid('160000001'), jobNumber: 1200, jobStatus: 'upcoming', createdAt: '2026-09-27T12:01:00Z' }])
+    const res = await handleJobDestroy(ctx(gid('155590816')))
+    const patch = updates('engagements')[0]
+    expect(patch.stage).toBeUndefined()
+    expect(patch.closed_reason).toBeUndefined()
+    expect(res.note).toMatch(/NOT closed — client still has 1 possible replacement/)
+    // it asked about the CLIENT's jobs, by the stored client id
+    const call = (jobberGraphQL as any).mock.calls.find((c: any[]) => /client\(id:\$id\)\{id jobs/.test(c[1]))
+    expect(call[0]).toBe('loc_dallas')
+    expect(Buffer.from(call[2].id, 'base64').toString()).toBe('gid://Jobber/Client/999')
+  })
+
+  it('a deletion with nothing left in Jobber still closes it (the August rule)', async () => {
+    destroyScenario(JIP, deletedJob)
+    jobberClientHas([{ id: jobGid('1058'), jobNumber: 1058, jobStatus: 'archived', createdAt: '2026-06-28T00:00:00Z' }]) // old, finished
+    await handleJobDestroy(ctx(gid('155590816')))
+    expect(updates('engagements')[0]).toMatchObject({ stage: 'Closed Lost', closed_reason: 'job_deleted' })
+  })
+
+  it('Jobber cannot be read → not closed (unreadable is not "gone")', async () => {
+    destroyScenario(JIP, deletedJob)
+    ;(jobberGraphQL as any).mockResolvedValueOnce({ errors: [{ message: 'no_valid_jobber_token' }] })
+    const res = await handleJobDestroy(ctx(gid('155590816')))
+    expect(updates('engagements')[0].stage).toBeUndefined()
+    expect(res.note).toMatch(/NOT closed — Jobber could not be read/)
+  })
+
+  it('no Jobber client id on the person → asked through the deal\'s quote', async () => {
+    h.enqueue('engagements', JIP)
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [{ jobber_quote_id: '65073712', status: 'approved' }])
+    h.enqueue('jobs', deletedJob)
+    h.enqueue('invoices', [])
+    h.enqueue('leads', { jobber_client_id: null, location_id: 'loc_ctshoreline' })
+    ;(jobberGraphQL as any).mockResolvedValueOnce({ data: { quote: { client: { id: Buffer.from('gid://Jobber/Client/4242').toString('base64') } } } })
+    jobberClientHas([])
+    const r = await maybeAdvanceEngagementStage('eng-9')
+    expect(r).toMatchObject({ advanced: true, stage: 'Closed Lost' })
+    const clientCall = (jobberGraphQL as any).mock.calls.find((c: any[]) => /client\(id:\$id\)\{id jobs/.test(c[1]))
+    expect(Buffer.from(clientCall[2].id, 'base64').toString()).toBe('gid://Jobber/Client/4242')
+  })
+
+  it('Jobber is only asked when the deal would actually close — never for an ordinary move', async () => {
+    destroyScenario({ id: 'eng-2', stage: 'Job in Progress', closed_reason: null, client_id: 'lead-1' },
+      [upcoming({ status: 'deleted' }), archived()], [paidInv(9066.14)])
+    await handleJobDestroy(ctx(gid('156427200')))
+    expect(updates('engagements')[0].stage).toBe('Final Processing')
+    expect(jobberGraphQL).not.toHaveBeenCalled()
+  })
+})
+
+// ── 7. the race: a job remade AFTER the close reopens the deal ─────────────
+describe('the race — Jobber sends the deletion before the replacement exists', () => {
+  it('pinned: the live check does not wait — no timer, no sleep, no retry loop in the webhook path', () => {
+    for (const f of ['lib/deleted-job-replacement.ts', 'lib/engagements.ts', 'lib/jobber-webhook-handlers.ts']) {
+      const src = readFileSync(f, 'utf8')
+      expect(src, f).not.toMatch(/setTimeout|\bsleep\(/)
+    }
+  })
+
+  it('a remade job that lands on the closed deal (same quote/request) reopens it — re-derived, trail written', async () => {
+    h.enqueue('engagements', { id: 'eng-c', stage: 'Closed Lost', closed_reason: 'job_deleted', client_id: 'lead-1', location_uuid: 'loc-uuid' })
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [{ status: 'approved' }])
+    h.enqueue('jobs', [upcoming({ status: 'deleted' }), upcoming()])   // the old one deleted, the remade one live
+    h.enqueue('invoices', [])
+    h.enqueue('engagements', [{ id: 'eng-c' }])                          // the guarded UPDATE ... select
+    const r = await reopenIfClosedByJobDeletion('eng-c')
+    expect(r).toEqual({ reopened: true, stage: 'Job in Progress' })
+    const patch = updates('engagements')[0]
+    expect(patch).toMatchObject({ stage: 'Job in Progress', closed_reason: null, closed_at: null, closed_note: null })
+    const guard = h.state.calls.find(c => c.table === 'engagements' && c.ops.some(o => o[0] === 'update'))!
+    expect(guard.ops).toContainEqual(['eq', ['closed_reason', 'job_deleted']])
+    const tp = h.state.calls.find(c => c.table === 'touchpoints')!.ops.find(o => o[0] === 'insert')![1][0]
+    expect(tp).toMatchObject({ kind: 'stage_change', engagement_id: 'eng-c', label: 'Reopened: Closed Lost → Job in Progress (the job was remade in Jobber)' })
+  })
+
+  it('a remade job made fresh on the client (no quote/request link) lands on the recently closed deal, not a second one', async () => {
+    const now = Date.now()
+    h.enqueue('jobs', { engagement_id: null })                                        // not attached yet
+    h.enqueue('engagements', [])                                                      // no open deal
+    h.enqueue('engagements', [], { count: 1 } as any)                                 // priorCount
+    h.enqueue('engagements', [{ id: 'eng-c', closed_at: new Date(now - 3 * 864e5).toISOString() }]) // closed by deletion 3 days ago
+    const id = await resolveEngagementForChild({ childTable: 'jobs', childId: 'job-new', leadId: 'lead-1', locationSlug: 'loc_kc' })
+    expect(id).toBe('eng-c')
+    expect(h.state.calls.some(c => c.table === 'engagements' && c.ops.some(o => o[0] === 'insert'))).toBe(false)
+  })
+
+  it('the landing window is 14 days — the longest measured gap was about 5 days', async () => {
+    expect(JOB_DELETED_REOPEN_WINDOW_MS).toBe(14 * 24 * 60 * 60 * 1000)
+    const now = Date.parse('2026-10-01T00:00:00Z')
+    h.enqueue('engagements', [{ id: 'eng-c', closed_at: '2026-09-20T00:00:00Z' }])
+    expect(await findJobDeletedCloseForClient('lead-1', now)).toEqual({ id: 'eng-c' })
+    h.enqueue('engagements', [{ id: 'eng-c', closed_at: '2026-09-01T00:00:00Z' }])
+    expect(await findJobDeletedCloseForClient('lead-1', now)).toBeNull()
+    const q = h.state.calls.filter(c => c.table === 'engagements')[0].ops
+    expect(q).toContainEqual(['eq', ['stage', 'Closed Lost']])
+    expect(q).toContainEqual(['eq', ['closed_reason', 'job_deleted']])
+  })
+
+  it('only a job-deletion close reopens: a human Lost, a written-off deal and Closed Won never do', async () => {
+    for (const eng of [
+      { stage: 'Closed Lost', closed_reason: 'Price too high' },
+      { stage: 'Closed Lost', closed_reason: 'written_off' },
+      { stage: 'Closed Won', closed_reason: 'won' },
+    ]) {
+      h.reset()
+      h.enqueue('engagements', { id: 'e', client_id: 'lead-1', ...eng })
+      expect(await reopenIfClosedByJobDeletion('e')).toEqual({ reopened: false })
+      expect(updates('engagements')).toHaveLength(0)
+    }
+  })
+
+  it('the job webhook reopens before it re-derives, on every job create/update', () => {
+    const src = readFileSync('lib/jobber-webhook-handlers.ts', 'utf8')
+    const core = src.slice(src.indexOf('async function handleJobCore'), src.indexOf('// Lead-level: jobber_job_id'))
+    expect(core).toMatch(/await reopenIfClosedByJobDeletion\(engId\)\s*\n\s*await maybeAdvanceEngagementStage\(engId\)/)
+  })
+})
+
+// ── 8. the 8 already closed stay closed ────────────────────────────────────
+describe('the 8 deals the repair closed stay closed', () => {
+  const CLOSED = { id: 'eng-8', stage: 'Closed Lost', closed_reason: 'job_deleted', client_id: 'lead-1', location_uuid: 'u' }
+  it('any re-derive leaves them: no stage written, Jobber not asked', async () => {
+    h.enqueue('engagements', CLOSED)
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [])
+    h.enqueue('jobs', [upcoming({ status: 'deleted' })])
+    h.enqueue('invoices', [])
+    expect(await maybeAdvanceEngagementStage('eng-8')).toEqual({ advanced: false })
+    expect(updates('engagements')[0].stage).toBeUndefined()
+    expect(jobberGraphQL).not.toHaveBeenCalled()
+  })
+
+  it('no reopen without a live job on the deal — only a remade job can reopen one', async () => {
+    h.enqueue('engagements', CLOSED)
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [])
+    h.enqueue('jobs', [upcoming({ status: 'deleted' })])
+    h.enqueue('invoices', [])
+    expect(await reopenIfClosedByJobDeletion('eng-8')).toEqual({ reopened: false })
+    expect(updates('engagements')).toHaveLength(0)
+  })
+
+  it('nothing runs over existing deals: the reopen is called from ONE place, the job webhook', () => {
+    const { execSync } = require('child_process')
+    const hits = execSync("grep -rln 'reopenIfClosedByJobDeletion(' app lib scripts components --include=*.ts --include=*.tsx --include=*.js --include=*.mjs | grep -v '\\.test\\.'").toString().trim().split('\n').sort()
+    expect(hits).toEqual(['lib/engagements.ts', 'lib/jobber-webhook-handlers.ts'])   // defined + the one caller
   })
 })
