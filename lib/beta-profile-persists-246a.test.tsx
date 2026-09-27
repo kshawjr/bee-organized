@@ -237,7 +237,8 @@ describe('the saved value survives a reload', () => {
   })
 
   it('the route persists all three and recomputes full_name', () => {
-    expect(ROUTE).toMatch(/const \{ first_name, last_name, phone, booking_link \} =/)
+    // (the email-signature fields ride the same destructure since {{signature}})
+    expect(ROUTE).toMatch(/const \{ first_name, last_name, phone, booking_link(, signature_title, signature_photo_path)? \} =/)
     expect(ROUTE).toContain('patch.first_name = first_name.trim() || null')
     expect(ROUTE).toContain('patch.last_name  = last_name.trim()  || null')
     expect(ROUTE).toContain('patch.phone      = phone.trim()      || null')

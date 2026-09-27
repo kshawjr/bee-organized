@@ -21,6 +21,8 @@ import {
 import { nextSendAt } from './drip-time'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
+import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
+import { resolveEmailSignature } from './email-signature-resolve'
 
 export type SendDripResult = {
   sent: boolean
@@ -305,7 +307,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     reviews_link: loc.reviews_link,
   }
 
-  const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx)
+  const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx, { signatureMarker: true })
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the step /
   // template subject is NULL/empty, or it renders to nothing. HOLD exactly
@@ -333,8 +335,18 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // values the body tokens use — and never re-renders tokens. bodyToHtml is
   // left for welcome/stage emails (drips only). The plain-text alternative is
   // rebuilt to match, not left stale.
-  const html = buildBrandedDripHtml(rendered.body, ctx)
-  const text = buildBrandedDripText(rendered.body, ctx)
+  //
+  // {{signature}} is resolved only when the body actually uses it, so a drip
+  // without the tag makes no extra reads and sends exactly as before.
+  const signature = hasSignatureTag(bodySource)
+    ? await resolveEmailSignature({
+        locationId: loc.id,
+        locationName: loc.name,
+        assigneeUserId: lead.assigned_to ?? null,
+      })
+    : null
+  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature })
+  const text = buildBrandedDripText(rendered.body, { ...ctx, signature })
 
   // Per-project-type SENDER routing. If the location split senders by project
   // type, this drip sends AS the sender assigned to the lead's project_type;
@@ -632,14 +644,23 @@ export async function advanceOrComplete(
 // Minimal text→HTML: escape, then turn paragraph breaks into <p>.
 // Templates are plain text today; this keeps Resend's HTML field happy
 // without pretending to be a full Markdown renderer.
-export function bodyToHtml(text: string): string {
+//
+// {{signature}}: when the body carries SIGNATURE_MARKER (renderTemplate with
+// { signatureMarker: true }), the text is split on it, every piece escaped
+// here exactly as before, and the fixed signature layout joined in between.
+// With no marker the output is byte-identical to before.
+function plainParagraphs(text: string): string {
   const esc = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  const paragraphs = esc
+  return esc
     .split(/\n{2,}/)
     .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
     .join('\n')
+}
+
+export function bodyToHtml(text: string, signature?: EmailSignature | null): string {
+  const paragraphs = htmlWithSignature(text, plainParagraphs, signature)
   return `<div style="font-family:system-ui,sans-serif;line-height:1.5;color:#222">${paragraphs}</div>`
 }

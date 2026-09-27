@@ -14,6 +14,7 @@ import { Resend } from 'resend'
 import { supabaseService } from './supabase-service'
 import { logNotificationFanout, type NotificationContext } from './notification-log'
 import { resolveHandlerForRawType } from './project-type-handlers'
+import { SIGNATURE_MARKER, SIGNATURE_TAG_RE } from './email-signature'
 
 let _resend: import('resend').Resend | null = null
 function getResend() {
@@ -133,13 +134,24 @@ function applyVars(input: string | null | undefined, ctx: RenderContext): string
   })
 }
 
+// {{signature}} is not a RenderContext value — it is HTML, built by
+// lib/email-signature.ts, and can't be substituted as text into a body that is
+// escaped afterwards. With { signatureMarker: true } the BODY's {{signature}}
+// becomes SIGNATURE_MARKER, which the client-email body builders swap for the
+// signature. Without the option (every other caller) it renders empty, exactly
+// as any unknown tag always has. In a SUBJECT it is always empty.
 export function renderTemplate(
   template: { subject: string | null; body: string },
   context: RenderContext,
+  options: { signatureMarker?: boolean } = {},
 ): { subject: string; body: string } {
+  const subject = (template.subject ?? '').replace(SIGNATURE_TAG_RE, '')
+  const body = options.signatureMarker
+    ? (template.body ?? '').replace(SIGNATURE_TAG_RE, SIGNATURE_MARKER)
+    : template.body
   return {
-    subject: applyVars(template.subject, context),
-    body: applyVars(template.body, context),
+    subject: applyVars(subject, context),
+    body: applyVars(body, context),
   }
 }
 

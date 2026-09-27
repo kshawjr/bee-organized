@@ -26,6 +26,8 @@ import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-
 import { bodyToHtml } from './drip-send'
 import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { hasSignatureTag, textWithSignature } from './email-signature'
+import { resolveEmailSignature } from './email-signature-resolve'
 import { appendCanSpamFooter } from './marketing-unsubscribe'
 import { resolveLocationTemplateFork } from './template-fork'
 
@@ -103,7 +105,12 @@ export function renderStageEmailContent(
       text: buildBrandedDripText(renderedBody, brandCtx),
     }
   }
-  return { html: bodyToHtml(renderedBody), text: renderedBody }
+  // {{signature}} rides brandCtx.signature into the plain path too; with no
+  // marker in the body both halves are byte-identical to before.
+  return {
+    html: bodyToHtml(renderedBody, brandCtx.signature),
+    text: textWithSignature(renderedBody, brandCtx.signature),
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -411,7 +418,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     return { sent: false, error: 'missing_booking_link' }
   }
 
-  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
+  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true })
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
   // subject is NULL/empty, or it renders to nothing. HOLD — send_at stays
@@ -430,10 +437,22 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // layout; commercial closed-job templates keep the plain path. The wrapper
   // reads the location chrome (name/phone/reviews) off the same resolved values
   // the body tokens use, and never re-renders tokens.
+  //
+  // {{signature}} is resolved only when the template uses it (no extra reads
+  // otherwise). Same chain as drips: assignee active here → primary owner →
+  // the location.
+  const signature = hasSignatureTag(tpl.body)
+    ? await resolveEmailSignature({
+        locationId: loc.id,
+        locationName: loc.name,
+        assigneeUserId: lead.assigned_to ?? null,
+      })
+    : null
   let { html, text } = renderStageEmailContent(row.stage_email_key, rendered.body, {
     location_name: loc.name,
     location_phone: loc.phone,
     reviews_link: loc.reviews_link,
+    signature,
   })
 
   // #115 — the two Closed-Job follow-ups are COMMERCIAL, so they carry the

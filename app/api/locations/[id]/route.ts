@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
+import { safeHttpUrl } from '@/lib/email-signature'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
 //         sender_name?, send_from_email?, reply_to_email?,
-//         reviews_link?, calendar_link? }
+//         reviews_link?, calendar_link?,
+//         website_url?, facebook_url?, instagram_url?, linkedin_url? }
 //
 // Updates the location row. Authorization:
 //   - super_admin: can edit any location
@@ -38,6 +40,20 @@ const ALLOWED_FIELDS = [
   // semantics here — the send guard then HOLDS rate-quoting sends).
   'rate_per_hour',
 ] as const
+
+// The location's own web presence, shown in every {{signature}} from this
+// location (lib/email-signature.ts) — location specific, never corporate.
+// Stored normalised ("beeorganized.com/kc" → "https://beeorganized.com/kc");
+// anything that isn't an http(s) web address is refused, so nothing but a
+// real link can reach an href in a client email. Blank clears.
+// Requires migrations/email_signatures.sql.
+const SIGNATURE_LINK_FIELDS = ['website_url', 'facebook_url', 'instagram_url', 'linkedin_url'] as const
+const SIGNATURE_LINK_NOUNS: Record<(typeof SIGNATURE_LINK_FIELDS)[number], string> = {
+  website_url: 'Website',
+  facebook_url: 'Facebook',
+  instagram_url: 'Instagram',
+  linkedin_url: 'LinkedIn',
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -76,6 +92,20 @@ export async function PATCH(
       }
     }
 
+    for (const field of SIGNATURE_LINK_FIELDS) {
+      const v = body?.[field]
+      if (typeof v !== 'string') continue
+      if (!v.trim()) { patch[field] = null; continue }
+      const url = safeHttpUrl(v)
+      if (!url) {
+        return NextResponse.json(
+          { error: `${SIGNATURE_LINK_NOUNS[field]} must be a web address, like https://www.facebook.com/yourpage` },
+          { status: 400 },
+        )
+      }
+      patch[field] = url
+    }
+
     // timezone is the ONE field that is NOT free text and NOT clearable.
     // lib/drip-time.ts's requireIanaTimezone throws on any value outside
     // lib/us-timezones.ts — and Send to Jobber runs that check AFTER the
@@ -111,6 +141,12 @@ export async function PATCH(
 
     if (error) {
       console.error(`[/api/locations/${locId} PATCH] error:`, error.message)
+      if (/(website|facebook|instagram|linkedin)_url/.test(error.message) && /does not exist/i.test(error.message)) {
+        return NextResponse.json(
+          { error: 'Signature links storage is not enabled yet — migrations/email_signatures.sql has not been run.' },
+          { status: 503 },
+        )
+      }
       return NextResponse.json({ error: 'Failed to update location' }, { status: 500 })
     }
     return NextResponse.json({ ok: true, location: data })

@@ -134,7 +134,9 @@ describe('welcome-email render path — unbranded bodyToHtml base, never the #90
   const src = readFileSync(join(__dirname, 'welcome-email.ts'), 'utf8')
 
   it('welcome-email.ts builds its base HTML via the plain bodyToHtml path', () => {
-    expect(src).toContain('const html = bodyToHtml(rendered.body)')
+    // (bodyToHtml's optional second argument is the {{signature}} block —
+    // still the plain path)
+    expect(src).toMatch(/const html = bodyToHtml\(rendered\.body(, signature)?\)/)
   })
 
   it('welcome-email.ts does not import or call the branded drip wrapper', () => {

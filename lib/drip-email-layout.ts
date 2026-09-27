@@ -23,6 +23,12 @@
 // does not re-render, convert, or add tokens.
 // ─────────────────────────────────────────────────────────────
 
+// escHtml / escAttr moved to lib/email-escape.ts (so lib/email-signature.ts
+// can share them without a circular import) and are re-exported here.
+import { escHtml, escAttr } from './email-escape'
+import { htmlWithSignature, textWithSignature, type EmailSignature } from './email-signature'
+export { escHtml, escAttr }
+
 // The gold bee mark — the SAME transparent PNG the brand site uses, but
 // SELF-HOSTED in this app's public/ dir rather than hot-linked off
 // beeorganized.com's Shopify CDN. Mail clients re-fetch the logo on every open,
@@ -70,29 +76,9 @@ export type BrandedEmailContext = {
   location_name?: string | null
   location_phone?: string | null
   reviews_link?: string | null
-}
-
-// Exported so sibling email builders (lib/feedback-reply-email) escape through
-// the SAME implementation rather than re-rolling one each — issue 233. Escaping
-// duplicated is escaping that drifts.
-export function escHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-// URL for an href attribute: escape only the chars that could break out of the
-// quoted attribute. Ampersands in query strings become &amp; so the HTML is
-// well-formed; the browser/mail client decodes them back on click.
-export function escAttr(url: string): string {
-  return url
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  // What {{signature}} becomes (lib/email-signature.ts). Only read when the
+  // rendered body carries SIGNATURE_MARKER; null/absent → the marker is dropped.
+  signature?: EmailSignature | null
 }
 
 const LINK_STYLE = `color:${DRIP_BRAND_TEAL};text-decoration:underline;`
@@ -258,7 +244,10 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
     .filter(Boolean)
     .join('&nbsp;&nbsp;|&nbsp;&nbsp;')
 
-  return buildBrandedShellHtml(`${bodyParagraphsHtml(renderedBody)}
+  // {{signature}}: the body is split on the private placeholder, every piece is
+  // escaped by bodyParagraphsHtml exactly as before, and the fixed signature
+  // layout is joined in between (lib/email-signature.ts header).
+  return buildBrandedShellHtml(`${htmlWithSignature(renderedBody, bodyParagraphsHtml, ctx.signature)}
               ${reviewsHtml}`, footerInner)
 }
 
@@ -277,7 +266,7 @@ export function buildBrandedDripText(renderedBody: string, ctx: BrandedEmailCont
   const parts = [
     'BEE ORGANIZED — Simplify Your Hive',
     '',
-    renderedBody.trimEnd(),
+    textWithSignature(renderedBody, ctx.signature).trimEnd(),
   ]
   if (addReviewsLine) {
     parts.push('', `${REVIEWS_LINE_TEXT} (${reviewsLink})`)

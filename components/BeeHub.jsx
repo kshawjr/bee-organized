@@ -35,6 +35,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
+import { YourSignatureCard, LocationSignatureLinksCard, SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -16400,6 +16401,10 @@ const TEMPLATE_VARIABLES = [
   { key:'{{owner_booking_link}}', label:'Assignee Booking Link' },
   { key:'{{phone}}',          label:'Your Phone'     },
   { key:'{{service_area}}',   label:'Service Area'   },
+  // The fixed Bee Organized signature block (photo, name, title, email,
+  // mobile, location website + socials) — lib/email-signature.ts. Appears
+  // ONLY where typed; includes the name, so "Thank you,\n{{signature}}".
+  { key:'{{signature}}',      label:'Signature'      },
 ]
 
 // ─── Master drip content helpers ──────────────────────────────────────────────
@@ -16800,6 +16805,11 @@ function RenderedTemplatePreview({ type='email', subject, body, settings=null, v
   const vars = buildPreviewVars(settings)
   const subj = applyPreviewVars(subject || '', vars)
   const rendered = applyPreviewVars(body || '', vars)
+  // {{signature}} pieces for the email frame. applyPreviewVars already blanks
+  // it in `rendered` (and a subject never shows it); the frame instead splits
+  // the raw body on the tag and renders the real signature in each gap.
+  const sigPieces = (body || '').split(/\{\{signature\}\}/).map(p => applyPreviewVars(p, vars).replace(/^\n+|\n+$/g, ''))
+  const sigLocationId = /^[0-9a-f-]{36}$/i.test(settings?.location?.locId || '') ? settings.location.locId : null
   const locName = vars.location_name
   const fromName = settings?.location?.sendFromName || `Bee Organized ${locName}`
   const fromEmail = settings?.location?.sendFromEmail || 'hello@beeorganized.com'
@@ -16839,7 +16849,15 @@ function RenderedTemplatePreview({ type='email', subject, body, settings=null, v
       </div>
       <div style={{ padding:'28px 24px' }}>
         {subj && <p style={{ fontSize:'20px', fontWeight:700, color:'#1a2e2b', marginBottom:'18px' }}>{subj}</p>}
-        <p style={{ fontSize:'14px', lineHeight:1.7, color:'#374151', whiteSpace:'pre-wrap' }}>{rendered}</p>
+        {/* {{signature}} is not a text variable: split the body on it and show
+            the REAL server-built signature between the pieces (SignaturePreview
+            → GET /api/signature, the same layout a send uses). */}
+        {sigPieces.map((piece, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <div style={{ margin:'4px 0 14px' }}><SignaturePreview locationId={sigLocationId} compact /></div>}
+            {piece && <p style={{ fontSize:'14px', lineHeight:1.7, color:'#374151', whiteSpace:'pre-wrap' }}>{piece}</p>}
+          </React.Fragment>
+        ))}
       </div>
       <div style={{ background:'#f7f5f0', padding:'16px 24px', borderTop:'1px solid #e5e7eb', textAlign:'center' }}>
         <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'4px' }}>{fromName} · {locName}</p>
@@ -23416,6 +23434,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 hint={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
             </div>
 
+            <SectionHeader title="Email Signature" desc="Your photo and title in the Bee Organized signature — used when a client email includes {{signature}}" />
+            <YourSignatureCard locationId={realLocId} signedIn={!!currentUserCtx?.id} />
+
             {isPastDue && (
               <>
                 <SectionHeader title="⚠️ Action Required" />
@@ -23504,6 +23525,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>persistLocationField('bookingLink','calendar_link',v,'booking link')}  hint="Shared in your new lead emails" />
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>persistLocationField('reviewsLink','reviews_link',v,'Google Reviews link')}  hint="Sent to completed clients" required validate={validateReviewsLink} />
             </div>
+
+            <SectionHeader title="Email Signature Links" desc="Your location's website and social pages, shown in every email signature from this location" />
+            <LocationSignatureLinksCard locationId={realLocId} />
 
             <SectionHeader title="Pricing" desc="Quoted to clients in your follow-up emails" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>

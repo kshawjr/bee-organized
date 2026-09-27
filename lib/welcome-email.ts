@@ -17,6 +17,8 @@ import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { hasSignatureTag, textWithSignature } from './email-signature'
+import { resolveEmailSignature } from './email-signature-resolve'
 import { appendCanSpamFooter } from './marketing-unsubscribe'
 import { resolveLocationTemplateFork } from './template-fork'
 
@@ -271,7 +273,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     reviews_link: loc.reviews_link,
   }
 
-  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
+  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true })
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
   // subject is NULL/empty, or it renders to nothing. HOLD — scheduled_at stays
@@ -289,7 +291,18 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // Base HTML is the plain bodyToHtml path — welcome is COMMERCIAL, so it does
   // NOT adopt the #90 branded drip wrapper (#114); the CAN-SPAM footer below is
   // what makes it compliant.
-  const html = bodyToHtml(rendered.body)
+  //
+  // {{signature}}: resolved only when the template uses it — same chain as
+  // drips and follow-ups. Text half gets the text signature.
+  const signature = hasSignatureTag(tpl.body)
+    ? await resolveEmailSignature({
+        locationId: loc.id,
+        locationName: loc.name,
+        assigneeUserId: lead.assigned_to ?? null,
+      })
+    : null
+  const html = bodyToHtml(rendered.body, signature)
+  const plainBody = textWithSignature(rendered.body, signature)
 
   // #115 — the Welcome email is COMMERCIAL (pure brand promo, no transactional
   // content), so it must carry a CAN-SPAM footer: a working unsubscribe link +
@@ -302,7 +315,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // retries and the email goes out on the first tick after the gap is fixed,
   // exactly like the rate / booking-link holds above. A non-compliant send is the
   // violation; not sending is the safe failure.
-  const footered = await appendCanSpamFooter(html, rendered.body, {
+  const footered = await appendCanSpamFooter(html, plainBody, {
     leadId: lead.id,
     audience: 'inquiry',
   })

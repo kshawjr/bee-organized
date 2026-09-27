@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
+import { SIGNATURE_PHOTO_BUCKET, isValidSignaturePhotoPath } from '@/lib/email-signature'
 
 // PATCH /api/hub_users/me
-// Body: { first_name?, last_name?, phone?, booking_link? }
+// Body: { first_name?, last_name?, phone?, booking_link?,
+//         signature_title?, signature_photo_path? }
 //
 // Updates the caller's own hub_users row. email is intentionally not editable
 // here — it comes from the auth provider (Supabase Auth via Google OAuth)
@@ -29,11 +31,13 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}))
-    const { first_name, last_name, phone, booking_link } = (body || {}) as {
+    const { first_name, last_name, phone, booking_link, signature_title, signature_photo_path } = (body || {}) as {
       first_name?: string
       last_name?: string
       phone?: string
       booking_link?: string
+      signature_title?: string
+      signature_photo_path?: string
     }
 
     // Build sparse patch. Only update fields explicitly provided in the body.
@@ -45,6 +49,37 @@ export async function PATCH(req: NextRequest) {
     // Blank clears it to null, which means "fall back to the location owner's
     // link, then locations.calendar_link" — never "no link".
     if (typeof booking_link === 'string') patch.booking_link = booking_link.trim() || null
+
+    // Email signature ({{signature}}, lib/email-signature.ts). Both are plain
+    // values — the layout escapes them at send time; nothing here is HTML.
+    // Title: one short line. Photo: blank clears; otherwise it must be a path
+    // POST /api/signature/photo minted for THIS caller, and the file must
+    // actually be in the bucket — never a URL, never someone else's folder.
+    if (typeof signature_title === 'string') {
+      const t = signature_title.replace(/\s+/g, ' ').trim()
+      if (t.length > 80) {
+        return NextResponse.json({ error: 'Keep your title under 80 characters.' }, { status: 400 })
+      }
+      patch.signature_title = t || null
+    }
+    if (typeof signature_photo_path === 'string') {
+      const p = signature_photo_path.trim()
+      if (!p) {
+        patch.signature_photo_path = null
+      } else {
+        if (!isValidSignaturePhotoPath(p) || !p.startsWith(`${authUser.id}/`)) {
+          return NextResponse.json({ error: 'That photo doesn’t belong to your account.' }, { status: 400 })
+        }
+        const [folder, file] = p.split('/')
+        const { data: found } = await supabaseService.storage
+          .from(SIGNATURE_PHOTO_BUCKET)
+          .list(folder, { search: file, limit: 1 })
+        if (!found?.some(o => o.name === file)) {
+          return NextResponse.json({ error: 'The photo didn’t finish uploading. Please try again.' }, { status: 400 })
+        }
+        patch.signature_photo_path = p
+      }
+    }
 
     // Recompute full_name when either name field changed. Fetch the current
     // row so partial updates (e.g. only first_name) preserve the other half.
@@ -66,7 +101,9 @@ export async function PATCH(req: NextRequest) {
     // column in the select would error the whole statement.
     const returning =
       'id, email, full_name, first_name, last_name, phone, role, location_id' +
-      ('booking_link' in patch ? ', booking_link' : '')
+      ('booking_link' in patch ? ', booking_link' : '') +
+      ('signature_title' in patch ? ', signature_title' : '') +
+      ('signature_photo_path' in patch ? ', signature_photo_path' : '')
 
     const { error, data } = await supabaseService
       .from('hub_users')
@@ -82,6 +119,12 @@ export async function PATCH(req: NextRequest) {
       if (/booking_link/.test(error.message) && /does not exist/i.test(error.message)) {
         return NextResponse.json(
           { error: 'Booking link storage is not enabled yet — migrations/hub_users_booking_link.sql has not been run.' },
+          { status: 503 },
+        )
+      }
+      if (/signature_(title|photo_path)/.test(error.message) && /does not exist/i.test(error.message)) {
+        return NextResponse.json(
+          { error: 'Email signature storage is not enabled yet — migrations/email_signatures.sql has not been run.' },
           { status: 503 },
         )
       }
