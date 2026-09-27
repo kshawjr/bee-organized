@@ -25,6 +25,9 @@
 --     (lib/email-signature-resolve.ts);
 --   · no unsubscribe line here: lib/welcome-email.ts appends the CAN-SPAM
 --     footer to every welcome, and refuses to send if it cannot.
+--   · no ** or * emphasis: client emails go out as plain paragraphs with no
+--     Markdown step, so asterisks would reach the inbox literally. Kevin
+--     chose to remove them rather than add bold rendering (2026-09-27).
 --
 -- Idempotent. Run in the Supabase SQL editor. The SELECT at the end should
 -- return exactly one row: type email, tag welcome, is_active true,
@@ -38,14 +41,14 @@ INSERT INTO templates (legacy_id, name, type, tag, subject, body) VALUES
  'Welcome to the Bee Organized Hive!',
  $tpl${{first_name}},
 
-Welcome to the Bee Organized Hive! We're excited to connect with you soon and it would be our HONOR to help you *Simplify Your Hive!*
+Welcome to the Bee Organized Hive! We're excited to connect with you soon and it would be our HONOR to help you Simplify Your Hive!
 
-Check out more info about **Bee Organized** below…
+Check out more info about Bee Organized below…
 
-**What's Your Organizing Profile?**
+What's Your Organizing Profile?
 Take our fun Organizing Profile Quiz here (https://beeorganized.com/) to find out who you are in relationship with your stuff!
 
-**How We Came To Bee**
+How We Came To Bee
 Learn how these best friends got started and built a successful national franchise business here! (https://beeorganized.com/pages/how-we-came-to-bee)
 
 {{signature}}$tpl$)

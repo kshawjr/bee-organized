@@ -159,7 +159,9 @@ describe('the migration inserts the master the sender looks for', () => {
     expect(TPL_BODY.endsWith('\n\n{{signature}}')).toBe(true)
     expect(TPL_BODY).toContain('Take our fun Organizing Profile Quiz here (https://beeorganized.com/)')
     expect(TPL_BODY).toContain('(https://beeorganized.com/pages/how-we-came-to-bee)')
-    expect(TPL_BODY).toContain('Check out more info about **Bee Organized** below…')
+    expect(TPL_BODY).toContain('Check out more info about Bee Organized below…')
+    expect(TPL_BODY).toContain('\n\nWhat\'s Your Organizing Profile?\nTake our fun')
+    expect(TPL_BODY).toContain('\n\nHow We Came To Bee\nLearn how')
     expect(TPL_BODY.toLowerCase()).not.toContain('unsubscribe')
   })
 })
@@ -212,19 +214,22 @@ describe('a new lead\'s welcome renders from this template', () => {
     expect(sendEmailMock).not.toHaveBeenCalled()
   })
 
-  // KNOWN GAP, pinned so it is visible rather than discovered in an inbox.
-  // Client emails render bodies as plain paragraphs (bodyToHtml → plainParagraphs
-  // in lib/drip-send.ts): there is no Markdown step anywhere on the send path.
-  // So Kevin's **bold** and *italic* go out as literal asterisks. This is NOT a
-  // regression — the original 2026 seed copy had the same asterisks. If this
-  // test starts failing because bold now renders, that is the fix landing:
-  // update it then.
-  it('KNOWN GAP: **bold** and *italic* go out as literal asterisks (no Markdown on the send path)', async () => {
+  // Was a KNOWN GAP test: the first draft of this copy used **bold** and
+  // *italic*, and client emails render bodies as plain paragraphs
+  // (bodyToHtml → plainParagraphs, lib/drip-send.ts) with no Markdown step, so
+  // the asterisks would have reached the inbox literally. Kevin chose to take
+  // them out of the copy rather than add rendering (2026-09-27). Now pinned the
+  // other way: no asterisk reaches the inbox, in the template or in either half
+  // of the sent email.
+  it('NO asterisks reach the inbox — not in the template, the HTML or the text', async () => {
+    expect(TPL_BODY).not.toContain('*')
+    expect(TPL_SUBJECT).not.toContain('*')
     const sent = await sendAndCapture()
-    expect(sent.text).toContain('**Bee Organized**')
-    expect(sent.text).toContain('*Simplify Your Hive!*')
-    expect(sent.html).toContain('**Bee Organized**')
-    expect(sent.html).not.toContain('<strong>Bee Organized</strong>')
+    for (const out of [sent.subject, sent.html, sent.text]) {
+      expect(out).not.toContain('*')
+    }
+    expect(sent.text).toContain('it would be our HONOR to help you Simplify Your Hive!')
+    expect(sent.text).toContain('Check out more info about Bee Organized below…')
   })
 })
 
