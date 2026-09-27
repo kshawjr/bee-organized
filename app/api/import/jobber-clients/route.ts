@@ -90,6 +90,7 @@ import {
   DEFERRED_WRITE_PACE_MS,
 } from '@/lib/import-phase'
 import { buildLastChildActivity, selectSampleClients } from '@/lib/import-sample'
+import { readLeadPaidTotal } from '@/lib/lead-paid-total'
 
 export const runtime = 'nodejs'
 export const maxDuration = 800
@@ -984,11 +985,14 @@ export async function POST(req: NextRequest) {
                   // invoices predating the import never emit a webhook, so
                   // this is the only place they can populate the roll-up.
                   if (iRes.status === 'paid') {
-                    const paidTotal = inv.amounts?.total ? parseFloat(inv.amounts.total) : null
+                    // Lifetime total = the sum of the lead's paid invoices,
+                    // never this one invoice's total (lib/lead-paid-total.ts).
+                    // A failed read leaves paid_amount as it was.
+                    const lifetime = await readLeadPaidTotal(leadId)
                     await supabaseService
                       .from('leads')
                       .update({
-                        paid_amount: paidTotal,
+                        ...(lifetime.ok ? { paid_amount: lifetime.paidAmount } : {}),
                         balance_owing: 0,
                         invoice_paid_at: inv.createdAt || new Date().toISOString(),
                         updated_at: new Date().toISOString(),
@@ -1057,11 +1061,11 @@ export async function POST(req: NextRequest) {
                 rlInvoiceIds.push(iRes.id)
                 // Same historical-paid roll-up as the request-joined path.
                 if (iRes.status === 'paid') {
-                  const paidTotal = inv.amounts?.total ? parseFloat(inv.amounts.total) : null
+                  const lifetime = await readLeadPaidTotal(leadId)
                   await supabaseService
                     .from('leads')
                     .update({
-                      paid_amount: paidTotal,
+                      ...(lifetime.ok ? { paid_amount: lifetime.paidAmount } : {}),
                       balance_owing: 0,
                       invoice_paid_at: inv.createdAt || new Date().toISOString(),
                       updated_at: new Date().toISOString(),

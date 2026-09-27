@@ -93,7 +93,7 @@ export async function POST(
     supabaseService.from('service_requests').select('requested_at, created_at').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }).limit(1),
     supabaseService.from('quotes').select('status, sent_at, approved_at, created_at').eq('engagement_id', id),
     supabaseService.from('jobs').select('status, completed_at, scheduled_start, created_at').eq('engagement_id', id),
-    supabaseService.from('invoices').select('status, paid_at, issued_at, created_at').eq('engagement_id', id),
+    supabaseService.from('invoices').select('status, total, paid_amount, paid_at, issued_at, created_at').eq('engagement_id', id),
   ])
   const derived = deriveEngagementStage({
     sr: srRes.data?.[0] ?? null,

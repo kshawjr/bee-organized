@@ -166,6 +166,8 @@ describe('paid INVOICE_UPDATE (the payment event) → syncs + live re-derivation
   it('zeroes balance, stamps invoice_paid_at, and forward-promotes → Closed Won', async () => {
     jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('PAID'))
     h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
+    // the lead's paid invoices, read back for the lifetime total — only this one
+    h.enqueue('invoices', [{ status: 'paid', paid_amount: 500 }])
 
     await handleInvoiceUpdate(ctx())
 
@@ -201,5 +203,61 @@ describe('non-paid INVOICE_UPDATE (a plain edit) → refresh only', () => {
     expect(patch.invoice_created_at).toBeUndefined()
 
     expect(res.processed).toBe(true)
+  })
+})
+
+// ── lifetime paid total (2026-09-27) ────────────────────────────
+// leads.paid_amount used to be OVERWRITTEN with the paid invoice's own total,
+// so a person's "lifetime paid" was whichever invoice was paid last — and a
+// -$92.58 refund read as -$92.58 lifetime. It is now the sum of every paid
+// invoice on the lead, re-read after the upsert (lib/lead-paid-total.ts).
+describe('paid total is the sum of the lead\'s paid invoices, not the last one', () => {
+  const invoicesRead = () =>
+    h.state.calls.filter(c => c.table === 'invoices' && c.ops.some(o => o[0] === 'select'))
+
+  it('a second paid invoice ADDS to the total rather than replacing it', async () => {
+    jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('PAID'))   // this event: $500
+    h.enqueue('leads', { id: 'lead-1', stage: 'Closed Won' })
+    h.enqueue('invoices', [
+      { status: 'paid', paid_amount: 1200 },   // an earlier job
+      { status: 'paid', paid_amount: 500 },    // this one
+    ])
+    await handleInvoiceUpdate(ctx())
+    expect(h.leadsUpdatePayload()!.paid_amount).toBe(1700)
+    // read by lead, after the upsert
+    const read = invoicesRead()[0]
+    expect(read.ops).toContainEqual(['eq', ['lead_id', 'lead-1']])
+  })
+
+  it('a refund (paid invoice with a negative total) REDUCES the total — never becomes it', async () => {
+    jobber.jobberGraphQL.mockResolvedValue({
+      data: { invoice: { id: '999', invoiceStatus: 'PAID', amounts: { total: '-92.58' }, client: { id: '888' }, jobs: { nodes: [] } } },
+    })
+    h.enqueue('leads', { id: 'lead-1', stage: 'Closed Won' })
+    h.enqueue('invoices', [
+      { status: 'paid', paid_amount: 1081.51 },
+      { status: 'paid', paid_amount: -92.58 },
+    ])
+    await handleInvoiceUpdate(ctx())
+    expect(h.leadsUpdatePayload()!.paid_amount).toBe(988.93)
+  })
+
+  it('unpaid invoices do not count toward the total', async () => {
+    jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('SENT'))
+    h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
+    h.enqueue('invoices', [
+      { status: 'paid', paid_amount: 300 },
+      { status: 'sent', paid_amount: null },
+    ])
+    await handleInvoiceUpdate(ctx())
+    expect(h.leadsUpdatePayload()!.paid_amount).toBe(300)
+  })
+
+  it('a failed read leaves the stored total alone (no write of a wrong number)', async () => {
+    jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('PAID'))
+    h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
+    h.enqueue('invoices', null, { message: 'boom' })
+    await handleInvoiceUpdate(ctx())
+    expect('paid_amount' in h.leadsUpdatePayload()!).toBe(false)
   })
 })

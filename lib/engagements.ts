@@ -96,7 +96,9 @@ export type EngagementChildren = {
   sr: { requested_at?: string | null; created_at?: string | null } | null
   quotes: Array<{ status?: string | null; sent_at?: string | null; approved_at?: string | null; created_at?: string | null }>
   jobs: Array<{ status?: string | null; completed_at?: string | null; scheduled_start?: string | null; created_at?: string | null }>
-  invoices: Array<{ status?: string | null; paid_at?: string | null; issued_at?: string | null; created_at?: string | null }>
+  // total / paid_amount are optional: a caller that doesn't select them
+  // simply never gets the paid-work reading below (fail-narrow).
+  invoices: Array<{ status?: string | null; paid_at?: string | null; issued_at?: string | null; created_at?: string | null; total?: number | string | null; paid_amount?: number | string | null }>
 }
 
 export type DerivedStage = {
@@ -119,6 +121,27 @@ export const engagementJobDone = (j: { status?: string | null; completed_at?: st
 const jobUnbooked = (j: { status?: string | null; completed_at?: string | null }) =>
   !j.completed_at && isUnbookedJobStatus(j.status)
 
+// PAID WORK ON AN "ACTION REQUIRED" JOB (2026-09-27). Jobber's
+// action_required (on_hold is its alias) means "no more upcoming visits" —
+// the visits ran out. On its own that is ambiguous: agreed-but-never-booked
+// work, or finished work nobody closed in Jobber. A PAID invoice on the same
+// engagement settles it: the visits happened and the money came in. Such a
+// job counts as DONE work, so the engagement never stale-closes as Lost and
+// a fully-paid one resolves like any other finished job (Won on import and
+// in the stale-Lost recovery, Final Processing on the live paths).
+//
+// Deliberately NARROW. Without a paid invoice the job still rides the quote
+// lane exactly as before, and 'unscheduled' is not included at all — its
+// visits haven't happened yet, so a paid invoice there can be a prepayment
+// for work still to come. "Paid" means status 'paid' AND a positive amount:
+// a refund / credit invoice (negative total) is not evidence of work, and a
+// caller that didn't select the amounts gets the old reading.
+const VISITS_RAN_OUT = new Set(['action_required', 'on_hold'])
+const jobVisitsRanOut = (j: { status?: string | null; completed_at?: string | null }) =>
+  !j.completed_at && VISITS_RAN_OUT.has((j.status || '').toLowerCase())
+export const invoiceMoneyIn = (i: { status?: string | null; total?: number | string | null; paid_amount?: number | string | null }) =>
+  (i.status ?? null) === 'paid' && (Number(i.paid_amount ?? i.total ?? 0) || 0) > 0
+
 // A job DELETED in Jobber (JOB_DESTROY marks the row rather than removing
 // it — the row is the record that work was once agreed). Deleted jobs are
 // invisible to stage classification: they must neither hold an engagement
@@ -140,8 +163,12 @@ export function deriveEngagementStage(
   const { sr, quotes, jobs, invoices } = children
 
   const liveJobs = jobs.filter(j => !jobDeleted(j))
-  const bookedJobs = liveJobs.filter(j => !jobUnbooked(j))
-  const unbookedJobs = liveJobs.filter(jobUnbooked)
+  // See invoiceMoneyIn above: an action-required job on an engagement with
+  // money in is finished work, not an unbooked one.
+  const moneyIn = invoices.some(invoiceMoneyIn)
+  const workedAndPaid = (j: EngagementChildren['jobs'][number]) => moneyIn && jobVisitsRanOut(j)
+  const bookedJobs = liveJobs.filter(j => !jobUnbooked(j) || workedAndPaid(j))
+  const unbookedJobs = liveJobs.filter(j => jobUnbooked(j) && !workedAndPaid(j))
 
   // Every job deleted in Jobber, nothing invoiced → the agreed work was
   // removed at the source; the deal did not happen. Closed Lost with its
@@ -199,7 +226,7 @@ export function deriveEngagementStage(
   }
 
   if (bookedJobs.length > 0) {
-    if (bookedJobs.some(j => !engagementJobDone(j))) return { stage: 'Job in Progress' }
+    if (bookedJobs.some(j => !engagementJobDone(j) && !workedAndPaid(j))) return { stage: 'Job in Progress' }
     // ≥1 invoice AND all paid → the job is wrapping up settled. THE single
     // predicate (invoicesFullyPaid, engagementStatus.js) the panel's
     // Close-Won gate also reads — so import and UI can never disagree on

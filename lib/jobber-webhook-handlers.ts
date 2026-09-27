@@ -146,6 +146,7 @@ import {
   attachToEngagement,
   maybeAdvanceEngagementStage,
 } from './engagements'
+import { readLeadPaidTotal } from './lead-paid-total'
 import type { LocationRow } from './jobber-webhook'
 
 export type HandlerCtx = {
@@ -806,8 +807,15 @@ async function handleInvoiceCore(
     jobber_invoice_id: extractJobberId(invRec.id),
     updated_at: new Date().toISOString(),
   }
+  // Lifetime paid total: recomputed from every paid invoice on the lead
+  // (this one is already upserted above), never this invoice's own total —
+  // see lib/lead-paid-total.ts. Recomputed on every invoice event so an
+  // invoice that stops being paid drops out too. A failed read leaves the
+  // stored value untouched rather than writing a wrong one.
+  const paidTotal = await readLeadPaidTotal(leadId)
+  if (paidTotal.ok) leadPatch.paid_amount = paidTotal.paidAmount
+  else console.error('[jobber-webhook] lead paid total read failed', { leadId, error: paidTotal.error })
   if (paid) {
-    leadPatch.paid_amount = totalNum
     leadPatch.balance_owing = 0
     leadPatch.invoice_paid_at = stampIso
   } else {
