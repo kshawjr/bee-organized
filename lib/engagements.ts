@@ -820,6 +820,25 @@ export async function resolveEngagementForChild(params: {
   return null
 }
 
+// ── money roll-up ─────────────────────────────────────────────────
+
+// An engagement's three money figures from its invoices — THE one formula,
+// shared by maybeAdvanceEngagementStage and scripts/repair-invoice-balances
+// (which recomputes money only, never stage). paid_amount is what came in
+// on each invoice (all of it when paid; payments + deposit on an unpaid one
+// once Jobber's amounts are read); balance_owing is what is still owed.
+export function rollUpInvoiceMoney(
+  invoices: Array<{ total?: any; paid_amount?: any; balance_owing?: any }>,
+): { total_invoiced: number; total_paid: number; balance_owing: number } {
+  const num = (v: any) => (v == null ? 0 : Number(v) || 0)
+  return {
+    total_invoiced: invoices.reduce((s, i) => s + num(i.total), 0),
+    total_paid: invoices.reduce((s, i) => s + num(i.paid_amount), 0),
+    balance_owing: invoices.reduce(
+      (s, i) => s + (i.balance_owing != null ? num(i.balance_owing) : num(i.total) - num(i.paid_amount)), 0),
+  }
+}
+
 // ── stage advance ─────────────────────────────────────────────────
 
 // Recompute the engagement's stage from its own children and apply it
@@ -883,12 +902,8 @@ export async function maybeAdvanceEngagementStage(
     // drift recovery call deriveEngagementStage directly WITHOUT this flag.
   }, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: true })
 
-  const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const patch: Record<string, any> = {
-    total_invoiced: invoices.reduce((s, i) => s + num(i.total), 0),
-    total_paid: invoices.reduce((s, i) => s + num(i.paid_amount), 0),
-    balance_owing: invoices.reduce(
-      (s, i) => s + (i.balance_owing != null ? num(i.balance_owing) : num(i.total) - num(i.paid_amount)), 0),
+    ...rollUpInvoiceMoney(invoices),
     updated_at: new Date().toISOString(),
   }
 

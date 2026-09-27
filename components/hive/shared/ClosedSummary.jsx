@@ -17,9 +17,10 @@
 'use client'
 
 import React from 'react'
-import { IconCheck, IconX } from '@/components/ui/icons'
+import { IconCheck, IconX, IconCash } from '@/components/ui/icons'
 import { closedReasonLabel, formatFullDate } from './engagementStatus'
 import { WON_OVER_BALANCE, OWING_CLOSED_LABEL, owingClosedLine } from './finalProcessing'
+import { isWrittenOff, WRITTEN_OFF_LABEL, writtenOffAmountText } from './writtenOff'
 import { T } from './tokens'
 
 export default function ClosedSummary({ engagement }) {
@@ -33,20 +34,28 @@ export default function ClosedSummary({ engagement }) {
   // — never the one-line ellipsis the optional completion note gets,
   // because this note is the whole justification for the close.
   const overBalance = won && e.closed_reason === WON_OVER_BALANCE
+  // A WRITTEN-OFF close (writtenOff.js): its own verdict — never "Closed
+  // lost" — with the amount written off, and the owner's reason in full,
+  // exactly like the override: the note is the justification.
+  const writtenOff = isWrittenOff(e)
   // 'won' as a reason is redundant beside the 'Closed won' verdict —
   // suppress it; every other reason (including machine stamps) shows.
   const reason = overBalance
     ? OWING_CLOSED_LABEL
-    : (e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason))
+    : writtenOff
+      ? writtenOffAmountText(e)
+      : (e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason))
+  const verdict = writtenOff ? WRITTEN_OFF_LABEL : `Closed ${won ? 'won' : 'lost'}`
+  const fullNote = overBalance || writtenOff
   const note = (e.closed_note || '').trim()
   return (
     <div style={{ padding: '10px 14px', background: T.surface.sunken, borderRadius: T.radius.inset, display: 'flex', flexDirection: 'column', gap: '3px' }}>
       <p style={{ fontSize: '12px', fontWeight: 500, color: won ? T.accent.deep : T.ink.secondary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
         <span style={{ color: won ? T.accent.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
-          {won ? <IconCheck size={13} /> : <IconX size={13} />}
+          {won ? <IconCheck size={13} /> : writtenOff ? <IconCash size={13} /> : <IconX size={13} />}
         </span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          Closed {won ? 'won' : 'lost'}
+          <span data-bee-closed-verdict={writtenOff ? 'written_off' : won ? 'won' : 'lost'}>{verdict}</span>
           {reason ? ` · ${reason}` : ''}
           {formatFullDate(e.closed_at) ? ` · ${formatFullDate(e.closed_at)}` : ''}
         </span>
@@ -56,10 +65,10 @@ export default function ClosedSummary({ engagement }) {
           {owingClosedLine(e)}
         </p>
       )}
-      {note && (overBalance ? (
+      {note && (fullNote ? (
         // Full text, wrapped — the reason a balance was overridden has to
         // be readable without hovering for a tooltip.
-        <p data-bee-over-balance-reason style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+        <p data-bee-over-balance-reason={overBalance ? '' : undefined} data-bee-written-off-reason={writtenOff ? '' : undefined} style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
           “{note}”
         </p>
       ) : (

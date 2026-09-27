@@ -32,6 +32,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
+import { isWrittenOff, WRITTEN_OFF, WRITTEN_OFF_LABEL } from './shared/writtenOff'
 import { T } from './shared/tokens'
 import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
@@ -145,7 +146,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
   // archive peek, not a pinned lens). Each segment's window is fetched
   // on first visit and cached; revisiting a segment never refetches.
   const [closedOpen, setClosedOpen] = useState(false)
-  const [closedSeg, setClosedSeg] = useState('all')     // 'all' | 'won' | 'lost'
+  const [closedSeg, setClosedSeg] = useState('all')     // 'all' | 'won' | 'lost' | written off
   const [closedData, setClosedData] = useState({})      // per segment: { rows, total }
   const [closedLoading, setClosedLoading] = useState({}) // per segment: bool
 
@@ -404,6 +405,9 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
               { key: 'all', label: 'All' },
               { key: 'won', label: 'Won', color: `var(--text-success, ${TEXT_SUCCESS})` },
               { key: 'lost', label: 'Lost', color: `var(--text-danger, ${TEXT_DANGER})` },
+              // Written off is its own outcome (writtenOff.js) — the Lost
+              // segment leaves it out, so it gets its own.
+              { key: WRITTEN_OFF, label: WRITTEN_OFF_LABEL },
             ]}
             active={closedSeg}
             onChange={pickClosedSeg}
@@ -415,7 +419,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
               key={e.id}
               e={e}
               onOpen={() => openCard(e)}
-              accent={e.stage === CLOSED_WON ? `var(--text-success, ${TEXT_SUCCESS})` : `var(--text-danger, ${TEXT_DANGER})`}
+              accent={e.stage === CLOSED_WON ? `var(--text-success, ${TEXT_SUCCESS})` : isWrittenOff(e) ? T.ink.quiet : `var(--text-danger, ${TEXT_DANGER})`}
             />
           ))}
           {segLoading && (

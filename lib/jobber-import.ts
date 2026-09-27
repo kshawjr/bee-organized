@@ -108,7 +108,7 @@ export const JOBS_QUERY = `
         invoices(first: 10) {
           nodes {
             id createdAt jobberWebUri invoiceStatus
-            amounts { subtotal taxAmount discountAmount total }
+            amounts { subtotal taxAmount discountAmount total paymentsTotal depositAmount invoiceBalance }
           }
           pageInfo { hasNextPage endCursor }
         }
@@ -125,7 +125,7 @@ export const JOB_INVOICES_QUERY = `
       invoices(first: 50, after: $after) {
         nodes {
           id createdAt jobberWebUri invoiceStatus
-          amounts { subtotal taxAmount discountAmount total }
+          amounts { subtotal taxAmount discountAmount total paymentsTotal depositAmount invoiceBalance }
         }
         pageInfo { hasNextPage endCursor }
       }
@@ -196,16 +196,17 @@ export const SINGLE_JOB_QUERY = `
   }
 `
 
-// paymentRecords + paymentsTotal/tipsTotal/invoiceBalance are selected ONLY
-// here (the webhook single-invoice path — the one a live payment travels).
-// The bulk-import invoice queries above deliberately still omit them: adding
-// them there is part of the not-yet-taken backfill decision, and upsertInvoice
-// falls back to createdAt when they're absent, exactly as before.
+// paymentRecords are selected ONLY here (the webhook single-invoice path —
+// the one a live payment travels); the bulk-import queries omit them and
+// upsertInvoice falls back to createdAt for paid_at, exactly as before.
+// The money amounts (paymentsTotal / depositAmount / invoiceBalance) are
+// selected here AND on the import's invoice queries since 2026-09-27, so
+// both paths store Jobber's real balance (invoiceMoneyFromJobber).
 export const SINGLE_INVOICE_QUERY = `
   query GetInvoice($id: EncodedId!) {
     invoice(id: $id) {
       id createdAt jobberWebUri invoiceStatus
-      amounts { subtotal taxAmount discountAmount total paymentsTotal tipsTotal invoiceBalance }
+      amounts { subtotal taxAmount discountAmount total paymentsTotal tipsTotal depositAmount invoiceBalance }
       client { id }
       jobs(first: 5) { nodes { id request { id } } }
       paymentRecords(first: 50) { nodes { amount entryDate tipAmount adjustmentType } }
@@ -1342,6 +1343,37 @@ export async function upsertJob(
   return { id: data.id, created: !existing, quote_db_id: quoteDbId }
 }
 
+// ── invoice money (2026-09-27) ────────────────────────────────────
+// An unpaid invoice used to be stored as owing its FULL total, whatever
+// Jobber said had come in. Jobber's amounts carry the truth:
+//   invoiceBalance — what is still owed after deposits, payments, voids
+//                    and bad-debt write-offs (read live: a $609.85 invoice
+//                    with a $100 deposit → 509.85; a voided $556.20 → 0;
+//                    Erin Bondurant's $8,294.29 with $600 paid and the rest
+//                    written off as bad debt → 0)
+//   paymentsTotal  — payments received on the invoice (deposits NOT in it)
+//   depositAmount  — the deposit taken on the quote and applied here
+// So for an unpaid invoice: balance_owing = invoiceBalance and paid_amount =
+// paymentsTotal + depositAmount (what was received — "X of Y paid").
+// A PAID invoice keeps the all-or-nothing reading (paid = total, balance 0),
+// and when invoiceBalance is absent — an older query shape — the old
+// reading stands: owing the full total, nothing recorded as received.
+const jobberNum = (v: any): number | null => {
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : parseFloat(v)
+  return Number.isFinite(n) ? n : null
+}
+const cents = (n: number) => Math.round(n * 100) / 100
+export function invoiceMoneyFromJobber(invoice: any): { paid_amount: number | null; balance_owing: number | null } {
+  const isPaid = (invoice?.invoiceStatus || '').toUpperCase() === 'PAID'
+  const totalNum = invoice?.amounts?.total ? parseFloat(invoice.amounts.total) : null
+  if (isPaid) return { paid_amount: totalNum, balance_owing: 0 }
+  const balance = jobberNum(invoice?.amounts?.invoiceBalance)
+  if (balance === null) return { paid_amount: null, balance_owing: totalNum }
+  const received = (jobberNum(invoice?.amounts?.paymentsTotal) ?? 0) + (jobberNum(invoice?.amounts?.depositAmount) ?? 0)
+  return { paid_amount: cents(received), balance_owing: cents(balance) }
+}
+
 export async function upsertInvoice(
   invoice: any,
   job_id: string | null,
@@ -1387,8 +1419,11 @@ export async function upsertInvoice(
     // expose paymentRecords { entryDate } and amounts { paymentsTotal
     // tipsTotal invoiceBalance }; SINGLE_INVOICE_QUERY simply never asked
     // until now. Repairing the already-stamped rows is a separate decision.
-    paid_amount:   isPaid ? totalNum : null,
-    balance_owing: isPaid ? 0 : totalNum,
+    // What is owed and what came in: Jobber's own figures when the query
+    // asked for them (invoiceMoneyFromJobber — deposits, part payments,
+    // voids and bad-debt write-offs all land in invoiceBalance), today's
+    // all-or-nothing reading only when it didn't.
+    ...invoiceMoneyFromJobber(invoice),
     paid_at:       isPaid ? (paidAtFromPayments || invoice.createdAt || null) : null,
     issued_at: invoice.createdAt || null,
     jobber_synced_at: new Date().toISOString(),

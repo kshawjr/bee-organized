@@ -413,6 +413,12 @@ export function deriveStatusChip(e, opts = {}) {
       return { label: 'Upcoming', styleKey: 'upcoming' }
     }
     case 'Final Processing': {
+      // Bad debt in Jobber with nothing else owed: not "Paid" (its balance
+      // reads $0 once Jobber's real figure is loaded) and not "Owes" — it
+      // is waiting to be closed as Written off (writtenOff.js).
+      const badDebtOnly = invoices.some(i => i?.status === 'bad_debt') &&
+        !invoices.some(i => i?.status !== 'paid' && i?.status !== 'bad_debt' && (Number(i?.balance_owing) || 0) > 0)
+      if (badDebtOnly) return { label: 'Bad debt in Jobber', styleKey: 'owing' }
       const owing = Number(e.balance_owing) || 0
       if (owing > 0) return { label: `Owes ${fmtMoney(owing)}`, styleKey: 'owing' }
       if (invoices.length === 0) return { label: 'Never Invoiced', styleKey: 'never_invoiced' }
@@ -420,6 +426,7 @@ export function deriveStatusChip(e, opts = {}) {
     }
     case 'Closed Won':
     case 'Closed Lost': {
+      if (e.stage === 'Closed Lost' && e.closed_reason === 'written_off') return { label: 'Written off', styleKey: 'gray' }
       const raw = (e.closed_reason || '').replace(/_/g, ' ')
       const label = raw ? raw.replace(/\b\w/g, c => c.toUpperCase()).replace(/ (On|Of|The|With) /g, m => m.toLowerCase()) : e.stage
       return { label, styleKey: 'gray' }

@@ -36,6 +36,7 @@ import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, WON_OVER_BALANCE, type EngagementStage } from '@/lib/engagements'
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
+import { WRITTEN_OFF, writtenOffAmountFromInvoices } from '@/components/hive/shared/writtenOff'
 
 // Close-out vocabulary (doc §4). A WON close is always reason 'won'. LOST
 // reasons are admin-configured (lookups category 'closed_lost_reasons') and
@@ -403,8 +404,38 @@ export async function PATCH(
           { status: 400 },
         )
       }
+      // THE WRITTEN-OFF CLOSE (2026-09-27). Bad debt: the work was done and
+      // the money is never coming. Stored as Closed Lost + 'written_off' (so
+      // it is closed everywhere and revenue nowhere) with the amount on the
+      // row. The amount is computed HERE from the engagement's invoices,
+      // never taken from the browser, and a write-off needs a reason and a
+      // positive amount — nothing owed means nothing to write off (use Mark
+      // won or Lost instead). See components/hive/shared/writtenOff.js.
+      let writtenOffAmount: number | null = null
+      if (stage === 'Closed Lost' && body?.closed_reason === WRITTEN_OFF) {
+        const writeOffNote = typeof body?.closed_note === 'string' ? body.closed_note.trim() : ''
+        if (!writeOffNote) {
+          return NextResponse.json(
+            { error: 'close_reason_required', message: 'A write-off has to record why the money is not coming' },
+            { status: 400 },
+          )
+        }
+        const { data: invs, error: invError } = await supabaseService
+          .from('invoices')
+          .select('status, total, paid_amount, balance_owing')
+          .eq('engagement_id', id)
+        if (invError) return NextResponse.json({ error: invError.message }, { status: 500 })
+        writtenOffAmount = writtenOffAmountFromInvoices(invs ?? [])
+        if (!(writtenOffAmount > 0)) {
+          return NextResponse.json(
+            { error: 'nothing_to_write_off', message: 'Nothing is owed on this engagement, so there is nothing to write off' },
+            { status: 400 },
+          )
+        }
+      }
       patch.stage = stage
       patch.stage_entered_at = nowIso
+      if (writtenOffAmount != null) patch.written_off_amount = writtenOffAmount
       if (targetTerminal) {
         patch.closed_at = nowIso
         // Won is 'won' — or WON_OVER_BALANCE on the owner override above,
@@ -479,7 +510,8 @@ export async function PATCH(
         .not('stage', 'in', '("Closed Won","Closed Lost")')
         .neq('id', id),
     ])
-    const entersNurture = patch.stage === 'Closed Lost' && (otherOpen ?? 0) === 0
+    // A written-off client is not a nurture prospect — they owe us money.
+    const entersNurture = patch.stage === 'Closed Lost' && patch.closed_reason !== WRITTEN_OFF && (otherOpen ?? 0) === 0
     // entity_id keys this row to the engagement; the client is the lead UUID
     // (joinable), never the name — and never patch.closed_note, which is free
     // staff text that could carry any PII and whose diagnostic content
@@ -491,6 +523,7 @@ export async function PATCH(
       status: 'success',
       message:
         `[engagement:close] ${patch.stage} reason=${patch.closed_reason}` +
+        (patch.written_off_amount != null ? ` written_off_amount=${patch.written_off_amount}` : '') +
         ` — client ${engagement.client_id} has ${otherOpen ?? 0} other open engagement(s)` +
         (entersNurture ? ' → enters nurture pool (step-5 trail)' : ''),
     })
@@ -503,6 +536,15 @@ export async function PATCH(
     title: patch.title ?? engagement.title,
     description: patch.description !== undefined ? patch.description : engagement.description,
     project_type: patch.project_type !== undefined ? patch.project_type : engagement.project_type,
+    // The close itself, so the panel can show the outcome it just wrote
+    // (a written-off deal must never flash "Closed lost" while it waits
+    // for a refetch). Only present when this request closed the deal.
+    ...(stageChanged ? {
+      closed_reason: patch.closed_reason ?? null,
+      closed_note: patch.closed_note ?? null,
+      closed_at: patch.closed_at ?? null,
+      written_off_amount: patch.written_off_amount ?? null,
+    } : {}),
     changed: stageChanged || patch.title !== undefined || patch.description !== undefined || patch.project_type !== undefined,
   })
 }

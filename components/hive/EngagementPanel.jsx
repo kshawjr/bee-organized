@@ -63,9 +63,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import useIsMobile from './shared/useIsMobile'
-import { isTerminal, stageDisplayLabel, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
+import { isTerminal, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage, IconCash } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
 import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { replaceInList, removeFromList } from './shared/noteStream'
@@ -87,7 +87,9 @@ import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
-import { invoicesSettled } from './shared/closeEngagement'
+import WriteOffWizard from './shared/WriteOffWizard'
+import { invoicesSettled, closedFieldsFrom } from './shared/closeEngagement'
+import { engagementStageLabel, isWrittenOff, WRITTEN_OFF_STYLE_KEY, WRITE_OFF_ACTION, WRITE_OFF_HINT } from './shared/writtenOff'
 import { finalProcessingCase, finalProcessingExplainer, FINAL_PROCESSING_LEAD, OWING_CLOSE_ACTION } from './shared/finalProcessing'
 import ClosedSummary from './shared/ClosedSummary'
 import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
@@ -243,7 +245,7 @@ function ClientEngagementRow({ row, current }) {
         {title}
       </span>
       <span data-client-eng-chip={row.id} style={{ flexShrink: 0 }}>
-        <StatusChip label={current ? CURRENT_CHIP_LABEL : stageDisplayLabel(row.stage)} styleKey={row.stage} />
+        <StatusChip label={current ? CURRENT_CHIP_LABEL : engagementStageLabel(row)} styleKey={isWrittenOff(row) ? WRITTEN_OFF_STYLE_KEY : row.stage} />
       </span>
       {money != null && (
         <span data-client-eng-money={row.id} style={{ flexShrink: 0, fontSize: '13px', fontWeight: 600, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum }}>
@@ -265,7 +267,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [busy, setBusy] = useState(false)
   // The ··· masthead menu drives the close-out wizards (Won/Lost) and
   // Reopen — the standalone action-bar Close… button was retired here.
-  const [wizard, setWizard] = useState(null) // null | 'won' | 'lost'
+  const [wizard, setWizard] = useState(null) // null | 'won' | 'lost' | 'won-over-balance' | 'write-off'
   // Terminal-close celebration (§C motion) — 'won' | 'lost' | null, fired
   // AFTER a commit lands so it never celebrates a move that didn't persist.
   const [celebrate, setCelebrate] = useState(null)
@@ -504,9 +506,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     // The wizard already COMMITTED (it awaits commitEngagementClose and only
     // calls back on success), so reflecting here shows a persisted move, not
     // an optimistic guess. Animate the stage chip + fire the celebration.
-    setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
-    onChanged(engagementId, { stage: j.stage })
-    setCelebrate(j.stage === 'Closed Won' ? 'won' : 'lost')
+    setData(d => d ? { ...d, engagement: { ...d.engagement, ...closedFieldsFrom(j) } } : d)
+    onChanged(engagementId, closedFieldsFrom(j))
+    // A write-off is nothing to celebrate and not a loss either — no flourish.
+    const writtenOff = isWrittenOff(closedFieldsFrom(j))
+    setCelebrate(writtenOff ? null : j.stage === 'Closed Won' ? 'won' : 'lost')
     // Hold the panel open long enough for the flourish to read (won lingers
     // for the confetti; lost is quick). Reduced motion closes promptly.
     const hold = reducedMotion ? 700 : j.stage === 'Closed Won' ? 1500 : 950
@@ -648,6 +652,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       // for an override they do not need. Every other stage yields a null
       // fpCase, so this is absent there without its own stage check.
       fpCase === 'owing' && { key: 'won-over-balance', label: OWING_CLOSE_ACTION, icon: <IconCheck size={15} />, onClick: () => setWizard('won-over-balance') },
+      // THE WRITTEN-OFF CLOSE (writtenOff.js) — "we will never get this
+      // money". Offered wherever money is outstanding or Jobber already has
+      // it as bad debt (the owing and written_off cases). Deliberately a
+      // different verb, icon and wizard from the override just above it,
+      // which means the opposite: "we WERE paid, outside Jobber".
+      (fpCase === 'owing' || fpCase === 'written_off') && { key: 'write-off', label: WRITE_OFF_ACTION, icon: <IconCash size={15} />, onClick: () => setWizard('write-off') },
     ].filter(Boolean) : []),
   ] : []
 
@@ -1124,7 +1134,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 remounts + replays the chip animation — the user SEES it
                 land instead of a silent swap. Reduced motion skips it. */}
             <span key={eng.stage} style={{ flexShrink: 0, ...chipMoveStyle(reducedMotion) }}>
-              <StatusChip label={reopening ? 'Reopening…' : stageDisplayLabel(eng.stage)} styleKey={reopening ? 'blue' : eng.stage} />
+              <StatusChip label={reopening ? 'Reopening…' : engagementStageLabel(eng)} styleKey={reopening ? 'blue' : isWrittenOff(eng) ? WRITTEN_OFF_STYLE_KEY : eng.stage} />
             </span>
             {stageDays != null && !reopening && (
               <span style={{ fontSize: '11px', color: T.ink.muted, fontVariantNumeric: T.type.tabular, whiteSpace: 'nowrap', flexShrink: 0 }}>
@@ -1210,6 +1220,27 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               <IconCheck size={13} />
               {OWING_CLOSE_ACTION}
             </button>
+          )}
+          {/* THE WRITTEN-OFF CLOSE — the other way out of "owing", and the
+              only one when Jobber already has it as bad debt. Same quiet
+              chrome as the override so neither is promoted over the other,
+              but a different verb and icon, and a sentence of its own above
+              it on the owing case so the two can't be read as one thing:
+              the override means "we were paid outside Jobber", this means
+              "that money is never coming". */}
+          {(fpCase === 'owing' || fpCase === 'written_off') && !readOnly && (
+            <>
+              {fpCase === 'owing' && (
+                <p data-bee-write-off-hint style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.5, marginTop: '6px' }}>{WRITE_OFF_HINT}</p>
+              )}
+              <button type="button" className="bee-small-action" data-bee-write-off
+                onClick={() => setWizard('write-off')}
+                style={{ ...rowActionBtn(), marginLeft: 0, alignSelf: 'flex-start', marginTop: '6px',
+                  gap: '6px', color: T.ink.primary }}>
+                <IconCash size={13} />
+                {WRITE_OFF_ACTION}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -1321,6 +1352,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           onCancel={() => setWizard(null)}
           onClosed={onWizardClosed}
           setToast={setToast}
+        />
+      )}
+      {wizard === 'write-off' && eng && (
+        <WriteOffWizard
+          engagementId={engagementId}
+          invoices={children.invoices || []}
+          isMobile={isMobile}
+          onCancel={() => setWizard(null)}
+          onClosed={onWizardClosed}
+          setToast={setToast}
+          readOnly={readOnly}
         />
       )}
       {/* Terminal-close flourish (§C) — body-portalled, above the overlay,

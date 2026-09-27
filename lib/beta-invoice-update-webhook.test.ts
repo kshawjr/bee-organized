@@ -302,12 +302,16 @@ describe('balance owing is the sum over every invoice, not the one in hand', () 
     expect(p.balance_owing).toBe(300)
   })
 
-  it('an invoice whose payment was voided is owing again (Jobber puts it back to awaiting payment)', async () => {
-    // Jobber has no "voided" invoice state: voiding the payment returns the
-    // invoice to awaiting payment, which lands here as 'sent' with its balance.
+  it('a VOIDED invoice owes nothing: its stored balance is $0, so the roll-up adds nothing for it', async () => {
+    // Corrected 2026-09-27 (read live from Jobber, KC): Jobber has no "voided"
+    // invoice STATE, but a whole invoice can be voided — a VOIDED payment
+    // record for its full amount. Its status stays past_due and its
+    // invoiceBalance goes to 0 (Tonya Mourning, $556.20). Stored from
+    // invoiceBalance (invoiceMoneyFromJobber) that is status 'sent',
+    // balance 0 — and the roll-up adds only what the OTHER invoice still owes.
     const p = await run('SENT', [
-      { status: 'sent', total: 750, paid_amount: null, balance_owing: 750 },
-      { status: 'paid', total: 200, paid_amount: 200, balance_owing: 0 },
+      { status: 'sent', total: 556.2, paid_amount: 0, balance_owing: 0 },      // voided
+      { status: 'sent', total: 750, paid_amount: 0, balance_owing: 750 },      // genuinely owed
     ])
     expect(p.balance_owing).toBe(750)
   })

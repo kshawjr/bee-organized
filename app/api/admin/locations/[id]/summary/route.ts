@@ -81,20 +81,23 @@ export async function GET(
     build(supabaseService.from('engagements').select('id', { count: 'exact', head: true })
       .eq('location_uuid', id))
 
-  const [leadsRes, activeRes, wonRes, lostRes, ...stageRes] = await Promise.all([
+  const [leadsRes, activeRes, wonRes, lostRes, writtenOffRes, ...stageRes] = await Promise.all([
     supabaseService.from('leads').select('id', { count: 'exact', head: true })
       .eq('location_uuid', id).not('is_junk', 'is', true),
     // Active = OPEN engagements, matching the board's own definition.
     countEng((q: any) => q.not('stage', 'in', TERMINAL_IN)),
     countEng((q: any) => q.eq('stage', 'Closed Won')),
-    countEng((q: any) => q.eq('stage', 'Closed Lost')),
+    // Lost leaves out written-off deals (Closed Lost + 'written_off',
+    // components/hive/shared/writtenOff.js) — they are their own outcome.
+    countEng((q: any) => q.eq('stage', 'Closed Lost').or('closed_reason.is.null,closed_reason.neq.written_off')),
+    countEng((q: any) => q.eq('stage', 'Closed Lost').eq('closed_reason', 'written_off')),
     ...OPEN_STAGES.map(stage => countEng((q: any) => q.eq('stage', stage))),
   ])
 
   const stageCounts: Record<string, number> = {}
   OPEN_STAGES.forEach((stage, i) => { stageCounts[stage] = stageRes[i]?.count ?? 0 })
 
-  const err = [leadsRes, activeRes, wonRes, lostRes, ...stageRes].find((r: any) => r?.error)
+  const err = [leadsRes, activeRes, wonRes, lostRes, writtenOffRes, ...stageRes].find((r: any) => r?.error)
   if (err) {
     console.error('[location-summary] count failed:', (err as any).error.message)
     return NextResponse.json({ error: 'count_failed', detail: (err as any).error.message }, { status: 500 })
@@ -106,6 +109,7 @@ export async function GET(
     active: activeRes.count ?? 0,
     closedWon: wonRes.count ?? 0,
     closedLost: lostRes.count ?? 0,
+    closedWrittenOff: writtenOffRes.count ?? 0,
     stageCounts,
   })
 }

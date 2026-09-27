@@ -36,6 +36,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatInboxAge, formatInboxFuture, fmtShort, fmtShortTime, fmtMoney } from './engagementStatus'
+import { isWrittenOff } from './writtenOff'
 import { T } from './tokens'
 import {
   IconMail, IconPhone, IconCalendar, IconClock, IconFileText, IconHammer,
@@ -183,9 +184,11 @@ export function buildTimelineItems(agg, drips, { engagementId = null, nowMs = Da
     const ts = toTs(e.closed_at)
     if (ts == null) continue
     const won = e.stage === 'Closed Won'
+    // Written off (writtenOff.js) is its own outcome — never "lost".
+    const outcome = won ? 'won' : isWrittenOff(e) ? 'written off' : 'lost'
     items.push({
       id: `close-${e.id}`, ts, type: 'close', category: 'stage',
-      summary: `Engagement closed — ${won ? 'won' : 'lost'}${e.title ? ` · ${e.title}` : ''}`,
+      summary: `Engagement closed — ${outcome}${e.title ? ` · ${e.title}` : ''}`,
       // closed_reason values are asymmetric across writers — display raw,
       // never branch on them.
       detail: { reason: e.closed_reason || null, notes: e.closed_note || null },

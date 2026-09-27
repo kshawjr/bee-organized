@@ -40,6 +40,7 @@ import { fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
 import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
+import { WRITTEN_OFF } from '@/components/hive/shared/writtenOff'
 import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 
 // Ceiling on ?ids= — the realtime coalescer only ever names cards already on
@@ -260,10 +261,15 @@ export async function GET(req: Request) {
 
   // Optional won/lost narrowing — vocabulary lives in stageConfig, the
   // audited stage strings, never inline literals.
+  // Written off (components/hive/shared/writtenOff.js) is stored as Closed
+  // Lost + closed_reason 'written_off' but is its own outcome: 'lost' leaves
+  // it out, and 'written_off' is its own segment. 'closed' keeps both.
   const stageParam = url.searchParams.get('stage') || 'closed'
-  const stages = (CLOSED_STAGE_FILTERS as Record<string, string[]>)[stageParam]
+  const stages = stageParam === WRITTEN_OFF
+    ? [CLOSED_STAGE_FILTERS.lost[0]]
+    : (CLOSED_STAGE_FILTERS as Record<string, string[]>)[stageParam]
   if (!stages) {
-    return NextResponse.json({ error: 'unsupported_stage', hint: 'stage must be won or lost' }, { status: 400 })
+    return NextResponse.json({ error: 'unsupported_stage', hint: 'stage must be won, lost or written_off' }, { status: 400 })
   }
 
   // Scope: owners locked to their location; elevated may pass one.
@@ -280,6 +286,9 @@ export async function GET(req: Request) {
     .order('id', { ascending: true })
     .range(offset, offset + limit - 1)
   if (scopeLoc) q = q.eq('location_uuid', scopeLoc)
+  if (stageParam === WRITTEN_OFF) q = q.eq('closed_reason', WRITTEN_OFF)
+  // neq alone would also drop rows whose reason is NULL — keep those.
+  else if (stageParam === 'lost') q = q.or(`closed_reason.is.null,closed_reason.neq.${WRITTEN_OFF}`)
 
   const { data: rows, count, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

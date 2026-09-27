@@ -41,6 +41,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
+import { isWrittenOff, writtenOffAmountText } from './shared/writtenOff'
 import { T } from './shared/tokens'
 import { describeDismissal, dismissalLine, stillNurturing, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
@@ -49,7 +50,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin, IconCash,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -711,21 +712,27 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           )}
           {closedVisible.map(e => {
             const won = e.stage === 'Closed Won'
+            // A written-off deal (writtenOff.js) is neither won nor lost:
+            // its own word, its own icon, and the amount written off where
+            // the value would sit — never "lost".
+            const writtenOff = isWrittenOff(e)
             const money = Number(e.total_paid) > 0 ? e.total_paid : e.total_invoiced
             // Closed reason rides the row (card-restore build 1 — fetched
             // all along, never rendered); 'won' as a reason is redundant
             // beside the won/lost word, so it stays suppressed.
-            const reason = e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason)
+            const reason = writtenOff
+              ? (writtenOffAmountText(e) ? `${writtenOffAmountText(e)} written off` : null)
+              : e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason)
             const note = (e.closed_note || '').trim()
             return (
               <div key={e.id} onClick={() => onOpenEngagement(e)}
                 style={{ display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 12px', cursor: 'pointer', opacity: 0.65 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   <span style={{ color: won ? T.state.success.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
-                    {won ? <IconCheck size={12} /> : <IconX size={12} />}
+                    {won ? <IconCheck size={12} /> : writtenOff ? <IconCash size={12} /> : <IconX size={12} />}
                   </span>
                   <span title={displayTitle(e)} style={{ flex: 1, minWidth: 0, fontSize: '11px', color: T.ink.secondary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
+                    {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : writtenOff ? 'written off' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
                   </span>
                   {/* Reopen (resurrect) — Closed LOST only; re-derives the
                       open stage server-side. Closed Won is out of scope.

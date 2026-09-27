@@ -15,8 +15,9 @@
 // — one source, so the panel and the list can never explain the same
 // engagement two different ways.
 //
-// THREE CASES, and they are genuinely different situations. They must
-// never collapse into one sentence:
+// FOUR CASES, and they are genuinely different situations. They must
+// never collapse into one sentence (the fourth, written_off, is below at
+// finalProcessingCase):
 //   · paid           → everything settled; Mark won already shows
 //   · never_invoiced → no invoice was ever raised; the $0 close, which
 //                      Mark won already offers (invoicesSettled counts
@@ -36,6 +37,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { invoicesSettled, WON_OVER_BALANCE } from './closeEngagement'
+import { hasBadDebt, writtenOffAmountFromInvoices, writtenOffInJobberExplainer } from './writtenOff'
 
 export { WON_OVER_BALANCE }
 
@@ -55,13 +57,23 @@ export function owedOnInvoices(invoices = []) {
   )
 }
 
-// 'paid' | 'never_invoiced' | 'owing' — or null for any stage that is
-// not Final Processing, which is how every caller renders nothing
-// elsewhere without its own stage check.
+// 'paid' | 'never_invoiced' | 'owing' | 'written_off' — or null for any
+// stage that is not Final Processing, which is how every caller renders
+// nothing elsewhere without its own stage check.
+//
+// 'written_off' (2026-09-27): Jobber has the money as BAD DEBT and nothing
+// else on the deal is still owed. There is nothing to collect and nothing
+// was paid, so neither Mark won nor "close it anyway" is the right door —
+// the written-off close is. Keyed on the invoice STATUS, so it reads the
+// same before and after Jobber's real balances are loaded (a written-off
+// invoice's balance is $0 afterwards, its full total before).
 export function finalProcessingCase(engagement, invoices = []) {
   if (!engagement || engagement.stage !== FINAL_PROCESSING) return null
   const list = invoices || []
-  if (!invoicesSettled(list)) return 'owing'
+  if (!invoicesSettled(list)) {
+    const stillOwedElsewhere = owedOnInvoices(list.filter(i => i?.status !== 'bad_debt')) > 0
+    return hasBadDebt(list) && !stillOwedElsewhere ? 'written_off' : 'owing'
+  }
   return list.length === 0 ? 'never_invoiced' : 'paid'
 }
 
@@ -85,6 +97,9 @@ export function finalProcessingExplainer(caseKey, invoices = []) {
       title: 'Waiting on you',
       body: 'The work is finished and no invoice was ever raised for it. If that’s right — a freebie, a warranty call, a job that never got billed — press Mark won to close it at $0.',
     }
+  }
+  if (caseKey === 'written_off') {
+    return writtenOffInJobberExplainer(writtenOffAmountFromInvoices(invoices))
   }
   if (caseKey === 'owing') {
     const owed = owedOnInvoices(invoices)
@@ -133,7 +148,7 @@ export function owingClosedLine(engagement) {
 // case PRESENT, with its count — the three situations stay three
 // sentences here too, and a case with nothing in it says nothing.
 export function finalProcessingGroupLines(rows = []) {
-  const counts = { paid: 0, never_invoiced: 0, owing: 0 }
+  const counts = { paid: 0, never_invoiced: 0, owing: 0, written_off: 0 }
   for (const e of rows || []) {
     const k = finalProcessingCase(e, e?.invoices || [])
     if (k) counts[k] += 1
@@ -148,6 +163,9 @@ export function finalProcessingGroupLines(rows = []) {
   }
   if (counts.owing) {
     lines.push(`${counts.owing} still ${plural(counts.owing, 'shows', 'show')} money owing. Open ${plural(counts.owing, 'it', 'one')} to see the amount and decide.`)
+  }
+  if (counts.written_off) {
+    lines.push(`${counts.written_off} ${plural(counts.written_off, 'is', 'are')} marked as bad debt in Jobber. Open ${plural(counts.written_off, 'it', 'one')} and close ${plural(counts.written_off, 'it', 'them')} as Written off.`)
   }
   return lines
 }

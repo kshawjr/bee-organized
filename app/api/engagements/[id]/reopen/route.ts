@@ -33,6 +33,7 @@ import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { writeSyncLog } from '@/lib/sync-log'
 import { deriveEngagementStage } from '@/lib/engagements'
+import { WRITTEN_OFF } from '@/components/hive/shared/writtenOff'
 
 export async function POST(
   req: Request,
@@ -117,6 +118,13 @@ export async function POST(
     nurture_started_at: null,
     updated_at: nowIso,
   }
+  // A written-off deal (Closed Lost + 'written_off') reopens like any other
+  // Lost — the client paid after all, say — and the write-off amount goes
+  // with the close. Only written on those rows, so an ordinary reopen never
+  // touches the column.
+  const wasWrittenOff = engagement.closed_reason === WRITTEN_OFF
+  if (wasWrittenOff) patch.written_off_amount = null
+  const fromLabel = wasWrittenOff ? 'Written off' : 'Closed Lost'
 
   const { error: updateError } = await supabaseService
     .from('engagements')
@@ -133,7 +141,7 @@ export async function POST(
     location_uuid: engagement.location_uuid,
     engagement_id: id,
     kind: 'stage_change',
-    label: `Reopened: Closed Lost → ${derived.stage}`,
+    label: `Reopened: ${fromLabel} → ${derived.stage}`,
     user_id: hubUser.id,
     occurred_at: nowIso,
   })
@@ -150,7 +158,7 @@ export async function POST(
     entity_type: 'engagement',
     status: 'success',
     message:
-      `[engagement:reopen] Closed Lost → ${derived.stage} (re-derived from records) ` +
+      `[engagement:reopen] ${fromLabel} → ${derived.stage} (re-derived from records) ` +
       `for client ${engagement.client_id}`,
   })
 

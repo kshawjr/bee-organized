@@ -82,7 +82,7 @@ export default function CloseEngagementConfirm({
       <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase' }}>Close as</p>
       <div style={{ display: 'flex', gap: '8px' }}>
         {segBtn(CLOSED_LOST, 'Lost', false)}
-        {segBtn(CLOSED_WON, 'Won', !settled, 'Invoices still owing — settle them in Jobber first (or close as lost / written off)')}
+        {segBtn(CLOSED_WON, 'Won', !settled, 'Invoices still owing — settle them in Jobber first, or open the engagement to write it off')}
       </div>
       {closeAs === CLOSED_LOST && (
         <select value={closeReason} onChange={e => setCloseReason(e.target.value)}
