@@ -12,6 +12,7 @@
 
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
+import { LOCATION_REPLY_TO_BROKEN, REPLY_TO_INVALID, isReplyToRejection } from './reply-to'
 import { blockedOnMissingRate } from './rate-guard'
 import {
   resolveOwnerBookingLink,
@@ -51,8 +52,21 @@ export const MAX_CONSECUTIVE_SEND_FAILURES = 5
 // errors, and — deliberately — auth/config errors (401/403) and un-typed
 // network throws, because those are system-wide and self-heal, so they must
 // never stop a single lead's drip.
-export function isTerminalSendFailure(errorName?: string | null): boolean {
+//
+// NOT the reply-to (Dallas, 2026-09). Resend refuses a bad reply-to with the
+// SAME validation_error a bad recipient gets, but the reply-to is the
+// LOCATION's setting: every lead there fails identically and every one of them
+// has a fine address. lib/resend.ts re-labels those as REPLY_TO_INVALID; the
+// message check here is the second lock, so a reply-to rejection can never be
+// read as the client's fault even if the label is lost on the way.
+export function isTerminalSendFailure(errorName?: string | null, message?: string | null): boolean {
+  if (errorName === REPLY_TO_INVALID || isReplyToRejection(message)) return false
   return errorName === 'validation_error'
+}
+
+// A send refused on the location's reply-to (see isTerminalSendFailure).
+export function isLocationReplyToFailure(errorName?: string | null, message?: string | null): boolean {
+  return errorName === REPLY_TO_INVALID || isReplyToRejection(message)
 }
 
 export async function sendDripStep(leadId: string): Promise<SendDripResult> {
@@ -124,7 +138,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type, drip_last_send_status')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type, drip_last_send_status, drip_last_send_error')
     .eq('id', row.lead_id)
     .maybeSingle()
 
@@ -374,13 +388,36 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     // setup gap, not a transient send failure, so we record it as 'no_email'
     // with owner-actionable copy. Anything else is a real Resend failure.
     const senderConfigMissing = (result.error ?? '').includes('missing sender config')
+    // The location's reply-to is broken (two addresses, a typo). Like a
+    // missing sender config it is the LOCATION's setup, not this lead: hold,
+    // never stop, never count, and say whose setting it is.
+    const replyToBroken = !senderConfigMissing && isLocationReplyToFailure(result.errorName, result.error)
     await recordDripSendStatus(row.lead_id, {
       status: senderConfigMissing ? 'no_email' : 'failed',
       step: row.current_step,
       error: senderConfigMissing
-        ? 'Location send_from_email/sender_name/reply_to_email not configured'
-        : result.error ?? 'unknown send error',
+        ? 'Your location’s sender email isn’t set up — check Settings (send-from address, sender name and reply-to).'
+        : replyToBroken
+          ? LOCATION_REPLY_TO_BROKEN
+          : result.error ?? 'unknown send error',
     })
+
+    if (replyToBroken) {
+      // HELD, exactly like senderConfigMissing below: the row is untouched, so
+      // the drip resumes on the next tick after the owner fixes Settings. The
+      // lead's drip is NOT stopped and NOT counted toward the cap — before
+      // this, every Dallas lead was stopped for good as 'invalid_recipient'.
+      // One Timeline entry, the first time only (the error on the lead row is
+      // the dedup key), so the owner sees why emails paused without a new row
+      // every hour.
+      if (lead.drip_last_send_error !== LOCATION_REPLY_TO_BROKEN) {
+        await recordDripTouchpoint(row.lead_id, loc.id, {
+          status: 'failed',
+          label: `Drip paused — ${LOCATION_REPLY_TO_BROKEN}`,
+        })
+      }
+      return { sent: false, error: 'location_reply_to_invalid' }
+    }
 
     // Sender config missing is a location-wide setup gap (self-heals the moment
     // the owner fills it in), so it stays a HELD retry like the rate / booking
@@ -396,7 +433,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     // noise, so STOP this lead's drip and record why. The full Resend message
     // is already on the lead (drip_last_send_error above), so the record shows
     // a bad address, not a system fault.
-    if (isTerminalSendFailure(result.errorName)) {
+    if (isTerminalSendFailure(result.errorName, result.error)) {
       await supabaseService
         .from('lead_drip_progress')
         .update({ stopped_at: new Date().toISOString(), stopped_reason: 'invalid_recipient' })

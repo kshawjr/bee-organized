@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { useLocationBroadcast } from "@/lib/use-location-broadcast"
 import { US_TIMEZONES, normalizeTimezoneLabel } from "@/lib/us-timezones"
+import { replyToProblem, onboardingReplyTo } from "@/lib/reply-to"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
@@ -11262,6 +11263,17 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       setStepError(e => ({ ...e, location: reviewsLinkErr }))
       return
     }
+    // Reply-to: ONE address (lib/reply-to.ts). Blank falls back to the
+    // Send From address, as the field has always promised — saving it blank
+    // left the location unable to send anything (Katy). A bad value is
+    // refused here with the reason, and the section opens so it is visible.
+    const replyToToSave = onboardingReplyTo(locationForm)
+    const replyToErr = replyToProblem(replyToToSave)
+    if (replyToErr) {
+      setShowAdvancedSender(true)
+      setStepError(e => ({ ...e, location: replyToErr }))
+      return
+    }
     const locId = currentLocationCtx?.id
     setSavingStep('location')
     setStepError(e => ({ ...e, location: '' }))
@@ -11279,7 +11291,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             timezone:        locationForm.timezone,
             sender_name:     locationForm.senderName,
             send_from_email: locationForm.sendFromEmail,
-            reply_to_email:  locationForm.replyToEmail,
+            reply_to_email:  replyToToSave,
             reviews_link:    locationForm.reviewsLink,
             // calendar_link is deliberately absent: the location step has no
             // input for it, and the route clears on '' — sending a stale form
@@ -13080,7 +13092,8 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
     // Autofill phone from profile if not yet set
     const locPhone = locationForm.phone || profileForm.phone
     const reviewsLinkError = validateReviewsLink(locationForm.reviewsLink)
-    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError
+    const replyToError = locationForm.sendFromEmail ? replyToProblem(onboardingReplyTo(locationForm)) : null
+    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError && !replyToError
 
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
@@ -13144,6 +13157,9 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             style={{ marginTop:'8px', fontSize:'12px', color:'#6366f1', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0, display:'flex', alignItems:'center', gap:'4px' }}>
             {showAdvancedSender?'▲':'▼'} {showAdvancedSender?'Hide':'Customize'} sender name & reply-to
           </button>
+          {replyToError && !showAdvancedSender && (
+            <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>Reply-to: {replyToError}</p>
+          )}
 
           {showAdvancedSender&&(
             <div style={{ marginTop:'8px', display:'grid', gap:'8px', padding:'12px', background:'rgba(99,102,241,0.04)', borderRadius:'9px', border:'1px solid rgba(99,102,241,0.12)' }}>
@@ -13154,8 +13170,11 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
               </div>
               <div>
                 <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Reply-To Email</p>
-                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land - can be a shared inbox or different address</p>
-                <input type="email" value={locationForm.replyToEmail} onChange={e=>setLocationForm(f=>({...f,replyToEmail:e.target.value}))} placeholder="replies@yourbusiness.com" style={inp} />
+                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land — one address. For two people, use one shared inbox. Leave blank to use your Send From address.</p>
+                <input type="email" value={locationForm.replyToEmail} onChange={e=>setLocationForm(f=>({...f,replyToEmail:e.target.value}))} placeholder="replies@yourbusiness.com" style={{ ...inp, ...(replyToError ? { borderColor:'rgba(239,68,68,0.5)' } : {}) }} />
+                {replyToError && (
+                  <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{replyToError}</p>
+                )}
               </div>
             </div>
           )}
@@ -23997,7 +24016,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             >
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
-              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
+              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land — one address. For two people, use one shared inbox." type="email" validate={replyToProblem} />
             </SequenceSenderCard>
 
           </div>

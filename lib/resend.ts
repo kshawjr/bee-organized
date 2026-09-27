@@ -11,6 +11,7 @@
 // invites going out before the owner has onboarded).
 
 import { Resend } from 'resend'
+import { LOCATION_REPLY_TO_BROKEN, REPLY_TO_INVALID, replyToProblem, isReplyToRejection } from './reply-to'
 import { supabaseService } from './supabase-service'
 import { logNotificationFanout, type NotificationContext } from './notification-log'
 import { resolveHandlerForRawType } from './project-type-handlers'
@@ -366,6 +367,21 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
     return { success: false, error }
   }
 
+  // THE REPLY-TO IS THE SENDER'S SETTING, NOT THE CLIENT'S ADDRESS. Checked
+  // before Resend sees it, with the same rule Settings enforces
+  // (lib/reply-to.ts). A value saved before that rule existed — Dallas's
+  // two-address reply_to_email — would otherwise reach Resend and come back
+  // as a 422 validation_error, indistinguishable from a mistyped client
+  // address, and the drip engine would stop the lead's drip for good.
+  // REPLY_TO_INVALID tells every caller whose problem this is.
+  const replyProblem = replyToProblem(replyTo)
+  if (replyProblem) {
+    const error = `${LOCATION_REPLY_TO_BROKEN} (${replyProblem})`
+    console.error('sendEmailDirect: reply-to refused before send', { replyTo, replyProblem })
+    await safeLog({ ...context, channel: 'email', subject, send_status: 'failed', error })
+    return { success: false, error, errorName: REPLY_TO_INVALID }
+  }
+
   try {
     const { data, error } = await getResend().emails.send({
       from: `${fromName} <${from}>`,
@@ -392,6 +408,12 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
       // permanently-rejected message (e.g. name='validation_error' / 422 — an
       // invalid recipient) from a transient one (429 rate limit, 5xx). The
       // human message alone can't be classified reliably.
+      // Backstop: Resend refused the REPLY-TO (a value our rule let through).
+      // Same 422 validation_error a bad recipient gets, so re-label it as the
+      // sender's setting — callers must never read it as the client's address.
+      if (isReplyToRejection(message)) {
+        return { success: false, error: `${LOCATION_REPLY_TO_BROKEN} (${message})`, errorName: REPLY_TO_INVALID, errorStatus: error.statusCode }
+      }
       return { success: false, error: message, errorName: error.name, errorStatus: error.statusCode }
     }
 

@@ -3,6 +3,7 @@ import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
 import { safeHttpUrl } from '@/lib/email-signature'
+import { replyToProblem } from '@/lib/reply-to'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
@@ -123,6 +124,19 @@ export async function PATCH(
         )
       }
       patch.timezone = normalizeTimezoneLabel(patch.timezone)
+    }
+
+    // reply_to_email takes exactly ONE usable address, and cannot be blank.
+    // Dallas saved "jackie@…,dknapp@…" here; Resend refused every send for
+    // ten days and the drips blamed the clients. A blank one holds every send
+    // too (sendEmail refuses without a reply-to — Katy's state). Same rule
+    // the Settings row and onboarding apply as the owner types
+    // (lib/reply-to.ts), so the reason shown there is the reason given here.
+    if ('reply_to_email' in patch) {
+      const problem = replyToProblem(patch.reply_to_email)
+      if (problem) {
+        return NextResponse.json({ error: problem }, { status: 400 })
+      }
     }
 
     if (Object.keys(patch).length === 1) {
