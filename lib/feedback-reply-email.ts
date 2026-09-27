@@ -59,6 +59,13 @@ const FROM_EMAIL = process.env.INVITE_FROM_EMAIL || 'admin@beeorganized.com'
 const FROM_NAME = process.env.INVITE_FROM_NAME || 'Bee Organized'
 const REPLY_TO = process.env.INVITE_REPLY_TO_EMAIL || 'admin@beeorganized.com'
 
+// A silent copy of every email this module sends, so Kevin has a record of
+// what went out in Bee Organized's name. BCC, not CC: the owner never sees the
+// address, and a visible cc invites reply-all. Same env-with-default pattern as
+// the sender trio above.
+export const FEEDBACK_REPLY_BCC =
+  process.env.FEEDBACK_REPLY_BCC_EMAIL || 'kevin@bmave.com'
+
 export const FEEDBACK_REPLY_EMAIL_KIND = 'feedback_reply'
 
 // Where the link lands: Help › My requests, the one place an owner's own
@@ -254,20 +261,34 @@ export async function sendFeedbackReplyEmail(args: FeedbackReplyEmailArgs & {
   locationId?: string | null
 }): Promise<SendResult & { subject: string }> {
   const { subject, html, text } = buildFeedbackReplyEmail(args)
+  const send = (bcc: string[]) => sendEmailDirect({
+    from: FROM_EMAIL,
+    fromName: FROM_NAME,
+    replyTo: REPLY_TO,
+    to: args.to,
+    ...(bcc.length ? { bcc } : {}),
+    subject,
+    html,
+    text,
+    // Context colours the notification_log row and nothing else. No lead_id —
+    // a feedback item is not a lead, even when it was filed from one.
+    location_id: args.locationId ?? null,
+    email_kind: FEEDBACK_REPLY_EMAIL_KIND,
+  })
   try {
-    const result = await sendEmailDirect({
-      from: FROM_EMAIL,
-      fromName: FROM_NAME,
-      replyTo: REPLY_TO,
-      to: args.to,
-      subject,
-      html,
-      text,
-      // Context colours the notification_log row and nothing else. No lead_id —
-      // a feedback item is not a lead, even when it was filed from one.
-      location_id: args.locationId ?? null,
-      email_kind: FEEDBACK_REPLY_EMAIL_KIND,
-    })
+    // The copy must never cost the owner their reply. Resend takes To and BCC
+    // in one call, so a REJECTED copy address (validation_error / 422) fails
+    // the whole message — in that case, and only that one, send again without
+    // the copy. Other failures (rate limit, 5xx) are not about the copy, and
+    // dropping it would not help, so they are reported as before. A copy that
+    // is accepted and later bounces does not affect the owner's delivery.
+    const bcc = FEEDBACK_REPLY_BCC && FEEDBACK_REPLY_BCC !== args.to ? [FEEDBACK_REPLY_BCC] : []
+    let result = await send(bcc)
+    if (!result.success && bcc.length &&
+        (result.errorName === 'validation_error' || result.errorStatus === 422)) {
+      console.warn('[feedback reply email] copy address rejected — resending to the owner only', result.error)
+      result = await send([])
+    }
     return { ...result, subject }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'feedback reply send threw'
