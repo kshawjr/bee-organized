@@ -30,15 +30,30 @@
 // Frames (routed by the lookup, all downstream of the search field):
 //   A — search input. Matches as you type against the loaded people
 //       prop (see shared/clientMatch.js for the phone-storage story).
-//   B — match found: returning client, matched-on line, open-engagement
+//   L — possible matches: a list, NOBODY pre-selected. Any name match,
+//       and more than one email/phone match, lands here — the owner
+//       picks who it is, or takes "None of these — create a new client".
+//   B — returning client, matched-on line, open-engagement
 //       count + last contact, new-job-in-Jobber / open-profile actions.
-//   C — no match: create the PERSON with founding-viable fields only.
+//       Opens by itself ONLY for exactly one email or phone match;
+//       otherwise only after a pick from L.
+//   C — no match (or "create a new client" chosen): create the PERSON
+//       with founding-viable fields only.
 //       The authoritative DB match query re-runs right before the insert.
 //       Source='Referral' opens ReferrerPicker (match-or-create) and the
 //       link rides the POST as referred_by_kind/referred_by_id.
 //   D — matched client has 1+ OPEN engagement: concurrent-work confirm
 //       before the send — the new request founds a SECOND engagement
 //       (rule 1), both stay active.
+//
+// WHY NAMES NEVER AUTO-SELECT (2026-09-27, Whitney / Portland): name
+// matching is a substring match from 2 characters, so "Shelby" matched
+// both Portland Shelbys and the sheet silently took the first — and with
+// any match on screen there was no way to reach frame C, so a THIRD
+// Shelby could not be created at all. An email or phone match is strong
+// evidence it is the same person; a name match is not (71% of clients
+// share a first name with someone at their own location). Every frame
+// with a match on it offers the "create a new client" exit.
 //
 // The merge seams: frame C hands the REAL returned lead row up through
 // onCreated (never an optimistic stub — phantom Inbox rows); frames B/D
@@ -88,6 +103,16 @@ const secondaryBtn = {
   fontSize: '13px', fontWeight: 500, color: T.ink.primary,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
+
+const linkBtn = {
+  alignSelf: 'flex-start', padding: 0, border: 'none', background: 'transparent',
+  fontSize: '12px', fontWeight: 500, color: T.accent.deep,
+  cursor: 'pointer', fontFamily: 'inherit',
+}
+
+// Frame L shows this many rows; the rest wait for a narrower query
+// (Philadelphia Suburbs has 332 Jennifers).
+const MAX_LISTED = 8
 
 function Badge({ tint, icon, label }) {
   return (
@@ -192,7 +217,8 @@ export default function NewClientSheet({
   // referred_by_id at POST.
   const [referrer, setReferrer] = useState(null)
   const [pickReferrer, setPickReferrer] = useState(false)
-  const [pickedId, setPickedId] = useState(null) // multi-match: which B row is active
+  const [pickedId, setPickedId] = useState(null) // the person picked from frame L
+  const [forceNew, setForceNew] = useState(false) // "None of these — create a new client"
   const [confirming, setConfirming] = useState(false) // frame D
   const [dbMatch, setDbMatch] = useState(null) // pre-insert gate hit not in the loaded set
   const [busy, setBusy] = useState(false)
@@ -206,7 +232,11 @@ export default function NewClientSheet({
   ), [people, locFilter])
 
   const matches = useMemo(() => matchPeople(scopedPeople, query), [scopedPeople, query])
-  const match = (pickedId && matches.find(m => m.person.id === pickedId)) || matches[0] || null
+  // Only ONE email/phone match opens frame B by itself. A name match —
+  // even a single one — never does, and neither does a strong key shared
+  // by several people (a household phone): those go to the frame L list.
+  const autoMatch = matches.length === 1 && matches[0].matchedOn !== 'name' ? matches[0] : null
+  const match = forceNew ? null : ((pickedId && matches.find(m => m.person.id === pickedId)) || autoMatch)
 
   // A query is "committed" once it could plausibly identify someone —
   // that is when a no-match result may open the create form (frame C).
@@ -214,7 +244,16 @@ export default function NewClientSheet({
   const qDigits = q.replace(/\D/g, '')
   const searched = q.includes('@') ? q.length >= 3 : (qDigits.length >= 7 || q.length >= 2)
 
-  const frame = confirming ? 'D' : match ? 'B' : (searched && !dbMatch) ? 'C' : 'A'
+  const frame = confirming ? 'D'
+    : match ? 'B'
+    : (matches.length > 0 && !forceNew && !dbMatch) ? 'L'
+    : (searched && !dbMatch) ? 'C'
+    : 'A'
+
+  // The missing exit: from a list, a returning client, or a pre-insert
+  // bounce, straight to frame C. The query stays, so the name prefills.
+  const createNewInstead = () => { setForceNew(true); setPickedId(null); setDbMatch(null); setErrorMsg(null) }
+  const backToMatches = () => { setForceNew(false); setPickedId(null); setErrorMsg(null) }
 
   // Frame B/D derived facts — session rowPatches already applied upstream.
   const openEngs = useMemo(() => {
@@ -314,6 +353,7 @@ export default function NewClientSheet({
           // per-location (one leads row per person per location).
           const rows = await queryLeadMatches(createClient(), { ...keys, locationUuid })
           if (rows.length > 0) {
+            setForceNew(false)
             const row = rows[0]
             const known = scopedPeople.find(p => p.id === row.id)
             if (known) {
@@ -415,13 +455,45 @@ export default function NewClientSheet({
               style={{ ...inp, paddingLeft: '34px' }}
               placeholder="Name, email, or phone"
               value={query}
-              onChange={e => { setQuery(e.target.value); setPickedId(null); setDbMatch(null); setErrorMsg(null) }}
+              onChange={e => { setQuery(e.target.value); setPickedId(null); setForceNew(false); setDbMatch(null); setErrorMsg(null) }}
               aria-label="Search clients"
             />
           </div>
           <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '6px' }}>
             Matches on email or phone (digits only). Type to search — results appear as you go.
           </p>
+        </div>
+      )}
+
+      {/* Frame L — possible matches, nobody pre-selected */}
+      {frame === 'L' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div><Badge tint={AMBER} icon={<IconUserCheck size={13} />} label={matches.length === 1 ? 'Possible match' : `${matches.length} possible matches`} /></div>
+          <p style={{ fontSize: '12px', color: T.ink.muted }}>
+            {matches.length === 1 ? 'Is this who you mean?' : 'Which one do you mean?'}
+          </p>
+          <div role="list" aria-label="Possible matches" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {matches.slice(0, MAX_LISTED).map(m => {
+              const contact = [maskEmail(m.person.email), maskPhone(m.person.phone)].filter(Boolean).join(' · ')
+              return (
+                <button key={m.person.id} role="listitem" onClick={() => setPickedId(m.person.id)}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px', padding: '8px 12px', borderRadius: T.radius.control, border: T.border.thin, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary }}>{m.person.name}</span>
+                  <span style={{ fontSize: '11px', color: T.ink.muted }}>
+                    matched on {m.matchedOn}{contact ? ` · ${contact}` : ''}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {matches.length > MAX_LISTED && (
+            <p style={{ fontSize: '11px', color: T.ink.muted }}>
+              {matches.length - MAX_LISTED} more — keep typing to narrow it down.
+            </p>
+          )}
+          <button style={secondaryBtn} onClick={createNewInstead}>
+            None of these — create a new client
+          </button>
         </div>
       )}
 
@@ -445,16 +517,10 @@ export default function NewClientSheet({
             </div>
           </div>
 
-          {matches.length > 1 && !dbMatch && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {matches.filter(m => m.person.id !== activeMatch.person.id).slice(0, 4).map(m => (
-                <button key={m.person.id} onClick={() => setPickedId(m.person.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: T.radius.control, border: T.border.thin, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                  <span style={{ fontSize: '13px', color: T.ink.primary }}>{m.person.name}</span>
-                  <span style={{ fontSize: '11px', color: T.ink.muted }}>also matched on {m.matchedOn}</span>
-                </button>
-              ))}
-            </div>
+          {pickedId && !autoMatch && !dbMatch && (
+            <button type="button" onClick={backToMatches} style={linkBtn}>
+              ← Back to {matches.length === 1 ? 'the match' : `all ${matches.length} matches`}
+            </button>
           )}
 
           <div style={{ background: T.surface.sunken, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -481,6 +547,9 @@ export default function NewClientSheet({
             <button style={onSendToJobber ? secondaryBtn : primaryBtn} onClick={() => onOpenClient(activeMatch.person.id)}>
               Open client profile
             </button>
+            <button style={secondaryBtn} onClick={createNewInstead}>
+              None of these — create a new client
+            </button>
           </div>
         </div>
       )}
@@ -488,7 +557,12 @@ export default function NewClientSheet({
       {/* Frame C — no match, create the person (founding-viable fields only) */}
       {frame === 'C' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><Badge tint={GREEN} icon={<IconSparkles size={13} />} label="No match — new person" /></div>
+          <div><Badge tint={GREEN} icon={<IconSparkles size={13} />} label={forceNew ? 'New person' : 'No match — new person'} /></div>
+          {forceNew && matches.length > 0 && (
+            <button type="button" onClick={backToMatches} style={linkBtn}>
+              ← Back to {matches.length === 1 ? 'the match' : `the ${matches.length} matches`}
+            </button>
+          )}
           <p style={{ fontSize: '12px', color: T.ink.muted }}>
             Founding-viable fields only. The card opens on create — fill the rest there.
           </p>

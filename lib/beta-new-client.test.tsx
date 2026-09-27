@@ -539,6 +539,167 @@ describe('NewClientSheet frames', () => {
   })
 })
 
+// ═══ common names — Whitney's trap (Portland, 2026-09-27) ═══
+// "I am trying to create a new encounter for a different shelby and it's
+// not letting me. It keeps creating this one." A name match silently
+// picked matches[0] and, with any match on screen, frame C (create) was
+// unreachable. Name matches now list with NOBODY pre-selected, and every
+// frame with a match on it offers "None of these — create a new client".
+describe('NewClientSheet — common first names never trap the owner', () => {
+  // Portland's real pair, shape-for-shape: Beauregard has a phone and no
+  // email, McKerr has both.
+  const beauregard = () => person({ id: 'shelby-b', name: 'Shelby Beauregard', email: '', phone: '503-555-0141', locationId: 'loc-portland' })
+  const mckerr = () => person({ id: 'shelby-m', name: 'Shelby McKerr', email: 'shelby.mckerr@example.com', phone: '(503) 555-0177', locationId: 'loc-portland' })
+  const EXIT = 'None of these — create a new client'
+  const search = (host: Element, q: string) => type(host.querySelector('input[aria-label="Search clients"]')!, q)
+  const listRows = (host: Element) => [...host.querySelectorAll('[aria-label="Possible matches"] [role="listitem"]')]
+
+  it('two clients sharing a first name both appear — neither is auto-selected', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person({ id: 's1', name: 'Sarah Mitchell' }), person({ id: 's2', name: 'Sarah Ortiz', email: 'so@x.com', phone: '' })]} locFilter="loc-uuid-1" onClose={() => {}} />
+    )
+    await search(host, 'Sarah')
+    const rows = listRows(host)
+    expect(rows.map(r => r.textContent)).toEqual([
+      expect.stringContaining('Sarah Mitchell'),
+      expect.stringContaining('Sarah Ortiz'),
+    ])
+    expect(host.textContent).toContain('2 possible matches')
+    // Nobody chosen: no returning-client screen, no Start/Open actions.
+    expect(host.textContent).not.toContain('Returning client')
+    expect(buttonByText(host, 'Open client profile')).toBeFalsy()
+    await unmount()
+  })
+
+  it('"create a new client" is reachable with matches present — and creates, never links', async () => {
+    const onCreated = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[beauregard(), mckerr()]} locFilter="loc-portland" currentUserId="user-1" onClose={() => {}} onCreated={onCreated} />
+    )
+    await search(host, 'Shelby Lindqvist')
+    // No match on the full new name — plain frame C, as before.
+    expect(host.textContent).toContain('No match — new person')
+
+    await search(host, 'Shelby')
+    expect(listRows(host)).toHaveLength(2)
+    await click(buttonByText(host, EXIT)!)
+    expect(host.textContent).toContain('New person')
+    expect((host.querySelector('input[aria-label="Name"]') as HTMLInputElement).value).toBe('Shelby')
+    await type(host.querySelector('input[aria-label="Name"]')!, 'Shelby Lindqvist')
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    expect(createdBodies[0]).toMatchObject({ name: 'Shelby Lindqvist', location_uuid: 'loc-portland' })
+    expect(onCreated).toHaveBeenCalledTimes(1)
+    await unmount()
+  })
+
+  it('the exit is on the returning-client screen too — even after an exact email match', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[mckerr()]} locFilter="loc-portland" onClose={() => {}} />
+    )
+    await search(host, 'shelby.mckerr@example.com')
+    expect(host.textContent).toContain('Returning client')
+    await click(buttonByText(host, EXIT)!)
+    expect(host.textContent).not.toContain('Returning client')
+    expect(buttonByText(host, 'Create — opens card')).toBeTruthy()
+    await unmount()
+  })
+
+  it('an exact email match still goes straight to the returning-client screen', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[beauregard(), mckerr()]} locFilter="loc-portland" onClose={() => {}} />
+    )
+    await search(host, 'SHELBY.MCKERR@example.com')
+    expect(host.textContent).toContain('Returning client')
+    expect(host.textContent).toContain('Shelby McKerr')
+    expect(host.textContent).toContain('matched on email · s···@example.com')
+    expect(host.textContent).not.toContain('Shelby Beauregard')
+    expect(listRows(host)).toHaveLength(0)
+    await unmount()
+  })
+
+  it("Whitney's case: two Shelbys at Portland — pick either one, or neither", async () => {
+    const onSend = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[beauregard(), mckerr()]} locFilter="loc-portland" onClose={() => {}} onSendToJobber={onSend} />
+    )
+    await search(host, 'Shelby')
+    const rows = listRows(host)
+    expect(rows).toHaveLength(2)
+    // Each row carries enough to tell them apart (masked contact).
+    expect(rows[0].textContent).toContain('Shelby Beauregard')
+    expect(rows[0].textContent).toContain('+1 503···0141')
+    expect(rows[1].textContent).toContain('Shelby McKerr')
+    expect(rows[1].textContent).toContain('s···@example.com')
+    expect(host.textContent).not.toContain('Returning client')
+
+    // Pick the SECOND one — the one matches[0] could never reach.
+    await click(rows[1])
+    expect(host.textContent).toContain('Returning client')
+    expect(host.querySelector('p[title]')?.textContent).toBe('Shelby McKerr')
+    // Changed their mind: back to the list, then take the exit.
+    await click(buttonByText(host, '← Back to all 2 matches')!)
+    expect(listRows(host)).toHaveLength(2)
+    await click(buttonByText(host, EXIT)!)
+    expect(buttonByText(host, 'Create — opens card')).toBeTruthy()
+    // And the returning-client path, when it IS them, sends the one picked.
+    await click(buttonByText(host, '← Back to the 2 matches')!)
+    await click(listRows(host)[0])
+    await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new job in Jobber'))!)
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0][0].id).toBe('shelby-b')
+    await unmount()
+  })
+
+  it('a single unambiguous (phone) match behaves as it does today — straight to returning client', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[beauregard(), mckerr()]} locFilter="loc-portland" onClose={() => {}} />
+    )
+    await search(host, '503 555 0141')
+    expect(host.textContent).toContain('Returning client')
+    expect(host.textContent).toContain('Shelby Beauregard')
+    expect(host.textContent).toContain('matched on phone · +1 503···0141')
+    expect(listRows(host)).toHaveLength(0)
+    await unmount()
+  })
+
+  it('a single NAME match is offered, not assumed', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[mckerr()]} locFilter="loc-portland" onClose={() => {}} />
+    )
+    await search(host, 'Shelby')
+    expect(listRows(host)).toHaveLength(1)
+    expect(host.textContent).toContain('Possible match')
+    expect(host.textContent).not.toContain('Returning client')
+    expect(buttonByText(host, EXIT)).toBeTruthy()
+    await unmount()
+  })
+
+  it('a shared household phone lists both people rather than picking one', async () => {
+    const shared = '(503) 555-0100'
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person({ id: 'h1', name: 'Pat Lee', phone: shared }), person({ id: 'h2', name: 'Sam Lee', email: 'sam@x.com', phone: shared })]} locFilter="loc-uuid-1" onClose={() => {}} />
+    )
+    await search(host, '5035550100')
+    expect(listRows(host)).toHaveLength(2)
+    expect(host.textContent).not.toContain('Returning client')
+    await unmount()
+  })
+
+  it('a very common name lists the first few and says how many more', async () => {
+    const jens = Array.from({ length: 12 }, (_, i) => person({ id: `j${i}`, name: `Jennifer Test${i}`, email: `j${i}@x.com`, phone: '' }))
+    const { host, unmount } = await mount(
+      <NewClientSheet people={jens} locFilter="loc-uuid-1" onClose={() => {}} />
+    )
+    await search(host, 'Jennifer')
+    expect(listRows(host)).toHaveLength(8)
+    expect(host.textContent).toContain('12 possible matches')
+    expect(host.textContent).toContain('4 more — keep typing to narrow it down.')
+    expect(buttonByText(host, EXIT)).toBeTruthy()
+    await unmount()
+  })
+})
+
 // ═══ placement ═════════════════════════════════════════════
 describe('New-client entry points', () => {
   it('desktop: one dark "New" pill in the shell top row', () => {
