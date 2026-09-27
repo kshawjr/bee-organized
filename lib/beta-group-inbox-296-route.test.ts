@@ -41,6 +41,22 @@ vi.mock('@/lib/supabase-server', () => ({
   }),
 }))
 
+// The route also checks a sender's DOMAIN (lib/sender-domain.ts, 2026-09-27),
+// which reads the sendable list and the type's current rows. Neither is what
+// this file pins: unknown list → shape-only check, no rows → nothing typed.
+vi.mock('@/lib/sendable-domains', () => ({ getSendableDomains: async () => null }))
+vi.mock('@/lib/supabase-service', () => ({
+  supabaseService: {
+    from: () => {
+      const b: any = {}
+      for (const m of ['select', 'eq', 'ilike']) b[m] = () => b
+      b.maybeSingle = async () => ({ data: null, error: null })
+      b.then = (res: any, rej: any) => Promise.resolve({ data: [], error: null }).then(res, rej)
+      return b
+    },
+  },
+}))
+
 import { POST, PUT } from '@/app/api/locations/[id]/project-type-senders/route'
 
 const params = { params: { id: LOC } }

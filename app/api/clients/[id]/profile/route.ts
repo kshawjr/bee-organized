@@ -16,6 +16,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { profileAggregates } from '@/lib/profile-aggregates'
 import { factsFromRows } from '@/lib/enquiry-exit'
+import { isLocationSendSettingProblem } from '@/lib/sender-domain'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
@@ -49,7 +50,7 @@ export async function GET(
   // retry drops it while migrations/lead_former_addresses.sql is pending —
   // the profile must never 500 over a column that only adds history.
   const PROFILE_COLS =
-    'id, name, first_name, last_name, company, email, phone, address, city, state, zip, address_label, address_label_note, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, inbox_dismissed_at, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type, import_source, jobber_request_id, jobber_job_id, is_junk'
+    'id, name, first_name, last_name, company, email, phone, address, city, state, zip, address_label, address_label_note, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, inbox_dismissed_at, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type, import_source, jobber_request_id, jobber_job_id, is_junk, drip_last_send_status, drip_last_send_error'
   let { data: lead, error: leadError } = await supabaseService
     .from('leads')
     .select(`${PROFILE_COLS}, former_addresses`)
@@ -144,6 +145,19 @@ export async function GET(
     if (latest.stopped_at) drip_stopped_reason = latest.stopped_reason ?? 'unknown'
     else if (latest.completed_at) drip_completed = true
   }
+
+  // HELD ON A LOCATION SETTING (2026-09-27). The drip is live but its last send
+  // failed on the LOCATION's setup — a broken reply-to, a send-from address on
+  // a domain we can't send from, or no sender at all. Those never stop the
+  // lead (lib/drip-send.ts holds and retries), so without this the card read
+  // "active" while nothing sent. The recorded error is already owner wording
+  // that names the setting; the card shows it as-is.
+  const drip_held_message =
+    dripHasLive &&
+    ((lead as any).drip_last_send_status === 'failed' || (lead as any).drip_last_send_status === 'no_email') &&
+    isLocationSendSettingProblem((lead as any).drip_last_send_error)
+      ? String((lead as any).drip_last_send_error)
+      : null
 
   // #243 — NEVER ENROLLED is its own state, not a flavour of "active".
   // #112 separated terminal stops from the paused/active flag but kept the
@@ -293,6 +307,7 @@ export async function GET(
       // progress rows) and its Activate button is the real, working
       // first-enrollment path, so it must keep winning.
       drip_stopped_reason,
+      drip_held_message,
       drip_completed,
       drip_never_enrolled,
       drip_never_enrolled_reason,

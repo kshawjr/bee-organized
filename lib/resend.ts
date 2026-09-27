@@ -16,6 +16,12 @@ import { supabaseService } from './supabase-service'
 import { logNotificationFanout, type NotificationContext } from './notification-log'
 import { resolveHandlerForRawType } from './project-type-handlers'
 import { SIGNATURE_MARKER, SIGNATURE_TAG_RE } from './email-signature'
+import {
+  SENDER_DOMAIN_UNVERIFIED,
+  isSenderDomainRejection,
+  locationSenderDomainMessage,
+  projectTypeSenderDomainMessage,
+} from './sender-domain'
 
 let _resend: import('resend').Resend | null = null
 function getResend() {
@@ -218,9 +224,11 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   let from = send_from_email
   let fromName = sender_name
   let replyTo = reply_to_email
+  let fromIsProjectTypeSender = false
   if (senderProjectType) {
     const override = await resolveProjectTypeSenderOverride(locationId, senderProjectType)
     if (override?.sender_email) {
+      fromIsProjectTypeSender = true
       from = override.sender_email
       fromName = override.sender_name ?? sender_name
       replyTo = override.sender_reply_to
@@ -228,7 +236,7 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
     }
   }
 
-  return sendEmailDirect({
+  const result = await sendEmailDirect({
     from,
     fromName,
     replyTo,
@@ -238,6 +246,24 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
     text,
     ...context,
   })
+
+  // THE FROM ADDRESS IS THE SENDER'S SETTING, NOT THE CLIENT'S ADDRESS
+  // (lib/sender-domain.ts — Test Location, 2026-09-27). Resend refuses a From
+  // on a domain we haven't verified ("The gmail.com domain is not verified…")
+  // with a validation error the drip engine used to read as a bad recipient.
+  // Re-label it here, where we still know WHICH setting the address came from,
+  // so the owner is told the right place to fix it.
+  if (!result.success && isSenderDomainRejection(result.error)) {
+    return {
+      success: false,
+      error: fromIsProjectTypeSender && senderProjectType
+        ? projectTypeSenderDomainMessage(senderProjectType.trim(), from)
+        : locationSenderDomainMessage(from),
+      errorName: SENDER_DOMAIN_UNVERIFIED,
+      errorStatus: result.errorStatus ?? null,
+    }
+  }
+  return result
 }
 
 // Resolve what a location's project type SENDS AS.

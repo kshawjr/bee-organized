@@ -12,9 +12,15 @@
 //     tab's "Snoozed until …" item and its Un-snooze action. See the note at
 //     the render site.
 //   nurture drip — row HIDDEN with live business (v4 rule). Otherwise
-//     five states in precedence order (issue 112 added the first two,
+//     six states in precedence order (issue 112 added the first two,
 //     issue 243 the fourth):
 //       stopped        → reason + guidance, no button (dead sequence)
+//       held           → the LOCATION's setting is blocking sends (reply-to,
+//                        a send-from domain we can't send from, sender not
+//                        set up). The drip is alive and waiting; the message
+//                        names the setting and where to fix it, and emails
+//                        resume on their own. Never blames the client, never
+//                        says "contact support" (Kevin, 2026-09-27).
 //       completed      → display only
 //       paused         → Activate (POST drip-resume — its seed path
 //                        enrolls never-dripped leads too, so one verb
@@ -91,7 +97,10 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
   const dripStopCopy = c.drip_stopped_reason
     ? (DRIP_STOP_COPY[c.drip_stopped_reason] || DRIP_STOP_FALLBACK)
     : null
-  const dripCompleted = !dripStopCopy && !!c.drip_completed
+  // HELD on a location setting — the profile route sets drip_held_message
+  // only while the drip is live and its last send failed on one.
+  const dripHeldMessage = !dripStopCopy && c.drip_held_message ? c.drip_held_message : null
+  const dripCompleted = !dripStopCopy && !dripHeldMessage && !!c.drip_completed
 
   // issue 243 — never-enrolled sits BELOW paused in precedence on purpose. An
   // imported lead is both (it lands paused = true with zero progress rows) and
@@ -99,7 +108,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
   // keep winning or 14k imported leads lose the only control that works for
   // them. Everything else with no progress rows lands here instead of being
   // mislabelled "active".
-  const dripNeverCopy = !dripStopCopy && !dripCompleted && !c.paused && c.drip_never_enrolled
+  const dripNeverCopy = !dripStopCopy && !dripHeldMessage && !dripCompleted && !c.paused && c.drip_never_enrolled
     ? (DRIP_NEVER_COPY[c.drip_never_enrolled_reason] || DRIP_NEVER_FALLBACK)
     : null
 
@@ -191,6 +200,13 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
               <IconPlayerPause size={13} /> Nurture drips stopped — {dripStopCopy.reason}
             </p>
             <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45 }}>{dripStopCopy.guide}</p>
+          </div>
+        ) : dripHeldMessage ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <p style={{ fontSize: '12px', color: T.state.warning.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+              <IconPlayerPause size={13} /> Nurture emails on hold — a location setting needs fixing
+            </p>
+            <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45 }}>{dripHeldMessage}</p>
           </div>
         ) : dripCompleted ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

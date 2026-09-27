@@ -13,6 +13,12 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { LOCATION_REPLY_TO_BROKEN, REPLY_TO_INVALID, isReplyToRejection } from './reply-to'
+import {
+  LOCATION_SENDER_NOT_SET_UP,
+  SENDER_DOMAIN_PREFIX,
+  SENDER_DOMAIN_UNVERIFIED,
+  isSenderDomainRejection,
+} from './sender-domain'
 import { blockedOnMissingRate } from './rate-guard'
 import {
   resolveOwnerBookingLink,
@@ -59,9 +65,20 @@ export const MAX_CONSECUTIVE_SEND_FAILURES = 5
 // has a fine address. lib/resend.ts re-labels those as REPLY_TO_INVALID; the
 // message check here is the second lock, so a reply-to rejection can never be
 // read as the client's fault even if the label is lost on the way.
+//
+// NOT the sender's domain either (Test Location, 2026-09-27): Resend refuses a
+// From on an unverified domain ("The gmail.com domain is not verified…") as a
+// validation error too. lib/resend.ts re-labels it SENDER_DOMAIN_UNVERIFIED;
+// the message check is again the second lock.
 export function isTerminalSendFailure(errorName?: string | null, message?: string | null): boolean {
   if (errorName === REPLY_TO_INVALID || isReplyToRejection(message)) return false
+  if (isLocationSenderDomainFailure(errorName, message)) return false
   return errorName === 'validation_error'
+}
+
+// A send refused because the FROM address's domain isn't one we can send from.
+export function isLocationSenderDomainFailure(errorName?: string | null, message?: string | null): boolean {
+  return errorName === SENDER_DOMAIN_UNVERIFIED || isSenderDomainRejection(message)
 }
 
 // A send refused on the location's reply-to (see isTerminalSendFailure).
@@ -392,15 +409,41 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     // missing sender config it is the LOCATION's setup, not this lead: hold,
     // never stop, never count, and say whose setting it is.
     const replyToBroken = !senderConfigMissing && isLocationReplyToFailure(result.errorName, result.error)
+    // The FROM address is on a domain we can't send from (a Gmail address as a
+    // job type's sender). Same shape as the reply-to: the location's setting.
+    // The message is sendEmail's owner wording, which names the address and
+    // the Settings screen; if the label was lost on the way, say it plainly.
+    const senderDomainBroken = !senderConfigMissing && !replyToBroken &&
+      isLocationSenderDomainFailure(result.errorName, result.error)
+    const senderDomainMessage = senderDomainBroken
+      ? ((result.error ?? '').startsWith(SENDER_DOMAIN_PREFIX)
+          ? result.error!
+          : `${SENDER_DOMAIN_PREFIX} this location’s sender address — Bee Organized can’t send from its domain. Check Settings → Emails and Settings → New leads → Who handles what. Emails resume on their own once it’s fixed.`)
+      : null
     await recordDripSendStatus(row.lead_id, {
       status: senderConfigMissing ? 'no_email' : 'failed',
       step: row.current_step,
       error: senderConfigMissing
-        ? 'Your location’s sender email isn’t set up — check Settings (send-from address, sender name and reply-to).'
+        ? LOCATION_SENDER_NOT_SET_UP
         : replyToBroken
           ? LOCATION_REPLY_TO_BROKEN
-          : result.error ?? 'unknown send error',
+          : senderDomainMessage ?? result.error ?? 'unknown send error',
     })
+
+    if (senderDomainMessage) {
+      // HELD, exactly as the reply-to above: row untouched (resumes on the next
+      // tick after the setting is fixed), NOT stopped, NOT counted toward the
+      // cap, NOT moved to the next step. One Timeline entry, the first time
+      // only — the recorded error is the dedup key, so a changed address gets
+      // its own entry and an unchanged one never repeats hourly.
+      if (lead.drip_last_send_error !== senderDomainMessage) {
+        await recordDripTouchpoint(row.lead_id, loc.id, {
+          status: 'failed',
+          label: `Drip paused — ${senderDomainMessage}`,
+        })
+      }
+      return { sent: false, error: 'location_sender_domain_unverified' }
+    }
 
     if (replyToBroken) {
       // HELD, exactly like senderConfigMissing below: the row is untouched, so

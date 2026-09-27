@@ -6,6 +6,7 @@ import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { useLocationBroadcast } from "@/lib/use-location-broadcast"
 import { US_TIMEZONES, normalizeTimezoneLabel } from "@/lib/us-timezones"
 import { replyToProblem, onboardingReplyTo } from "@/lib/reply-to"
+import { senderAddressProblem, isLocationSendSettingProblem } from "@/lib/sender-domain"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
@@ -8380,6 +8381,13 @@ function PersonPanel({
                     if (dsStatus === "sent") {
                       dsIcon = "✓"; dsColor = "#10b981"; dsBg = "rgba(16,185,129,0.06)";
                       dsText = "Email " + (dsStep || "?") + " sent " + dsRel;
+                    } else if (dsStatus === "failed" && isLocationSendSettingProblem(person.dripLastSendError)) {
+                      // The LOCATION's setting is blocking sends (reply-to, a
+                      // send-from domain we can't send from). Held, not failed:
+                      // the drip resumes by itself once Settings is fixed, and
+                      // the message already names which setting and where.
+                      dsIcon = "⏸"; dsColor = "#b45309"; dsBg = "rgba(245,158,11,0.1)";
+                      dsText = "Email " + (dsStep || "?") + " on hold — " + person.dripLastSendError;
                     } else if (dsStatus === "failed") {
                       dsIcon = "⚠"; dsColor = "#ef4444"; dsBg = "rgba(239,68,68,0.07)";
                       dsText = "Email " + (dsStep || "?") + " failed: " + (person.dripLastSendError || "unknown error");
@@ -11267,6 +11275,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     // Send From address, as the field has always promised — saving it blank
     // left the location unable to send anything (Katy). A bad value is
     // refused here with the reason, and the section opens so it is visible.
+    // Send From: ONE address (lib/sender-domain.ts). The shape is checked here;
+    // whether its DOMAIN is one Bee Organized can send from is the server's
+    // call (it asks Resend) and comes back as the save error below.
+    const sendFromErr = senderAddressProblem(locationForm.sendFromEmail, null)
+    if (sendFromErr) {
+      setStepError(e => ({ ...e, location: sendFromErr }))
+      return
+    }
     const replyToToSave = onboardingReplyTo(locationForm)
     const replyToErr = replyToProblem(replyToToSave)
     if (replyToErr) {
@@ -13093,7 +13109,8 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
     const locPhone = locationForm.phone || profileForm.phone
     const reviewsLinkError = validateReviewsLink(locationForm.reviewsLink)
     const replyToError = locationForm.sendFromEmail ? replyToProblem(onboardingReplyTo(locationForm)) : null
-    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError && !replyToError
+    const sendFromError = locationForm.sendFromEmail ? senderAddressProblem(locationForm.sendFromEmail, null) : null
+    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError && !replyToError && !sendFromError
 
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
@@ -13147,11 +13164,14 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📧 Send-From Email</p>
             {locationForm.sendFromEmail && locationForm.sendFromEmail===profileForm.email && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all new lead emails and welcome messages. Change it to a business address if you prefer. Editable anytime in Settings.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all new lead emails and welcome messages. It must be your Bee Organized address — email can’t be sent from a personal address like Gmail. Editable anytime in Settings.</p>
           <input type="email" value={locationForm.sendFromEmail}
             onChange={e=>setLocationForm(f=>({...f,sendFromEmail:e.target.value}))}
             placeholder="you@yourbusiness.com"
             style={{ ...inp, background: locationForm.sendFromEmail===profileForm.email ? 'rgba(168,201,196,0.06)' : 'white', borderColor: locationForm.sendFromEmail===profileForm.email ? 'rgba(168,201,196,0.4)' : 'rgba(0,0,0,0.1)' }} />
+          {sendFromError && (
+            <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{sendFromError}</p>
+          )}
 
           <button onClick={()=>setShowAdvancedSender(!showAdvancedSender)}
             style={{ marginTop:'8px', fontSize:'12px', color:'#6366f1', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0, display:'flex', alignItems:'center', gap:'4px' }}>
@@ -24015,7 +24035,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               onOpenNewLeads={realLocId ? () => openSection('newleads', { push:false }) : null}
             >
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
-              <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
+              <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="One address, on a domain Bee Organized can send from — your Bee Organized address, not a personal Gmail." type="email" validate={v=>senderAddressProblem(v, null)} />
               <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land — one address. For two people, use one shared inbox." type="email" validate={replyToProblem} />
             </SequenceSenderCard>
 

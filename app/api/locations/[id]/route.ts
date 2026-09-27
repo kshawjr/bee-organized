@@ -4,6 +4,8 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
 import { safeHttpUrl } from '@/lib/email-signature'
 import { replyToProblem } from '@/lib/reply-to'
+import { senderAddressProblem } from '@/lib/sender-domain'
+import { getSendableDomains } from '@/lib/sendable-domains'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
@@ -132,6 +134,18 @@ export async function PATCH(
     // too (sendEmail refuses without a reply-to — Katy's state). Same rule
     // the Settings row and onboarding apply as the owner types
     // (lib/reply-to.ts), so the reason shown there is the reason given here.
+    // send_from_email: ONE address, and on a domain Bee Organized can SEND
+    // from (lib/sender-domain.ts). Resend refuses a From on any other domain,
+    // and until 2026-09-27 that refusal wrote the client off. The sendable list
+    // comes from Resend itself (lib/sendable-domains.ts); if it can't be known
+    // right now, only the shape is checked — never a guessed domain rule.
+    if ('send_from_email' in patch) {
+      const problem = senderAddressProblem(patch.send_from_email, await getSendableDomains(), { what: 'Send From address' })
+      if (problem) {
+        return NextResponse.json({ error: problem }, { status: 400 })
+      }
+    }
+
     if ('reply_to_email' in patch) {
       const problem = replyToProblem(patch.reply_to_email)
       if (problem) {

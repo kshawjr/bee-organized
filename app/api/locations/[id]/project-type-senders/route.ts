@@ -58,6 +58,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
+import { supabaseService } from '@/lib/supabase-service'
+import { senderAddressProblem } from '@/lib/sender-domain'
+import { getSendableDomains } from '@/lib/sendable-domains'
 import {
   getSenderConfig,
   getPickableHandler,
@@ -67,6 +70,36 @@ import {
 } from '@/lib/project-type-senders'
 
 export const runtime = 'nodejs'
+
+// For the POST check: would any of these types send AS the handler? A type
+// with no row yet, or a row in person mode, would; a typed shared mailbox
+// would not (setHandlerForTypes keeps a typed identity).
+async function anyTypeWouldSendAsPerson(locationId: string, projectTypes: string[]): Promise<boolean> {
+  const { data } = await supabaseService
+    .from('location_project_type_senders')
+    .select('project_type, sender_is_custom')
+    .eq('location_id', locationId)
+  const custom = new Set(
+    ((data as { project_type: string; sender_is_custom: boolean | null }[] | null) ?? [])
+      .filter((r) => r.sender_is_custom === true)
+      .map((r) => r.project_type.trim().toLowerCase()),
+  )
+  return projectTypes.some((t) => !custom.has(t.trim().toLowerCase()))
+}
+
+// For the PUT revert check: the handler's own sign-in address for a type.
+async function handlerEmailForType(locationId: string, projectType: string): Promise<string | null> {
+  const { data: row } = await supabaseService
+    .from('location_project_type_senders')
+    .select('source_user_id, project_type')
+    .eq('location_id', locationId)
+    .ilike('project_type', projectType)
+    .maybeSingle()
+  const uid = (row as { source_user_id?: string | null } | null)?.source_user_id
+  if (!uid) return null
+  const { data: u } = await supabaseService.from('hub_users').select('email').eq('id', uid).maybeSingle()
+  return ((u as { email?: string | null } | null)?.email ?? null) || null
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -155,6 +188,20 @@ export async function POST(
         { status: 400 },
       )
     }
+    // A handler SENDS AS their own sign-in address by default (person mode).
+    // If that address is on a domain Bee Organized can't send from — a Gmail
+    // sign-in — every email for these types would be refused and, before
+    // 2026-09-27, every lead written off (Test Location). Refuse here with the
+    // reason instead. Only for types that would send as the person: a type
+    // already sending as a typed shared mailbox keeps that identity.
+    const sendable = await getSendableDomains()
+    const personProblem = senderAddressProblem(handler.email, sendable, { what: 'sending address' })
+    if (personProblem && await anyTypeWouldSendAsPerson(params.id, projectTypes)) {
+      return NextResponse.json(
+        { error: `${handler.name || 'This person'} signs in with ${handler.email}. ${personProblem} Give them a Bee Organized address first, or set these job types to send as a shared address.` },
+        { status: 400 },
+      )
+    }
     await setHandlerForTypes(params.id, handler, projectTypes)
     const data = await getSenderConfig(params.id)
     return NextResponse.json(data)
@@ -211,6 +258,11 @@ export async function PUT(
     if (!EMAIL_RE.test(senderEmail)) {
       return NextResponse.json({ error: 'sender_email must be a valid email' }, { status: 400 })
     }
+    // One address, on a domain Bee Organized can send from (lib/sender-domain.ts).
+    const typedProblem = senderAddressProblem(senderEmail, await getSendableDomains(), { what: 'sending address' })
+    if (typedProblem) {
+      return NextResponse.json({ error: typedProblem }, { status: 400 })
+    }
     // issue 296 — sender_reply_to was only ever trimmed, never format-checked,
     // which was harmless while nothing could write it. A malformed reply-to now
     // reaches Resend and fails the send at delivery time, blaming the drip for
@@ -225,6 +277,18 @@ export async function PUT(
       sender_reply_to: senderReplyTo,
     }
   } else {
+    // Back to sending AS the handler — so the handler's own address must be
+    // one we can send from (a Gmail sign-in cannot).
+    const handlerEmail = await handlerEmailForType(params.id, projectType)
+    const revertProblem = handlerEmail
+      ? senderAddressProblem(handlerEmail, await getSendableDomains(), { what: 'sending address' })
+      : null
+    if (revertProblem) {
+      return NextResponse.json(
+        { error: `This job type’s handler signs in with ${handlerEmail}. ${revertProblem} Keep it sending as a shared address, or give them a Bee Organized address first.` },
+        { status: 400 },
+      )
+    }
     identity = { sender_is_custom: false }
   }
 
