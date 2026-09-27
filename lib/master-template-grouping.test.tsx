@@ -107,12 +107,11 @@ describe('template sections — Gen 2 master grouping', () => {
     expect(t, 'Other Templates heading').toContain('📨 Other Templates')
   })
 
-  // issue 314 — the Welcome Email is retired. The HEADING and its row stay:
-  // this screen is the super_admin template LIBRARY, the templates row still
-  // exists, and hiding a real row from the library would be its own kind of
-  // lie. What had to go is the claim that it still fires. Same shape as the
-  // retired estimate follow-ups noted under Opportunity Stages.
-  it('no longer claims the Welcome Email auto-fires, and says it is retired', async () => {
+  // issue 314 retired the Welcome Email and this test pinned the "Retired"
+  // caption. RESTORED (Kevin: the retirement was a mistake), so it now pins the
+  // opposite — the caption says it fires again — plus the new-leads-only rule
+  // an owner reading this screen needs to be able to trust.
+  it('says the Welcome Email auto-fires for new leads, and never for a returning client', async () => {
     await act(async () => {
       root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
@@ -120,10 +119,10 @@ describe('template sections — Gen 2 master grouping', () => {
     await openEmailSection()
 
     const t = container.textContent || ''
-    expect(t).toContain('💛 Welcome Email')          // the row is still real
-    expect(t).not.toContain('Auto-fires 24h after Email 1')
-    expect(t).not.toMatch(/Auto-fires/)
-    expect(t).toMatch(/Retired in issue 314/)
+    expect(t).toContain('💛 Welcome Email')
+    expect(t).toContain("Auto-fires 24h after Email 1 of a new lead's sequence")
+    expect(t).toContain('Never sent to a returning client')
+    expect(t).not.toMatch(/Retired in issue 314/)
   })
 
   it('files each master under the right heading', async () => {

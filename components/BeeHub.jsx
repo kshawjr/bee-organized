@@ -13705,13 +13705,10 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
           ) : (
             <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Each option is a short series of emails — you'll see the schedule on the preview screen.</p>
           )}
-          {/* issue 314 — the Welcome Email is retired. The paragraph that used
-              to sit here told every new owner during onboarding that "a Welcome
-              Email from Bee Organized HQ goes out 24 hours after that first
-              email … sends automatically". Nothing sends it any more, so the
-              sentence is simply removed rather than reworded: onboarding should
-              describe the emails that exist, and there is no replacement send
-              to describe. */}
+          {/* issue 314 retired the Welcome Email and removed this paragraph;
+              it is restored with the email itself. "new lead" is deliberate:
+              a returning client never gets one (lib/welcome-email.ts). */}
+          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after a new lead's first email. It's the same whichever way you set this up, and sends automatically.</p>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
@@ -18154,29 +18151,30 @@ const LEAD_NOTIF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // SMS is wired up.
 const TEXT_PREVIEW = "Hi {{first_name}}, it's {{owner_name}} from Bee Organized — thanks for reaching out! I'll follow up by email too, but happy to answer anything here."
 
-// ─── issue 240 step 7 — one list, two rails ───
+// ─── issue 240 step 7 — one list, three rails ───
 //
-// Five rows that a client experiences as one sequence, and which the database
-// keeps in two unrelated shapes. This builder is the seam, kept pure so the
+// Six rows that a client experiences as one sequence, and which the database
+// keeps in three unrelated shapes. This builder is the seam, kept pure so the
 // unification is testable without mounting anything.
 //
 //   RAIL A  drip steps      drip_path_steps rows on the location's default
 //                           path. Timing is a real per-location column
 //                           (delay_days). Content is EITHER inline on the step
 //                           OR on a template the step points at.
+//   RAIL B  welcome         a templates row (legacy_id 'welcome'). Timing is
+//                           WELCOME_DELAY_MS in lib/welcome-email.ts — a code
+//                           constant, 24h, not a column. NEW LEADS ONLY: it
+//                           sits in group one, never in the returning group.
 //   RAIL C  closed job      two templates rows (legacy_id opp_closed_job_3mo /
 //                           _12mo). Timing is CLOSED_WON_TRIGGERS in
 //                           lib/stage-emails.ts — [90, 365], also constants.
 //
-// RAIL B was the Welcome Email — a templates row (legacy_id 'welcome') timed by
-// WELCOME_DELAY_MS in lib/welcome-email.ts. RETIRED in issue 314: the writer in
-// lib/drip-send.ts no longer schedules it and the pending queue was cancelled.
-// Rail C is still lettered C so the surviving rails keep the names the tests and
-// the rest of these comments use.
+// RAIL B was retired in issue 314 (281ebdf) and restored after Kevin said the
+// retirement was a mistake. The restore made it new-leads-only on the server.
 //
 // WHERE THE SEAMS SHOW, deliberately not papered over:
 //
-// 1. Only rail A's timing is data. The other two rows are constants, which
+// 1. Only rail A's timing is data. The other three rows are constants, which
 //    is why step 10 can offer to change one and not the others. The rows carry
 //    `timingIsData` so the UI never implies otherwise.
 // 2. Rail A content resolves inline-first, mirroring lib/drip-send.ts
@@ -18189,10 +18187,9 @@ const TEXT_PREVIEW = "Hi {{first_name}}, it's {{owner_name}} from Bee Organized 
 //    fetches and cannot be done from the paths route alone.
 // 4. Resolving a location's fork duplicates server logic (cloned_from_id →
 //    master.id, newest active fork wins) that really lives in
-//    lib/template-fork.ts. Two implementations of one rule is a genuine risk;
-//    it is marked here rather than hidden. (It used to name lib/welcome-email.ts
-//    as a second server-side caller of that rule; since issue 314 the only rows
-//    this mirror resolves a fork for are rail C's, served by lib/stage-emails.ts.)
+//    lib/template-fork.ts, called by lib/welcome-email.ts (rail B) and
+//    lib/stage-emails.ts (rail C). Two implementations of one rule is a genuine
+//    risk; it is marked here rather than hidden.
 // 5. Quarantined templates are NOT filtered out. The Templates surface hides
 //    is_active=false rows, but the send path still resolves them, so hiding
 //    one here would show an owner something other than what sends.
@@ -18248,9 +18245,7 @@ function templateRow(templates, legacyId, days, when) {
   const use = fork || master
   return {
     key: legacyId,
-    // issue 314 — was `legacyId === 'welcome' ? 'welcome' : 'stage'`. The only
-    // caller left is RAIL C (the closed-job pair), so the welcome arm was dead.
-    rail: 'stage',
+    rail: legacyId === 'welcome' ? 'welcome' : 'stage',
     days, when,
     timingIsData: false,
     // issue 240 step 8b — what the write paths need to act on this row.
@@ -18358,17 +18353,15 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
   // hides an empty group rather than promise emails that do not exist yet.
   const returning = [...dripRowsFor(returningPathKey)].sort((a, b) => a.days - b.days)
 
-  // RAIL B is gone — issue 314 retired the Welcome Email. It used to sit here
-  // as templateRow(templates, 'welcome', 1, 'Next day'), where the `1` was a
-  // second hardcoded constant that nothing tied to WELCOME_DELAY_MS in
-  // lib/welcome-email.ts. Group one is now the drip steps alone.
-  //
-  // The sort stays even though a single rail is already ordered: dripRows is
-  // sorted by step ORDER above, and this re-sorts by DAYS. Those agree for
-  // every current path, but dropping it would silently change the displayed
-  // order for any path whose delay_days is not monotonic with step_order —
-  // a change that has nothing to do with this retirement.
-  const newLead = [...dripRows].sort((a, b) => a.days - b.days)
+  // RAIL B — welcome, 24h after the first drip email. New leads only, so it
+  // joins group one and never the returning group above. The `1` is a second
+  // hardcoded constant mirroring WELCOME_DELAY_MS in lib/welcome-email.ts.
+  // No master row → no row: the list never promises an email with nothing to
+  // send (the send would fail template_lookup).
+  const welcome = templateRow(templates, 'welcome', 1, 'Next day')
+
+  const newLead = [...dripRows, ...(welcome ? [welcome] : [])]
+    .sort((a, b) => a.days - b.days)
 
   // RAIL C — the closed-job pair.
   const afterJob = CLOSED_JOB_ROWS
@@ -18988,17 +18981,13 @@ export function rowHasMasterCounterpart(row) {
 // deliberately retired.
 //
 // EXCLUDED BY legacy_id, and this list must not be re-added:
-//   opp_closed_job_3mo, opp_closed_job_12mo
+//   welcome, opp_closed_job_3mo, opp_closed_job_12mo
 //     already render as their own rows here. Picking one would put a second
-//     copy of the same email into the sequence.
-//   welcome
-//     RETIRED in issue 314. Its row is GONE from this screen, so the "already
-//     renders here" reason above no longer applies to it — and that is exactly
-//     why the entry has to stay. The master template row still exists in the
-//     library, so without this line the Welcome Email reappears in "+ Add
-//     another email" and an owner can put a retired send back into a live
-//     sequence by hand. Same side door as the estimate follow-ups below.
-//     Do not remove this because the surface went away; that IS the reason.
+//     copy of the same email into the sequence. For 'welcome' it would also
+//     be a side door past the new-leads-only gate: a drip STEP is not checked
+//     for returning clients the way lib/welcome-email.ts is. (Between issue
+//     314's retirement and its restore this entry was kept for the opposite
+//     reason — to stop a retired email coming back by hand. Either way, stay.)
 //   opp_organizing_estimate_3d / _30d, opp_moving_estimate_3d / _30d
 //     RETIRED in issue 240 step 3 (ec04aee) because Jobber sends its own
 //     estimate follow-ups and ours duplicated them for the client. 67 had
@@ -19096,9 +19085,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // Step 10 decides what is editable; nothing here is a control.
   const withNotes = newLead.map((r, i) => ({
     ...r,
-    // 'always second' went with the welcome row (issue 314). Nothing else
-    // holds a fixed position in group one, so first is the only fixed note.
-    fixedNote: i === 0 ? 'always first' : null,
+    fixedNote: i === 0 ? 'always first' : (r.rail === 'welcome' ? 'always second' : null),
   }))
   const groups = { new: withNotes, returning, job: afterJob }
   const openRows = open ? groups[open.group] : []
@@ -23233,13 +23220,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                         <>
                           <div style={{ padding:'8px 4px 4px' }}>
                             <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
-                            {/* issue 314 — this used to read "Auto-fires 24h after
-                                Email 1 of any new lead sequence." Nothing fires it
-                                now. The template ROW is still real and still in the
-                                library, so the heading stays and the caption says
-                                what is true — the same shape as the retired estimate
-                                follow-ups noted under Opportunity Stages below. */}
-                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Retired in issue 314 — nothing schedules or sends this any more.</p>
+                            {/* issue 314 retired it and captioned it "Retired";
+                                restored, so the caption says when it fires again —
+                                and who it never goes to. */}
+                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of a new lead's sequence. Never sent to a returning client.</p>
                           </div>
                           {renderRowsCard(wWelcome, masterActions)}
                         </>

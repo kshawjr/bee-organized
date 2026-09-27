@@ -777,9 +777,8 @@ export async function fetchHeldSubjectEmails(
     }
   }
 
-  // (b) welcome — pending, unpaused, due one hold-window back. (The welcome
-  // writer is retired per issue 314, so this queue is normally empty — the
-  // sender stays wired for straggler rows, and so does this.)
+  // (b) welcome — pending, unpaused, due one hold-window back. (Retired in
+  // issue 314 and since restored, new leads only — so this queue fills again.)
   const { data: wl } = await supabase
     .from('leads')
     .select('id, name, location_uuid, welcome_email_scheduled_at')

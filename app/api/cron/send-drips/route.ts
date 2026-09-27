@@ -8,7 +8,8 @@
 //      (sendDripStepForRow advances current_step and schedules next)
 //
 //   2. leads.welcome_email_*  — single Welcome Email fired 24h after Email 1
-//      of any new lead drip (sendWelcomeEmail sets welcome_email_sent_at)
+//      of a new lead's drip, never a returning client's (sendWelcomeEmail sets
+//      welcome_email_sent_at)
 //
 //   3. scheduled_stage_emails — Opportunity Stages drip emails fired on
 //      lead stage transitions (sendStageEmail sets sent_at)
@@ -158,7 +159,8 @@ export async function GET(req: NextRequest) {
         result.error === 'already_sent' ||
         result.error === 'junk' ||        // cancelled at send time
         result.error === 'opted_out' ||   // cancelled at send time
-        result.error === 'paused'         // HELD — retried after resume
+        result.error === 'paused' ||      // HELD — retried after resume
+        result.error === 'returning_client' // cancelled — new leads only
       ) {
         welcomeSkipped++
       } else if (result.error) {

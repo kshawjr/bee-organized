@@ -26,6 +26,8 @@ import {
   MISSING_BOOKING_LINK_MESSAGE,
 } from './booking-link'
 import { nextSendAt } from './drip-time'
+import { scheduleWelcomeEmail } from './welcome-email'
+import { isReturningPathKey } from '@/components/hive/shared/returningVariant'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
@@ -155,7 +157,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type, drip_last_send_status, drip_last_send_error')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type, drip_last_send_status, drip_last_send_error, import_source, paid_amount')
     .eq('id', row.lead_id)
     .maybeSingle()
 
@@ -534,13 +536,28 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     await resetTransientFailures(row.id)
   }
 
-  // issue 314 — step 1 no longer schedules the Welcome Email. It is retired:
-  // nothing queues a new one, and scripts/retire-welcome-email.mjs cleared what
-  // was already pending. The SENDER (lib/welcome-email.ts) and the cron's
-  // Queue 2 stay wired on purpose, exactly as ec04aee left the estimate stage
-  // emails: a row that outlives the sweep — or one written by an older
-  // deployment still in flight — then renders and completes correctly instead
-  // of erroring. With the writer gone that queue drains to empty and stays there.
+  // Step 1 of a NEW-LEAD drip triggers the 24h Welcome Email. Fire and
+  // forget — a failed schedule is logged inside scheduleWelcomeEmail and
+  // doesn't block drip progression.
+  //
+  // Retired in issue 314 (281ebdf, 2026-08-19) and restored on Kevin's word
+  // that the retirement was a mistake — with one change: new leads only. The
+  // old trigger was "step 1 of any drip", so anyone whose drip started got
+  // "Welcome to the Bee Organized Hive!", past clients included. Two gates:
+  //   · the returning-a..d sequence (a past client's website enquiry) never
+  //     schedules one — that sequence IS their greeting;
+  //   · scheduleWelcomeEmail asks isPastClient's rule of the person, so a
+  //     Jobber-imported or paid or won client on an ordinary path is refused
+  //     too (an owner pressing Activate on an imported client, say).
+  // The step 1 → welcome gap is pinned in lib/email-send-integrity.test.ts:
+  // step 1 goes at day 0, the welcome 24h later, step 2 no sooner than day 3.
+  const pathKey = (path as { path_key?: string | null }).path_key ?? null
+  if (row.current_step === 1 && !isReturningPathKey(pathKey)) {
+    await scheduleWelcomeEmail(row.lead_id, {
+      import_source: lead.import_source ?? null,
+      paid_amount: lead.paid_amount ?? null,
+    })
+  }
 
   const advancedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
   return { sent: true, advanced_to_step: advancedTo }

@@ -1,8 +1,22 @@
 // lib/welcome-email.ts
 //
 // Auto Welcome Email — single corp master template that fires 24 hours
-// after Email 1 of any new-lead drip path. Scheduled by drip-send when
+// after Email 1 of a new-lead drip path. Scheduled by drip-send when
 // step 1 of a drip fires successfully; sent by the cron when due.
+//
+// NEW LEADS ONLY. Retired on 2026-08-19 (issue 314, 281ebdf) and restored
+// on Kevin's word that the retirement was a mistake. What the restore adds:
+// a returning client is NEVER welcomed. The trigger used to be "step 1 of any
+// drip", which greets anyone whose drip starts — a Jobber-imported client an
+// owner activates, and (since 2026-09-03) every past client whose website
+// form enrols them on the returning-a..d sequence. Two gates now stand in the
+// way, both using the app's one existing rule (isPastClient in
+// lib/drip-lifecycle.ts, the same facts the Inbox's "Back again" chip reads):
+//   · schedule time — scheduleWelcomeEmail refuses a past client, and refuses
+//     when it cannot tell (a failed lookup is not proof of a stranger);
+//   · send time — sendWelcomeEmail re-asks, because someone can become a
+//     client inside the 24 hours (a Closed Won, a payment).
+// drip-send also skips the returning-a..d paths outright, before either.
 //
 // Schema (drip_followup_infrastructure.sql):
 //   leads.welcome_email_scheduled_at — when to fire (set by scheduleWelcomeEmail)
@@ -21,6 +35,9 @@ import { hasSignatureTag, textWithSignature } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { appendCanSpamFooter } from './marketing-unsubscribe'
 import { resolveLocationTemplateFork } from './template-fork'
+// Type-only: erased at build, so it adds no runtime cycle (drip-lifecycle
+// imports this file; the value import below stays dynamic for that reason).
+import type { PastClientFacts } from './drip-lifecycle'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
@@ -30,10 +47,30 @@ const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
 // ──────────────────────────────────────────────────────────────────────
 // Idempotent: skips leads that already have welcome_email_sent_at set
 // (already sent — don't reschedule) or welcome_email_scheduled_at set
-// (already pending — don't push it out). Caller is fire-and-forget.
+// (already pending — don't push it out). Caller is fire-and-forget; the
+// result is for logs and tests, never for control flow.
+//
+// NEW LEADS ONLY: a past client is refused before anything is written, and
+// so is anyone the past-client lookup could not answer for. The cost of a
+// wrong "no" is one missed brand email to a stranger; the cost of a wrong
+// "yes" is an owner's client being welcomed like someone off the street.
 
-export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
+export type ScheduleWelcomeResult = 'scheduled' | 'returning_client' | 'check_failed' | 'error'
+
+export async function scheduleWelcomeEmail(
+  leadId: string,
+  // The caller's already-loaded lead facts, when it has them (drip-send does).
+  known: PastClientFacts | null = null,
+): Promise<ScheduleWelcomeResult> {
   try {
+    const { pastClientCheck } = await import('./drip-lifecycle')
+    const who = await pastClientCheck(leadId, known)
+    if (who.past) return 'returning_client'
+    if (who.failed) {
+      console.error('[welcome] scheduleWelcomeEmail: past-client check failed — not scheduling', { leadId })
+      return 'check_failed'
+    }
+
     const scheduledAt = new Date(Date.now() + WELCOME_DELAY_MS).toISOString()
 
     const { error } = await supabaseService
@@ -45,9 +82,12 @@ export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
 
     if (error) {
       console.error('[welcome] scheduleWelcomeEmail: update failed', { leadId, error })
+      return 'error'
     }
+    return 'scheduled'
   } catch (err) {
     console.error('[welcome] scheduleWelcomeEmail: unexpected error', { leadId, err })
+    return 'error'
   }
 }
 
@@ -72,7 +112,8 @@ export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
 export async function cancelPendingWelcomeEmail(
   leadId: string,
   // 'closed_lost' — issue 204, a no-engagement lead closed "not interested".
-  reason: 'junk' | 'opted_out' | 'stage_changed' | 'closed_lost',
+  // 'returning_client' — the send-time new-leads-only gate found a past client.
+  reason: 'junk' | 'opted_out' | 'stage_changed' | 'closed_lost' | 'returning_client',
 ): Promise<void> {
   try {
     const { error } = await supabaseService
@@ -123,7 +164,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at, is_junk, paused, marketing_opt_out')
+    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at, is_junk, paused, marketing_opt_out, import_source, paid_amount')
     .eq('id', leadId)
     .maybeSingle()
 
@@ -152,6 +193,26 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // first tick after the lead is resumed.
   if (lead.paused === true) {
     return { sent: false, error: 'paused' }
+  }
+
+  // Returning client → CANCEL, never send. The schedule-time gate already
+  // refuses them; this is the backstop for someone who became a client in the
+  // 24 hours since (a Closed Won, a payment), or a row queued by any other
+  // door. A lookup that fails HOLDS instead (scheduled_at intact, the cron
+  // asks again next tick) — never a send on a guess.
+  {
+    const { pastClientCheck } = await import('./drip-lifecycle')
+    const who = await pastClientCheck(leadId, {
+      import_source: lead.import_source ?? null,
+      paid_amount: lead.paid_amount ?? null,
+    })
+    if (who.past) {
+      await cancelPendingWelcomeEmail(leadId, 'returning_client')
+      return { sent: false, error: 'returning_client' }
+    }
+    if (who.failed) {
+      return { sent: false, error: 'past_client_check_failed' }
+    }
   }
 
   // No email → mark sent so it never gets retried, log skip.

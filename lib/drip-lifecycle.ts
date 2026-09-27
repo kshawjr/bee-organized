@@ -342,23 +342,50 @@ export type ReturningEnrolResult =
 // engagement counted, which was safe only while every close was a human one.
 // A new website lead who submits the form twice is none of these — so they
 // stay on the ordinary drip.
+//
+// The Inbox's "Back again" chip (isBackAgain in
+// components/hive/shared/clientStatus.js) applies the same three facts to a
+// resubmission, and the restored Welcome Email (lib/welcome-email.ts) asks this
+// function whether someone is a stranger. One rule, so the three can't disagree.
 export async function isPastClient(leadId: string): Promise<boolean> {
-  const { data: lead } = await supabaseService
-    .from('leads')
-    .select('import_source, paid_amount')
-    .eq('id', leadId)
-    .maybeSingle()
-  if (lead?.import_source && lead.import_source !== 'manual') return true
-  if ((Number(lead?.paid_amount) || 0) > 0) return true
+  return (await pastClientCheck(leadId)).past
+}
 
-  const { data: won } = await supabaseService
+// isPastClient with the lookup failures kept. isPastClient reads a failed or
+// empty lookup as "not a past client", which is right for its callers (the
+// ordinary drip is the safe default there). The Welcome Email needs the
+// opposite: it must never greet a returning client, so a lookup it could not
+// complete has to read as "don't know" rather than "stranger". Same queries,
+// same order, same rule — only the failure is reported.
+//
+// `known` lets a caller that has already read the lead row pass its
+// import_source / paid_amount instead of reading them again. The rule applied
+// to them is unchanged; only the round trip is saved.
+export type PastClientFacts = { import_source: string | null; paid_amount: number | string | null }
+
+export async function pastClientCheck(
+  leadId: string,
+  known: PastClientFacts | null = null,
+): Promise<{ past: boolean; failed: boolean }> {
+  const { data: lead, error: leadErr } = known
+    ? { data: known, error: null }
+    : await supabaseService
+        .from('leads')
+        .select('import_source, paid_amount')
+        .eq('id', leadId)
+        .maybeSingle()
+  if (lead?.import_source && lead.import_source !== 'manual') return { past: true, failed: false }
+  if ((Number(lead?.paid_amount) || 0) > 0) return { past: true, failed: false }
+
+  const { data: won, error: wonErr } = await supabaseService
     .from('engagements')
     .select('id')
     .eq('client_id', leadId)
     .eq('stage', 'Closed Won')
     .limit(1)
     .maybeSingle()
-  return !!won
+  if (won) return { past: true, failed: false }
+  return { past: false, failed: !!leadErr || !lead || !!wonErr }
 }
 
 export async function enrolReturningSequence(
