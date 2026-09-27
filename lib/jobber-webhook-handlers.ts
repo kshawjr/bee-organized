@@ -146,7 +146,7 @@ import {
   attachToEngagement,
   maybeAdvanceEngagementStage,
 } from './engagements'
-import { readLeadPaidTotal } from './lead-paid-total'
+import { readLeadMoneyTotals } from './lead-paid-total'
 import type { LocationRow } from './jobber-webhook'
 
 export type HandlerCtx = {
@@ -801,25 +801,28 @@ async function handleInvoiceCore(
   }
 
   // Lead-level denormalizations.
-  const totalNum = invRec.amounts?.total ? parseFloat(invRec.amounts.total) : null
   const stampIso = ctx.occurredAt || new Date().toISOString()
   const leadPatch: Record<string, any> = {
     jobber_invoice_id: extractJobberId(invRec.id),
     updated_at: new Date().toISOString(),
   }
-  // Lifetime paid total: recomputed from every paid invoice on the lead
-  // (this one is already upserted above), never this invoice's own total —
-  // see lib/lead-paid-total.ts. Recomputed on every invoice event so an
-  // invoice that stops being paid drops out too. A failed read leaves the
-  // stored value untouched rather than writing a wrong one.
-  const paidTotal = await readLeadPaidTotal(leadId)
-  if (paidTotal.ok) leadPatch.paid_amount = paidTotal.paidAmount
-  else console.error('[jobber-webhook] lead paid total read failed', { leadId, error: paidTotal.error })
+  // Lifetime paid total AND balance owing: both recomputed from every
+  // invoice on the lead (this one is already upserted above), never this
+  // invoice's own total — see lib/lead-paid-total.ts. Recomputed on every
+  // invoice event, so a second open invoice adds to the balance instead of
+  // hiding the first, and an invoice that stops being paid drops out of the
+  // paid total. A failed read leaves both stored values untouched rather than
+  // writing wrong ones.
+  const money = await readLeadMoneyTotals(leadId)
+  if (money.ok) {
+    leadPatch.paid_amount = money.paidAmount
+    leadPatch.balance_owing = money.balanceOwing
+  } else {
+    console.error('[jobber-webhook] lead money totals read failed', { leadId, error: money.error })
+  }
   if (paid) {
-    leadPatch.balance_owing = 0
     leadPatch.invoice_paid_at = stampIso
   } else {
-    leadPatch.balance_owing = totalNum
     // invoice_created_at is a create-time stamp only — an unpaid UPDATE
     // (JOB_UPDATE-style refresh) must not re-stamp it.
     if (mode === 'create') leadPatch.invoice_created_at = stampIso

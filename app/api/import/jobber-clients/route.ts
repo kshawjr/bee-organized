@@ -90,7 +90,23 @@ import {
   DEFERRED_WRITE_PACE_MS,
 } from '@/lib/import-phase'
 import { buildLastChildActivity, selectSampleClients } from '@/lib/import-sample'
-import { readLeadPaidTotal } from '@/lib/lead-paid-total'
+import { readLeadMoneyTotals } from '@/lib/lead-paid-total'
+
+// Lead money roll-up after an imported invoice lands: lifetime paid total and
+// balance owing, both summed over EVERY invoice on the lead — never this one
+// invoice's figure (lib/lead-paid-total.ts). paidCreatedAt is set only for a
+// paid invoice and stamps invoice_paid_at, as before. A failed read leaves
+// both totals as they were; the stamp is still written.
+async function writeLeadMoneyRollup(leadId: string, paidCreatedAt: string | null | undefined) {
+  const money = await readLeadMoneyTotals(leadId)
+  const patch: Record<string, any> = money.ok
+    ? { paid_amount: money.paidAmount, balance_owing: money.balanceOwing }
+    : {}
+  if (paidCreatedAt !== null) patch.invoice_paid_at = paidCreatedAt || new Date().toISOString()
+  if (Object.keys(patch).length === 0) return
+  patch.updated_at = new Date().toISOString()
+  await supabaseService.from('leads').update(patch).eq('id', leadId)
+}
 
 export const runtime = 'nodejs'
 export const maxDuration = 800
@@ -977,28 +993,15 @@ export async function POST(req: NextRequest) {
                   const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
                   iRes.created ? stats.invoices_created++ : stats.invoices_updated++
                   engInvoiceIds.push(iRes.id)
-                  // Lead roll-up for historical paid invoices — mirrors the
-                  // INVOICE_PAID webhook denorm (paid_amount / balance_owing /
+                  // Lead roll-up for historical invoices — mirrors the
+                  // INVOICE webhook denorm (paid_amount / balance_owing /
                   // invoice_paid_at) but deliberately does NOT promote stage
                   // to Closed Won or touch drips: stage was already inferred
-                  // by determineStage and imported leads are paused. Paid
-                  // invoices predating the import never emit a webhook, so
-                  // this is the only place they can populate the roll-up.
-                  if (iRes.status === 'paid') {
-                    // Lifetime total = the sum of the lead's paid invoices,
-                    // never this one invoice's total (lib/lead-paid-total.ts).
-                    // A failed read leaves paid_amount as it was.
-                    const lifetime = await readLeadPaidTotal(leadId)
-                    await supabaseService
-                      .from('leads')
-                      .update({
-                        ...(lifetime.ok ? { paid_amount: lifetime.paidAmount } : {}),
-                        balance_owing: 0,
-                        invoice_paid_at: inv.createdAt || new Date().toISOString(),
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', leadId)
-                  }
+                  // by determineStage and imported leads are paused. Invoices
+                  // predating the import never emit a webhook, so this is the
+                  // only place they can populate the roll-up. Runs for EVERY
+                  // invoice, paid or not, so an unpaid one reaches the balance.
+                  await writeLeadMoneyRollup(leadId, iRes.status === 'paid' ? inv.createdAt : null)
                 }
               }
 
@@ -1059,19 +1062,8 @@ export async function POST(req: NextRequest) {
                 const iRes = await upsertInvoice(inv, jRes.id, null, leadId, locSlug)
                 iRes.created ? stats.invoices_created++ : stats.invoices_updated++
                 rlInvoiceIds.push(iRes.id)
-                // Same historical-paid roll-up as the request-joined path.
-                if (iRes.status === 'paid') {
-                  const lifetime = await readLeadPaidTotal(leadId)
-                  await supabaseService
-                    .from('leads')
-                    .update({
-                      ...(lifetime.ok ? { paid_amount: lifetime.paidAmount } : {}),
-                      balance_owing: 0,
-                      invoice_paid_at: inv.createdAt || new Date().toISOString(),
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', leadId)
-                }
+                // Same roll-up as the request-joined path.
+                await writeLeadMoneyRollup(leadId, iRes.status === 'paid' ? inv.createdAt : null)
               }
               try {
                 const engId = await resolveEngagementForChild({

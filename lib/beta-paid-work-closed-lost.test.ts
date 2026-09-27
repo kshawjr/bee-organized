@@ -52,7 +52,7 @@ import {
   recoverEngagementStageDrift,
 } from '@/lib/engagements'
 import { planStaleLostRecovery } from '@/lib/paid-work-repair'
-import { sumPaidInvoices } from '@/lib/lead-paid-total'
+import { sumPaidInvoices, sumBalanceOwing } from '@/lib/lead-paid-total'
 
 const NOW = new Date('2026-09-27T00:00:00Z').getTime()
 const kids = (over: any = {}) => ({ sr: null, quotes: [], jobs: [], invoices: [], ...over })
@@ -262,20 +262,35 @@ describe('sumPaidInvoices — the lifetime paid total', () => {
   })
 })
 
-// ── every writer uses the sum ───────────────────────────────────
-describe('no writer carries one invoice\'s total into leads.paid_amount any more', () => {
-  it('the import route reads the lifetime total at both paid-invoice roll-ups', () => {
-    const src = readFileSync('app/api/import/jobber-clients/route.ts', 'utf8')
-    expect(src.match(/readLeadPaidTotal\(leadId\)/g)?.length).toBe(2)
-    // every paid_amount the route writes is the lifetime sum — nothing else
-    const writes = src.match(/paid_amount:\s*[^,}\n]+/g) ?? []
-    expect(writes.length).toBe(2)
-    for (const w of writes) expect(w).toMatch(/^paid_amount:\s*lifetime\.paidAmount\s*$/)
+describe('sumBalanceOwing — what the person still owes', () => {
+  it('no invoices → null (never invoiced is not "owes nothing")', () => {
+    expect(sumBalanceOwing([])).toBeNull()
   })
-  it('the invoice webhook reads the lifetime total', () => {
+  it('a missing balance falls back to total − paid, the engagement roll-up\'s formula', () => {
+    expect(sumBalanceOwing([{ status: 'sent', total: 900, paid_amount: 250, balance_owing: null }])).toBe(650)
+  })
+  it('paid invoices add nothing; open ones add their balance', () => {
+    expect(sumBalanceOwing([paid(500, 'x'), unpaid(200), unpaid(300)])).toBe(500)
+  })
+})
+
+// ── every writer uses the sum ───────────────────────────────────
+describe('no writer carries one invoice\'s figure into the lead money roll-up any more', () => {
+  it('the import route writes both totals from the summed read, at both invoice roll-ups', () => {
+    const src = readFileSync('app/api/import/jobber-clients/route.ts', 'utf8')
+    expect(src.match(/await writeLeadMoneyRollup\(leadId, /g)?.length).toBe(2)
+    expect(src).toContain('readLeadMoneyTotals(leadId)')
+    // every paid_amount / balance_owing the route writes is the summed value — nothing else
+    const paid = src.match(/paid_amount:\s*[^,}\n]+/g) ?? []
+    const bal = src.match(/balance_owing:\s*[^,}\n]+/g) ?? []
+    expect(paid).toEqual(['paid_amount: money.paidAmount'])
+    expect(bal.map(b => b.trim())).toEqual(['balance_owing: money.balanceOwing'])
+  })
+  it('the invoice webhook writes both totals from the summed read', () => {
     const src = readFileSync('lib/jobber-webhook-handlers.ts', 'utf8')
     expect(src).not.toMatch(/leadPatch\.paid_amount\s*=\s*totalNum/)
-    expect(src).toContain('readLeadPaidTotal(leadId)')
+    expect(src).not.toMatch(/leadPatch\.balance_owing\s*=\s*(totalNum|0)\b/)
+    expect(src).toContain('readLeadMoneyTotals(leadId)')
   })
   it('reopen selects the invoice amounts, so it reads paid work the same way', () => {
     const src = readFileSync('app/api/engagements/[id]/reopen/route.ts', 'utf8')

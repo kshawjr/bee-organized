@@ -167,7 +167,7 @@ describe('paid INVOICE_UPDATE (the payment event) → syncs + live re-derivation
     jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('PAID'))
     h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
     // the lead's paid invoices, read back for the lifetime total — only this one
-    h.enqueue('invoices', [{ status: 'paid', paid_amount: 500 }])
+    h.enqueue('invoices', [{ status: 'paid', total: 500, paid_amount: 500, balance_owing: 0 }])
 
     await handleInvoiceUpdate(ctx())
 
@@ -186,6 +186,7 @@ describe('non-paid INVOICE_UPDATE (a plain edit) → refresh only', () => {
   it('re-derives the engagement but does NOT promote to Closed Won', async () => {
     jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('SENT'))
     h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
+    h.enqueue('invoices', [{ status: 'sent', total: 500, paid_amount: null, balance_owing: 500 }])
 
     const res = await handleInvoiceUpdate(ctx())
 
@@ -219,8 +220,8 @@ describe('paid total is the sum of the lead\'s paid invoices, not the last one',
     jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('PAID'))   // this event: $500
     h.enqueue('leads', { id: 'lead-1', stage: 'Closed Won' })
     h.enqueue('invoices', [
-      { status: 'paid', paid_amount: 1200 },   // an earlier job
-      { status: 'paid', paid_amount: 500 },    // this one
+      { status: 'paid', total: 1200, paid_amount: 1200, balance_owing: 0 },   // an earlier job
+      { status: 'paid', total: 500, paid_amount: 500, balance_owing: 0 },      // this one
     ])
     await handleInvoiceUpdate(ctx())
     expect(h.leadsUpdatePayload()!.paid_amount).toBe(1700)
@@ -235,8 +236,8 @@ describe('paid total is the sum of the lead\'s paid invoices, not the last one',
     })
     h.enqueue('leads', { id: 'lead-1', stage: 'Closed Won' })
     h.enqueue('invoices', [
-      { status: 'paid', paid_amount: 1081.51 },
-      { status: 'paid', paid_amount: -92.58 },
+      { status: 'paid', total: 1081.51, paid_amount: 1081.51, balance_owing: 0 },
+      { status: 'paid', total: -92.58, paid_amount: -92.58, balance_owing: 0 },
     ])
     await handleInvoiceUpdate(ctx())
     expect(h.leadsUpdatePayload()!.paid_amount).toBe(988.93)
@@ -246,8 +247,8 @@ describe('paid total is the sum of the lead\'s paid invoices, not the last one',
     jobber.jobberGraphQL.mockResolvedValue(invoiceRecord('SENT'))
     h.enqueue('leads', { id: 'lead-1', stage: 'Job in Progress' })
     h.enqueue('invoices', [
-      { status: 'paid', paid_amount: 300 },
-      { status: 'sent', paid_amount: null },
+      { status: 'paid', total: 300, paid_amount: 300, balance_owing: 0 },
+      { status: 'sent', total: 900, paid_amount: null, balance_owing: 900 },
     ])
     await handleInvoiceUpdate(ctx())
     expect(h.leadsUpdatePayload()!.paid_amount).toBe(300)
@@ -259,5 +260,88 @@ describe('paid total is the sum of the lead\'s paid invoices, not the last one',
     h.enqueue('invoices', null, { message: 'boom' })
     await handleInvoiceUpdate(ctx())
     expect('paid_amount' in h.leadsUpdatePayload()!).toBe(false)
+    expect('balance_owing' in h.leadsUpdatePayload()!).toBe(false)
+  })
+})
+
+// ── balance owing (2026-09-27) ──────────────────────────────────
+// leads.balance_owing had the same overwrite: 0 on a paid event, the invoice
+// in hand's total otherwise — so a second open invoice hid the first (35
+// people, ~$95k). It is now the sum of what every invoice on the lead still
+// owes, by the engagement roll-up's own formula.
+describe('balance owing is the sum over every invoice, not the one in hand', () => {
+  const run = async (status: string, rows: any[] | null, error: any = null) => {
+    jobber.jobberGraphQL.mockResolvedValue(invoiceRecord(status))   // this event: $500
+    h.enqueue('leads', { id: 'lead-1', stage: 'Final Processing' })
+    h.enqueue('invoices', rows, error)
+    await handleInvoiceUpdate(ctx())
+    return h.leadsUpdatePayload()!
+  }
+
+  it('several open invoices SUM — a new one does not hide the first', async () => {
+    const p = await run('SENT', [
+      { status: 'sent', total: 3350, paid_amount: null, balance_owing: 3350 },
+      { status: 'sent', total: 500, paid_amount: null, balance_owing: 500 },   // this one
+    ])
+    expect(p.balance_owing).toBe(3850)
+  })
+
+  it('paying one invoice leaves the OTHER still owing — not zero', async () => {
+    const p = await run('PAID', [
+      { status: 'sent', total: 10540, paid_amount: null, balance_owing: 10540 },
+      { status: 'paid', total: 500, paid_amount: 500, balance_owing: 0 },       // this one, just paid
+    ])
+    expect(p.balance_owing).toBe(10540)
+    expect(p.paid_amount).toBe(500)
+  })
+
+  it('a partly paid invoice counts what it still owes, not its full total', async () => {
+    const p = await run('SENT', [
+      { status: 'sent', total: 1000, paid_amount: null, balance_owing: 300 },
+    ])
+    expect(p.balance_owing).toBe(300)
+  })
+
+  it('an invoice whose payment was voided is owing again (Jobber puts it back to awaiting payment)', async () => {
+    // Jobber has no "voided" invoice state: voiding the payment returns the
+    // invoice to awaiting payment, which lands here as 'sent' with its balance.
+    const p = await run('SENT', [
+      { status: 'sent', total: 750, paid_amount: null, balance_owing: 750 },
+      { status: 'paid', total: 200, paid_amount: 200, balance_owing: 0 },
+    ])
+    expect(p.balance_owing).toBe(750)
+  })
+
+  it('a refund / credit note reduces the balance (and can take it below zero, as the engagement shows)', async () => {
+    const withWork = await run('SENT', [
+      { status: 'sent', total: 1000, paid_amount: null, balance_owing: 1000 },
+      { status: 'sent', total: -82.3, paid_amount: null, balance_owing: -82.3 },
+    ])
+    expect(withWork.balance_owing).toBe(917.7)
+    h.reset()
+    const creditOnly = await run('SENT', [{ status: 'sent', total: -82.3, paid_amount: null, balance_owing: -82.3 }])
+    expect(creditOnly.balance_owing).toBe(-82.3)
+  })
+
+  it('a bad-debt invoice still counts, exactly as it does on the engagement', async () => {
+    const p = await run('SENT', [
+      { status: 'bad_debt', total: 1743.69, paid_amount: null, balance_owing: 1743.69 },
+      { status: 'paid', total: 5803.59, paid_amount: 5803.59, balance_owing: 0 },
+    ])
+    expect(p.balance_owing).toBe(1743.69)
+  })
+
+  it('all invoices paid → 0 owing', async () => {
+    const p = await run('PAID', [
+      { status: 'paid', total: 400, paid_amount: 400, balance_owing: 0 },
+      { status: 'paid', total: 500, paid_amount: 500, balance_owing: 0 },
+    ])
+    expect(p.balance_owing).toBe(0)
+  })
+
+  it('a failed read leaves the stored balance alone', async () => {
+    const p = await run('SENT', null, { message: 'boom' })
+    expect('balance_owing' in p).toBe(false)
+    expect('paid_amount' in p).toBe(false)
   })
 })
