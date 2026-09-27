@@ -18206,6 +18206,57 @@ function templateRow(templates, legacyId, days, when) {
   }
 }
 
+// The template a drip step points at, if its text lives there rather than on
+// the step. One lookup shared by the list and the step editor, so the two can
+// never again disagree about what a step says (they did: the list resolved the
+// template, the editor did not, and a template-backed step opened blank).
+// Deliberately does NOT filter on isActive — the send path doesn't either.
+export function linkedTemplateForStep(step, templates) {
+  if (!step) return null
+  return (templates || []).find(t =>
+    (step.masterTemplateId && t.dbId === step.masterTemplateId) ||
+    (step.templateId && t.legacyId === step.templateId)) || null
+}
+
+// What the step editor opens with: the step's own text first, then the linked
+// template — the same order as the list below and lib/drip-send.ts.
+export function stepEditorContent(step, templates) {
+  const linked = linkedTemplateForStep(step, templates)
+  return {
+    subject: step?.subject ?? linked?.subject ?? '',
+    body: step?.body ?? linked?.body ?? '',
+  }
+}
+
+// Apply a DripPathStepEditor save to a step. If the owner saved without
+// changing the wording of a template-backed step, the step KEEPS its template
+// link and carries no text of its own — only the delay moves. Otherwise the
+// saved wording becomes the step's own text and the link is dropped, because
+// inline text wins at send time and a kept pointer would show a template the
+// step no longer uses.
+export function applyStepContentEdit(step, patch, templates) {
+  const linked = linkedTemplateForStep(step, templates)
+  const shown = stepEditorContent(step, templates)
+  const textFromTemplate = !!linked && step.subject == null && step.body == null
+  const unchanged =
+    (patch.subject || '') === (shown.subject || '').trim() &&
+    (patch.body || '') === (shown.body || '')
+  const timing = {
+    delay: daysToDelayLabel(patch.delay_days),
+    delay_days: patch.delay_days,
+  }
+  if (textFromTemplate && unchanged) return { ...step, ...timing }
+  return {
+    ...step,
+    ...timing,
+    subject: patch.subject,
+    body: patch.body,
+    name: patch.subject || step.name,
+    templateId: null,
+    masterTemplateId: null,
+  }
+}
+
 export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null, returningPathKey = null }) {
   // RAIL A — a path's email steps, inline-first. Used for the default
   // organizing/moving path (group one) and for the fixed returning-client
@@ -18219,11 +18270,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
       .map(s => {
         // Mirrors lib/drip-send.ts: the step's own text wins, the linked
         // template is the fallback. Deliberately does NOT filter on isActive.
-        const linked = (templates || []).find(t =>
-          (s.masterTemplateId && t.dbId === s.masterTemplateId) ||
-          (s.templateId && t.legacyId === s.templateId))
-        const subject = s.subject ?? linked?.subject ?? ''
-        const body = s.body ?? linked?.body ?? ''
+        const { subject, body } = stepEditorContent(s, templates)
         return {
           key: `step-${key}-${s.dbId ?? s.order}`,
           rail: 'drip',
@@ -22706,23 +22753,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   }
 
   // DripPathStepEditor save → apply subject/body/delay to the step and
-  // auto-commit. Inline content is now the step's truth, so the template
-  // pointer is DROPPED — keeping it would display a template chip the step no
-  // longer uses (inline wins at send time). Throws through commitSteps so the
-  // editor surfaces a failed commit in place and the sequence stays unchanged.
+  // auto-commit. Changed wording becomes the step's own text and the template
+  // pointer is DROPPED (inline wins at send time). Unchanged wording on a
+  // template-backed step keeps the pointer — see applyStepContentEdit. Throws
+  // through commitSteps so the editor surfaces a failed commit in place and
+  // the sequence stays unchanged.
   async function saveStepContent(patch) {
     const { pathId, step } = stepContentEditor
     const nextSteps = (pathSteps[pathId] || []).map(s => s.order === step.order
-      ? {
-          ...s,
-          subject: patch.subject,
-          body: patch.body,
-          delay: daysToDelayLabel(patch.delay_days),
-          delay_days: patch.delay_days,
-          name: patch.subject || s.name,
-          templateId: null,
-          masterTemplateId: null,
-        }
+      ? applyStepContentEdit(s, patch, templates)
       : s)
     await commitSteps(pathId, nextSteps)
     setStepContentEditor(null)
@@ -24056,8 +24095,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         <DripPathStepEditor
           step={{
             step_order: stepContentEditor.step.order,
-            subject: stepContentEditor.step.subject || '',
-            body: stepContentEditor.step.body || '',
+            // The step's own text, else its linked template's — a step whose
+            // wording lives on a template used to open blank here.
+            ...stepEditorContent(stepContentEditor.step, templates),
             delay_days: stepContentEditor.step.delay_days ?? delayToDays(stepContentEditor.step.delay),
           }}
           onSave={saveStepContent}
