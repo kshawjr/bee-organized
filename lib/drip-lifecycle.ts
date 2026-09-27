@@ -6,6 +6,7 @@
 
 import { supabaseService } from './supabase-service'
 import { nextSendAt } from './drip-time'
+import { recordDripEnrolOutcome, type DripEnrolReason, type DripEnrolResult } from './drip-enrol-outcome'
 import {
   scheduleStageEmails,
   cancelStageEmails,
@@ -64,25 +65,46 @@ interface LocationCtx {
 // Lead email doesn't get sent to historical clients — the owner has to
 // flip paused = false (via the Activate Drips button) to opt them in,
 // which routes back through here via resumePausedDripsForLead.
-export async function startDripForLead(leadId: string, locationUuid: string): Promise<void> {
+// EVERY EXIT IS NAMED (2026-09-27, lib/drip-enrol-outcome.ts). This used to
+// return nothing from twelve places — Test Fornat's "step 1 missing" among
+// them — and a lead that never enrolled looked exactly like one that did.
+// Now it returns the outcome AND records it on the lead (plus a Timeline
+// entry for setup/system causes), so every caller — intake, POST/PATCH
+// /api/leads, transfer, Jobber stage promotion, drip-resume, restart —
+// inherits the record without doing anything.
+export async function startDripForLead(leadId: string, locationUuid: string): Promise<DripEnrolResult> {
+  const result = await attemptDripEnrol(leadId, locationUuid)
+  if (!result.enrolled) {
+    console.warn('[drip] startDrip: not enrolled', { leadId, locationUuid, reason: result.reason })
+  }
+  await recordDripEnrolOutcome(leadId, locationUuid, result)
+  return result
+}
+
+const notEnrolled = (
+  reason: DripEnrolReason,
+  sequence: 'Moving' | 'Organizing' | null = null,
+): DripEnrolResult => ({ enrolled: false, reason, sequence })
+
+async function attemptDripEnrol(leadId: string, locationUuid: string): Promise<DripEnrolResult> {
   try {
     const { data: leadRow, error: leadErr } = await supabaseService
       .from('leads')
       .select('paused, marketing_opt_out, project_type')
       .eq('id', leadId)
       .maybeSingle()
-    if (leadErr) {
+    if (leadErr || !leadRow) {
       console.error('[drip] startDrip: lead lookup failed', { leadId, leadErr })
-      return
+      return notEnrolled('lookup_failed')
     }
-    if (leadRow?.paused) {
+    if (leadRow.paused) {
       // Imported lead — owner must explicitly activate drips first.
-      return
+      return notEnrolled('paused_import')
     }
-    if (leadRow?.marketing_opt_out) {
+    if (leadRow.marketing_opt_out) {
       // Opted out of marketing — never enroll. sendDripStepForRow also
       // enforces this at send time (the authoritative gate).
-      return
+      return notEnrolled('opted_out')
     }
 
     const { data: loc, error: locErr } = await supabaseService
@@ -93,7 +115,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
 
     if (locErr || !loc) {
       console.error('[drip] startDrip: location lookup failed', { leadId, locationUuid, locErr })
-      return
+      return notEnrolled('lookup_failed')
     }
 
     // SAFETY GATE (interface-active): client drips fire ONLY for locations
@@ -107,11 +129,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
     // and the imported-lead resume seed. The internal lead notification
     // (B2/B3) is a separate path and is unaffected.
     if (loc.lifecycle_status !== 'active') {
-      console.log(
-        `[drip] startDrip: location ${locationUuid} not active ` +
-          `(lifecycle_status=${loc.lifecycle_status ?? 'null'}) — lead ${leadId} not enrolled`,
-      )
-      return
+      return notEnrolled('location_not_live')
     }
 
     // New Client Drip selection: the lead's project_type resolves through
@@ -123,15 +141,19 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
     // unknown project_type, so the fallback is safe by construction. A
     // Move-tagged lead at a location that never configured a move path
     // falls back to the organizing default rather than enrolling nothing.
-    const dripCategory = await resolveDripCategory(leadRow?.project_type ?? null)
+    const dripCategory = await resolveDripCategory(leadRow.project_type ?? null)
     const pathKey =
       dripCategory === 'move'
         ? loc.default_move_drip_path || loc.default_drip_path
         : loc.default_drip_path
+    // Which sequence the owner would recognise, for the message — the one
+    // actually used (a move lead falls back to Organizing when no move
+    // sequence is chosen).
+    const sequence: 'Moving' | 'Organizing' =
+      dripCategory === 'move' && loc.default_move_drip_path ? 'Moving' : 'Organizing'
 
     if (!pathKey) {
-      // Owner hasn't picked the relevant default — silently skip.
-      return
+      return notEnrolled('no_default_path', sequence)
     }
 
     // Look for a location-owned copy first; fall back to the corp master.
@@ -150,7 +172,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
         .maybeSingle()
       if (locCopyErr) {
         console.error('[drip] startDrip: location-copy lookup failed', { leadId, locCopyErr })
-        return
+        return notEnrolled('lookup_failed', sequence)
       }
       if (locCopy) {
         path = locCopy
@@ -164,7 +186,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
           .maybeSingle()
         if (masterErr) {
           console.error('[drip] startDrip: master lookup failed', { leadId, masterErr })
-          return
+          return notEnrolled('lookup_failed', sequence)
         }
         path = master
       }
@@ -176,19 +198,30 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
         locationUuid,
         path_key: pathKey,
       })
-      return
+      return notEnrolled('path_missing', sequence)
     }
 
-    const { data: step1, error: stepErr } = await supabaseService
+    // THE FIRST STEP IS THE LOWEST-NUMBERED ONE — not "step_order = 1".
+    // Test Location's Moving copy holds a single step numbered 3 (saved
+    // 2026-07-29, before PATCH /api/drip-paths/:id/steps renumbered); an
+    // exact step-1 lookup found nothing and every Moving lead there silently
+    // never enrolled. The drip starts AT that step (current_step = its
+    // number), so the send path finds it by the same number.
+    const { data: firstSteps, error: stepErr } = await supabaseService
       .from('drip_path_steps')
-      .select('delay_days')
+      .select('step_order, delay_days')
       .eq('drip_path_id', path.id)
-      .eq('step_order', 1)
-      .maybeSingle()
+      .order('step_order', { ascending: true })
+      .limit(1)
+    const first = (firstSteps as { step_order: number; delay_days: number | null }[] | null)?.[0] ?? null
 
-    if (stepErr || !step1) {
-      console.error('[drip] startDrip: step 1 missing', { leadId, drip_path_id: path.id, stepErr })
-      return
+    if (stepErr) {
+      console.error('[drip] startDrip: first-step lookup failed', { leadId, drip_path_id: path.id, stepErr })
+      return notEnrolled('lookup_failed', sequence)
+    }
+    if (!first) {
+      console.error('[drip] startDrip: sequence has no steps', { leadId, drip_path_id: path.id })
+      return notEnrolled('path_has_no_first_email', sequence)
     }
 
     // Step 1 with delay_days=0 should feel "immediate" to the user who
@@ -197,7 +230,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
     // nextSendAt() would push the welcome email to 9am the following
     // day (a 23-hour delay for leads created after 9am local).
     // Subsequent steps still flow through nextSendAt() in the cron.
-    const delayDays = step1.delay_days ?? 0
+    const delayDays = first.delay_days ?? 0
     const next =
       delayDays === 0
         ? new Date()
@@ -212,18 +245,21 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
       .insert({
         lead_id: leadId,
         drip_path_id: path.id,
-        current_step: 1,
+        current_step: first.step_order,
         started_at: new Date().toISOString(),
         next_send_at: next.toISOString(),
       })
 
     // ON CONFLICT (lead_id, drip_path_id) DO NOTHING — Postgres will
-    // raise a unique-violation we can swallow.
+    // raise a unique-violation we can swallow: the lead is ALREADY enrolled.
     if (insertErr && insertErr.code !== '23505') {
       console.error('[drip] startDrip: insert failed', { leadId, insertErr })
+      return notEnrolled('lookup_failed', sequence)
     }
+    return { enrolled: true }
   } catch (err) {
     console.error('[drip] startDrip: unexpected error', { leadId, err })
+    return notEnrolled('lookup_failed')
   }
 }
 
@@ -494,7 +530,10 @@ export async function pauseActiveDripsForLead(leadId: string): Promise<void> {
 // are no progress rows to resume. When the owner clicks Activate Drips
 // we need to seed step 1 instead — detect "no progress rows + lead in a
 // drip-eligible stage" and delegate to startDripForLead.
-export async function resumePausedDripsForLead(leadId: string): Promise<void> {
+// Returns the ENROL outcome when this call had to start a fresh drip (a
+// never-enrolled lead — Activate on the card), so the caller can say whether
+// it worked. null = it resumed existing paused rows, or had nothing to do.
+export async function resumePausedDripsForLead(leadId: string): Promise<DripEnrolResult | null> {
   try {
     const { data: rows, error: loadErr } = await supabaseService
       .from('lead_drip_progress')
@@ -506,7 +545,7 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
 
     if (loadErr) {
       console.error('[drip] resumePausedDrips: load failed', { leadId, loadErr })
-      return
+      return null
     }
 
     if (!rows || rows.length === 0) {
@@ -518,7 +557,7 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
         .select('location_uuid, stage')
         .eq('id', leadId)
         .maybeSingle()
-      if (!lead?.location_uuid) return
+      if (!lead?.location_uuid) return null
 
       // Don't re-seed if there's any non-paused progress row (i.e. an
       // active or already-stopped/completed drip). The owner can use
@@ -529,13 +568,13 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
         .eq('lead_id', leadId)
         .limit(1)
         .maybeSingle()
-      if (anyProgress) return
+      if (anyProgress) return null
 
       // Drip-eligible stages mirror the start-trigger in applyDripSideEffects.
       if (lead.stage === 'New' || lead.stage === 'Attempting') {
-        await startDripForLead(leadId, lead.location_uuid)
+        return await startDripForLead(leadId, lead.location_uuid)
       }
-      return
+      return null
     }
 
     // Pull the lead's location tz once (all rows here share the lead).
@@ -569,8 +608,10 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
         .eq('id', row.id)
       if (updErr) console.error('[drip] resumePausedDrips: update failed', { id: row.id, updErr })
     }
+    return null
   } catch (err) {
     console.error('[drip] resumePausedDrips: unexpected error', { leadId, err })
+    return null
   }
 }
 
@@ -587,9 +628,12 @@ export async function applyDripSideEffects(args: {
   locationUuid: string
   prevStage: string | null
   patch: Record<string, unknown>
-}): Promise<void> {
+}): Promise<{ enrol: DripEnrolResult | null }> {
   const { leadId, locationUuid, prevStage, patch } = args
-  const tasks: Promise<void>[] = []
+  const tasks: Promise<unknown>[] = []
+  // The enrol outcome, when this call tried to start a drip — so a caller
+  // (the hand-entry route) can tell the owner it didn't start, and why.
+  let enrol: DripEnrolResult | null = null
 
   // Stages that PROTECT pending opportunity-stage emails: leaving one cancels
   // whatever is still queued. 'Estimate Sent' stays here after issue 240 even
@@ -611,7 +655,7 @@ export async function applyDripSideEffects(args: {
     if (newStage === 'New') {
       // Fires for both create-into-New and transition-into-New. startDrip
       // is idempotent (unique on lead_id + drip_path_id) so re-entry is safe.
-      tasks.push(startDripForLead(leadId, locationUuid))
+      tasks.push(startDripForLead(leadId, locationUuid).then((r) => { enrol = r }))
     } else if (newStage === 'Attempting') {
       // leave active drips alone — drip continues through Attempting
     } else if (DRIP_STOP_STAGES.has(newStage) && !isFreshCreate) {
@@ -664,10 +708,11 @@ export async function applyDripSideEffects(args: {
 
   if ('paused' in patch) {
     if (patch.paused === true) tasks.push(pauseActiveDripsForLead(leadId))
-    else if (patch.paused === false) tasks.push(resumePausedDripsForLead(leadId))
+    else if (patch.paused === false) tasks.push(resumePausedDripsForLead(leadId).then((r) => { if (r) enrol = r }))
   }
 
   await Promise.all(tasks)
+  return { enrol }
 }
 
 // Wrapper that resolves project_type (from patch or DB) before delegating

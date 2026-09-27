@@ -26,6 +26,7 @@ import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { resumePausedDripsForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
+import { dripEnrolReasonText } from '@/lib/drip-enrol-outcome'
 
 export async function POST(
   _req: Request,
@@ -78,7 +79,10 @@ export async function POST(
     return NextResponse.json({ error: 'flag_sync_failed', detail: flagErr.message }, { status: 500 })
   }
 
-  await resumePausedDripsForLead(id)
+  // For a never-enrolled lead this STARTS the drip (Activate on the card), and
+  // the outcome comes back — enrolled, or not and why. The card used to toast
+  // "Nurture drips active" whether or not anything started (2026-09-27).
+  const enrol = await resumePausedDripsForLead(id)
 
   try {
     await sendDripStep(id)
@@ -86,5 +90,13 @@ export async function POST(
     console.error('[drip-resume] inline sendDripStep threw', err)
   }
 
-  return NextResponse.json({ ok: true })
+  if (enrol && !enrol.enrolled) {
+    return NextResponse.json({
+      ok: true,
+      enrolled: false,
+      reason: enrol.reason,
+      message: dripEnrolReasonText(enrol.reason, { sequence: enrol.sequence }),
+    })
+  }
+  return NextResponse.json({ ok: true, ...(enrol ? { enrolled: true } : {}) })
 }

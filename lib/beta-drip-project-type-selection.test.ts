@@ -88,7 +88,7 @@ function seedHappyPath(opts: {
   }
   h.enqueue('drip_paths', null)                     // location-copy → miss
   h.enqueue('drip_paths', { id: 'path-db-1' })      // master → hit
-  h.enqueue('drip_path_steps', { delay_days: 0 })   // step 1
+  h.enqueue('drip_path_steps', [{ step_order: 1, delay_days: 0 }])   // first step (lowest-numbered)
   h.enqueue('lead_drip_progress', null)             // insert ok
 }
 
@@ -177,9 +177,11 @@ describe('suppression intact', () => {
     // locations / lookups / drip_paths / lead_drip_progress.
     h.enqueue('leads', { paused: true, marketing_opt_out: false, project_type: 'Move Out' })
 
-    await startDripForLead(LEAD_ID, LOC_UUID)
+    const res = await startDripForLead(LEAD_ID, LOC_UUID)
 
-    expect(h.tablesTouched()).toEqual(['leads'])
+    // + the enrol outcome is recorded on the lead: one read, one update (2026-09-27)
+    expect(res).toEqual({ enrolled: false, reason: 'paused_import', sequence: null })
+    expect(h.tablesTouched()).toEqual(['leads', 'leads', 'leads'])
     expect(h.progressInsert()).toBeUndefined()
     expect(h.dripPathKeys()).toEqual([])
   })
@@ -187,9 +189,11 @@ describe('suppression intact', () => {
   it('marketing_opt_out lead → enrolls NOTHING', async () => {
     h.enqueue('leads', { paused: false, marketing_opt_out: true, project_type: 'Move Out' })
 
-    await startDripForLead(LEAD_ID, LOC_UUID)
+    const res = await startDripForLead(LEAD_ID, LOC_UUID)
 
-    expect(h.tablesTouched()).toEqual(['leads'])
+    // + the enrol outcome is recorded on the lead: one read, one update (2026-09-27)
+    expect(res).toEqual({ enrolled: false, reason: 'opted_out', sequence: null })
+    expect(h.tablesTouched()).toEqual(['leads', 'leads', 'leads'])
     expect(h.progressInsert()).toBeUndefined()
   })
 

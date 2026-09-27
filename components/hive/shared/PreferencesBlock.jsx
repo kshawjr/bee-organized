@@ -77,11 +77,36 @@ const DRIP_STOP_FALLBACK = { reason: 'nurture emails were stopped', guide: 'Cont
 // active — it would return having enrolled nothing and toast success. A silent
 // no-op is worse than no control. `reason` may be null when the cause isn't
 // knowable; the headline then stands alone rather than inventing one.
+//
+// 2026-09-27 — EVERY CAUSE NAMED, AND NO TICKETS. startDripForLead now records
+// why it didn't enrol (lib/drip-enrol-outcome.ts) and the profile route passes
+// it through, so each cause gets its own words. `activate` marks where the
+// card's Activate button genuinely starts the drip (drip-resume →
+// resumePausedDripsForLead → startDripForLead): a lead with no drip at a LIVE
+// location enrols on it, and if something still stops it the button's toast
+// names the reason. The only cause with no button is a location that isn't
+// live — Activate would hit that same gate. "Contact support" is gone: none
+// of these needs Kevin. `reason` may be a function of the sequence name.
 const DRIP_NEVER_COPY = {
-  location_not_active:      { reason: 'this location isn’t live yet',                  guide: 'Nurture emails start once the location is activated. Leads that arrive before then aren’t enrolled.' },
-  location_activated_later: { reason: 'this client arrived before the location went live', guide: 'Contact support to start nurture emails for this client.' },
+  location_not_active:      { reason: 'this location isn’t live yet',                  guide: 'Nurture emails start once the location is live. Leads that arrive before then aren’t enrolled.', activate: false },
+  location_activated_later: { reason: 'this client arrived before the location went live', guide: 'Nurture emails never started for them. Tap Activate to start them now.', activate: true },
+  drip_not_ticked:          { reason: 'Drip wasn’t ticked when this client was added',     guide: 'Tap Activate to start nurture emails.', activate: true },
+  path_has_no_first_email:  { reason: (seq) => `your ${seq} sequence has no first email`, guide: 'Add one in Settings → Emails, then tap Activate.', activate: true },
+  no_default_path:          { reason: (seq) => `no ${seq} sequence is chosen`,            guide: 'Choose one in Settings → Emails, then tap Activate.', activate: true },
+  path_missing:             { reason: (seq) => `your ${seq} sequence can’t be found`,      guide: 'Choose it again in Settings → Emails, then tap Activate.', activate: true },
+  lookup_failed:            { reason: 'a temporary error stopped them starting',          guide: 'Tap Activate to try again.', activate: true },
+  opted_out:                { reason: 'the client opted out of marketing',               guide: 'Re-subscribe them above, then tap Activate.', activate: true },
+  paused_import:            { reason: 'this client was imported, and imports start paused', guide: 'Tap Activate to start nurture emails.', activate: true },
 }
-const DRIP_NEVER_FALLBACK = { reason: null, guide: 'Contact support to start nurture emails for this client.' }
+const DRIP_NEVER_FALLBACK = { reason: null, guide: 'Tap Activate to start them. If something stops them, the reason will show here.', activate: true }
+
+// The reason line for a never-enrolled cause — a string, or built from the
+// sequence the lead would use ("Moving" / "Organizing"). Exported for tests.
+export function dripNeverReasonText(copy, sequence) {
+  if (!copy || !copy.reason) return null
+  return typeof copy.reason === 'function' ? copy.reason(sequence || 'nurture') : copy.reason
+}
+export { DRIP_NEVER_COPY, DRIP_NEVER_FALLBACK }
 
 export default function PreferencesBlock({ client, openCount = 0, onPatched = () => {}, setToast = () => {}, nowMs = Date.now(), readOnly = false }) {
   const c = client
@@ -142,7 +167,16 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
       const res = await fetch(`/api/leads/${c.id}/${pause ? 'drip-pause' : 'drip-resume'}`, { method: 'POST' })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      onPatched({ paused: pause })
+      // Activate STARTED nothing — say why, and show that cause on the card,
+      // instead of toasting "active" over a drip that didn't begin.
+      if (!pause && j?.enrolled === false) {
+        onPatched({ paused: false, drip_never_enrolled: true, drip_never_enrolled_reason: j.reason ?? null })
+        setToast({ kind: 'error', msg: `Nurture emails didn’t start: ${j.message || 'no reason was given'}` })
+        return
+      }
+      onPatched(!pause && j?.enrolled === true
+        ? { paused: false, drip_never_enrolled: false, drip_never_enrolled_reason: null }
+        : { paused: pause })
       setToast({ kind: 'success', msg: pause ? 'Nurture drips paused' : 'Nurture drips active' })
     } catch (e) {
       setToast({ kind: 'error', msg: `Drip ${pause ? 'pause' : 'activate'} failed: ${e.message}` })
@@ -218,9 +252,14 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
             <p style={{ fontSize: '12px', color: T.state.warning.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
               <IconMail size={13} /> Not receiving nurture emails
-              {dripNeverCopy.reason ? ` — ${dripNeverCopy.reason}` : ''}
+              {dripNeverReasonText(dripNeverCopy, c.drip_enrol_sequence) ? ` — ${dripNeverReasonText(dripNeverCopy, c.drip_enrol_sequence)}` : ''}
             </p>
-            <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45 }}>{dripNeverCopy.guide}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45, flex: 1 }}>{dripNeverCopy.guide}</p>
+              {!readOnly && dripNeverCopy.activate && (
+                <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
+              )}
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

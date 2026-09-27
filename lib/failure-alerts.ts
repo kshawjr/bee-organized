@@ -30,6 +30,15 @@
 //   5. ASSESSMENT_TEAM_MISMATCH — the send landed, the team didn't apply.
 //   6. STRANDED CHECKOUT (issue 312) — see the window note below.
 //   7. EMAIL HELD ≥ HELD_SUBJECT_ALERT_MS FOR A BLANK SUBJECT (issue 316).
+//   8. NURTURE EMAILS NOT STARTING (2026-09-27) — a new lead couldn't enrol
+//      because of a LOCATION SETUP problem (no sequence chosen, the chosen
+//      one missing, or one with no emails in it — lib/drip-enrol-outcome.ts
+//      SETUP_REASONS). One broken sequence fails EVERY new lead at that
+//      location, silently, until someone fixes it — Test Location's Moving
+//      sequence did exactly that. ONE alert per location and reason: the
+//      fetcher skips a group that already failed the same way in the
+//      previous DRIP_ENROL_REALERT_MS. By-design reasons (Drip not ticked,
+//      imported, opted out, location not live) never reach this rail.
 // (Stripe payment failures post instantly from app/api/webhooks/stripe
 //  itself, one message each — they never needed this rail.)
 //
@@ -92,6 +101,7 @@ import { fetchWebhookLogEvents, type WebhookLogEvent } from './webhook-observabi
 import { SELF_HEAL_WINDOW_MS } from './webhook-digest'
 import { parseReconnectStamp } from './jobber-reconnect'
 import { FEEDBACK_TRIAGE_PATH } from './feedback-triage-link'
+import { DRIP_ENROL_KIND, SETUP_REASONS, dripEnrolReasonText, type DripEnrolReason } from './drip-enrol-outcome'
 
 export { parseReconnectStamp }
 
@@ -112,6 +122,7 @@ export type AlertKind =
   | 'assessment_mismatch'
   | 'checkout_stranded'
   | 'email_held'
+  | 'drip_not_starting'
 
 // How long an owner may sit on an unpaid checkout before it is a strand.
 // Measured, not guessed — see the window note in the module header.
@@ -124,6 +135,20 @@ export const STRANDED_CHECKOUT_MS = 90 * 60_000
 // while still surfacing same-day (the failures that motivated this sat silent
 // for 4 days). ~6 retry ticks have happened by the time this fires.
 export const HELD_SUBJECT_ALERT_MS = 6 * 60 * 60_000
+
+// A location whose setup failure has been quiet this long alerts again on the
+// next occurrence (it was fixed and broke again, or someone needs reminding).
+export const DRIP_ENROL_REALERT_MS = 7 * 24 * 60 * 60_000
+
+// New leads at one location that couldn't enrol for one SETUP reason in the
+// window (fetchDripEnrolSetupFailures — already grouped and de-duplicated).
+export type DripEnrolFailureRow = {
+  location_uuid: string | null
+  reason: DripEnrolReason
+  first_at: string
+  count: number
+  lead_name?: string | null
+}
 
 export type AlertItem = {
   kind: AlertKind
@@ -326,6 +351,7 @@ export function selectNewAlerts(input: {
   locBilling?: Map<string, LocationBillingState>    // slug → subscription state
   resolvedSessions?: Set<string>                    // sessions with a later terminal row
   heldEmails?: HeldSubjectEmailRow[]                // sends held for a blank subject
+  dripEnrolFailures?: DripEnrolFailureRow[]         // leads a location setup kept out of nurture
   ownerReports?: OwnerReportRow[]                   // feedback_items rows filed by owners
   reconnects?: ReconnectRow[]                       // locations stamped RECONNECT REQUIRED
   locNameByUuid?: Map<string, string>               // locations.id (uuid) → display name
@@ -338,6 +364,7 @@ export function selectNewAlerts(input: {
     events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs,
     pendingCheckouts = [], locBilling, resolvedSessions,
     heldEmails = [], ownerReports = [], reconnects = [], locNameByUuid, appUrl = '',
+    dripEnrolFailures = [],
   } = input
   const items: AlertItem[] = []
   const uuidLabel = (id: string | null | undefined) =>
@@ -470,6 +497,23 @@ export function selectNewAlerts(input: {
     })
   }
 
+  // (8) nurture emails not starting — a location SETUP problem. The fetcher
+  // has already grouped by location + reason and dropped groups alerted in
+  // the last week; windowed here on the group's first failure like the rest.
+  for (const f of dripEnrolFailures) {
+    if (DRIP_ENROL_KIND[f.reason] !== 'setup') continue
+    const t = Date.parse(f.first_at)
+    if (!inWindow(t, sinceMs, cutoffMs)) continue
+    const who = f.count > 1 ? `${f.count} new leads` : `A new lead${f.lead_name ? ` (${clean(f.lead_name, 60)})` : ''}`
+    items.push({
+      kind: 'drip_not_starting',
+      ts: t,
+      text:
+        `Nurture emails not starting — ${uuidLabel(f.location_uuid)}: ${who} couldn't enrol because ` +
+        `${dripEnrolReasonText(f.reason)}. Every new lead there fails the same way until it's fixed.`,
+    })
+  }
+
   return items.sort((a, b) => a.ts - b.ts)
 }
 
@@ -485,6 +529,7 @@ const EMOJI: Record<AlertKind, string> = {
   assessment_mismatch: ':busts_in_silhouette:',
   checkout_stranded: ':hourglass_flowing_sand:',
   email_held: ':envelope:',
+  drip_not_starting: ':mailbox_with_no_mail:',
 }
 
 export type AlertMessage = { text: string; items: AlertItem[] }
@@ -873,6 +918,51 @@ export async function fetchLocationDirectory(supabase: typeof supabaseService): 
 // Fetches every raw source + the location directory for the window, then
 // runs the pure selector. cutoff trails now() by ALERT_SETTLE_MS; sinceMs is
 // the prior watermark. An empty (settled) window short-circuits to no work.
+// Leads that couldn't enrol for a SETUP reason in (since, cutoff], grouped by
+// location + reason. A group whose location already failed the same way in the
+// DRIP_ENROL_REALERT_MS before `since` is dropped — it has been alerted. Reads
+// leads.drip_enrol_reason / drip_enrol_at (migrations/drip_enrol_reason.sql);
+// before that runs the read errors and this returns nothing.
+export async function fetchDripEnrolSetupFailures(
+  supabase: typeof supabaseService,
+  sinceIso: string,
+  cutoffIso: string,
+): Promise<DripEnrolFailureRow[]> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('name, location_uuid, drip_enrol_reason, drip_enrol_at')
+    .in('drip_enrol_reason', SETUP_REASONS)
+    .gt('drip_enrol_at', sinceIso)
+    .lte('drip_enrol_at', cutoffIso)
+    .order('drip_enrol_at', { ascending: true })
+    .limit(200)
+  if (error || !data) return []
+
+  const groups = new Map<string, DripEnrolFailureRow>()
+  for (const r of data as any[]) {
+    const key = `${r.location_uuid}|${r.drip_enrol_reason}`
+    const g = groups.get(key)
+    if (g) g.count += 1
+    else groups.set(key, { location_uuid: r.location_uuid ?? null, reason: r.drip_enrol_reason, first_at: r.drip_enrol_at, count: 1, lead_name: r.name ?? null })
+  }
+
+  const priorFrom = new Date(Date.parse(sinceIso) - DRIP_ENROL_REALERT_MS).toISOString()
+  const out: DripEnrolFailureRow[] = []
+  for (const g of Array.from(groups.values())) {
+    const { data: prior } = await supabase
+      .from('leads')
+      .select('id')
+      .eq('location_uuid', g.location_uuid)
+      .eq('drip_enrol_reason', g.reason)
+      .gt('drip_enrol_at', priorFrom)
+      .lte('drip_enrol_at', sinceIso)
+      .limit(1)
+    if (prior && (prior as any[]).length > 0) continue // already alerted for this location + reason
+    out.push(g)
+  }
+  return out
+}
+
 export async function collectFailureAlerts(opts: {
   nowMs: number
   sinceMs: number
@@ -903,6 +993,11 @@ export async function collectFailureAlerts(opts: {
       fetchHeldSubjectEmails(supabase, opts.sinceMs, cutoffMs),
     ])
 
+  // Nurture emails not starting (kind 8). After the batch, not inside it: its
+  // per-group "already alerted?" look-backs are a second hop, like
+  // fetchCheckoutResolutions below.
+  const dripEnrolFailures = await fetchDripEnrolSetupFailures(supabase, sinceIso, cutoffIso)
+
   // Second hop, and only when there is something to resolve: which of the
   // candidate sessions already reached a terminal row.
   const resolvedSessions = await fetchCheckoutResolutions(supabase, pendingCheckouts)
@@ -916,6 +1011,7 @@ export async function collectFailureAlerts(opts: {
     locBilling: directory.billing,
     resolvedSessions,
     heldEmails,
+    dripEnrolFailures,
     ownerReports,
     reconnects: directory.reconnects,
     locNameByUuid: directory.namesByUuid,

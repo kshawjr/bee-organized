@@ -103,6 +103,13 @@ function Badge({ tint, icon, label }) {
   )
 }
 
+// The create-time warning when nurture emails didn't start. Exported for the
+// test; the reason text comes from the server (lib/drip-enrol-outcome.ts).
+export function dripNotStartedToast(drip) {
+  const why = (drip && drip.message) || 'no reason was given'
+  return `Client saved — nurture emails didn’t start: ${why}.`
+}
+
 // On-create notification actions — ONE unified multi-select folding the old
 // standalone "Add to drip sequence" toggle in as the Drip pill. Three
 // INDEPENDENT options, ALL default OFF: each rides the POST /api/leads create
@@ -285,7 +292,7 @@ export default function NewClientSheet({
     })
     const json = await res.json().catch(() => ({}))
     if (!res.ok || !json?.lead) throw new Error(json?.error || `HTTP ${res.status}`)
-    return json.lead
+    return json
   }
 
   // Frame C create — person only. The authoritative DB match query runs
@@ -329,7 +336,7 @@ export default function NewClientSheet({
         }
       }
       const parts = name.split(/\s+/).filter(Boolean)
-      const lead = await postLead({
+      const { lead, drip } = await postLead({
         name,
         first_name: parts[0] || null,
         last_name: parts.slice(1).join(' ') || null,
@@ -357,6 +364,13 @@ export default function NewClientSheet({
       // lands in the Inbox as a person (doctrine above), and Send to Jobber
       // from there creates the first request.
       onCreated(lead)
+      // Nurture emails didn't start — say so, and why (2026-09-27). Before
+      // this a hand-entered client with Drip left off, or a Drip that failed
+      // to enrol, looked exactly like one that started. Only when the route
+      // reports it: a client saved at a stage with no drip gets nothing.
+      if (drip && drip.enrolled === false) {
+        setToast({ kind: 'error', msg: dripNotStartedToast(drip) })
+      }
     } catch (e) {
       setErrorMsg(String(e?.message || e))
     } finally {

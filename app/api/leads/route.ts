@@ -23,6 +23,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { dripEnrolReasonText, recordDripEnrolOutcome, type DripEnrolResult } from '@/lib/drip-enrol-outcome'
 import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
@@ -375,14 +376,26 @@ export async function POST(req: NextRequest) {
   //    omit it fall back to the historical skip_drip default-ON behavior.
   const wantsDrip =
     typeof body.startDrip === 'boolean' ? body.startDrip : body.skip_drip !== true
+  // WHETHER NURTURE EMAILS STARTED, told to the caller (2026-09-27). The New
+  // sheet shows "Client saved — nurture emails didn't start: <reason>" rather
+  // than nothing. Seven hand-entered leads in 30 days went in with Drip left
+  // off and nobody knew; Test Fornat went in WITH Drip ticked and still
+  // didn't enrol, silently. Both now come back here, and both are stored on
+  // the lead (lib/drip-enrol-outcome.ts).
+  let drip: DripEnrolResult | null = null
+  if (stage === 'New' && !wantsDrip) {
+    drip = { enrolled: false, reason: 'drip_not_ticked' }
+    await recordDripEnrolOutcome(lead.id, location.id, drip)
+  }
   if (stage === 'New' && wantsDrip) {
     try {
-      await applyDripSideEffects({
+      const fx = await applyDripSideEffects({
         leadId:        lead.id,
         locationUuid:  location.id,
         prevStage:     null,
         patch:         { stage: 'New' },
       })
+      drip = fx.enrol
     } catch (err: any) {
       console.error('[drip] applyDripSideEffects on create threw', err)
       warnings.push(`drip_side_effects_failed: ${err?.message || String(err)}`)
@@ -397,7 +410,17 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { lead, ...(warnings.length ? { warnings } : {}) },
+    {
+      lead,
+      ...(warnings.length ? { warnings } : {}),
+      ...(drip
+        ? {
+            drip: drip.enrolled
+              ? { enrolled: true }
+              : { enrolled: false, reason: drip.reason, message: dripEnrolReasonText(drip.reason, { sequence: drip.sequence, locationName: location.name }) },
+          }
+        : {}),
+    },
     { status: 201 },
   )
 }

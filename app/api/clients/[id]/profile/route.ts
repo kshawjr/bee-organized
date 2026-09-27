@@ -17,6 +17,8 @@ import { isAdmin } from '@/lib/auth'
 import { profileAggregates } from '@/lib/profile-aggregates'
 import { factsFromRows } from '@/lib/enquiry-exit'
 import { isLocationSendSettingProblem } from '@/lib/sender-domain'
+import { DRIP_ENROL_KIND, isDripEnrolReason, type DripEnrolReason } from '@/lib/drip-enrol-outcome'
+import { resolveDripCategory } from '@/lib/stage-emails'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
@@ -183,14 +185,38 @@ export async function GET(
   // can also be missing rows, but those have their own causes and their own
   // rows in this panel — claiming the location gate for them would be a
   // fabricated reason.
+  //
+  // THE STORED REASON WINS (2026-09-27). startDripForLead now records why it
+  // didn't enrol (leads.drip_enrol_reason — lib/drip-enrol-outcome.ts), so
+  // the card can name drip_not_ticked, a broken sequence, a temporary error…
+  // instead of guessing. Read on its own: the column arrives with
+  // migrations/drip_enrol_reason.sql, and until then this read errors and
+  // the location inference below is all there is (the old wording).
+  // A stored location_not_live is re-judged against TODAY's location: live
+  // now means the lead simply predates it, and Activate will work.
   let drip_never_enrolled_reason: string | null = null
+  let drip_enrol_sequence: 'Moving' | 'Organizing' | null = null
   if (drip_never_enrolled) {
+    let stored: string | null = null
+    {
+      const { data: er, error: erErr } = await supabaseService
+        .from('leads')
+        .select('drip_enrol_reason')
+        .eq('id', id)
+        .maybeSingle()
+      if (!erErr && isDripEnrolReason((er as any)?.drip_enrol_reason)) stored = (er as any).drip_enrol_reason
+    }
     const locRow = locRes.data
     const activatedAt = locRow?.activated_at ? new Date(locRow.activated_at).getTime() : null
     const createdAt = lead.created_at ? new Date(lead.created_at).getTime() : null
     if (locRow && locRow.lifecycle_status !== 'active') {
       drip_never_enrolled_reason = 'location_not_active'
-    } else if (locRow && activatedAt !== null && createdAt !== null && createdAt < activatedAt) {
+    } else if (stored && stored !== 'location_not_live') {
+      drip_never_enrolled_reason = stored
+      if (DRIP_ENROL_KIND[stored as DripEnrolReason] === 'setup') {
+        drip_enrol_sequence = (await resolveDripCategory(lead.project_type ?? null)) === 'move' ? 'Moving' : 'Organizing'
+      }
+    } else if (locRow && ((activatedAt !== null && createdAt !== null && createdAt < activatedAt) || stored === 'location_not_live')) {
       drip_never_enrolled_reason = 'location_activated_later'
     }
   }
@@ -311,6 +337,7 @@ export async function GET(
       drip_completed,
       drip_never_enrolled,
       drip_never_enrolled_reason,
+      drip_enrol_sequence,
     },
     referred_us: referredUsRes.data ?? [],
     referred_us_total: referredUsRes.count ?? (referredUsRes.data?.length ?? 0),

@@ -95,7 +95,7 @@ describe('interface-active gate — enrollment (startDripForLead)', () => {
     h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', lifecycle_status: 'active', default_drip_path: 'organizing-a', default_move_drip_path: null })
     h.enqueue('drip_paths', null)                     // location-copy → miss
     h.enqueue('drip_paths', { id: 'path-db-1' })      // master → hit
-    h.enqueue('drip_path_steps', { delay_days: 0 })   // step 1
+    h.enqueue('drip_path_steps', [{ step_order: 1, delay_days: 0 }])   // first step (lowest-numbered)
     h.enqueue('lead_drip_progress', null)             // insert ok
 
     await startDripForLead(LEAD_ID, LOC_UUID)
@@ -109,11 +109,13 @@ describe('interface-active gate — enrollment (startDripForLead)', () => {
     h.enqueue('leads', { paused: false, marketing_opt_out: false, project_type: null })
     h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', lifecycle_status: 'onboarding', default_drip_path: 'organizing-a', default_move_drip_path: null })
 
-    await startDripForLead(LEAD_ID, LOC_UUID)
+    const res = await startDripForLead(LEAD_ID, LOC_UUID)
 
     // Stops right after the location lookup — no path resolution, no step
-    // lookup, no progress insert.
-    expect(h.tablesTouched()).toEqual(['leads', 'locations'])
+    // lookup, no progress insert — and SAYS why (2026-09-27).
+    // + the enrol outcome is recorded on the lead: one read, one update (2026-09-27)
+    expect(res).toEqual({ enrolled: false, reason: 'location_not_live', sequence: null })
+    expect(h.tablesTouched()).toEqual(['leads', 'locations', 'leads', 'leads'])
     expect(h.tablesTouched()).not.toContain('drip_paths')
     expect(h.insertPayloads('lead_drip_progress')).toHaveLength(0)
   })
@@ -122,9 +124,11 @@ describe('interface-active gate — enrollment (startDripForLead)', () => {
     h.enqueue('leads', { paused: false, marketing_opt_out: false, project_type: null })
     h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', lifecycle_status: null, default_drip_path: 'organizing-a', default_move_drip_path: null })
 
-    await startDripForLead(LEAD_ID, LOC_UUID)
+    const res = await startDripForLead(LEAD_ID, LOC_UUID)
 
-    expect(h.tablesTouched()).toEqual(['leads', 'locations'])
+    // + the enrol outcome is recorded on the lead: one read, one update (2026-09-27)
+    expect(res).toEqual({ enrolled: false, reason: 'location_not_live', sequence: null })
+    expect(h.tablesTouched()).toEqual(['leads', 'locations', 'leads', 'leads'])
     expect(h.insertPayloads('lead_drip_progress')).toHaveLength(0)
   })
 })

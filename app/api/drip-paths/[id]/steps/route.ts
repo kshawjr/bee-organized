@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { renumberSteps } from '@/lib/drip-step-order'
 
 const VALID_CHANNELS = new Set(['email', 'sms'])
 
@@ -159,6 +160,16 @@ export async function PATCH(
     }
   }
 
+  // RENUMBER 1, 2, 3 ON SAVE (2026-09-27). A sequence whose numbering doesn't
+  // start at 1 — Test Location's Moving copy was saved with a single step 3 —
+  // made enrolment find no first step and every lead at that location
+  // silently never start. Steps keep the order they were sent in (by their
+  // step_order, ties in payload order); only the NUMBERS are made 1..n.
+  // Every sequence already numbered 1..n (all but that one in production,
+  // proven before this shipped) is saved exactly as sent.
+  const renumber = renumberSteps(stepsIn)
+  stepsIn.splice(0, stepsIn.length, ...renumber.steps)
+
   // Two-phase write to avoid bumping into the UNIQUE(drip_path_id, step_order)
   // constraint when reordering: stash incoming step_orders into a high range
   // first by deleting all existing rows, then inserting fresh ones. The DB has
@@ -197,6 +208,22 @@ export async function PATCH(
   if (insErr) {
     console.error('[/api/drip-paths/[id]/steps PATCH] insert error:', insErr.message)
     return NextResponse.json({ error: 'insert_failed', detail: insErr.message }, { status: 500 })
+  }
+
+  // A lead mid-sequence records its place BY NUMBER (lead_drip_progress
+  // .current_step). If renumbering moved a step (4 → 3), move the leads on it
+  // too, or they'd point at a step that no longer exists and stall. Ascending
+  // order is collision-free: with distinct numbers, renumbering only ever
+  // lowers one (a repeated number reports no move — lib/drip-step-order).
+  for (const [from, to] of renumber.moves) {
+    const { error: mvErr } = await supabaseService
+      .from('lead_drip_progress')
+      .update({ current_step: to })
+      .eq('drip_path_id', pathId)
+      .eq('current_step', from)
+      .is('stopped_at', null)
+      .is('completed_at', null)
+    if (mvErr) console.error('[/api/drip-paths/[id]/steps PATCH] in-flight renumber failed', { pathId, from, to, error: mvErr.message })
   }
 
   return NextResponse.json({ ok: true, steps: inserted ?? [] })
