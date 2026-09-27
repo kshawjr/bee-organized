@@ -89,6 +89,7 @@ vi.mock('@/lib/project-type-senders', () => ({
 
 import {
   senderAddressProblem,
+  replyToSaveProblem,
   isLocationSendSettingProblem,
   projectTypeSenderDomainMessage,
   locationSenderDomainMessage,
@@ -360,5 +361,83 @@ describe('the screens check it as the owner types', () => {
   it('onboarding refuses a bad Send From before saving and says why', () => {
     expect(src).toContain('const sendFromErr = senderAddressProblem(locationForm.sendFromEmail, null)')
     expect(src).toContain('!replyToError && !sendFromError')
+  })
+})
+
+// ═══ reply-to: a Bee Organized address too (Kevin, 2026-09-27) ═══════════
+// Same domain rule as Send From, same source (getSendableDomains), SAVE ONLY.
+describe('reply-to — the Bee Organized rule, on save', () => {
+  const req = (body: any) => new Request('http://test/api/locations/loc-test', { method: 'PATCH', body: JSON.stringify(body) }) as any
+
+  it('a non-Bee-Organized reply-to is refused on save, with a clear reason, and nothing is written', async () => {
+    for (const addr of ['kevin@bmave.com', 'owner@gmail.com']) {
+      h.reset()
+      const res = await LOCATION_PATCH(req({ reply_to_email: addr }), { params: { id: 'loc-test' } })
+      expect(res.status, addr).toBe(400)
+      const err = (await res.json()).error
+      expect(err).toContain('Replies must go to a Bee Organized address')
+      expect(err).toContain(addr.split('@')[1])
+      expect(err).toContain('beeorganized.com')
+      expect(h.payloads('locations', 'update')).toHaveLength(0)
+    }
+  })
+
+  it('a Bee Organized reply-to is accepted and written', async () => {
+    h.enqueue('locations', { id: 'loc-test' })
+    const res = await LOCATION_PATCH(req({ reply_to_email: ' replies@BeeOrganized.com ' }), { params: { id: 'loc-test' } })
+    expect(res.status).toBe(200)
+    expect(h.payloads('locations', 'update')[0].reply_to_email).toBe('replies@BeeOrganized.com')
+  })
+
+  it('both fields still refuse two addresses', async () => {
+    const r1 = await LOCATION_PATCH(req({ reply_to_email: 'a@beeorganized.com, b@beeorganized.com' }), { params: { id: 'loc-test' } })
+    expect(r1.status).toBe(400)
+    expect((await r1.json()).error).toContain('Only one reply-to address')
+    const r2 = await LOCATION_PATCH(req({ send_from_email: 'a@beeorganized.com, b@beeorganized.com' }), { params: { id: 'loc-test' } })
+    expect(r2.status).toBe(400)
+    expect((await r2.json()).error).toContain('Only one Send From address')
+    expect(h.payloads('locations', 'update')).toHaveLength(0)
+  })
+
+  it('uses the SAME domain source as Send From: change the list and both rules move together', async () => {
+    sendable.current = ['example.org']
+    const reply = await LOCATION_PATCH(req({ reply_to_email: 'x@beeorganized.com' }), { params: { id: 'loc-test' } })
+    const from = await LOCATION_PATCH(req({ send_from_email: 'x@beeorganized.com' }), { params: { id: 'loc-test' } })
+    expect(reply.status).toBe(400)
+    expect(from.status).toBe(400)
+    expect((await reply.json()).error).toContain('example.org')
+    expect((await from.json()).error).toContain('example.org')
+
+    h.enqueue('locations', { id: 'loc-test' })
+    const ok = await LOCATION_PATCH(req({ reply_to_email: 'x@example.org', send_from_email: 'x@example.org' }), { params: { id: 'loc-test' } })
+    expect(ok.status).toBe(200)
+
+    const routeSrc = readFileSync(join(process.cwd(), 'app/api/locations/[id]/route.ts'), 'utf8')
+    expect(routeSrc).toContain('replyToSaveProblem(patch.reply_to_email, await getSendableDomains())')
+    expect(routeSrc).toContain('senderAddressProblem(patch.send_from_email, await getSendableDomains()')
+  })
+
+  it('unknown domain list → shape only for reply-to too (never a guessed rule)', () => {
+    expect(replyToSaveProblem('kevin@bmave.com', null)).toBeNull()
+    expect(replyToSaveProblem('kevin@bmave.com, x@y.com', null)).toContain('Only one')
+  })
+
+  it('a job type’s typed reply-to follows the same rule', async () => {
+    const res = await SENDERS_PUT(new Request('http://t', { method: 'PUT', body: JSON.stringify({
+      project_type: 'Moving/Relocation', sender_is_custom: true, sender_name: 'Team',
+      sender_email: 'team@beeorganized.com', sender_reply_to: 'team@gmail.com',
+    }) }) as any, { params: { id: 'loc-test' } })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain('Replies must go to a Bee Organized address')
+    expect(pts.setSenderIdentityForType).not.toHaveBeenCalled()
+  })
+
+  it('the SEND path does not apply the domain rule — only the shape (lib/resend.ts)', () => {
+    // code only — the comments there explain the rule by name
+    const resendSrc = readFileSync(join(process.cwd(), 'lib/resend.ts'), 'utf8')
+      .split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    expect(resendSrc).toContain('const replyProblem = replyToProblem(replyTo)')
+    expect(resendSrc).not.toContain('replyToSaveProblem')
+    expect(resendSrc).not.toContain('getSendableDomains')
   })
 })

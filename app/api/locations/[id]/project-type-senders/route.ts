@@ -59,7 +59,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
 import { supabaseService } from '@/lib/supabase-service'
-import { senderAddressProblem } from '@/lib/sender-domain'
+import { senderAddressProblem, replyToSaveProblem } from '@/lib/sender-domain'
 import { getSendableDomains } from '@/lib/sendable-domains'
 import {
   getSenderConfig,
@@ -269,6 +269,13 @@ export async function PUT(
     // a typo made in settings. Same EMAIL_RE as every other address here.
     if (senderReplyTo !== null && !EMAIL_RE.test(senderReplyTo)) {
       return NextResponse.json({ error: 'sender_reply_to must be a valid email' }, { status: 400 })
+    }
+    // A typed reply-to follows the location reply-to rule: one address, on a
+    // Bee Organized domain (same sendable list). Optional — blank means the
+    // location default.
+    if (senderReplyTo !== null) {
+      const replyProblem = replyToSaveProblem(senderReplyTo, await getSendableDomains())
+      if (replyProblem) return NextResponse.json({ error: replyProblem }, { status: 400 })
     }
     identity = {
       sender_is_custom: true,

@@ -3,8 +3,7 @@ import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
 import { safeHttpUrl } from '@/lib/email-signature'
-import { replyToProblem } from '@/lib/reply-to'
-import { senderAddressProblem } from '@/lib/sender-domain'
+import { senderAddressProblem, replyToSaveProblem } from '@/lib/sender-domain'
 import { getSendableDomains } from '@/lib/sendable-domains'
 
 // PATCH /api/locations/[id]
@@ -147,7 +146,10 @@ export async function PATCH(
     }
 
     if ('reply_to_email' in patch) {
-      const problem = replyToProblem(patch.reply_to_email)
+      // …and, like send_from_email, on a Bee Organized domain (the same
+      // sendable list). Checked on SAVE only — an existing value is never
+      // re-judged at send time (lib/sender-domain.ts replyToSaveProblem).
+      const problem = replyToSaveProblem(patch.reply_to_email, await getSendableDomains())
       if (problem) {
         return NextResponse.json({ error: problem }, { status: 400 })
       }

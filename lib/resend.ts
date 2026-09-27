@@ -400,6 +400,10 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
   // as a 422 validation_error, indistinguishable from a mistyped client
   // address, and the drip engine would stop the lead's drip for good.
   // REPLY_TO_INVALID tells every caller whose problem this is.
+  // SHAPE ONLY, on purpose: no domain rule here. The "must be a Bee Organized
+  // address" rule is enforced when the field is SAVED (lib/sender-domain.ts
+  // replyToSaveProblem); applying it at send time would stop a location whose
+  // existing reply-to predates the rule and still works.
   const replyProblem = replyToProblem(replyTo)
   if (replyProblem) {
     const error = `${LOCATION_REPLY_TO_BROKEN} (${replyProblem})`

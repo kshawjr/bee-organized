@@ -27,7 +27,7 @@
 // client card import it as well as the server.
 // ─────────────────────────────────────────────────────────────
 
-import { LOCATION_REPLY_TO_BROKEN } from './reply-to'
+import { LOCATION_REPLY_TO_BROKEN, replyToProblem } from './reply-to'
 
 // SendResult.errorName for a send refused because the FROM address's domain
 // isn't one we can send from. Like REPLY_TO_INVALID, distinct from Resend's
@@ -79,6 +79,29 @@ export function senderAddressProblem(
   if (!EMAIL_RE.test(v)) return `That ${what} is not valid. Enter one address, like hello@beeorganized.com.`
   if (sendable && !isSendableDomain(v, sendable)) {
     return `Bee Organized can’t send email from ${domainOf(v)} addresses. Use an address on ${domainList(sendable)}.`
+  }
+  return null
+}
+
+// ── Reply-to, ON SAVE (Kevin, 2026-09-27) ─────────────────────────────────
+// Both email fields must be Bee Organized addresses: the reply-to gets the
+// SAME domain rule as the send-from, from the SAME list (lib/sendable-domains),
+// so the two can never drift apart and nothing is hard-coded.
+//
+// SAVE-TIME ONLY, deliberately. The send path keeps lib/reply-to's shape-only
+// replyToProblem (lib/resend.ts sendEmailDirect) — Resend itself accepts a
+// reply-to on any domain, so an existing value outside the rule (Test
+// Location's kevin@bmave.com) keeps working until someone edits the field.
+// Putting the domain rule on the send path would stop locations that are
+// working today.
+export function replyToSaveProblem(
+  value: string | null | undefined,
+  sendable: readonly string[] | null,
+): string | null {
+  const shape = replyToProblem(value)
+  if (shape) return shape
+  if (sendable && !isSendableDomain(String(value ?? '').trim(), sendable)) {
+    return `Replies must go to a Bee Organized address — ${domainOf(String(value))} isn’t one. Use an address on ${domainList(sendable)}.`
   }
   return null
 }

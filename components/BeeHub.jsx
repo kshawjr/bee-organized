@@ -13190,7 +13190,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
               </div>
               <div>
                 <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Reply-To Email</p>
-                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land — one address. For two people, use one shared inbox. Leave blank to use your Send From address.</p>
+                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land — one Bee Organized address. For two people, use one shared inbox. Leave blank to use your Send From address.</p>
                 <input type="email" value={locationForm.replyToEmail} onChange={e=>setLocationForm(f=>({...f,replyToEmail:e.target.value}))} placeholder="replies@yourbusiness.com" style={{ ...inp, ...(replyToError ? { borderColor:'rgba(239,68,68,0.5)' } : {}) }} />
                 {replyToError && (
                   <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{replyToError}</p>
@@ -24036,7 +24036,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             >
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="One address, on a domain Bee Organized can send from — your Bee Organized address, not a personal Gmail." type="email" validate={v=>senderAddressProblem(v, null)} />
-              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land — one address. For two people, use one shared inbox." type="email" validate={replyToProblem} />
+              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land — one Bee Organized address. For two people, use one shared inbox." type="email" validate={replyToProblem} />
             </SequenceSenderCard>
 
           </div>

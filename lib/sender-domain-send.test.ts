@@ -99,6 +99,21 @@ describe('sendEmail — a From domain Resend refuses', () => {
   })
 })
 
+describe('an existing reply-to outside the new rule still sends', () => {
+  it('Test Location’s kevin@bmave.com reply-to: the send goes out, reply-to intact', async () => {
+    // exactly production's row today
+    locRow.current = { send_from_email: 'test@beeorganized.com', sender_name: 'Bee Test', reply_to_email: 'kevin@bmave.com' }
+    listMock.mockResolvedValue({ data: { data: [{ name: 'beeorganized.com', status: 'verified' }] }, error: null })
+    sendMock.mockResolvedValueOnce({ data: { id: 'ok-bmave' }, error: null })
+
+    const res = await sendEmail(args)
+
+    expect(res).toEqual({ success: true, id: 'ok-bmave' })
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMock.mock.calls[0][0].replyTo).toBe('kevin@bmave.com')
+  })
+})
+
 describe('getSendableDomains — how the app knows (nothing hard-coded)', () => {
   it('asks Resend, keeping only VERIFIED domains', async () => {
     listMock.mockResolvedValueOnce({ data: { data: [
