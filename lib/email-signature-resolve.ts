@@ -178,26 +178,49 @@ export async function loadLocationSignatureLinks(locationId: string): Promise<Lo
   }
 }
 
+// WHO signs, and the signature they sign with — from ONE resolution, so a
+// caller that needs both (the Settings card: "Raluca Sharma's signature" +
+// its preview) can never show one person and preview another.
+//   reason 'assignee'      — the passed assignee, active at this location
+//   reason 'primary_owner' — getPrimaryOwnerForLocation, active here
+//   reason null            — nobody; the location signs ("Bee Organized X")
+export type EmailSigner = {
+  signer: SignaturePersonRow | null
+  reason: 'assignee' | 'primary_owner' | null
+  signature: EmailSignature
+}
+
+export async function resolveEmailSigner(args: {
+  locationId: string
+  locationName: string | null | undefined
+  assigneeUserId: string | null | undefined
+}): Promise<EmailSigner> {
+  const { locationId, locationName, assigneeUserId } = args
+  try {
+    const assignee = await loadCandidate(assigneeUserId)
+    let person: SignaturePersonRow | null = null
+    let reason: EmailSigner['reason'] = null
+    if (isActiveAtLocation(assignee, locationId)) {
+      person = assignee!.person
+      reason = 'assignee'
+    } else {
+      const owner = await getPrimaryOwnerForLocation(locationId).catch(() => null)
+      const ownerCandidate = owner && owner.id !== assigneeUserId ? await loadCandidate(owner.id) : null
+      person = chooseSignaturePerson({ locationId, assignee, owner: ownerCandidate })
+      reason = person ? 'primary_owner' : null
+    }
+    const personWithFields = person ? { ...person, ...(await loadPersonSignatureFields(person.id)) } : null
+    const links = await loadLocationSignatureLinks(locationId)
+    return { signer: personWithFields, reason, signature: assembleSignature(personWithFields, links, locationName) }
+  } catch {
+    return { signer: null, reason: null, signature: assembleSignature(null, NO_LINKS, locationName) }
+  }
+}
+
 export async function resolveEmailSignature(args: {
   locationId: string
   locationName: string | null | undefined
   assigneeUserId: string | null | undefined
 }): Promise<EmailSignature> {
-  const { locationId, locationName, assigneeUserId } = args
-  try {
-    const assignee = await loadCandidate(assigneeUserId)
-    let person: SignaturePersonRow | null = null
-    if (isActiveAtLocation(assignee, locationId)) {
-      person = assignee!.person
-    } else {
-      const owner = await getPrimaryOwnerForLocation(locationId).catch(() => null)
-      const ownerCandidate = owner && owner.id !== assigneeUserId ? await loadCandidate(owner.id) : null
-      person = chooseSignaturePerson({ locationId, assignee, owner: ownerCandidate })
-    }
-    const personWithFields = person ? { ...person, ...(await loadPersonSignatureFields(person.id)) } : null
-    const links = await loadLocationSignatureLinks(locationId)
-    return assembleSignature(personWithFields, links, locationName)
-  } catch {
-    return assembleSignature(null, NO_LINKS, locationName)
-  }
+  return (await resolveEmailSigner(args)).signature
 }

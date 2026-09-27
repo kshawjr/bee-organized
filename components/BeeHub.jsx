@@ -36,7 +36,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
-import { YourSignatureCard, LocationSignatureLinksCard, SignaturePreview } from "@/components/settings/EmailSignatureSettings"
+import { SignatureCard, LocationSignatureLinksCard, SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -23453,8 +23453,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 hint={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
             </div>
 
-            <SectionHeader title="Email Signature" desc="Your photo and title in the Bee Organized signature — used when a client email includes {{signature}}" />
-            <YourSignatureCard locationId={realLocId} signedIn={!!currentUserCtx?.id} />
+            <SectionHeader title="Email Signature" desc="The Bee Organized signature used when a client email includes {{signature}} — the card names whose it is" />
+            <SignatureCard locationId={realLocId} signedIn={!!currentUserCtx?.id} />
 
             {isPastDue && (
               <>
