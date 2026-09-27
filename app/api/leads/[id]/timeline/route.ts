@@ -67,7 +67,8 @@ export async function GET(
       .eq('lead_id', id),
     supabaseService.from('jobs')
       .select('id, title, total, status, scheduled_start, completed_at, created_at, engagement_id')
-      .eq('lead_id', id),
+      .eq('lead_id', id)
+      .neq('status', 'deleted'), // never a job deleted in Jobber (components/hive/shared/jobDeleted.js)
     supabaseService.from('invoices')
       .select('id, total, status, balance_owing, issued_at, paid_at, engagement_id')
       .eq('lead_id', id)

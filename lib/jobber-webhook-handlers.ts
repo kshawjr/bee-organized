@@ -65,7 +65,10 @@
 //                                          (BOOKED_JOB_STATUSES) — closes the
 //                                          gap an unbooked JOB_CREATE leaves
 //   JOB_COMPLETE     → 'Closed Won'     forward-only + stop drip
-//   JOB_DESTROY      → (no change)      null jobber_job_id on lead
+//   JOB_DESTROY      → 'Closed Lost'    null jobber_job_id on lead + mark
+//                    ('job_deleted')    the job row deleted + re-derive: only
+//                                       when EVERY job is deleted and nothing
+//                                       was invoiced (forward-only, Reopen-able)
 //   INVOICE_CREATE   → (no change)      stamp invoice_created_at +
 //                                       balance_owing
 //   INVOICE_UPDATE   → 'Closed Won' when the refreshed invoiceStatus is
@@ -152,6 +155,7 @@ import {
 } from './engagements'
 import { readLeadMoneyTotals } from './lead-paid-total'
 import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/invoiceDeleted'
+import { JOB_DELETED, isDeletedJob } from '@/components/hive/shared/jobDeleted'
 import type { LocationRow } from './jobber-webhook'
 
 export type HandlerCtx = {
@@ -1228,25 +1232,35 @@ export function handleQuoteDestroy(ctx: HandlerCtx) {
 // ('job_deleted', Reopen-able) through the same gated advance path the
 // archived-quote close uses. Fail-soft: the row marking and re-derive
 // never fail the webhook — the lead nullify above already landed.
+//
+// THE ID (2026-09-27). Jobber sends the id ENCODED (base64 gid); we store
+// the plain number. From 2026-08-29 to 2026-09-27 this compared the encoded
+// id directly, matched nothing, and all 56 deletions were dropped — 55 jobs
+// kept reading as live work. Decode before matching, exactly as
+// handleInvoiceDestroy does. The re-derive (maybeAdvanceEngagementStage)
+// also recomputes the deal's money from its invoices; a job carries no
+// money of its own, so the person's totals do not change.
 export async function handleJobDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.JOB_DESTROY
   const res = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'JOB_DESTROY')
   try {
+    const numeric = extractJobberId(ctx.itemId) || ctx.itemId
     const { data: rows, error } = await supabaseService
       .from('jobs')
       .select('id, engagement_id, status')
-      .eq('jobber_job_id', ctx.itemId)
+      .eq('jobber_job_id', numeric)
       .eq('location_id', ctx.location.location_id)
     if (error) throw new Error(error.message)
-    for (const row of rows || []) {
+    const marked = (rows || []).filter(r => !isDeletedJob(r))
+    for (const row of marked) {
       await supabaseService
         .from('jobs')
-        .update({ status: 'deleted', updated_at: new Date().toISOString() })
+        .update({ status: JOB_DELETED, updated_at: new Date().toISOString() })
         .eq('id', row.id)
       if (row.engagement_id) await maybeAdvanceEngagementStage(row.engagement_id)
     }
-    if (rows?.length) {
-      res.note = `${res.note || 'JOB_DESTROY'}; marked ${rows.length} job row(s) deleted + re-derived engagement`
+    if (marked.length) {
+      res.note = `${res.note || 'JOB_DESTROY'}; marked ${marked.length} job row(s) deleted + re-derived engagement`
     }
   } catch (err: any) {
     console.warn('[jobber-webhook] JOB_DESTROY job-row cleanup failed (webhook still processed)', {

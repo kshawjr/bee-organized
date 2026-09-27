@@ -144,7 +144,7 @@ export async function GET(
     supabaseService.from('assessments').select('*').eq('lead_id', id).order('scheduled_at', { ascending: false }),
     supabaseService.from('service_requests').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
     supabaseService.from('quotes').select('*').eq('lead_id', id).order('sent_at', { ascending: false }),
-    supabaseService.from('jobs').select('*').eq('lead_id', id).order('scheduled_start', { ascending: false }),
+    supabaseService.from('jobs').select('*').eq('lead_id', id).neq('status', 'deleted').order('scheduled_start', { ascending: false }), // never a job deleted in Jobber (components/hive/shared/jobDeleted.js)
     supabaseService.from('invoices').select('*').eq('lead_id', id).neq('status', 'deleted').order('issued_at', { ascending: false }), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
     // issue 187 follow-up — engagements key on client_id (= the lead id), like
     // the _hub-page.tsx sweep. Fetched so the refetch can ship the same

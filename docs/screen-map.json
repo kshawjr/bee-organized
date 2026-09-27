@@ -50,8 +50,8 @@
       ],
       "note": "Every top-level route (/, /clients, /settings, ...) renders this same server component, which then mounts BeeHub. If a surface is empty for everyone, suspect the scoping here before the component.",
       "lines": [
-        328,
-        1918
+        329,
+        1923
       ]
     },
     {

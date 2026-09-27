@@ -82,6 +82,7 @@
 // and rides the API response so the toast can tell the truth.
 // ─────────────────────────────────────────────────────────────
 
+import { liveJobs } from '@/components/hive/shared/jobDeleted'
 import { supabaseService } from './supabase-service'
 import { jobberMutation, jobberGraphQL } from './jobber'
 import { encodeJobberId } from './jobber-import'
@@ -315,10 +316,11 @@ export async function syncEngagementAssignmentToJobber(
   // appointment id in jobber_assessment_id. Requests are intentionally NOT
   // read — the team model doesn't assign pre-work.
   const [jobRes, assessRes] = await Promise.all([
-    supabaseService.from('jobs').select('jobber_job_id').eq('engagement_id', engagementId).not('jobber_job_id', 'is', null),
+    // never a job deleted in Jobber (components/hive/shared/jobDeleted.js) — pushing a crew to it can only fail
+    supabaseService.from('jobs').select('jobber_job_id, status').eq('engagement_id', engagementId).not('jobber_job_id', 'is', null),
     supabaseService.from('assessments').select('jobber_assessment_id').eq('engagement_id', engagementId).not('jobber_assessment_id', 'is', null),
   ])
-  const jobIds = (jobRes.data ?? []).map((j: any) => j.jobber_job_id).filter(Boolean)
+  const jobIds = liveJobs(jobRes.data ?? []).map((j: any) => j.jobber_job_id).filter(Boolean)
   const apptIds = (assessRes.data ?? []).map((a: any) => a.jobber_assessment_id).filter(Boolean)
 
   // Job CREW (multi) — the crew lives on the job's visits, not the job.

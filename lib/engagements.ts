@@ -25,6 +25,7 @@ import { resolveLeadAssignees } from './lead-assignment'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 import { invoicesFullyPaid } from '@/components/hive/shared/engagementStatus'
 import { isDeletedInvoice, keepsCollectedMoney, invoicesForReasoning } from '@/components/hive/shared/invoiceDeleted'
+import { isDeletedJob } from '@/components/hive/shared/jobDeleted'
 
 export type EngagementStage =
   | 'Request'
@@ -148,8 +149,8 @@ export const invoiceMoneyIn = (i: { status?: string | null; total?: number | str
 // invisible to stage classification: they must neither hold an engagement
 // at 'Job in Progress' nor count as done work. When EVERY job is deleted
 // and no invoice exists, the gated branch below closes the deal.
-const jobDeleted = (j: { status?: string | null }) =>
-  (j.status || '').toLowerCase() === 'deleted'
+// One rule for "deleted": components/hive/shared/jobDeleted.js.
+const jobDeleted = (j: { status?: string | null }) => isDeletedJob(j)
 
 const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null; created_at?: string | null }) =>
   Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
@@ -869,6 +870,43 @@ export async function refreshEngagementMoney(engagementId: string): Promise<bool
 
 // ── stage advance ─────────────────────────────────────────────────
 
+// The forward-only stage write, as a pure decision: given the stored stage
+// and a fresh derivation, does the deal move, and with what fields? ONE
+// function for the webhook advance (maybeAdvanceEngagementStage) and the
+// deleted-jobs repair (scripts/repair-deleted-jobs.mjs), so the two can
+// never disagree about what a deletion does to a deal.
+export function stageAdvanceFor(
+  eng: { stage: string; closed_reason?: string | null },
+  derived: DerivedStage,
+  nowIso: string = new Date().toISOString(),
+): { advance: boolean; patch: Record<string, any> } {
+  const staleLostRecoverable = eng.stage === 'Closed Lost' && eng.closed_reason === 'stale_on_import'
+  const currentRank = ENGAGEMENT_STAGE_RANK[eng.stage as EngagementStage] ?? 0
+  const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
+  // Override fires only when the stale-Lost recovery actually derives Won
+  // (paid-in-full); a stale-Lost row with no paid evidence stays Lost.
+  const staleLostOverride = staleLostRecoverable && derived.stage === 'Closed Won'
+  const advance = newRank > currentRank || staleLostOverride
+  const patch: Record<string, any> = {}
+  if (advance) {
+    patch.stage = derived.stage
+    patch.stage_entered_at = nowIso
+    if (derived.closed_reason) patch.closed_reason = derived.closed_reason
+    if (derived.closed_at) patch.closed_at = derived.closed_at
+    if (derived.closed_reason === 'stale_on_import') {
+      patch.closed_note = 'Closed automatically at import: no activity within 30 days (Ruling A for quote-only).'
+    }
+    if (derived.closed_reason === 'quote_archived') {
+      patch.closed_note = 'Closed automatically: the quote was archived in Jobber (#117).'
+    }
+    if (derived.closed_reason === 'job_deleted') {
+      patch.closed_note = 'Closed automatically: the job was deleted in Jobber and nothing was invoiced. Reopen if this deal is still live.'
+    }
+    if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
+  }
+  return { advance, patch }
+}
+
 // Recompute the engagement's stage from its own children and apply it
 // only when it is forward progress on ENGAGEMENT_STAGE_RANK. Also
 // refreshes the money roll-ups (cheap, and keeps weekly billing live).
@@ -930,33 +968,11 @@ export async function maybeAdvanceEngagementStage(
     // drift recovery call deriveEngagementStage directly WITHOUT this flag.
   }, { mode, closeWonOnDone, closeOnArchivedQuote: true, closeOnDeletedJobs: true })
 
+  const { advance, patch: stagePatch } = stageAdvanceFor(eng, derived)
   const patch: Record<string, any> = {
     ...rollUpInvoiceMoney(invoices),
     updated_at: new Date().toISOString(),
-  }
-
-  const currentRank = ENGAGEMENT_STAGE_RANK[eng.stage as EngagementStage] ?? 0
-  const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
-  // Override fires only when the stale-Lost recovery actually derives Won
-  // (paid-in-full); a stale-Lost row with no paid evidence stays Lost.
-  const staleLostOverride = staleLostRecoverable && derived.stage === 'Closed Won'
-  const advance = newRank > currentRank || staleLostOverride
-
-  if (advance) {
-    patch.stage = derived.stage
-    patch.stage_entered_at = new Date().toISOString()
-    if (derived.closed_reason) patch.closed_reason = derived.closed_reason
-    if (derived.closed_at) patch.closed_at = derived.closed_at
-    if (derived.closed_reason === 'stale_on_import') {
-      patch.closed_note = 'Closed automatically at import: no activity within 30 days (Ruling A for quote-only).'
-    }
-    if (derived.closed_reason === 'quote_archived') {
-      patch.closed_note = 'Closed automatically: the quote was archived in Jobber (#117).'
-    }
-    if (derived.closed_reason === 'job_deleted') {
-      patch.closed_note = 'Closed automatically: the job was deleted in Jobber and nothing was invoiced. Reopen if this deal is still live.'
-    }
-    if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
+    ...stagePatch,
   }
 
   const { error } = await supabaseService.from('engagements').update(patch).eq('id', engagementId)

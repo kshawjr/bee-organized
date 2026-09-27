@@ -86,7 +86,8 @@ export async function GET(
   const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes, touchRes, locRes, dripRes] = await Promise.all([
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
-    supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
+    // never a job deleted in Jobber (components/hive/shared/jobDeleted.js) — the panel's job rows and drift recovery read this.
+    supabaseService.from('jobs').select('*').eq('engagement_id', id).neq('status', 'deleted').order('scheduled_start', { ascending: true, nullsFirst: false }),
     // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js) — the panel's list,
     // Final Processing, Mark won and the owing override all read this.
     supabaseService.from('invoices').select('*').eq('engagement_id', id).neq('status', 'deleted').order('issued_at', { ascending: true, nullsFirst: false }),

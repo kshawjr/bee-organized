@@ -35,6 +35,7 @@ import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppre
 import { deriveSeatComposition } from '@/lib/billing-state'
 import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 import { liveInvoices } from '@/components/hive/shared/invoiceDeleted'
+import { liveJobs } from '@/components/hive/shared/jobDeleted'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -1245,7 +1246,11 @@ export default async function HubPage({
       const assessByLead      = groupBy(assessmentsRaw)
       const serviceReqsByLead = groupBy(serviceRequestsRaw)
       const quotesByLead      = groupBy(quotesRaw)
-      const jobsByLead        = groupBy(jobsRaw)
+      // Jobs DELETED in Jobber never reach a screen (components/hive/shared/
+      // jobDeleted.js) — person.jobs counts anything not completed/archived
+      // as active work, so a deleted row would read as live.
+      const liveJobRows       = liveJobs(jobsRaw)
+      const jobsByLead        = groupBy(liveJobRows)
       // Invoices DELETED in Jobber never reach a screen (components/hive/
       // shared/invoiceDeleted.js); money they kept is already in the stored
       // engagement / lead totals.
@@ -1400,7 +1405,7 @@ export default async function HubPage({
             return out
           }
           const quotesByEng      = byEngagement(quotesRaw)
-          const jobsByEng        = byEngagement(jobsRaw)
+          const jobsByEng        = byEngagement(liveJobRows)
           const invoicesByEng    = byEngagement(liveInvoiceRows)
           const assessmentsByEng = byEngagement(assessmentsRaw)
           const serviceReqsByEng = byEngagement(serviceRequestsRaw)

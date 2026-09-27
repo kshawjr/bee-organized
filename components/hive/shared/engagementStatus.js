@@ -168,7 +168,8 @@ export function engagementValue(e) {
 export function lastActivityTs(e) {
   const candidates = [
     ...(e.quotes || []).flatMap(q => [ts(q.approved_at), ts(q.sent_at)]),
-    ...(e.jobs || []).flatMap(j => [ts(j.completed_at), ts(j.scheduled_start)]),
+    // a job deleted in Jobber is not activity on the deal (jobDeleted.js)
+    ...(e.jobs || []).filter(j => String(j?.status ?? '').toLowerCase() !== 'deleted').flatMap(j => [ts(j.completed_at), ts(j.scheduled_start)]),
     ...(e.invoices || []).flatMap(i => [ts(i.paid_at), ts(i.issued_at)]),
     ts(e.closed_at),
     ts(e.stage_entered_at),
@@ -368,7 +369,10 @@ export function deriveStatusChip(e, opts = {}) {
     return { label: longForm ? `Nurturing · Day ${d} of 90` : `Nurturing · ${formatDayCount(d)}`, styleKey: 'nurturing' }
   }
   const quotes = e.quotes || []
-  const jobs = e.jobs || []
+  // Jobs deleted in Jobber are not work on the deal — a deleted 'upcoming'
+  // job must never read 'Scheduled …' (jobDeleted.js isDeletedJob — repeated
+  // here because this module takes no imports; beta-deleted-jobs pins it).
+  const jobs = (e.jobs || []).filter(j => String(j?.status ?? '').toLowerCase() !== 'deleted')
   // Invoices deleted in Jobber are not part of the deal; a paid one that was
   // later deleted reads as paid (invoiceDeleted.js invoicesForReasoning —
   // repeated here because this module takes no imports; beta-deleted-
