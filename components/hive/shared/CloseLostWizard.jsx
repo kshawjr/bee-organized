@@ -69,7 +69,11 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
         const r = await fetch('/api/engagements', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ client_id: leadId, reuse_open: true }),
+          // The blank rule (2026-09-28): a founding must say what it is. The
+          // reason the owner just picked is the true answer — and if the
+          // close below were to fail, the card left behind still says why
+          // it exists instead of sitting there empty.
+          body: JSON.stringify({ client_id: leadId, reuse_open: true, title: `Enquiry — ${reason}`, description: note.trim() || null }),
         })
         const jj = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(jj?.error || `HTTP ${r.status}`)

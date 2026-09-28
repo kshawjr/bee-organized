@@ -3,11 +3,11 @@
 // A client's second job (Kevin, 2026-09-26): "Kitchen this month. Client
 // calls and wants the bedroom next month." The screens that make it real work:
 //
-//   · ClientProfile — "New job in Jobber" on the Engagements header, for a
-//     Jobber-linked client. It opens Send to Jobber (the request lands on the
-//     EXISTING Jobber client; the webhook founds the engagement). It is NOT in
-//     the action bar where the removed "+ New engagement" sat — that one made
-//     an empty local card; this one makes real work.
+//   · ClientProfile — "Start a new job" on the Engagements header, for a
+//     Jobber-linked client (2026-09-28; it replaced 2026-09-26's "New job in
+//     Jobber"). It opens NewJobWizard, whose Send-now ending opens Send to
+//     Jobber for the EXISTING Jobber client — see beta-new-job-wizard.test.tsx.
+//     It is NOT in the action bar where the removed "+ New engagement" sat.
 //   · Send to Jobber — tells the owner the truth for a linked client:
 //     existing client reused, no new client.
 //   · The after-send poll — surfaces the NEW engagement even though the
@@ -87,7 +87,7 @@ const mount = async (ui: React.ReactElement) => {
 const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 })
-const newJobBtn = (host: Element) => host.querySelector('button[aria-label="New job in Jobber"]')
+const newJobBtn = (host: Element) => host.querySelector('button[aria-label="Start a new job"]')
 
 beforeEach(() => {
   document.body.innerHTML = ''
@@ -96,24 +96,25 @@ beforeEach(() => {
 })
 
 // ═══ the client-card action ════════════════════════════════════
-describe('ClientProfile — "New job in Jobber"', () => {
+describe('ClientProfile — "Start a new job"', () => {
   const mountProfile = (props: any = {}) => mount(
     <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}}
       lookupOptions={{ sources: [], projectTypes: [], clientTags: [] } as any}
       locationUsers={[] as any} {...props} />
   )
 
-  it('a Jobber-linked client with open work gets it; pressing it opens the send for THIS client', async () => {
+  it('a Jobber-linked client with open work gets it; pressing it opens the wizard, not a card', async () => {
     profileBody = profilePayload({ jobber_client_id: '136289662' }, [kitchen])
     const onSend = vi.fn()
     const { host, unmount } = await mountProfile({ onSendToJobber: onSend })
     const b = newJobBtn(host)
     expect(b, 'the linked client gets the new-job action').toBeTruthy()
-    expect(b!.textContent).toContain('New job in Jobber')
+    expect(b!.textContent).toContain('Start a new job')
     await click(b!)
-    expect(onSend).toHaveBeenCalledTimes(1)
-    expect(onSend).toHaveBeenCalledWith('lead-9')
-    // It makes no local card — the old button's POST /api/engagements.
+    expect(document.querySelector('[role="dialog"][aria-label="Start a new job"]')).toBeTruthy()
+    // Opening the wizard writes nothing and sends nothing — the old button
+    // founded on the click; this founds only after the work is described.
+    expect(onSend).not.toHaveBeenCalled()
     expect(postedEngagements).toBe(0)
     await unmount()
   })

@@ -46,7 +46,7 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
 import { isLocationReadOnly } from '@/lib/read-only-access'
 import { upsertServiceRequest, upsertJob, encodeJobberId } from '@/lib/jobber-import'
-import { attachToEngagement } from '@/lib/engagements'
+import { attachToEngagement, isFallbackTitle } from '@/lib/engagements'
 import {
   buildContactEditFields,
   resolveContactWriteback,
@@ -471,10 +471,12 @@ export async function POST(
   // engagement_id must be THIS lead's open engagement — fail fast, before
   // any Jobber write. A mismatched id would silently attach the new
   // request to someone else's work cycle.
+  // What the card itself says, for the request form below (2026-09-28).
+  let engagementWords: { request_details: string; project_type: string | null } | null = null
   if (engagementId) {
     const { data: eng } = await supabaseService
       .from('engagements')
-      .select('id, client_id, stage')
+      .select('id, client_id, stage, title, description, project_type')
       .eq('id', engagementId)
       .maybeSingle()
     if (!eng) return fail('validation', 'engagement_not_found', 400)
@@ -483,6 +485,20 @@ export async function POST(
     }
     if (eng.stage === 'Closed Won' || eng.stage === 'Closed Lost') {
       return fail('validation', 'engagement_already_closed', 400)
+    }
+    // A send that rides a card carries THAT card's words into Jobber — what
+    // the work is and what they said on the call — not the lead's
+    // request_details, which describe the client's FIRST enquiry (the
+    // kitchen, when this is the bedroom). An auto title ("Engagement – Sep
+    // 2026", on the old hand-made cards) says nothing and is never sent; a
+    // card with no words of its own keeps today's lead-level form exactly.
+    const words = [isFallbackTitle(eng.title) ? '' : (eng.title || '').trim(), (eng.description || '').trim()]
+      .filter(Boolean).join('\n\n')
+    if (words) {
+      engagementWords = {
+        request_details: words,
+        project_type: (eng.project_type || '').trim() || (lead as any).project_type || null,
+      }
     }
   }
 
@@ -836,7 +852,7 @@ export async function POST(
     // `request` value). One section, two items, no per-account ids:
     // lib/jobber-request-form.ts. Blank project_type / request_details drop
     // their item; both blank drops the key entirely — never a placeholder.
-    const requestDetails = buildRequestDetails(lead)
+    const requestDetails = buildRequestDetails(engagementWords ?? lead)
     if (requestDetails) requestInput.requestDetails = requestDetails
     // Only include propertyId when we actually have one — Deluge mirrored
     // this with two requestCreate variants. Omitting the key lets Jobber

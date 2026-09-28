@@ -119,7 +119,10 @@ describe('the button is absent from the card action bar', () => {
     const src = readFileSync(join(process.cwd(), 'components/hive/ClientProfile.jsx'), 'utf8')
     expect(src).not.toContain('async function newEngagement')
     expect(src).not.toContain('onClick={newEngagement}')
-    // and the card no longer POSTs an engagement at all
+    // and the card itself never POSTs an engagement. Since 2026-09-28 the
+    // card's "Start a new job" opens NewJobWizard, which does — but only
+    // with the work described (the blank rule: beta-new-job-wizard and
+    // blank-engagement-*.test.ts). That is not this button coming back.
     expect(src).not.toMatch(/fetch\('\/api\/engagements',\s*\{/)
   })
 })

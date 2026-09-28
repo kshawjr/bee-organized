@@ -24,8 +24,9 @@
 //                    engagements (repeat/new chips; closed rows keep
 //                    Build-1 reason + note) → recent activity + composer
 //   action bar — PINNED (sticky bottom): Call · Log touchpoint ·
-//              Open in Jobber (or Send to Jobber pre-link) · + New
-//              engagement
+//              Open in Jobber (or Send to Jobber pre-link). A new job for
+//              an existing client starts from "Start a new job" on the
+//              Engagements header (NewJobWizard), never from this bar.
 // Fetches GET /api/clients/:id/profile on open.
 //
 // Overlay model: HiveShell holds ONE overlay slot — ClientProfile and
@@ -45,16 +46,17 @@ import { isWrittenOff, writtenOffAmountText } from './shared/writtenOff'
 import { T } from './shared/tokens'
 import { describeDismissal, dismissalLine, stillNurturing, DISMISS_BUTTON_LABEL } from './shared/dismissalFacts'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel, vitalsAge } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel, vitalsAge, isUnsentEngagement, NOT_SENT_LABEL } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin, IconCash,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin, IconCash, IconPencil,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import TouchpointModal from './TouchpointModal'
+import NewJobWizard from './NewJobWizard'
 import TransferLeadModal from './TransferLeadModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -100,7 +102,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
+export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, onEngagementFounded = () => {}, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -111,6 +113,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   // — the old inline select+input+Log wedge is gone and its method/note
   // state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
+  const [newJobOpen, setNewJobOpen] = useState(false)
   // Transfer modal — only reachable for a loc_other lead (see actionBar).
   const [transferOpen, setTransferOpen] = useState(false)
   // "Add to Network" sheet + this client's Network twin, if any.
@@ -237,9 +240,20 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   // 403s a franchise user viewing a loc_other lead, and the transfer endpoint
   // is the load-bearing gate, so surfacing the action on the slug is enough.
   const atLocOther = c?.location_id === 'loc_other'
-  // "New job in Jobber" (Engagements header) — a linked client's second
-  // piece of work. Same gates as the action bar's Send.
+  // "Start a new job" (Engagements header) — a linked client's second
+  // piece of work, through NewJobWizard. Same gates as the action bar's Send.
   const canStartNewJob = !!c && jobberLinked && !readOnly && !atLocOther && !!onSendToJobber
+  // A card that has not reached Jobber. A send made this session for THIS
+  // card (jobberLinks carries its engagement_id) counts as sent before the
+  // refetch brings the request home.
+  const unsent = (e) => isUnsentEngagement(e) && linkPatch?.engagement_id !== e.id
+  // The wizard's founded row lands on this card at once (the real row the
+  // route returned), and goes up to the board the same way.
+  const addFoundedEngagement = (row) => {
+    const withLists = { service_requests: [], quotes: [], jobs: [], invoices: [], assessments: [], ...row }
+    setData(d => d ? { ...d, engagements: [withLists, ...(d.engagements || []).filter(e => e.id !== row.id)] } : d)
+    onEngagementFounded(withLists)
+  }
   const transferSubline = c
     ? [
         [[c.city, c.state].filter(Boolean).join(', '), c.zip].filter(Boolean).join(' '),
@@ -657,33 +671,40 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />
       </div>
 
-      {/* Engagements — "New job in Jobber" sits on this header, beside the
+      {/* Engagements — "Start a new job" sits on this header, beside the
           work it adds to, and NOT in the action bar where "+ New engagement"
-          was. That button made a local card and sent nothing; this one opens
-          Send to Jobber for the client's EXISTING Jobber record, and the
-          request that lands founds a second engagement beside any open one
-          (the kitchen-then-bedroom call). Linked clients only: an unlinked
-          client's first job is the action bar's Send to Jobber, the same
-          send, so offering both would be two doors to one room. */}
+          was. It opens NewJobWizard: say what the work is (required), which
+          address, what they said — then Send to Jobber now (the same Send
+          to Jobber window, with the new card attached) or Save and send
+          later. It replaced "New job in Jobber" (2026-09-26), which went
+          straight to the send and captured nothing. Linked clients only: an
+          unlinked client's first job is the action bar's Send to Jobber.
+          A card that never reached Jobber reads "Not sent to Jobber" and
+          carries its own Send to Jobber, right on the row. */}
       <div>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
           <MicroLabel>Engagements · {agg?.total_count ?? engagements.length} · {agg?.open_count ?? open.length} open</MicroLabel>
           {canStartNewJob && (
-            <button type="button" aria-label="New job in Jobber" disabled={busy} onClick={() => onSendToJobber(c.id)}
+            <button type="button" aria-label="Start a new job" disabled={busy} onClick={() => setNewJobOpen(true)}
               style={{ ...rowActionBtn(), gap: '5px', color: T.accent.fg }}>
-              <IconSend size={12} /> New job in Jobber
+              <IconPencil size={12} /> Start a new job
             </button>
           )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {open.map(e => {
-            const chip = deriveStatusChip(e, { nowMs })
+            const notSent = unsent(e)
+            // deriveStatusChip already says "Not sent to Jobber" for a row
+            // carrying its request list; the live-send override above wins.
+            const derived = deriveStatusChip(e, { nowMs })
+            const chip = notSent ? { label: NOT_SENT_LABEL, styleKey: 'amber' }
+              : (derived?.label === NOT_SENT_LABEL ? null : derived)
             const StageIcon = STAGE_ICON[e.stage] || IconInbox
             const value = engagementValue(e)
             const statusColor = chip ? (CHIP_STYLES[chip.styleKey] || CHIP_STYLES.gray).text : T.ink.muted
             return (
-              <div key={e.id} onClick={() => onOpenEngagement(e)}
-                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: T.surface.raised, border: T.border.divider, borderRadius: T.radius.control, cursor: 'pointer' }}>
+              <div key={e.id} onClick={() => onOpenEngagement(e)} data-unsent={notSent ? '1' : undefined}
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: T.surface.raised, border: notSent ? `1px dashed ${CHIP_STYLES.amber.text}` : T.border.divider, borderRadius: T.radius.control, cursor: 'pointer' }}>
                 <span style={{ color: (CHIP_STYLES[e.stage] || CHIP_STYLES.gray).text, display: 'inline-flex', flexShrink: 0 }}><StageIcon size={15} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p title={displayTitle(e)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -697,6 +718,15 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
                   {chip && <p style={{ fontSize: '11px', fontWeight: 500, color: statusColor, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chip.label}</p>}
                 </div>
                 <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  {/* Not sent to Jobber → the send is ON the row, so the
+                      card that is waiting on the owner can't be missed. */}
+                  {notSent && !readOnly && !atLocOther && onSendToJobber && (
+                    <button type="button" aria-label={`Send ${displayTitle(e)} to Jobber`} data-row-send="1" disabled={busy}
+                      onClick={(ev) => { ev.stopPropagation(); onSendToJobber(c.id, { engagementId: e.id }) }}
+                      style={{ ...rowActionBtn(), gap: '5px', color: T.accent.fg }}>
+                      <IconSend size={12} /> Send to Jobber
+                    </button>
+                  )}
                   {/* repeat/new — first-ever engagement chips New while
                       fresh; everything after chips Repeat (v4). */}
                   {engChip(e) && <StatusChip label={engChip(e).label} styleKey={engChip(e).styleKey} />}
@@ -846,18 +876,32 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             button either duplicated Jobber's own path or produced a permanent
             empty card.
 
-            ITS REPLACEMENT (2026-09-26) is "New job in Jobber" on the
-            Engagements header above: it creates the request on the client's
-            existing Jobber record and the webhook founds the engagement, so
-            it cannot make an empty card. Kevin's ruling the same day: no work
-            skips Jobber, so there is no local-only start anywhere — the New
-            sheet's "Keep local for now" went too. Do not put this back.
+            ITS REPLACEMENT is "Start a new job" on the Engagements header
+            (NewJobWizard, 2026-09-28; it replaced 2026-09-26's "New job in
+            Jobber"). It can save a card to send later — Kevin's call, so the
+            call gets captured before Jobber — but under two rules the old
+            button never had: the card cannot be blank (the work must be
+            described, enforced by the route and foundManualEngagement too),
+            and an unsent card says "Not sent to Jobber" and carries Send to
+            Jobber on its row. Do not put a bare "+ New engagement" back.
 
             ActionRow sizes its grid from the CHILD COUNT, so removing this
             takes a normal writable card from four columns to three and the
             survivors widen. loc_other is untouched — Transfer is still its
             only action. */}
       </ActionRow>
+      {newJobOpen && canStartNewJob && (
+        <NewJobWizard
+          client={c}
+          formerAddresses={otherAddresses}
+          openCount={open.length}
+          onClose={() => setNewJobOpen(false)}
+          onFounded={addFoundedEngagement}
+          onSendToJobber={onSendToJobber}
+          setToast={setToast}
+          readOnly={readOnly}
+        />
+      )}
       {touchOpen && !readOnly && c && (
         <TouchpointModal
           personName={c.name}

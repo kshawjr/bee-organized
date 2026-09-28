@@ -92,7 +92,9 @@ describe('CloseLostWizard — lead-close mode (issue 204)', () => {
 
     // 1) found-or-reuse the engagement
     expect(engagementPosts).toHaveLength(1)
-    expect(engagementPosts[0]).toEqual({ client_id: 'c1', reuse_open: true })
+    // The blank rule (2026-09-28): the founding says what it is — the reason
+    // just picked — so even a failed close can't leave an empty card.
+    expect(engagementPosts[0]).toEqual({ client_id: 'c1', reuse_open: true, title: 'Enquiry — Went quiet', description: null })
     // 2) close routed through the SHARED path onto the founded engagement
     expect(patchCalls).toHaveLength(1)
     expect(patchCalls[0].url).toContain('/api/engagements/eng-NEW')

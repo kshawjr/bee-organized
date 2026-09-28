@@ -1112,10 +1112,18 @@ export default function HiveShell({
           onLeadPatched={handleLeadPatched}
           onPartnerCreated={onPartnerCreated}
           onCallLogged={applyTouchpoint}
-          onSendToJobber={(clientId) => {
+          onSendToJobber={(clientId, opts) => {
+            // opts.engagementId: a send for one of this client's cards (the
+            // new-job wizard's Send now, or an unsent row's Send to Jobber)
+            // — the request attaches to THAT card, never founding a second.
             const p = patchedPeople.find(x => x.id === clientId)
-            if (p) onSendToJobber(p)
+            if (p) onSendToJobber(p, opts)
             else setToast({ kind: 'error', msg: 'Client record not loaded — refresh and try again' })
+          }}
+          onEngagementFounded={(row) => {
+            // The new-job wizard's founded card — the same show-without-reload
+            // seam onReopened uses; the next server refetch dedups it by id.
+            setSessionEngagements(prev => [row, ...prev.filter(e => e.id !== row.id)])
           }}
           jobberLinks={jobberLinks}
           setToast={setToast}

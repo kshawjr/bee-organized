@@ -870,8 +870,13 @@ async function mergeResubmission(args: {
       if (!pastClient) {
         foundingSkipped = checkFailed ? 'past_client_check_failed' : 'not_past_client'
       } else {
+        // The blank rule (2026-09-28): the card says what it is. The title
+        // names where it came from; the form's own message is what they
+        // said, when they wrote one.
         const founded = await foundManualEngagement({
           clientId: matched.id,
+          title: 'Website enquiry',
+          description: submission.message?.trim() || null,
           note: `founded from webform resubmission (matched on ${matchedOn})`,
         })
         if ('engagement' in founded) {

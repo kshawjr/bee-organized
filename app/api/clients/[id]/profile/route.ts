@@ -270,13 +270,16 @@ export async function GET(
 
   // Minimal children for OPEN engagements only — same shape the board rows
   // carry, so the profile's engagement cards reuse deriveStatusChip.
-  let quotesByEng: Record<string, any[]> = {}, jobsByEng: Record<string, any[]> = {}, invoicesByEng: Record<string, any[]> = {}, assessByEng: Record<string, any[]> = {}
+  // service_requests (ids only) ride too, so a card that never reached
+  // Jobber can say so (isUnsentEngagement needs the list, not a guess).
+  let quotesByEng: Record<string, any[]> = {}, jobsByEng: Record<string, any[]> = {}, invoicesByEng: Record<string, any[]> = {}, assessByEng: Record<string, any[]> = {}, srsByEng: Record<string, any[]> = {}
   if (openIds.length > 0) {
-    const [q, j, inv, ass] = await Promise.all([
+    const [q, j, inv, ass, srs] = await Promise.all([
       supabaseService.from('quotes').select('id, engagement_id, status, total, sent_at, approved_at').in('engagement_id', openIds),
       supabaseService.from('jobs').select('id, engagement_id, status, title, scheduled_start, completed_at').in('engagement_id', openIds).neq('status', 'deleted'), // never a job deleted in Jobber (components/hive/shared/jobDeleted.js)
       supabaseService.from('invoices').select('id, engagement_id, status, total, balance_owing').in('engagement_id', openIds).neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
       supabaseService.from('assessments').select('id, engagement_id, scheduled_at, status, completed_at').in('engagement_id', openIds),
+      supabaseService.from('service_requests').select('id, engagement_id').in('engagement_id', openIds),
     ])
     const group = (rows: any[] | null) => {
       const out: Record<string, any[]> = {}
@@ -284,6 +287,10 @@ export async function GET(
       return out
     }
     quotesByEng = group(q.data); jobsByEng = group(j.data); invoicesByEng = group(inv.data); assessByEng = group(ass.data)
+    // A failed request read ships NO list for that engagement (not an empty
+    // one), so a read error can never make a sent card claim "not sent".
+    if (!srs.error) srsByEng = Object.fromEntries(openIds.map(id => [id, []]))
+    for (const [k, v] of Object.entries(group(srs.error ? null : srs.data))) srsByEng[k] = v.map((r: any) => ({ id: r.id }))
   }
 
   const withChildren = engagements.map(e => ({
@@ -292,6 +299,7 @@ export async function GET(
     jobs: jobsByEng[e.id] ?? [],
     invoices: invoicesByEng[e.id] ?? [],
     assessments: assessByEng[e.id] ?? [],
+    ...(srsByEng[e.id] ? { service_requests: srsByEng[e.id] } : {}),
   }))
 
   // Inbox rule (2026-09-03) — the profile chip must agree with the Inbox, so

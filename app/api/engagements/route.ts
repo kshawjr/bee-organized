@@ -20,10 +20,15 @@
 // hub_user; elevated may scope with location_uuid; everyone else is forced
 // to their own location.
 //
-// POST /api/engagements — { client_id, title? }
+// POST /api/engagements — { client_id, title, description?, reuse_open? }
+//
+// title IS REQUIRED — the blank rule (2026-09-28). It says what the work is,
+// at least WORK_MIN_CHARS characters; without it the route answers 400
+// blank_engagement and writes nothing, reuse_open or not. description is the
+// captured call ("what they said"), optional.
 //
 // Manual founding (founded_by='manual'), the decoupled local write behind
-// "Start new engagement" on a returning client. Founds a NEW engagement
+// the client card's new-job wizard and the Close flow. Founds a NEW engagement
 // under the EXISTING lead — never a second leads row, so the returning-
 // client path can no longer trip leads_jobber_client_id_location_idx.
 // Every call is a distinct concurrent engagement (rule 1). Returns the
@@ -35,13 +40,13 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { foundManualEngagement, findOpenEngagementForClient } from '@/lib/engagements'
+import { foundManualEngagement, findOpenEngagementForClient, BLANK_ENGAGEMENT_ERROR } from '@/lib/engagements'
 import { fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
 import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
 import { WRITTEN_OFF } from '@/components/hive/shared/writtenOff'
-import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
+import { originalEngagementIds, describesTheWork, WORK_MIN_CHARS } from '@/components/hive/shared/engagementStatus'
 
 // Ceiling on ?ids= — the realtime coalescer only ever names cards already on
 // one board, so this is a guard against a hand-crafted URL, not a real limit.
@@ -336,7 +341,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
   }
 
-  let body: { client_id?: string; title?: string | null; reuse_open?: boolean }
+  let body: { client_id?: string; title?: string | null; description?: string | null; reuse_open?: boolean }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
@@ -345,6 +350,17 @@ export async function POST(req: Request) {
   }
   if (body.title != null && (typeof body.title !== 'string' || body.title.length > 200)) {
     return NextResponse.json({ error: 'invalid_title' }, { status: 400 })
+  }
+  // The blank rule, first and unconditional — before the lead read, before
+  // reuse_open. An engagement with nothing on it is not creatable here.
+  if (!describesTheWork(body.title)) {
+    return NextResponse.json({
+      error: BLANK_ENGAGEMENT_ERROR,
+      message: `Say what the work is (at least ${WORK_MIN_CHARS} characters).`,
+    }, { status: 400 })
+  }
+  if (body.description != null && (typeof body.description !== 'string' || body.description.length > 2000)) {
+    return NextResponse.json({ error: 'invalid_description' }, { status: 400 })
   }
 
   // Location scoping rides the LEAD (same rule as send-to-jobber): the
@@ -402,10 +418,12 @@ export async function POST(req: Request) {
   const founded = await foundManualEngagement({
     clientId: lead.id,
     title: body.title ?? null,
+    description: body.description ?? null,
     note: `manual founding via POST /api/engagements by hub_user ${hubUser.id}`,
   })
   if ('error' in founded) {
-    return NextResponse.json({ error: founded.error }, { status: 500 })
+    const blank = founded.error.startsWith(BLANK_ENGAGEMENT_ERROR)
+    return NextResponse.json({ error: blank ? BLANK_ENGAGEMENT_ERROR : founded.error }, { status: blank ? 400 : 500 })
   }
 
   // repeat_count matches the _hub-page sweep: ALL engagements for this
@@ -425,6 +443,9 @@ export async function POST(req: Request) {
       // Freshly founded = the client's newest engagement, so it is a return
       // iff they already had at least one (repeat_count > 1). Never the debut.
       is_returning: (repeatCount ?? 1) > 1,
+      // Carried empty so the card can say it has not reached Jobber
+      // (isUnsentEngagement reads the list, never a missing key).
+      service_requests: [],
       quotes: [],
       jobs: [],
       invoices: [],

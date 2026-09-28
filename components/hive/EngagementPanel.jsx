@@ -931,6 +931,14 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       margin: isMobile ? '0 -16px' : '0 -24px',
       padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
     }}>
+      {/* Not sent to Jobber (2026-09-28) — said in words, beside the button
+          that fixes it, so a card waiting on the owner never passes for one
+          waiting on Jobber. Same gate as the button. */}
+      {canSendToJobber && (
+        <p data-unsent-note="1" style={{ fontSize: '12px', color: T.family.amber.text, background: T.family.amber.bg, padding: '7px 10px', borderRadius: T.radius.control, marginBottom: '8px' }}>
+          Not sent to Jobber — this job is only in Bee Hub. Nothing reaches Jobber until you send it.
+        </p>
+      )}
       <ActionRow>
         {client?.phone && (
           <a href={`tel:${client.phone}`} style={actionBtn('accent')}>

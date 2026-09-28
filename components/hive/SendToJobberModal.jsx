@@ -115,7 +115,7 @@ function Tile({ Icon, label, sub, selected, onSelect, ariaLabel }) {
   )
 }
 
-export default function SendToJobberModal({ person, engagementId = null, onDone, onClose }) {
+export default function SendToJobberModal({ person, engagementId = null, addressKey: presetAddressKey = null, onDone, onClose }) {
   const isMobile = useIsMobile()
 
   const [step, setStep] = useState(person.jobberClient ? 'history' : 'action')
@@ -173,8 +173,14 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
     person.formerAddresses,
   )
   const multiAddress = addressChoices.length > 1
+  // presetAddressKey: the new-job wizard already asked "which address?"
+  // (2026-09-28). A key that names one of THESE choices is taken as the
+  // answer and the question is not asked twice; anything else (no key, or
+  // one this list doesn't hold) falls back to asking, exactly as before.
+  const presetValid = multiAddress && !!presetAddressKey && addressChoices.some(c => c.key === presetAddressKey)
+  const askAddress = multiAddress && !presetValid
   // Default to the current address — always choices[0] by construction.
-  const [addressKey, setAddressKey] = useState(CURRENT_CHOICE_KEY)
+  const [addressKey, setAddressKey] = useState(presetValid ? presetAddressKey : CURRENT_CHOICE_KEY)
   const chosenAddress = addressChoices.find(c => c.key === addressKey) || addressChoices[0] || null
 
   // Esc — OverlayShell gives the backdrop tap and the X, not this.
@@ -355,7 +361,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   const steps = [
     ...(person.jobberClient ? ['history'] : []),
     'action',
-    ...(multiAddress ? ['address'] : []),
+    ...(askAddress ? ['address'] : []),
     detailStep,
     'confirm',
   ]
@@ -419,7 +425,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button type="button" onClick={onClose} style={ghostBtn}>Cancel</button>
-              <button type="button" disabled={!action} onClick={() => action && setStep(multiAddress ? 'address' : (action === 'job' ? 'job-details' : 'request-details'))} style={primaryBtn(!!action)}>Continue →</button>
+              <button type="button" disabled={!action} onClick={() => action && setStep(askAddress ? 'address' : (action === 'job' ? 'job-details' : 'request-details'))} style={primaryBtn(!!action)}>Continue →</button>
             </div>
           </>
         )}
@@ -524,7 +530,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep(multiAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(askAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
               <button type="button" onClick={() => setStep('confirm')} style={primaryBtn(true)}>Review →</button>
             </div>
           </>
@@ -596,7 +602,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep(multiAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(askAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
               <button type="button" disabled={!jobDetailsComplete} onClick={() => jobDetailsComplete && setStep('confirm')} style={primaryBtn(jobDetailsComplete)}>Review →</button>
             </div>
           </>

@@ -43,6 +43,7 @@ vi.mock('@/lib/lead-suppression', () => ({ fetchSuppressedLeadIds: vi.fn(async (
 vi.mock('@/lib/engagements', () => ({
   foundManualEngagement: vi.fn(async () => ({ engagement: { id: 'eng-NEW', stage: 'Request' }, created: true })),
   findOpenEngagementForClient: vi.fn(async () => null),
+  BLANK_ENGAGEMENT_ERROR: 'blank_engagement',
 }))
 
 import { POST } from '@/app/api/engagements/route'
@@ -71,7 +72,7 @@ describe('POST /api/engagements reuse_open — issue 204', () => {
     h.enqueue('engagements', { id: 'eng-OPEN', stage: 'Estimate', client_id: 'c1' }) // select('*').single
     h.enqueue('engagements', null, null, 2)                                          // repeat count head
 
-    const res = await post({ client_id: 'c1', reuse_open: true })
+    const res = await post({ client_id: 'c1', reuse_open: true, title: 'Enquiry — Not a fit' })
     expect(res.status).toBe(200)
     const j = await res.json()
     expect(j.reused).toBe(true)
@@ -83,17 +84,17 @@ describe('POST /api/engagements reuse_open — issue 204', () => {
     arm()
     // findOpenEngagementForClient → null (default); foundManualEngagement runs.
     h.enqueue('engagements', null, null, 1) // repeat count head after founding
-    const res = await post({ client_id: 'c1', reuse_open: true })
+    const res = await post({ client_id: 'c1', reuse_open: true, title: 'Enquiry — Not a fit' })
     expect(res.status).toBe(201)
     const j = await res.json()
     expect(j.engagement.id).toBe('eng-NEW')
     expect(foundManualEngagement).toHaveBeenCalledTimes(1)
   })
 
-  it('without reuse_open, always founds (Start new engagement is unchanged)', async () => {
+  it('without reuse_open, always founds (the new-job wizard\'s call)', async () => {
     arm()
     h.enqueue('engagements', null, null, 1)
-    const res = await post({ client_id: 'c1' })
+    const res = await post({ client_id: 'c1', title: 'Bedroom closet' })
     expect(res.status).toBe(201)
     expect(findOpenEngagementForClient).not.toHaveBeenCalled()
     expect(foundManualEngagement).toHaveBeenCalledTimes(1)

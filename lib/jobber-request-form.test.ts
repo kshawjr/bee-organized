@@ -194,7 +194,9 @@ describe('send-to-jobber route wiring', () => {
 
   it('the REQUEST path attaches requestDetails, and only when there is something to send', () => {
     expect(route).toContain("import { buildRequestDetails } from '@/lib/jobber-request-form'")
-    expect(route).toContain('const requestDetails = buildRequestDetails(lead)')
+    // A send riding a card with words of its own uses them (2026-09-28);
+    // otherwise the lead, exactly as before.
+    expect(route).toContain('const requestDetails = buildRequestDetails(engagementWords ?? lead)')
     expect(route).toContain('if (requestDetails) requestInput.requestDetails = requestDetails')
     // the "no form mapping today" placeholder comment from the May audit is gone
     expect(route).not.toContain('until we wire form sync')

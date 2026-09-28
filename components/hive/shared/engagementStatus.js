@@ -63,9 +63,21 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 
 // Junk-length Jobber titles ("(L)", "(M)") fall through to the generic
 // fallback — a ≤3-character title reads as data noise.
+//
+// The same threshold is THE BLANK RULE for a hand-started engagement
+// (2026-09-28): the work has to be described in at least this many
+// characters, or nothing is founded. They are one number on purpose — a
+// title short enough to be swapped for "Engagement – Sep 2026" on screen
+// would found a card that LOOKS as empty as the 47 that went nowhere.
+// lib/engagements.ts (foundManualEngagement) and POST /api/engagements
+// both enforce it; the new-job wizard gates its buttons on it.
+export const WORK_MIN_CHARS = 4
+export function describesTheWork(title) {
+  return typeof title === 'string' && title.trim().length >= WORK_MIN_CHARS
+}
 export function displayTitle(e) {
   const t = (e.title || '').trim()
-  if (t.length > 3) return t
+  if (t.length >= WORK_MIN_CHARS) return t
   const d = e.created_at ? new Date(e.created_at) : new Date()
   return `Engagement – ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
@@ -150,6 +162,23 @@ export function invoiceNumber(inv) {
 export const ENGAGEMENT_CHILD_KEYS = ['service_requests', 'quotes', 'jobs', 'invoices', 'assessments']
 export function isJobberLinked(rec) {
   return ENGAGEMENT_CHILD_KEYS.some(k => ((rec || {})[k] || []).length > 0)
+}
+
+// NOT SENT TO JOBBER (2026-09-28). An OPEN engagement with no Jobber record
+// of any kind: it lives only in Bee Hub, and nothing will ever arrive from
+// Jobber to move it. That is the state the 47 forgotten cards sat in while
+// looking like every other card — so it gets its own words wherever a card
+// shows (deriveStatusChip below, the client card's rows, the panel).
+//
+// Only claimed when the row CARRIES its request list (service_requests is an
+// array). A request-founded engagement always has its request, but a surface
+// that doesn't ship the list can't tell the two apart — and calling a real
+// Jobber request "not sent" would be a worse lie than saying nothing.
+export const NOT_SENT_LABEL = 'Not sent to Jobber'
+export function isUnsentEngagement(e) {
+  if (!e || e.stage === 'Closed Won' || e.stage === 'Closed Lost') return false
+  if (!Array.isArray(e.service_requests)) return false
+  return !isJobberLinked(e)
 }
 
 // Card/row value: real money once invoiced, best quote before that.
@@ -382,6 +411,9 @@ export function deriveStatusChip(e, opts = {}) {
 
   switch (e.stage) {
     case 'Request': {
+      // Never reached Jobber — say so before anything else, and in amber:
+      // this card waits on the owner, not on the client.
+      if (isUnsentEngagement(e)) return { label: NOT_SENT_LABEL, styleKey: 'amber' }
       // A scheduled FUTURE assessment outranks the request-age chip —
       // the next concrete step is on the calendar. A past-dated
       // assessment that never resolved falls back to the age chip (the

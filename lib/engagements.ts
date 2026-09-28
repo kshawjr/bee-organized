@@ -23,7 +23,7 @@ import { writeSyncLog } from './sync-log'
 import { isUnbookedJobStatus } from './jobber-import'
 import { resolveLeadAssignees } from './lead-assignment'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
-import { invoicesFullyPaid } from '@/components/hive/shared/engagementStatus'
+import { invoicesFullyPaid, describesTheWork, WORK_MIN_CHARS } from '@/components/hive/shared/engagementStatus'
 import { isDeletedInvoice, keepsCollectedMoney, invoicesForReasoning } from '@/components/hive/shared/invoiceDeleted'
 import { isDeletedJob } from '@/components/hive/shared/jobDeleted'
 
@@ -289,6 +289,11 @@ const fallbackTitle = (t?: number) => {
   const d = t ? new Date(t) : new Date()
   return `Engagement – ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
+// True for a title fallbackTitle made — the one shape of title nobody typed.
+// The send route uses it so an old hand-made card's auto title is never
+// pushed into Jobber as though it said something.
+export const isFallbackTitle = (t: unknown): boolean =>
+  typeof t === 'string' && /^Engagement – [A-Z][a-z]{2} \d{4}$/.test(t.trim())
 
 async function logFounding(params: {
   locationSlug: string | null
@@ -450,7 +455,7 @@ export async function foundEngagement(params: {
 }
 
 // Manual founding (§3 rule 6, founded_by='manual') — the decoupled
-// local write behind "Start new engagement" on a returning client.
+// local write behind the client card's new-job wizard (NewJobWizard).
 // UNLIKE foundEngagement there is no founding child row and therefore
 // no child-anchored idempotency: every call is a NEW engagement, which
 // is exactly rule 1 (a second engagement is a distinct concurrent row,
@@ -462,12 +467,29 @@ export async function foundEngagement(params: {
 // Returns the full inserted row so callers can confirm the founding
 // from the real write (never an optimistic stub) and merge it into
 // board state in the shape _hub-page ships.
+//
+// THE BLANK RULE (2026-09-28). A hand-started engagement must say what the
+// work is: a title of at least WORK_MIN_CHARS characters, or nothing is
+// written. There is no fallback title here any more. The removed "+ New
+// engagement" button founded 47 cards that carried nothing but an auto
+// title ("Engagement – Sep 2026"); every one sat at Request forever. This
+// function is the only place a manual engagement is inserted, so refusing
+// here refuses for every caller — the route, the Close flow and the
+// webform resubmission alike. (auto-close inserts a Closed Lost directly,
+// already closed and already noted; it never makes an open card.)
+export const BLANK_ENGAGEMENT_ERROR = 'blank_engagement'
 export async function foundManualEngagement(params: {
   clientId: string
   title?: string | null
+  description?: string | null
   note?: string
 }): Promise<{ engagement: Record<string, any>; created: true } | { error: string }> {
   const { clientId } = params
+  if (!describesTheWork(params.title)) {
+    return { error: `${BLANK_ENGAGEMENT_ERROR}: say what the work is (at least ${WORK_MIN_CHARS} characters)` }
+  }
+  const title = String(params.title).trim().slice(0, 200)
+  const description = typeof params.description === 'string' ? params.description.trim().slice(0, 2000) : ''
 
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
@@ -486,7 +508,8 @@ export async function foundManualEngagement(params: {
       location_uuid: lead.location_uuid,
       stage: OPENING_STAGE.manual,
       founded_by: 'manual',
-      title: params.title?.trim() || fallbackTitle(),
+      title,
+      ...(description ? { description } : {}),
       stage_entered_at: nowIso,
       created_at: nowIso,
       updated_at: nowIso,

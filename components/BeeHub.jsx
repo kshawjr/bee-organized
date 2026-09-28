@@ -10132,7 +10132,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // Beta board closed the record (client or engagement) → clear both
           // from the URL (back to /clients).
           onCloseRecord={()=>{ setSelected(null); setSelectedEngagementId(null) }}
-          onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
+          onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null, addressKey: opts?.addressKey || null, savedCard: !!opts?.savedCard })}
           jobberLinks={jobberLinks}
           onReportProblem={onReportProblem}
         />
@@ -10149,6 +10149,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           <SendToJobberModal
             person={betaSendPerson.person}
             engagementId={betaSendPerson.engagementId}
+            addressKey={betaSendPerson.addressKey}
             onDone={(patch, result)=>{
               updatePerson({ ...betaSendPerson.person, ...patch }, patch)
               if (result?.jobber_client_id) {
@@ -10172,7 +10173,12 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
               setBetaSendPerson(null)
               setToast({ kind:'success', msg:`${betaSendPerson.person.name} sent to Jobber` })
             }}
-            onClose={()=>setBetaSendPerson(null)}
+            onClose={()=>{
+              // Backed out of a new-job wizard's "Send now": the card was
+              // already saved, so say plainly it has not reached Jobber.
+              if (betaSendPerson.savedCard) setToast({ kind:'success', msg:'Saved on the card — not sent to Jobber yet. Send it from the card when you’re ready.' })
+              setBetaSendPerson(null)
+            }}
           />
         )}
         {/* UNIFIED DETAIL UI: the beta board's client detail is HiveShell's

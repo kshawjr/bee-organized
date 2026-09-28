@@ -212,7 +212,8 @@ describe('foundManualEngagement stays now-stamped', () => {
     const before = Date.now()
     h.enqueue('leads', { id: 'lead1', location_uuid: 'loc-uuid-1', location_id: 'loc_x', name: 'Pat', is_junk: false })
     h.enqueue('engagements', { id: 'eng9', stage: 'Request' })
-    const res = await foundManualEngagement({ clientId: 'lead1' })
+    // A title is required now (the blank rule, 2026-09-28).
+    const res = await foundManualEngagement({ clientId: 'lead1', title: 'Garage shelving' })
     expect('engagement' in res && res.engagement.id).toBe('eng9')
     const row = insertPayload('engagements')
     for (const k of ['created_at', 'stage_entered_at'] as const) {
