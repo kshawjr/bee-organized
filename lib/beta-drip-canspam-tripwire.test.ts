@@ -146,7 +146,19 @@ const COMMERCIAL_PRIMARY = ['welcome', 'opp_closed_job_3mo', 'opp_closed_job_12m
 // re-ask the CAN-SPAM question (12mo especially — its classification rests on
 // judgment, not lexical markers).
 const COMMERCIAL_BODY_HASHES: Record<string, string> = {
-  welcome: '70fcc5951201',
+  // 2026-09-27 — was '70fcc5951201'. REASSESSED, not waved through: the only
+  // change is the removal of Markdown asterisks (*Simplify Your Hive!*,
+  // **Bee Organized**, and the two **headings**), which reached the inbox
+  // literally because client emails have no Markdown step. Every word, link
+  // and line is otherwise identical: no offer added or removed, no
+  // transactional content (the TRANSACTIONAL_ANCHOR check above still finds
+  // none), so the primary purpose is unchanged — still commercial, still
+  // pure brand promo, still sent WITH the #115 footer by lib/welcome-email.ts.
+  // NOTE this pins the SEED's welcome. The copy production sends is Kevin's
+  // 2026-09-27 rewrite in migrations/restore_welcome_master_template.sql
+  // (adds a {{first_name}} greeting and {{signature}}), which this tripwire
+  // does not read.
+  welcome: '5f4c801030dc',
   opp_closed_job_3mo: '5b28a1f22e7a',
   opp_closed_job_12mo: '3e5643fdf958',
 }

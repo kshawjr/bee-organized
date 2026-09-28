@@ -425,7 +425,7 @@ Thank you,
 
 {{owner_name}}
 
-**Be sure to check out our Google Reviews!** ({{reviews_link}})$tpl$,
+Be sure to check out our Google Reviews! ({{reviews_link}})$tpl$,
   true
 FROM drip_paths dp WHERE dp.is_master = true AND dp.path_key = 'moving-c'
 ON CONFLICT (drip_path_id, step_order) DO NOTHING;
@@ -535,14 +535,14 @@ INSERT INTO templates (legacy_id, name, type, tag, subject, body) VALUES
 -- welcome — auto-fires 24h after Email 1 of any new lead drip
 ('welcome', 'Welcome Email', 'email', 'welcome',
  'Welcome to the Bee Organized Hive!',
- $tpl$Welcome to the Bee Organized Hive! We're excited to connect with you soon and it would be our HONOR to help you *Simplify Your Hive!*
+ $tpl$Welcome to the Bee Organized Hive! We're excited to connect with you soon and it would be our HONOR to help you Simplify Your Hive!
 
-Check out more info about **Bee Organized** below…
+Check out more info about Bee Organized below…
 
-**What's Your Organizing Profile?**
+What's Your Organizing Profile?
 Take our fun Organizing Profile Quiz here (https://beeorganized.com/) to find out who you are in relationship with your stuff!
 
-**How We Came To Bee**
+How We Came To Bee
 Learn how these best friends got started and built a successful national franchise business here! (https://beeorganized.com/pages/how-we-came-to-bee)$tpl$),
 
 -- opp_closed_job_3mo — 90d after stage→Closed Won
