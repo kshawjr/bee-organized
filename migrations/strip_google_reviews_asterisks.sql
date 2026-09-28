@@ -55,85 +55,101 @@
 -- updated_at is fork resolution (lib/template-fork.ts), and neither KC
 -- template is a fork (cloned_from_id NULL).
 --
--- NOT RUN. Kevin runs it in the Supabase SQL editor. The whole file is one
--- transaction; the final SELECT should show 10 rows, each "stripped" (first
--- run) or "done" (any run after).
+-- RUN HISTORY. Kevin ran the first version of this file on 2026-09-28
+-- 03:20:25 UTC. Its two UPDATEs committed and did exactly what they should:
+-- a read-back against a snapshot taken before the run found all 10 rows with
+-- only the ** removed, the other 190 template / step bodies byte-for-byte
+-- unchanged, and no asterisk left in any template or drip step. Its closing
+-- report failed with 42P01 (relation "strip_reviews_targets" does not exist):
+-- that version kept the target list in a TEMP TABLE, and the Supabase SQL
+-- editor does not keep one alive across every statement of a script.
+--
+-- THIS VERSION has no temp table and no BEGIN/COMMIT. The strip and its
+-- report are ONE statement (the target list is a CTE, the two UPDATEs are
+-- data-modifying CTEs, the report reads their RETURNING), so it is atomic on
+-- its own and works however the editor sends it. Run it now and it changes
+-- nothing: every row reports "done".
+--
+-- The report: 10 rows, each "stripped" (this run changed it), "done" (already
+-- stripped), "CHANGED SINCE 2026-09-27 — not touched" (an owner edited it;
+-- check by hand), or "ROW GONE".
 
-BEGIN;
-
-CREATE TEMP TABLE strip_reviews_targets (
-  tbl        text NOT NULL,
-  id         uuid NOT NULL,
-  label      text NOT NULL,
-  before_md5 text NOT NULL,   -- body as read 2026-09-27, asterisks in
-  after_md5  text NOT NULL    -- the same body with only the ** removed
-) ON COMMIT DROP;
-
-INSERT INTO strip_reviews_targets VALUES
-  ('drip_path_steps', '4ffd555c-e879-47ef-b92a-479c97ec2e2a', 'master · moving-c step 1',          '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
-  ('drip_path_steps', 'a39eb127-c0d9-4f64-bfde-b08407500123', 'Central Austin · moving-c step 1',  '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
-  ('drip_path_steps', 'a0e15aeb-b0b0-40ca-8ca4-43aef6ba69c9', 'New Braunfels · moving-c step 1',   'c27622993e42fa5726f379a2b4e62233', '0e67dc17dcfaac59a344d6ca1e3eb1be'),
-  ('drip_path_steps', 'cc58766d-a1fa-405c-8067-bc5c33ff92b5', 'North Houston · moving-c step 1',   '0875cb2fa21d02175a324a71548dc334', 'df90ca23b61938ab09ae9c1ea8ffb299'),
-  ('drip_path_steps', '45023cc3-6c74-4c9b-8360-55ab6656c027', 'Sioux Falls · moving-c step 1',     'e4669241a11b42aa61c7a237b587d8d6', '106288efabf326c19b8efaa6c6fb6a4c'),
-  ('drip_path_steps', 'c5779834-7649-48c3-80f0-ff651f2e924a', 'South Charlotte · moving-c step 1', '3e21b7e340be854a2589c9433161abe0', '89d15727f19ff9fa581e4925547bdd32'),
-  ('drip_path_steps', '6becd2bc-6706-44e6-a6e1-cec0fcbd9bbd', 'Test Location · moving-c step 1',   '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
-  ('drip_path_steps', '137855d8-49a5-435f-8216-bdea79c1f6c4', 'Kansas City · organizing-a step 1', 'b69f2d78877f964ddf7f629469579c65', 'e31222752f226e1462cb56f4a6e16619'),
-  ('templates',       '2317e195-25fd-444c-a719-8652b5799794', 'KC Move Intro Email',               '4a41a73fe72fa8c2465c402784ed5fbc', 'e4ee14fb5f2d5818cb7479a1d4507874'),
-  ('templates',       'fefc3147-8a89-44a2-b16d-d7490bcdef32', 'KC Organizing Intro Template',      '339f8acbc2c6b060f2cce6bee0993eb0', 'fde535e6d9005c9072f2e400d9e4796e');
-
-UPDATE drip_path_steps s
-SET body = replace(s.body, '**Be sure to check out our Google Reviews!**', 'Be sure to check out our Google Reviews!')
-FROM strip_reviews_targets x
-WHERE x.tbl = 'drip_path_steps' AND s.id = x.id AND md5(s.body) = x.before_md5;
-
-UPDATE templates t
-SET body = replace(t.body, '**Be sure to check out our Google Reviews!**', 'Be sure to check out our Google Reviews!')
-FROM strip_reviews_targets x
-WHERE x.tbl = 'templates' AND t.id = x.id AND md5(t.body) = x.before_md5;
-
--- The report. One row per target.
+WITH targets (tbl, id, label, before_md5, after_md5) AS (VALUES
+  ('drip_path_steps', '4ffd555c-e879-47ef-b92a-479c97ec2e2a'::uuid, 'master · moving-c step 1',          '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+  ('drip_path_steps', 'a39eb127-c0d9-4f64-bfde-b08407500123'::uuid, 'Central Austin · moving-c step 1',  '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+  ('drip_path_steps', 'a0e15aeb-b0b0-40ca-8ca4-43aef6ba69c9'::uuid, 'New Braunfels · moving-c step 1',   'c27622993e42fa5726f379a2b4e62233', '0e67dc17dcfaac59a344d6ca1e3eb1be'),
+  ('drip_path_steps', 'cc58766d-a1fa-405c-8067-bc5c33ff92b5'::uuid, 'North Houston · moving-c step 1',   '0875cb2fa21d02175a324a71548dc334', 'df90ca23b61938ab09ae9c1ea8ffb299'),
+  ('drip_path_steps', '45023cc3-6c74-4c9b-8360-55ab6656c027'::uuid, 'Sioux Falls · moving-c step 1',     'e4669241a11b42aa61c7a237b587d8d6', '106288efabf326c19b8efaa6c6fb6a4c'),
+  ('drip_path_steps', 'c5779834-7649-48c3-80f0-ff651f2e924a'::uuid, 'South Charlotte · moving-c step 1', '3e21b7e340be854a2589c9433161abe0', '89d15727f19ff9fa581e4925547bdd32'),
+  ('drip_path_steps', '6becd2bc-6706-44e6-a6e1-cec0fcbd9bbd'::uuid, 'Test Location · moving-c step 1',   '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+  ('drip_path_steps', '137855d8-49a5-435f-8216-bdea79c1f6c4'::uuid, 'Kansas City · organizing-a step 1', 'b69f2d78877f964ddf7f629469579c65', 'e31222752f226e1462cb56f4a6e16619'),
+  ('templates',       '2317e195-25fd-444c-a719-8652b5799794'::uuid, 'KC Move Intro Email',               '4a41a73fe72fa8c2465c402784ed5fbc', 'e4ee14fb5f2d5818cb7479a1d4507874'),
+  ('templates',       'fefc3147-8a89-44a2-b16d-d7490bcdef32'::uuid, 'KC Organizing Intro Template',      '339f8acbc2c6b060f2cce6bee0993eb0', 'fde535e6d9005c9072f2e400d9e4796e')
+),
+steps AS (
+  UPDATE drip_path_steps s
+  SET body = replace(s.body, '**Be sure to check out our Google Reviews!**', 'Be sure to check out our Google Reviews!')
+  FROM targets x
+  WHERE x.tbl = 'drip_path_steps' AND s.id = x.id AND md5(s.body) = x.before_md5
+  RETURNING s.id, s.body
+),
+tpls AS (
+  UPDATE templates t
+  SET body = replace(t.body, '**Be sure to check out our Google Reviews!**', 'Be sure to check out our Google Reviews!')
+  FROM targets x
+  WHERE x.tbl = 'templates' AND t.id = x.id AND md5(t.body) = x.before_md5
+  RETURNING t.id, t.body
+),
+changed AS (SELECT id, body FROM steps UNION ALL SELECT id, body FROM tpls),
+-- Bodies as they stood when this statement began (a statement cannot see
+-- its own UPDATEs except through RETURNING — hence "changed" above).
+existing AS (
+  SELECT id, body FROM drip_path_steps WHERE id IN (SELECT id FROM targets WHERE tbl = 'drip_path_steps')
+  UNION ALL
+  SELECT id, body FROM templates       WHERE id IN (SELECT id FROM targets WHERE tbl = 'templates')
+)
 SELECT x.label,
   CASE
-    WHEN cur.body IS NULL              THEN 'ROW GONE — deleted since 2026-09-27'
-    WHEN md5(cur.body) = x.after_md5
-     AND cur.updated_at >= now()       THEN 'stripped'
-    WHEN md5(cur.body) = x.after_md5   THEN 'done (already stripped by an earlier run)'
+    WHEN c.id IS NOT NULL                THEN 'stripped'
+    WHEN e.id IS NULL                    THEN 'ROW GONE — deleted since 2026-09-27'
+    WHEN md5(e.body) = x.after_md5       THEN 'done (already stripped by an earlier run)'
     ELSE 'CHANGED SINCE 2026-09-27 — not touched; check it by hand'
   END AS result,
-  position('*' in coalesce(cur.body, '')) > 0 AS still_has_asterisk
-FROM strip_reviews_targets x
-LEFT JOIN LATERAL (
-  SELECT body, updated_at FROM drip_path_steps WHERE x.tbl = 'drip_path_steps' AND id = x.id
-  UNION ALL
-  SELECT body, updated_at FROM templates       WHERE x.tbl = 'templates'       AND id = x.id
-) cur ON true
+  position('*' in coalesce(c.body, e.body, '')) > 0 AS still_has_asterisk
+FROM targets x
+LEFT JOIN changed  c ON c.id = x.id
+LEFT JOIN existing e ON e.id = x.id
 ORDER BY x.tbl, x.label;
-
-COMMIT;
 
 -- ─── ROLLBACK ────────────────────────────────────────────────────────
 -- Puts the ** back on exactly the rows this stripped, and only while their
 -- body is still byte-for-byte what this migration left (after_md5). A row an
--- owner has edited since is left alone, same rule as above. Run as one block:
+-- owner has edited since is left alone, same rule as above. One statement,
+-- no temp table; it returns the rows it restored.
 --
---   BEGIN;
---   CREATE TEMP TABLE unstrip (tbl text, id uuid, after_md5 text) ON COMMIT DROP;
---   INSERT INTO unstrip VALUES
---     ('drip_path_steps','4ffd555c-e879-47ef-b92a-479c97ec2e2a','9e39ee30144330b96838aa22b1badac4'),
---     ('drip_path_steps','a39eb127-c0d9-4f64-bfde-b08407500123','9e39ee30144330b96838aa22b1badac4'),
---     ('drip_path_steps','a0e15aeb-b0b0-40ca-8ca4-43aef6ba69c9','0e67dc17dcfaac59a344d6ca1e3eb1be'),
---     ('drip_path_steps','cc58766d-a1fa-405c-8067-bc5c33ff92b5','df90ca23b61938ab09ae9c1ea8ffb299'),
---     ('drip_path_steps','45023cc3-6c74-4c9b-8360-55ab6656c027','106288efabf326c19b8efaa6c6fb6a4c'),
---     ('drip_path_steps','c5779834-7649-48c3-80f0-ff651f2e924a','89d15727f19ff9fa581e4925547bdd32'),
---     ('drip_path_steps','6becd2bc-6706-44e6-a6e1-cec0fcbd9bbd','9e39ee30144330b96838aa22b1badac4'),
---     ('drip_path_steps','137855d8-49a5-435f-8216-bdea79c1f6c4','e31222752f226e1462cb56f4a6e16619'),
---     ('templates','2317e195-25fd-444c-a719-8652b5799794','e4ee14fb5f2d5818cb7479a1d4507874'),
---     ('templates','fefc3147-8a89-44a2-b16d-d7490bcdef32','fde535e6d9005c9072f2e400d9e4796e');
---   UPDATE drip_path_steps s SET body = replace(s.body, 'Be sure to check out our Google Reviews!', '**Be sure to check out our Google Reviews!**')
---     FROM unstrip u WHERE u.tbl='drip_path_steps' AND s.id=u.id AND md5(s.body)=u.after_md5;
---   UPDATE templates t SET body = replace(t.body, 'Be sure to check out our Google Reviews!', '**Be sure to check out our Google Reviews!**')
---     FROM unstrip u WHERE u.tbl='templates' AND t.id=u.id AND md5(t.body)=u.after_md5;
---   COMMIT;
+--   WITH targets (tbl, id, label, before_md5, after_md5) AS (VALUES
+--     ('drip_path_steps', '4ffd555c-e879-47ef-b92a-479c97ec2e2a'::uuid, 'master · moving-c step 1',          '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+--     ('drip_path_steps', 'a39eb127-c0d9-4f64-bfde-b08407500123'::uuid, 'Central Austin · moving-c step 1',  '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+--     ('drip_path_steps', 'a0e15aeb-b0b0-40ca-8ca4-43aef6ba69c9'::uuid, 'New Braunfels · moving-c step 1',   'c27622993e42fa5726f379a2b4e62233', '0e67dc17dcfaac59a344d6ca1e3eb1be'),
+--     ('drip_path_steps', 'cc58766d-a1fa-405c-8067-bc5c33ff92b5'::uuid, 'North Houston · moving-c step 1',   '0875cb2fa21d02175a324a71548dc334', 'df90ca23b61938ab09ae9c1ea8ffb299'),
+--     ('drip_path_steps', '45023cc3-6c74-4c9b-8360-55ab6656c027'::uuid, 'Sioux Falls · moving-c step 1',     'e4669241a11b42aa61c7a237b587d8d6', '106288efabf326c19b8efaa6c6fb6a4c'),
+--     ('drip_path_steps', 'c5779834-7649-48c3-80f0-ff651f2e924a'::uuid, 'South Charlotte · moving-c step 1', '3e21b7e340be854a2589c9433161abe0', '89d15727f19ff9fa581e4925547bdd32'),
+--     ('drip_path_steps', '6becd2bc-6706-44e6-a6e1-cec0fcbd9bbd'::uuid, 'Test Location · moving-c step 1',   '06c724dcc2f0fbd097a1950cae337a5c', '9e39ee30144330b96838aa22b1badac4'),
+--     ('drip_path_steps', '137855d8-49a5-435f-8216-bdea79c1f6c4'::uuid, 'Kansas City · organizing-a step 1', 'b69f2d78877f964ddf7f629469579c65', 'e31222752f226e1462cb56f4a6e16619'),
+--     ('templates',       '2317e195-25fd-444c-a719-8652b5799794'::uuid, 'KC Move Intro Email',               '4a41a73fe72fa8c2465c402784ed5fbc', 'e4ee14fb5f2d5818cb7479a1d4507874'),
+--     ('templates',       'fefc3147-8a89-44a2-b16d-d7490bcdef32'::uuid, 'KC Organizing Intro Template',      '339f8acbc2c6b060f2cce6bee0993eb0', 'fde535e6d9005c9072f2e400d9e4796e')
+--   ),
+--   steps AS (
+--     UPDATE drip_path_steps s SET body = replace(s.body, 'Be sure to check out our Google Reviews!', '**Be sure to check out our Google Reviews!**')
+--     FROM targets x WHERE x.tbl = 'drip_path_steps' AND s.id = x.id AND md5(s.body) = x.after_md5
+--     RETURNING x.label
+--   ),
+--   tpls AS (
+--     UPDATE templates t SET body = replace(t.body, 'Be sure to check out our Google Reviews!', '**Be sure to check out our Google Reviews!**')
+--     FROM targets x WHERE x.tbl = 'templates' AND t.id = x.id AND md5(t.body) = x.after_md5
+--     RETURNING x.label
+--   )
+--   SELECT label AS restored FROM steps UNION ALL SELECT label FROM tpls ORDER BY 1;
 --
 -- updated_at is not restored (the trigger stamps it again); nothing reads it
 -- for these rows.
