@@ -89,15 +89,18 @@ export async function ensureUnsubscribeToken(leadId: string): Promise<string | n
 // not CAN-SPAM. CAN-SPAM turns on opt-out-honored + address + accurate headers,
 // none of which need prior consent. The rails keep their own marketing_opt_out
 // check; this helper adds only the footer + token.
-export type AppendCanSpamFooterResult =
-  | { ok: true; html: string; text: string }
-  | { ok: false; reason: 'no_token' | 'no_postal_address' }
+export type CanSpamFooterFailure = { ok: false; reason: 'no_token' | 'no_postal_address' }
+export type BuildCanSpamFooterResult = { ok: true; html: string; text: string } | CanSpamFooterFailure
+export type AppendCanSpamFooterResult = { ok: true; html: string; text: string } | CanSpamFooterFailure
 
-export async function appendCanSpamFooter(
-  html: string,
-  text: string,
-  args: { leadId: string; audience: MarketingAudience },
-): Promise<AppendCanSpamFooterResult> {
+// Build the footer WITHOUT placing it — for a rail whose layout decides where
+// it goes. The branded Closed-Job follow-ups (lib/stage-emails.ts) put it inside
+// the white card, above the teal band; appended to the finished document it
+// would land after </html>. Same fail-closed checks as appendCanSpamFooter.
+export async function buildCanSpamFooter(args: {
+  leadId: string
+  audience: MarketingAudience
+}): Promise<BuildCanSpamFooterResult> {
   // Postal address first — it's a pure env read, so a misconfiguration is caught
   // before we spend a DB round-trip minting a token. process.env.MARKETING_POSTAL_ADDRESS
   // is confirmed set in Vercel production; this is the read that never existed.
@@ -128,6 +131,18 @@ export async function appendCanSpamFooter(
   const unsubscribeUrl = `${base}${unsubscribePathFor(token)}`
 
   const footer = buildMarketingFooter({ unsubscribeUrl, postalAddress, audience: args.audience })
+  return { ok: true, html: footer.html, text: footer.text }
+}
+
+// Build the footer and append it to the end of plain html + text — for a rail
+// with no layout frame (welcome's plain bodyToHtml path).
+export async function appendCanSpamFooter(
+  html: string,
+  text: string,
+  args: { leadId: string; audience: MarketingAudience },
+): Promise<AppendCanSpamFooterResult> {
+  const footer = await buildCanSpamFooter(args)
+  if (!footer.ok) return footer
   return {
     ok: true,
     html: `${html}${footer.html}`,

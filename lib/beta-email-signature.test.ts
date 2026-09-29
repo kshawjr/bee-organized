@@ -462,13 +462,16 @@ describe('both email layouts render it — where it was typed, once, and nowhere
     expect(text).not.toContain(SIGNATURE_MARKER)
   })
 
-  it('plain layout (bodyToHtml — 3- and 12-month follow-ups, welcome)', () => {
+  it('plain layout (bodyToHtml — welcome)', () => {
     checkPlacement(bodyToHtml(body, FULL))
   })
 
   it('both follow-up paths through renderStageEmailContent', () => {
+    // The Closed-Job pair is commercial and refuses to render without its
+    // CAN-SPAM footer; a stand-in footer is passed so the signature is what's tested.
+    const footer = { html: '<p>unsubscribe</p>', text: 'unsubscribe' }
     for (const key of ['opp_closed_job_3mo', 'opp_closed_job_12mo', 'opp_organizing_estimate_3d']) {
-      const { html, text } = renderStageEmailContent(key, body, brandCtx)
+      const { html, text } = renderStageEmailContent(key, body, brandCtx, footer)
       checkPlacement(html)
       expect(text).toContain('Jane Smith\nOwner & Lead Organizer')
       expect(text).not.toContain(SIGNATURE_MARKER)
@@ -550,7 +553,7 @@ describe('nothing an owner typed is ever rendered as HTML', () => {
     for (const out of [
       bodyToHtml(body, HOSTILE),
       buildBrandedDripHtml(body, { location_name: 'Boulder', signature: HOSTILE }),
-      renderStageEmailContent('opp_closed_job_3mo', body, { location_name: 'Boulder', signature: HOSTILE }).html,
+      renderStageEmailContent('opp_closed_job_3mo', body, { location_name: 'Boulder', signature: HOSTILE }, { html: '<p>unsubscribe</p>', text: 'unsubscribe' }).html,
     ]) {
       expect(out).not.toMatch(/<script/i)
       expect(out).not.toMatch(/<img src=x/i)

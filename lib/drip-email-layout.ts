@@ -7,10 +7,17 @@
 // body copy at generous line-height, one gold bee logo + wordmark header,
 // and a solid teal footer band.
 //
-// SCOPE: drips ONLY. bodyToHtml (lib/drip-send.ts) is shared by welcome +
-// stage emails and is deliberately left untouched — this module is a new,
-// separate layer used only by the drip send path, so welcome/stage output
-// is byte-identical to before.
+// SCOPE: drips, all six opportunity-stage emails (lib/stage-emails.ts — the
+// four estimate follow-ups AND the two commercial Closed-Job follow-ups), and
+// the shell alone for lead notifications + feedback replies. Only welcome
+// still uses the plain bodyToHtml path (lib/drip-send.ts), which this module
+// does not touch.
+//
+// COMPLIANCE SLOT: a commercial email's CAN-SPAM footer (unsubscribe + postal
+// address) must sit INSIDE the white card, above the teal band. Appending it to
+// the finished document would land it after </html>, outside the frame. The
+// caller passes it as `cardFooterHtml`; with no footer passed, the output is
+// byte-identical to before (drips never pass one).
 //
 // EMAIL-CLIENT CONSTRAINTS (not optional): table-based layout, every style
 // inline (Gmail strips <style>), no flexbox/grid (Outlook). A single <style>
@@ -169,10 +176,26 @@ function footerSegments(ctx: BrandedEmailContext): {
 // body is plain text run through bodyParagraphsHtml; the notification body is a
 // table-based field grid — those DON'T share a body model, but they DO share
 // this shell, so the shell takes already-built inner HTML and stays agnostic
-// about what's inside. Both slots are inserted verbatim: the caller is
+// about what's inside. Every slot is inserted verbatim: the caller is
 // responsible for escaping its own content.
-export function buildBrandedShellHtml(cardContentHtml: string, footerBandHtml: string): string {
+//
+//   • cardFooterHtml    → optional; the CAN-SPAM footer of a commercial email.
+//                          Its own row at the bottom of the white card, directly
+//                          above the teal band. Empty → no row at all.
+export function buildBrandedShellHtml(
+  cardContentHtml: string,
+  footerBandHtml: string,
+  cardFooterHtml = '',
+): string {
   const logoUrl = resolveDripLogoUrl()
+  const cardFooterRow = cardFooterHtml
+    ? `
+          <tr>
+            <td class="bo-card-footer" style="padding:0 40px 28px;background:#ffffff;">
+              ${cardFooterHtml}
+            </td>
+          </tr>`
+    : ''
 
   return `<!doctype html>
 <html lang="en">
@@ -207,7 +230,7 @@ export function buildBrandedShellHtml(cardContentHtml: string, footerBandHtml: s
             <td style="padding:28px 40px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
               ${cardContentHtml}
             </td>
-          </tr>
+          </tr>${cardFooterRow}
           <tr>
             <td style="padding:0;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -227,8 +250,17 @@ export function buildBrandedShellHtml(cardContentHtml: string, footerBandHtml: s
 </html>`
 }
 
+// A commercial email's compliance footer, pre-built by the caller
+// (lib/marketing-unsubscribe.ts buildCanSpamFooter). html goes in the card's
+// footer slot; text goes after the body in the plain-text alternative.
+export type CardFooter = { html: string; text: string }
+
 // ── HTML ──────────────────────────────────────────────────────────────────
-export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailContext): string {
+export function buildBrandedDripHtml(
+  renderedBody: string,
+  ctx: BrandedEmailContext,
+  cardFooter?: CardFooter | null,
+): string {
   const reviewsLink = ctx.reviews_link?.trim() || null
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
 
@@ -248,7 +280,7 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
   // escaped by bodyParagraphsHtml exactly as before, and the fixed signature
   // layout is joined in between (lib/email-signature.ts header).
   return buildBrandedShellHtml(`${htmlWithSignature(renderedBody, bodyParagraphsHtml, ctx.signature)}
-              ${reviewsHtml}`, footerInner)
+              ${reviewsHtml}`, footerInner, cardFooter?.html ?? '')
 }
 
 // ── Plain text ────────────────────────────────────────────────────────────
@@ -256,7 +288,11 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
 // visible (plain text can't hyperlink), which is exactly what the master bodies
 // already do ("click HERE (url)"). Adds the wordmark line, the conditional
 // reviews line, and the footer band as text.
-export function buildBrandedDripText(renderedBody: string, ctx: BrandedEmailContext): string {
+export function buildBrandedDripText(
+  renderedBody: string,
+  ctx: BrandedEmailContext,
+  cardFooter?: CardFooter | null,
+): string {
   const reviewsLink = ctx.reviews_link?.trim() || null
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
 
@@ -271,6 +307,8 @@ export function buildBrandedDripText(renderedBody: string, ctx: BrandedEmailCont
   if (addReviewsLine) {
     parts.push('', `${REVIEWS_LINE_TEXT} (${reviewsLink})`)
   }
+  // Same order as the HTML: the compliance footer closes the card, then the band.
+  if (cardFooter?.text) parts.push('', cardFooter.text)
   parts.push('', '—', footerLine)
   return parts.join('\n')
 }

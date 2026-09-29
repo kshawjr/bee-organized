@@ -63,16 +63,17 @@ vi.mock('@/lib/resend', () => ({
 vi.mock('@/lib/owner-resolution', () => ({
   getPrimaryOwnerForLocation: vi.fn(async () => null),
 }))
-// CAN-SPAM footer is a spy that stamps a sentinel — its own fail-closed logic
-// is pinned elsewhere (#115). Here we only assert it runs on the customized body.
-const appendFooterMock = vi.hoisted(() =>
-  vi.fn(async (html: string, text: string) => ({
+// CAN-SPAM footer is a spy that returns a sentinel — its own fail-closed logic
+// is pinned elsewhere (#115). Here we only assert it runs for a customized
+// COMMERCIAL body and that its output is what ships.
+const buildFooterMock = vi.hoisted(() =>
+  vi.fn(async () => ({
     ok: true as const,
-    html: `${html}\n<!--canspam-footer-->`,
-    text: `${text}\ncanspam-footer`,
+    html: '<!--canspam-footer-->',
+    text: 'canspam-footer',
   })),
 )
-vi.mock('@/lib/marketing-unsubscribe', () => ({ appendCanSpamFooter: appendFooterMock }))
+vi.mock('@/lib/marketing-unsubscribe', () => ({ buildCanSpamFooter: buildFooterMock }))
 
 import { sendStageEmail } from '@/lib/stage-emails'
 
@@ -159,7 +160,7 @@ describe('issue 206 — send path prefers the location fork, falls back to maste
 })
 
 describe('issue 206 — compliance and holds still apply to a customized body', () => {
-  it('the CAN-SPAM footer appends on top of a customized COMMERCIAL body', async () => {
+  it('the CAN-SPAM footer rides along with a customized COMMERCIAL body', async () => {
     h.enqueue('scheduled_stage_emails', rowFor('opp_closed_job_3mo'))
     h.enqueue('templates', masterRow('opp_closed_job_3mo'))
     h.enqueue('leads', leadRow())
@@ -169,13 +170,13 @@ describe('issue 206 — compliance and holds still apply to a customized body', 
     const res = await sendStageEmail(ROW_ID)
 
     expect(res.sent).toBe(true)
-    // Footer ran, and it ran on the customized body…
-    expect(appendFooterMock).toHaveBeenCalledTimes(1)
-    expect((appendFooterMock.mock.calls[0][0] as string)).toContain('customized closed-job body')
-    // …and the footered output is what actually shipped.
+    // Footer was built once, for this lead…
+    expect(buildFooterMock).toHaveBeenCalledTimes(1)
+    // …and the footered, customized output is what actually shipped.
     const arg = sendEmailMock.mock.calls[0][0] as any
     expect(arg.html).toContain('customized closed-job body')
     expect(arg.html).toContain('<!--canspam-footer-->')
+    expect(arg.text).toContain('canspam-footer')
   })
 
   it('a customized body referencing an unfilled booking token HOLDS, not sends', async () => {

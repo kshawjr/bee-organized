@@ -366,8 +366,8 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // (logo header, single column, teal footer band). The wrapper reads the
   // location chrome (name/phone/reviews) straight off ctx — the same resolved
   // values the body tokens use — and never re-renders tokens. bodyToHtml is
-  // left for welcome/stage emails (drips only). The plain-text alternative is
-  // rebuilt to match, not left stale.
+  // left for the welcome email only; stage emails use this same layout. The
+  // plain-text alternative is rebuilt to match, not left stale.
   //
   // {{signature}} is resolved only when the body actually uses it, so a drip
   // without the tag makes no extra reads and sends exactly as before.

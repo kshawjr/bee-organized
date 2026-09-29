@@ -19,26 +19,25 @@
 //     opp_closed_job_12mo  year-later re-solicitation (no lexical marker,
 //                          so it is hash-pinned: ANY copy edit trips)
 //
-// BRANDED-WRAPPER SPLIT (#114, tip a668be3 + this change): the #90 Bee
-// Organized wrapper (lib/drip-email-layout.ts) now wraps the four
-// TRANSACTIONAL estimate follow-ups at the stage-email send site
-// (lib/stage-emails.ts renderStageEmailContent) — opp_organizing_estimate_3d,
-// opp_organizing_estimate_30d, opp_moving_estimate_3d, opp_moving_estimate_30d
-// — plus the drip steps (lib/drip-send.ts). The three COMMERCIAL emails are
-// DELIBERATELY left on the plain unbranded bodyToHtml path: wrapping a
-// footer-less commercial email in branded chrome would make it *look* like it
-// carries an official footer while remaining non-compliant. welcome,
-// opp_closed_job_3mo, and opp_closed_job_12mo wait on #115 (postal-address +
-// unsubscribe footer). NOTE: this tripwire hashes the seed BODIES, so an HTML
-// wrapper change does NOT trip it — the split is enforced in code + guarded by
-// lib/beta-stage-email-wrapper.test.ts, not here. This comment is the record.
+// BRANDED LAYOUT (#114, then the Closed-Job follow-ups 2026-09-28): the #90
+// Bee Organized layout (lib/drip-email-layout.ts) wraps the drip steps
+// (lib/drip-send.ts) and ALL SIX opportunity-stage emails (lib/stage-emails.ts
+// renderStageEmailContent) — the four transactional estimate follow-ups with no
+// footer, and opp_closed_job_3mo / opp_closed_job_12mo WITH the #115 CAN-SPAM
+// footer placed inside the white card, above the teal band. The Closed-Job pair
+// was held on the plain bodyToHtml path only until #115 shipped the footer
+// (branded chrome on a footer-less commercial email would have looked
+// official while non-compliant); #115 has shipped, so that reason is gone.
+// welcome is still on the plain bodyToHtml path, WITH the footer. NOTE: this
+// tripwire hashes the seed BODIES, so an HTML layout change does NOT trip it —
+// placement is guarded by lib/beta-stage-email-wrapper.test.ts, not here.
 //
 // FOOTER STATUS (#115, this change): the three COMMERCIAL emails now carry a
 // CAN-SPAM footer (unsubscribe link + postal address). The rail split is
 // recorded and guarded in the "rail split" block below:
 //   welcome            → lib/welcome-email.ts appends the footer (audience inquiry)
-//   opp_closed_job_3mo → lib/stage-emails.ts appends the footer (audience client)
-//   opp_closed_job_12mo→ lib/stage-emails.ts appends the footer (audience client)
+//   opp_closed_job_3mo → lib/stage-emails.ts places the footer in the card (audience client)
+//   opp_closed_job_12mo→ lib/stage-emails.ts places the footer in the card (audience client)
 // The drip rail (lib/drip-send.ts) stays footer-less — its 24 steps are
 // transactional. The seed BODIES are unchanged (the footer is appended at send
 // time, not stored), so the hash pins below still hold and still guard copy edits.

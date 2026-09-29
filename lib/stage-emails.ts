@@ -23,12 +23,16 @@ import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
-import { bodyToHtml } from './drip-send'
-import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from './drip-email-layout'
+import {
+  buildBrandedDripHtml,
+  buildBrandedDripText,
+  type BrandedEmailContext,
+  type CardFooter,
+} from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
-import { hasSignatureTag, textWithSignature } from './email-signature'
+import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
-import { appendCanSpamFooter } from './marketing-unsubscribe'
+import { buildCanSpamFooter } from './marketing-unsubscribe'
 import { resolveLocationTemplateFork } from './template-fork'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -62,54 +66,45 @@ const ALL_STAGE_EMAIL_KEYS = [
 ].map(t => t.key)
 
 // ──────────────────────────────────────────────────────────────────────
-// Branded-wrapper eligibility (#114)
+// Branded layout + the CAN-SPAM split
 // ──────────────────────────────────────────────────────────────────────
-// The four opp_*_estimate follow-ups are TRANSACTIONAL — each follows up on
-// the recipient's own estimate/inquiry — so they get the #90 Bee Organized
-// branded wrapper (logo header, single column, teal footer band), matching
-// drips. They need no CAN-SPAM marketing footer.
+// All six stage emails render through the #90 Bee Organized branded layout
+// (logo header, white card, teal band) — the same one drips use, so the
+// booking link becomes a clickable word, the Google Reviews line and the
+// location phone appear, and {{signature}} lays out exactly as on drips.
 //
-// The two opp_closed_job_* templates are DELIBERATELY excluded: the CAN-SPAM
-// tripwire classifies them COMMERCIAL (opp_closed_job_3mo = "1 Free Hour" offer;
-// opp_closed_job_12mo = year-later re-solicitation). Wrapping a footer-less
-// commercial email in branded chrome would make it *look* like it carries an
-// official footer while remaining non-compliant — worse than plain. They keep
-// the unbranded bodyToHtml path until #115 lands the postal-address +
-// unsubscribe footer. (welcome-email is likewise commercial, but it lives in
-// lib/welcome-email.ts and never routes through here.)
-const TRANSACTIONAL_STAGE_EMAIL_KEYS = new Set(
-  [...ESTIMATE_ORGANIZING_TRIGGERS, ...ESTIMATE_MOVING_TRIGGERS].map(t => t.key),
-)
-
+// The four opp_*_estimate follow-ups are TRANSACTIONAL — each follows up on the
+// recipient's own estimate/inquiry — and carry no CAN-SPAM footer.
+//
 // The two Closed-Job follow-ups are COMMERCIAL (opp_closed_job_3mo = "1 Free
-// Hour" offer; opp_closed_job_12mo = year-later re-solicitation). #115 attaches
-// the CAN-SPAM footer to these at send time (see sendStageEmail); the four
-// estimate follow-ups above are transactional and get no footer.
+// Hour" offer; opp_closed_job_12mo = year-later re-solicitation), so they MUST
+// carry the #115 CAN-SPAM footer (unsubscribe link + postal address). They were
+// held on the plain bodyToHtml path until #115 landed, because branded chrome
+// on a footer-less commercial email would have looked official while being
+// non-compliant. #115 has landed; the footer now sits INSIDE the white card,
+// above the teal band (the layout's cardFooter slot), never after </html>.
 const COMMERCIAL_STAGE_EMAIL_KEYS = new Set(CLOSED_WON_TRIGGERS.map(t => t.key))
 
-// Choose the HTML/text rendering for a stage email. Transactional estimate
-// follow-ups get the branded wrapper; commercial closed-job templates get the
-// plain bodyToHtml path (byte-identical to pre-#114). Pure + exported so the
-// wrap/no-wrap split is unit-testable without the send-time DB plumbing.
+// Render a stage email's HTML + text. Pure + exported so the layout and the
+// footer placement are unit-testable without the send-time DB plumbing.
 //
-// bodyToHtml is NOT modified here (#90): welcome + closed-job output stays
-// byte-identical.
+// FAIL CLOSED: a commercial key with no footer throws rather than rendering a
+// footer-less commercial email. sendStageEmail builds the footer first and holds
+// the send if it can't, so this throw is a backstop, not a path.
 export function renderStageEmailContent(
   stageEmailKey: string,
   renderedBody: string,
   brandCtx: BrandedEmailContext,
+  canSpamFooter?: CardFooter | null,
 ): { html: string; text: string } {
-  if (TRANSACTIONAL_STAGE_EMAIL_KEYS.has(stageEmailKey)) {
-    return {
-      html: buildBrandedDripHtml(renderedBody, brandCtx),
-      text: buildBrandedDripText(renderedBody, brandCtx),
-    }
+  const commercial = COMMERCIAL_STAGE_EMAIL_KEYS.has(stageEmailKey)
+  if (commercial && !canSpamFooter) {
+    throw new Error(`stage email ${stageEmailKey} is commercial and needs its CAN-SPAM footer`)
   }
-  // {{signature}} rides brandCtx.signature into the plain path too; with no
-  // marker in the body both halves are byte-identical to before.
+  const footer = commercial ? canSpamFooter : null
   return {
-    html: bodyToHtml(renderedBody, brandCtx.signature),
-    text: textWithSignature(renderedBody, brandCtx.signature),
+    html: buildBrandedDripHtml(renderedBody, brandCtx, footer),
+    text: buildBrandedDripText(renderedBody, brandCtx, footer),
   }
 }
 
@@ -174,8 +169,8 @@ export async function scheduleStageEmails(args: {
       // gone out. Nothing schedules those four keys any more.
       //
       // The keys stay defined below — ALL_STAGE_EMAIL_KEYS still scopes
-      // cancellation over them, TRANSACTIONAL_STAGE_EMAIL_KEYS still picks
-      // their wrapper, and sendStageEmail must keep rendering correctly for
+      // cancellation over them, they stay outside COMMERCIAL_STAGE_EMAIL_KEYS
+      // (no footer), and sendStageEmail must keep rendering correctly for
       // any pending row that outlives the retirement sweep.
       return
     }
@@ -433,10 +428,9 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     return { sent: false, error: 'missing_subject' }
   }
 
-  // #114 — wrap the four transactional estimate follow-ups in the branded
-  // layout; commercial closed-job templates keep the plain path. The wrapper
-  // reads the location chrome (name/phone/reviews) off the same resolved values
-  // the body tokens use, and never re-renders tokens.
+  // All six render through the branded layout. The layout reads the location
+  // chrome (name/phone/reviews) off the same resolved values the body tokens
+  // use, and never re-renders tokens.
   //
   // {{signature}} is resolved only when the template uses it (no extra reads
   // otherwise). Same chain as drips: assignee active here → primary owner →
@@ -448,37 +442,40 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
         assigneeUserId: lead.assigned_to ?? null,
       })
     : null
-  let { html, text } = renderStageEmailContent(row.stage_email_key, rendered.body, {
-    location_name: loc.name,
-    location_phone: loc.phone,
-    reviews_link: loc.reviews_link,
-    signature,
-  })
-
   // #115 — the two Closed-Job follow-ups are COMMERCIAL, so they carry the
   // CAN-SPAM footer (unsubscribe link + postal address); audience 'client'
-  // because these go to past/current clients. The four estimate follow-ups are
-  // transactional and are sent unchanged (no footer).
+  // because these go to past/current clients. It is placed inside the branded
+  // card, above the teal band. The four estimate follow-ups are transactional
+  // and get no footer.
   //
   // FAIL CLOSED: if no token can be minted or MARKETING_POSTAL_ADDRESS is unset,
   // HOLD — leave send_at intact (do NOT mark sent) so the cron retries and it
   // goes out on the first tick after the gap is fixed, exactly like the rate /
   // booking-link holds above. A non-compliant send is the violation; not sending
   // is the safe failure.
+  let canSpamFooter: CardFooter | null = null
   if (COMMERCIAL_STAGE_EMAIL_KEYS.has(row.stage_email_key)) {
-    const footered = await appendCanSpamFooter(html, text, {
-      leadId: lead.id,
-      audience: 'client',
-    })
-    if (!footered.ok) {
+    const footer = await buildCanSpamFooter({ leadId: lead.id, audience: 'client' })
+    if (!footer.ok) {
       console.warn('[stage-emails] held: CAN-SPAM footer could not be built — send refused', {
-        rowId: row.id, leadId: lead.id, key: row.stage_email_key, reason: footered.reason,
+        rowId: row.id, leadId: lead.id, key: row.stage_email_key, reason: footer.reason,
       })
-      return { sent: false, error: `canspam_${footered.reason}` }
+      return { sent: false, error: `canspam_${footer.reason}` }
     }
-    html = footered.html
-    text = footered.text
+    canSpamFooter = { html: footer.html, text: footer.text }
   }
+
+  const { html, text } = renderStageEmailContent(
+    row.stage_email_key,
+    rendered.body,
+    {
+      location_name: loc.name,
+      location_phone: loc.phone,
+      reviews_link: loc.reviews_link,
+      signature,
+    },
+    canSpamFooter,
+  )
 
   const result = await sendEmail({
     locationId: loc.id,

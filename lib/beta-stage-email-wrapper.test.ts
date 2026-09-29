@@ -1,12 +1,21 @@
-// #114 — the branded-wrapper split for opportunity-stage emails.
+// @vitest-environment node
 //
-// renderStageEmailContent (lib/stage-emails.ts) decides which of the six stage
-// templates gets the #90 Bee Organized branded wrapper. This suite pins that
-// split so a future edit can't silently:
-//   - drop the wrapper off a transactional estimate follow-up, or
-//   - slip the wrapper onto a footer-less COMMERCIAL email (welcome /
-//     opp_closed_job_*), which would fake an official footer before #115 ships
-//     the real postal-address + unsubscribe one.
+// Stage emails on the branded layout.
+//
+// renderStageEmailContent (lib/stage-emails.ts) renders all six opportunity-
+// stage emails through the #90 Bee Organized layout. This suite pins:
+//   - the four transactional estimate follow-ups: branded, NO footer
+//   - the two COMMERCIAL Closed-Job follow-ups (3- and 12-month): branded, with
+//     the #115 CAN-SPAM footer INSIDE the white card, directly above the teal
+//     band — never after </html> (where the old append would have put it)
+//   - a commercial follow-up refuses to render without its footer
+//   - the booking link is a clickable word, the reviews line and phone appear
+//   - {{signature}} still resolves through the branded path
+//   - drips are byte-identical to before this change
+//
+// The footer-placement pin runs through the REAL send path (sendStageEmail →
+// real buildCanSpamFooter → real layout) and checks what reaches sendEmail, so
+// a regression in either the layout slot or the send site trips it.
 //
 // The CAN-SPAM tripwire hashes seed BODIES and so is blind to this HTML-layer
 // change (see beta-drip-canspam-tripwire.test.ts) — this file is the guard.
@@ -14,30 +23,81 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 
-// stage-emails.ts pulls in the service-role client at module load; it never
-// runs in these pure-render tests, so a bare stub is enough.
-vi.mock('@/lib/supabase-service', () => ({ supabaseService: {} }))
+// ── Queued fake DB (FIFO per table), same shape as the issue 206 suite ──────
+const h = vi.hoisted(() => {
+  type Resp = { data: any; error: any }
+  const state = { queue: [] as { table: string; resp: Resp }[] }
+  const reset = () => { state.queue = [] }
+  const enqueue = (table: string, data: any, error: any = null) =>
+    state.queue.push({ table, resp: { data, error } })
+  const makeBuilder = (table: string) => {
+    const idx = state.queue.findIndex(q => q.table === table)
+    const resp = idx >= 0 ? state.queue.splice(idx, 1)[0].resp : { data: null, error: null }
+    const b: any = {}
+    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'or', 'not', 'range', 'ilike', 'is', 'limit', 'order', 'lte', 'in']) {
+      b[m] = () => b
+    }
+    b.maybeSingle = () => Promise.resolve(resp)
+    b.single = () => Promise.resolve(resp)
+    b.then = (res: any, rej: any) => Promise.resolve(resp).then(res, rej)
+    return b
+  }
+  return { reset, enqueue, makeBuilder }
+})
 
-import { renderStageEmailContent } from '@/lib/stage-emails'
-import { bodyToHtml } from '@/lib/drip-send'
+vi.mock('@/lib/supabase-service', () => ({
+  supabaseService: { from: (t: string) => h.makeBuilder(t) },
+}))
+
+// Real renderTemplate (tokens + the {{signature}} marker); only the network send is faked.
+const sendEmailMock = vi.hoisted(() => vi.fn(async (_args: any) => ({ success: true, id: 're-1' })))
+vi.mock('@/lib/resend', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/resend')>()),
+  sendEmail: sendEmailMock,
+}))
+vi.mock('@/lib/owner-resolution', () => ({
+  getPrimaryOwnerForLocation: vi.fn(async () => null),
+}))
+const SIGNATURE = {
+  name: 'Jane Smith', title: 'Owner & Lead Organizer', email: 'jane@example.com',
+  mobile: '303 555 0199', photoPath: null, websiteUrl: null,
+  facebookUrl: null, instagramUrl: null, linkedinUrl: null,
+}
+vi.mock('@/lib/email-signature-resolve', () => ({
+  resolveEmailSignature: vi.fn(async () => SIGNATURE),
+}))
+
+import { renderStageEmailContent, sendStageEmail } from '@/lib/stage-emails'
 import {
+  buildBrandedDripHtml,
+  buildBrandedDripText,
   DRIP_BRAND_TEAL,
   DRIP_WEBSITE_LABEL,
   DRIP_LOGO_PATH,
   REVIEWS_LINE_TEXT,
 } from '@/lib/drip-email-layout'
 
-// The logo URL is built from the app origin at render time — pin one so the
-// branded HTML is deterministic; restore afterward.
+// The logo + unsubscribe URLs are built from the app origin at render time —
+// pin one so the HTML is deterministic; restore afterward.
 const APP_ORIGIN = 'https://beehive.beeorganized.com'
-const savedEnv = { app: process.env.NEXT_PUBLIC_APP_URL, site: process.env.NEXT_PUBLIC_SITE_URL }
+const POSTAL = '123 Hive Lane, Boulder, CO 80301'
+const savedEnv = {
+  app: process.env.NEXT_PUBLIC_APP_URL,
+  site: process.env.NEXT_PUBLIC_SITE_URL,
+  postal: process.env.MARKETING_POSTAL_ADDRESS,
+}
 beforeEach(() => {
+  h.reset()
+  vi.clearAllMocks()
   process.env.NEXT_PUBLIC_APP_URL = APP_ORIGIN
+  process.env.MARKETING_POSTAL_ADDRESS = POSTAL
 })
 afterEach(() => {
   process.env.NEXT_PUBLIC_APP_URL = savedEnv.app
   process.env.NEXT_PUBLIC_SITE_URL = savedEnv.site
+  process.env.MARKETING_POSTAL_ADDRESS = savedEnv.postal
 })
 
 const ESTIMATE_KEYS = [
@@ -54,11 +114,11 @@ const brandCtx = {
   reviews_link: 'https://g.page/bee-organized-boulder/review',
 }
 
-// A fully-rendered estimate follow-up: tokens already substituted, booking CTA
-// in the corpus's "word (url)" form with a query string, no in-body reviews line.
-const RENDERED_ESTIMATE_BODY = `Hi John,
+// A fully-rendered body: tokens already substituted, booking CTA in the
+// corpus's "word (url)" form with a query string, no in-body reviews line.
+const RENDERED_BODY = `Hi John,
 
-Just following up on the estimate for your project. Click HERE (https://book.example.com/sarah?ref=a&b=2) to pick a time.
+Just following up. Click HERE (https://book.example.com/sarah?ref=a&b=2) to pick a time.
 
 Our rate starts at $95 per hour per Bee.
 
@@ -66,80 +126,201 @@ Thank you,
 
 Sarah Mitchell`
 
-describe('#114 stage-email wrapper — transactional estimate follow-ups are branded', () => {
-  it.each(ESTIMATE_KEYS)('%s renders inside the branded wrapper', (key) => {
-    const { html } = renderStageEmailContent(key, RENDERED_ESTIMATE_BODY, brandCtx)
-    // Branded chrome present…
-    expect(html).toContain('role="presentation"')
-    expect(html).toContain('max-width:600px')
-    expect(html).toContain('BEE ORGANIZED')
-    expect(html).toContain('Simplify Your Hive')
-    expect(html).toContain(`${APP_ORIGIN}${DRIP_LOGO_PATH}`)
-    // …and the teal footer band with name / website / phone.
-    expect(html).toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
-    expect(html).toContain('Bee Organized Boulder')
-    expect(html).toContain(DRIP_WEBSITE_LABEL)
-    expect(html).toContain('(303) 555-0147')
-    // …and is NOT the plain unbranded path.
-    expect(html).not.toBe(bodyToHtml(RENDERED_ESTIMATE_BODY))
+const STAND_IN_FOOTER = {
+  html: '<div data-test="canspam">Unsubscribe here</div>',
+  text: '—\nUnsubscribe at any time: https://x/unsubscribe/t',
+}
+
+// Where the teal band starts — everything above it and after the card's own
+// open tag is "inside the white card".
+const TEAL_BAND = `bgcolor="${DRIP_BRAND_TEAL}"`
+
+function expectBrandedChrome(html: string) {
+  expect(html).toContain('role="presentation"')
+  expect(html).toContain('max-width:600px')
+  expect(html).toContain('BEE ORGANIZED')
+  expect(html).toContain('Simplify Your Hive')
+  expect(html).toContain(`${APP_ORIGIN}${DRIP_LOGO_PATH}`)
+  expect(html).toContain(TEAL_BAND)
+  expect(html).toContain('Bee Organized Boulder')
+  expect(html).toContain(DRIP_WEBSITE_LABEL)
+}
+
+// The compliance placement check. `needle` is a string that only the footer
+// carries. It must appear exactly once, after the body copy and the card's
+// opening tag, before the teal band, and inside the document.
+function expectFooterInsideCard(html: string, needle: string, bodyMarker: string) {
+  expect(html.split(needle).length - 1).toBe(1)
+  const at = html.indexOf(needle)
+  expect(at).toBeGreaterThan(html.indexOf('class="bo-card"'))
+  expect(at).toBeGreaterThan(html.indexOf(bodyMarker))
+  expect(at).toBeLessThan(html.indexOf(TEAL_BAND))
+  expect(at).toBeLessThan(html.indexOf('</body>'))
+  // It sits in its own row of the card table, directly above the band row.
+  const between = html.slice(at, html.indexOf(TEAL_BAND))
+  expect(between).not.toContain('class="bo-card"')
+  expect(between.match(/<\/tr>/g)?.length).toBe(1)
+  // Nothing trails the document.
+  expect(html.trimEnd().endsWith('</html>')).toBe(true)
+}
+
+describe('transactional estimate follow-ups — branded, no footer', () => {
+  it.each(ESTIMATE_KEYS)('%s renders inside the branded layout with no footer row', (key) => {
+    const { html } = renderStageEmailContent(key, RENDERED_BODY, brandCtx)
+    expectBrandedChrome(html)
+    expect(html).not.toContain('bo-card-footer')
+    // A footer passed by mistake is ignored — transactional mail stays footer-less.
+    const { html: again } = renderStageEmailContent(key, RENDERED_BODY, brandCtx, STAND_IN_FOOTER)
+    expect(again).toBe(html)
+  })
+})
+
+describe('Closed-Job follow-ups (3- and 12-month) — branded, footer inside the card', () => {
+  it.each(COMMERCIAL_STAGE_KEYS)('%s renders branded with the footer above the teal band', (key) => {
+    const { html, text } = renderStageEmailContent(key, RENDERED_BODY, brandCtx, STAND_IN_FOOTER)
+    expectBrandedChrome(html)
+    expectFooterInsideCard(html, 'data-test="canspam"', 'Sarah Mitchell')
+    // Plain text: footer after the body, before the band line.
+    const t = text.indexOf('Unsubscribe at any time')
+    expect(t).toBeGreaterThan(text.indexOf('Sarah Mitchell'))
+    expect(t).toBeLessThan(text.indexOf('Bee Organized Boulder | beeorganized.com'))
   })
 
-  it('tokens resolve, the booking link is clickable, and the plain-text alternative matches', () => {
-    const { html, text } = renderStageEmailContent(
-      ESTIMATE_KEYS[0],
-      RENDERED_ESTIMATE_BODY,
-      brandCtx,
-    )
-    // Rendered token values survive into the HTML (no raw {{token}} left).
-    for (const needle of ['John', '$95 per hour', 'Sarah Mitchell']) {
-      expect(html).toContain(needle)
-    }
-    expect(html).not.toMatch(/\{\{[a-z_]+\}\}/)
-    // Booking CTA is a working link on the word, URL hidden, & encoded.
+  it.each(COMMERCIAL_STAGE_KEYS)('%s refuses to render without its footer (fail closed)', (key) => {
+    expect(() => renderStageEmailContent(key, RENDERED_BODY, brandCtx)).toThrow(/CAN-SPAM/)
+    expect(() => renderStageEmailContent(key, RENDERED_BODY, brandCtx, null)).toThrow(/CAN-SPAM/)
+  })
+
+  it.each(COMMERCIAL_STAGE_KEYS)('%s: booking link is a clickable word, not a raw URL', (key) => {
+    const { html, text } = renderStageEmailContent(key, RENDERED_BODY, brandCtx, STAND_IN_FOOTER)
     expect(html).toContain('<a href="https://book.example.com/sarah?ref=a&amp;b=2"')
     expect(html).toMatch(/>HERE<\/a>/)
-    // No in-body reviews line → the wrapper injects one, linked, exactly once.
-    expect(html.split(`href="${brandCtx.reviews_link}"`).length - 1).toBe(1)
-    // Plain-text alternative: carries the wordmark + footer band, keeps the
-    // visible URL, and contains no HTML.
-    expect(text).toContain('BEE ORGANIZED — Simplify Your Hive')
-    expect(text).toContain('Bee Organized Boulder | beeorganized.com | (303) 555-0147')
+    expect(html).not.toContain('HERE (https://')
+    // Plain text can't hyperlink, so it keeps the visible URL.
     expect(text).toContain('Click HERE (https://book.example.com/sarah?ref=a&b=2)')
+  })
+
+  it.each(COMMERCIAL_STAGE_KEYS)('%s: the reviews line and location phone appear', (key) => {
+    const { html, text } = renderStageEmailContent(key, RENDERED_BODY, brandCtx, STAND_IN_FOOTER)
+    expect(html.split(`href="${brandCtx.reviews_link}"`).length - 1).toBe(1)
+    expect(html).toContain(REVIEWS_LINE_TEXT)
+    expect(html).toContain('(303) 555-0147')
     expect(text).toContain(`${REVIEWS_LINE_TEXT} (${brandCtx.reviews_link})`)
+    expect(text).toContain('Bee Organized Boulder | beeorganized.com | (303) 555-0147')
     expect(text).not.toContain('<')
   })
 })
 
-describe('#114 stage-email wrapper — commercial closed-job templates stay unbranded (byte-identical)', () => {
+// ── The compliance pin, end to end ──────────────────────────────────────────
+describe('COMPLIANCE — what actually ships for a Closed-Job follow-up', () => {
+  const TOKEN = 'a'.repeat(48)
+  const queueSend = (key: string, body: string) => {
+    h.enqueue('scheduled_stage_emails', {
+      id: 'sched-1', lead_id: 'lead-1', stage_email_key: key, sent_at: null, cancelled_at: null,
+    })
+    h.enqueue('templates', { id: 'master-1', subject: 'We hope you love your space', body, name: key })
+    h.enqueue('leads', {
+      id: 'lead-1', name: 'John Doe', first_name: 'John', email: 'john@example.com',
+      location_uuid: 'loc-1', assigned_to: null, marketing_opt_out: false,
+    })
+    h.enqueue('locations', {
+      id: 'loc-1', name: 'Boulder', sender_name: 'Bee Boulder', phone: '(303) 555-0147',
+      calendar_link: 'https://book.example.com/boulder?x=1&y=2',
+      reviews_link: 'https://g.page/bee-organized-boulder/review',
+      rate_per_hour: '95', city: 'Boulder', state: 'CO',
+    })
+    // ensureUnsubscribeToken's read — an existing token, so nothing is minted.
+    h.enqueue('leads', { unsubscribe_token: TOKEN })
+  }
+
   it.each(COMMERCIAL_STAGE_KEYS)(
-    '%s is rendered by the plain bodyToHtml path, not the wrapper',
-    (key) => {
-      const { html, text } = renderStageEmailContent(key, RENDERED_ESTIMATE_BODY, brandCtx)
-      // Byte-identical to the pre-#114 path: bodyToHtml for html, raw body for text.
-      expect(html).toBe(bodyToHtml(RENDERED_ESTIMATE_BODY))
-      expect(text).toBe(RENDERED_ESTIMATE_BODY)
-      // No branded chrome leaked in.
-      expect(html).not.toContain('BEE ORGANIZED')
-      expect(html).not.toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
-      expect(html).not.toContain(DRIP_WEBSITE_LABEL)
+    '%s ships branded with the real unsubscribe link + postal address inside the card',
+    async (key) => {
+      queueSend(key, '{{first_name}},\n\nWe hope you are still thrilled.\n\nBest,\n\n{{owner_name}}')
+      const res = await sendStageEmail('sched-1')
+      expect(res).toEqual({ sent: true })
+
+      const { html, text } = sendEmailMock.mock.calls[0][0]
+      const unsubUrl = `${APP_ORIGIN}/unsubscribe/${TOKEN}`
+      expectBrandedChrome(html)
+      expectFooterInsideCard(html, `href="${unsubUrl}"`, 'We hope you are still thrilled.')
+      // The postal address and audience line are inside the card too.
+      expect(html.indexOf(POSTAL)).toBeLessThan(html.indexOf(TEAL_BAND))
+      expect(html.indexOf(POSTAL)).toBeGreaterThan(html.indexOf('We hope you are still thrilled.'))
+      expect(html).toContain('because you&#39;re a Bee Organized client')
+      expect(text).toContain("because you're a Bee Organized client")
+      expect(text).toContain(`Unsubscribe at any time: ${unsubUrl}`)
+      expect(text).toContain(POSTAL)
     },
   )
+
+  it('no postal address → held, nothing sent', async () => {
+    process.env.MARKETING_POSTAL_ADDRESS = ''
+    queueSend('opp_closed_job_3mo', 'Hi {{first_name}}')
+    const res = await sendStageEmail('sched-1')
+    expect(res).toEqual({ sent: false, error: 'canspam_no_postal_address' })
+    expect(sendEmailMock).not.toHaveBeenCalled()
+  })
+
+  it('{{signature}} and the booking tag resolve through the branded path', async () => {
+    queueSend(
+      'opp_closed_job_12mo',
+      'Hi {{first_name}},\n\nBook a refresh HERE ({{book_assessment_link}}).\n\nWarmly,\n{{signature}}',
+    )
+    const res = await sendStageEmail('sched-1')
+    expect(res).toEqual({ sent: true })
+    const { html, text } = sendEmailMock.mock.calls[0][0]
+    // Signature block laid out once, in the body — above the footer and band.
+    expect(html).toContain('Jane Smith')
+    expect(html).toContain('Owner &amp; Lead Organizer')
+    expect(html).not.toContain('{{signature}}')
+    expect(html).not.toContain('bo-signature')
+    expect(html.indexOf('Jane Smith')).toBeLessThan(html.indexOf('/unsubscribe/'))
+    expect(text).toContain('Jane Smith\nOwner & Lead Organizer')
+    // Booking link: clickable word.
+    expect(html).toContain('<a href="https://book.example.com/boulder?x=1&amp;y=2"')
+    expect(html).toMatch(/>HERE<\/a>/)
+  })
 })
 
-describe('welcome-email render path — unbranded bodyToHtml base, never the #90 wrapper', () => {
-  // welcome is COMMERCIAL and never routes through renderStageEmailContent; it
-  // renders in lib/welcome-email.ts via the plain bodyToHtml path. #115 now
-  // appends the CAN-SPAM footer on top of that base — but welcome must never
-  // adopt the branded #90 drip wrapper (which would fake an official footer).
+// ── Drips are unchanged ─────────────────────────────────────────────────────
+describe('drips are byte-identical to before the footer slot existed', () => {
+  // SHA-256 of buildBrandedDripHtml / buildBrandedDripText for this exact input,
+  // recorded on d4e99c5 BEFORE the card-footer slot was added.
+  it('same output, byte for byte', () => {
+    const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
+    const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
+    const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+    expect(sha(buildBrandedDripHtml(body, ctx))).toBe(
+      '2ccb28fcb2afe51dff02929f8e29639782542b69b825b368d18fa09118992e76',
+    )
+    expect(sha(buildBrandedDripText(body, ctx))).toBe(
+      '3b9d0e5b8a968c165ed27212cf0100f47512d861455a7d498593546731568eed',
+    )
+    expect(buildBrandedDripHtml(body, ctx)).not.toContain('bo-card-footer')
+  })
+
+  it('the drip send site passes no footer', () => {
+    const src = readFileSync(join(__dirname, 'drip-send.ts'), 'utf8')
+    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature \}\)/)
+    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature \}\)/)
+  })
+})
+
+// ── Welcome: still the plain path, still footered ───────────────────────────
+describe('welcome-email render path — plain bodyToHtml base with the footer appended', () => {
+  // Welcome is COMMERCIAL and never routes through renderStageEmailContent; it
+  // renders in lib/welcome-email.ts via the plain bodyToHtml path and #115
+  // appends the CAN-SPAM footer to that. The original reason to keep it off the
+  // branded layout (no footer yet) is gone, but moving it is a separate
+  // decision — these pins record where it is today, so a move is deliberate.
   const src = readFileSync(join(__dirname, 'welcome-email.ts'), 'utf8')
 
   it('welcome-email.ts builds its base HTML via the plain bodyToHtml path', () => {
-    // (bodyToHtml's optional second argument is the {{signature}} block —
-    // still the plain path)
     expect(src).toMatch(/const html = bodyToHtml\(rendered\.body(, signature)?\)/)
   })
 
-  it('welcome-email.ts does not import or call the branded drip wrapper', () => {
+  it('welcome-email.ts does not import the branded layout', () => {
     expect(/buildBrandedDrip|drip-email-layout/.test(src)).toBe(false)
   })
 
