@@ -28,14 +28,15 @@
 // was held on the plain bodyToHtml path only until #115 shipped the footer
 // (branded chrome on a footer-less commercial email would have looked
 // official while non-compliant); #115 has shipped, so that reason is gone.
-// welcome is still on the plain bodyToHtml path, WITH the footer. NOTE: this
+// welcome joined them on 2026-09-28 for the same reason, its footer also in
+// the card (lib/welcome-email.ts renderWelcomeEmailContent). NOTE: this
 // tripwire hashes the seed BODIES, so an HTML layout change does NOT trip it —
 // placement is guarded by lib/beta-stage-email-wrapper.test.ts, not here.
 //
 // FOOTER STATUS (#115, this change): the three COMMERCIAL emails now carry a
 // CAN-SPAM footer (unsubscribe link + postal address). The rail split is
 // recorded and guarded in the "rail split" block below:
-//   welcome            → lib/welcome-email.ts appends the footer (audience inquiry)
+//   welcome            → lib/welcome-email.ts places the footer in the card (audience inquiry)
 //   opp_closed_job_3mo → lib/stage-emails.ts places the footer in the card (audience client)
 //   opp_closed_job_12mo→ lib/stage-emails.ts places the footer in the card (audience client)
 // The drip rail (lib/drip-send.ts) stays footer-less — its 24 steps are

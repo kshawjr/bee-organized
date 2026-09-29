@@ -307,24 +307,51 @@ describe('drips are byte-identical to before the footer slot existed', () => {
   })
 })
 
-// ── Welcome: still the plain path, still footered ───────────────────────────
-describe('welcome-email render path — plain bodyToHtml base with the footer appended', () => {
-  // Welcome is COMMERCIAL and never routes through renderStageEmailContent; it
-  // renders in lib/welcome-email.ts via the plain bodyToHtml path and #115
-  // appends the CAN-SPAM footer to that. The original reason to keep it off the
-  // branded layout (no footer yet) is gone, but moving it is a separate
-  // decision — these pins record where it is today, so a move is deliberate.
+// ── Follow-ups unchanged by the welcome move ────────────────────────────────
+describe('the Closed-Job follow-ups are byte-identical to 5656a86', () => {
+  // SHA-256 recorded on 5656a86, before the welcome moved to the branded layout.
+  it('same output, byte for byte', () => {
+    const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
+    const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
+    const r = renderStageEmailContent('opp_closed_job_3mo', body, ctx, { html: '<div>FOOTER</div>', text: 'FOOTER' })
+    const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+    expect(sha(r.html)).toBe('2cd4623a2bb9cf3230917d27caae1ae9f00e8839a056a5502572f31aec58eeea')
+    expect(sha(r.text)).toBe('ddf4cf2733ab65db098ef5f4750fe1823629b079107a22754b70f82d956faf6f')
+  })
+})
+
+// ── Welcome: branded, footer in the card ────────────────────────────────────
+describe('welcome-email render path — branded layout, footer in the card', () => {
+  // REVERSED ON PURPOSE, 2026-09-28. Until then this block pinned the OPPOSITE:
+  // "builds its base HTML via the plain bodyToHtml path" and "does not import
+  // the branded layout". Those guarded a real rule — never put branded chrome on
+  // a commercial email that has no CAN-SPAM footer — and the rule's condition
+  // no longer holds: #115 gave welcome its footer. Kevin asked for the welcome
+  // to be branded. The guard is not dropped, it is flipped: welcome must now
+  // use the branded layout, must NOT fall back to the plain path, and must keep
+  // its footer (placement is pinned end-to-end, on Kevin's live copy, in
+  // lib/beta-welcome-master-template.test.ts).
   const src = readFileSync(join(__dirname, 'welcome-email.ts'), 'utf8')
 
-  it('welcome-email.ts builds its base HTML via the plain bodyToHtml path', () => {
-    expect(src).toMatch(/const html = bodyToHtml\(rendered\.body(, signature)?\)/)
+  it('welcome-email.ts renders through the branded layout, not the plain bodyToHtml path', () => {
+    expect(src).toMatch(/from '\.\/drip-email-layout'/)
+    expect(src).toMatch(/buildBrandedDripHtml\(renderedBody, brandCtx, canSpamFooter\)/)
+    expect(/bodyToHtml\(/.test(src)).toBe(false)
   })
 
-  it('welcome-email.ts does not import the branded layout', () => {
-    expect(/buildBrandedDrip|drip-email-layout/.test(src)).toBe(false)
+  it('welcome-email.ts builds the #115 CAN-SPAM footer and places it, not appends it', () => {
+    expect(src).toContain('buildCanSpamFooter')
+    expect(src).not.toContain('appendCanSpamFooter(')
   })
+})
 
-  it('welcome-email.ts appends the #115 CAN-SPAM footer (it is a commercial email)', () => {
-    expect(src).toContain('appendCanSpamFooter')
+describe('welcome refuses to render without its footer (fail closed)', () => {
+  it('no footer → throws; with a footer → branded, footer in the card', async () => {
+    const { renderWelcomeEmailContent } = await import('@/lib/welcome-email')
+    expect(() => renderWelcomeEmailContent(RENDERED_BODY, brandCtx, null)).toThrow(/CAN-SPAM/)
+    expect(() => renderWelcomeEmailContent(RENDERED_BODY, brandCtx, undefined)).toThrow(/CAN-SPAM/)
+    const { html } = renderWelcomeEmailContent(RENDERED_BODY, brandCtx, STAND_IN_FOOTER)
+    expectBrandedChrome(html)
+    expectFooterInsideCard(html, 'data-test="canspam"', 'Sarah Mitchell')
   })
 })

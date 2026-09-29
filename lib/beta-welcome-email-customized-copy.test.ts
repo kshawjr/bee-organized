@@ -51,17 +51,17 @@ vi.mock('@/lib/resend', () => ({
 vi.mock('@/lib/owner-resolution', () => ({
   getPrimaryOwnerForLocation: vi.fn(async () => null),
 }))
-// Welcome is COMMERCIAL — the footer is unconditional. Spy stamps a sentinel so
-// we can prove it ran on the customized body; its own fail-closed logic is
-// pinned in beta-can-spam-footer.test.ts.
-const appendFooterMock = vi.hoisted(() =>
-  vi.fn(async (html: string, text: string) => ({
+// Welcome is COMMERCIAL — the footer is unconditional. The spy returns a
+// sentinel so we can prove it ships with the customized body; its own
+// fail-closed logic is pinned in beta-can-spam-footer.test.ts.
+const buildFooterMock = vi.hoisted(() =>
+  vi.fn(async () => ({
     ok: true as const,
-    html: `${html}\n<!--canspam-footer-->`,
-    text: `${text}\ncanspam-footer`,
+    html: '<!--canspam-footer-->',
+    text: 'canspam-footer',
   })),
 )
-vi.mock('@/lib/marketing-unsubscribe', () => ({ appendCanSpamFooter: appendFooterMock }))
+vi.mock('@/lib/marketing-unsubscribe', () => ({ buildCanSpamFooter: buildFooterMock }))
 
 import { sendWelcomeEmail } from '@/lib/welcome-email'
 
@@ -134,7 +134,7 @@ describe('issue 206 — Welcome send prefers the location fork, falls back to ma
 })
 
 describe('issue 206 — Welcome compliance and holds apply to a customized body', () => {
-  it('the CAN-SPAM footer appends on top of the customized body', async () => {
+  it('the CAN-SPAM footer ships with the customized body', async () => {
     h.enqueue('leads', leadRow())
     h.enqueue('locations', locRow())
     h.enqueue('templates', masterRow())
@@ -143,11 +143,11 @@ describe('issue 206 — Welcome compliance and holds apply to a customized body'
     const res = await sendWelcomeEmail('lead-1')
 
     expect(res.sent).toBe(true)
-    expect(appendFooterMock).toHaveBeenCalledTimes(1)
-    expect(appendFooterMock.mock.calls[0][0] as string).toContain('customized welcome body')
+    expect(buildFooterMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailMock.mock.calls[0][0] as any
     expect(arg.html).toContain('customized welcome body')
     expect(arg.html).toContain('<!--canspam-footer-->')
+    expect(arg.text).toContain('canspam-footer')
   })
 
   it('a customized body with an unfilled booking token HOLDS, not sends', async () => {

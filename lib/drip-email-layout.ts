@@ -7,11 +7,11 @@
 // body copy at generous line-height, one gold bee logo + wordmark header,
 // and a solid teal footer band.
 //
-// SCOPE: drips, all six opportunity-stage emails (lib/stage-emails.ts — the
-// four estimate follow-ups AND the two commercial Closed-Job follow-ups), and
-// the shell alone for lead notifications + feedback replies. Only welcome
-// still uses the plain bodyToHtml path (lib/drip-send.ts), which this module
-// does not touch.
+// SCOPE: every automated client email — drips, all six opportunity-stage
+// emails (lib/stage-emails.ts — the four estimate follow-ups AND the two
+// commercial Closed-Job follow-ups), and the welcome (lib/welcome-email.ts) —
+// plus the shell alone for lead notifications + feedback replies. The old
+// plain bodyToHtml path (lib/drip-send.ts) no longer has a sending caller.
 //
 // COMPLIANCE SLOT: a commercial email's CAN-SPAM footer (unsubscribe + postal
 // address) must sit INSIDE the white card, above the teal band. Appending it to

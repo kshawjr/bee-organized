@@ -135,7 +135,9 @@ export async function buildCanSpamFooter(args: {
 }
 
 // Build the footer and append it to the end of plain html + text — for a rail
-// with no layout frame (welcome's plain bodyToHtml path).
+// with no layout frame. No sending rail uses it today: welcome and the
+// Closed-Job follow-ups place buildCanSpamFooter's output inside the branded
+// card instead. Kept for any future plain-bodied commercial rail.
 export async function appendCanSpamFooter(
   html: string,
   text: string,

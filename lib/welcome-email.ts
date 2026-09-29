@@ -29,11 +29,16 @@ import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
-import { bodyToHtml } from './drip-send'
+import {
+  buildBrandedDripHtml,
+  buildBrandedDripText,
+  type BrandedEmailContext,
+  type CardFooter,
+} from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
-import { hasSignatureTag, textWithSignature } from './email-signature'
+import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
-import { appendCanSpamFooter } from './marketing-unsubscribe'
+import { buildCanSpamFooter } from './marketing-unsubscribe'
 import { resolveLocationTemplateFork } from './template-fork'
 // Type-only: erased at build, so it adds no runtime cycle (drip-lifecycle
 // imports this file; the value import below stays dynamic for that reason).
@@ -41,6 +46,38 @@ import type { PastClientFacts } from './drip-lifecycle'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
+
+// ──────────────────────────────────────────────────────────────────────
+// Render
+// ──────────────────────────────────────────────────────────────────────
+// The welcome renders through the #90 Bee Organized branded layout — the same
+// one drips and the stage emails use: logo, white card, teal band, any
+// "word (https://…)" link made clickable on the word, the Google Reviews line
+// and the location phone, and {{signature}} laid out inside the card.
+//
+// It is COMMERCIAL (pure brand promo, no transactional content), so its #115
+// CAN-SPAM footer is REQUIRED and sits in the card's footer slot, above the
+// teal band. It used to be held on the plain bodyToHtml path because branded
+// chrome on a footer-less commercial email would have looked official while
+// non-compliant; #115 shipped the footer, so that reason is gone.
+//
+// FAIL CLOSED, same as the Closed-Job follow-ups: no footer → throw rather
+// than render a footer-less commercial email. sendWelcomeEmail builds the
+// footer first and holds the send if it can't, so this is a backstop.
+// Pure + exported so layout and footer placement are testable without the DB.
+export function renderWelcomeEmailContent(
+  renderedBody: string,
+  brandCtx: BrandedEmailContext,
+  canSpamFooter: CardFooter | null | undefined,
+): { html: string; text: string } {
+  if (!canSpamFooter) {
+    throw new Error('the welcome email is commercial and needs its CAN-SPAM footer')
+  }
+  return {
+    html: buildBrandedDripHtml(renderedBody, brandCtx, canSpamFooter),
+    text: buildBrandedDripText(renderedBody, brandCtx, canSpamFooter),
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Schedule
@@ -349,12 +386,8 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     return { sent: false, error: 'missing_subject' }
   }
 
-  // Base HTML is the plain bodyToHtml path — welcome is COMMERCIAL, so it does
-  // NOT adopt the #90 branded drip wrapper (#114); the CAN-SPAM footer below is
-  // what makes it compliant.
-  //
   // {{signature}}: resolved only when the template uses it — same chain as
-  // drips and follow-ups. Text half gets the text signature.
+  // drips and follow-ups.
   const signature = hasSignatureTag(tpl.body)
     ? await resolveEmailSignature({
         locationId: loc.id,
@@ -362,37 +395,44 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
         assigneeUserId: lead.assigned_to ?? null,
       })
     : null
-  const html = bodyToHtml(rendered.body, signature)
-  const plainBody = textWithSignature(rendered.body, signature)
 
   // #115 — the Welcome email is COMMERCIAL (pure brand promo, no transactional
   // content), so it must carry a CAN-SPAM footer: a working unsubscribe link +
-  // physical postal address. Append it to both bodies; audience 'inquiry' because
-  // the recipient asked about Bee Organized (they never joined a mailing list —
-  // an inaccurate reason line is itself a deceptive-header problem).
+  // physical postal address. Audience 'inquiry' because the recipient asked
+  // about Bee Organized (they never joined a mailing list — an inaccurate reason
+  // line is itself a deceptive-header problem). It goes inside the branded
+  // card, above the teal band (renderWelcomeEmailContent).
   //
   // FAIL CLOSED: if no token can be minted or MARKETING_POSTAL_ADDRESS is unset,
   // HOLD — leave welcome_email_scheduled_at intact (do NOT mark sent) so the cron
   // retries and the email goes out on the first tick after the gap is fixed,
   // exactly like the rate / booking-link holds above. A non-compliant send is the
   // violation; not sending is the safe failure.
-  const footered = await appendCanSpamFooter(html, plainBody, {
-    leadId: lead.id,
-    audience: 'inquiry',
-  })
-  if (!footered.ok) {
+  const footer = await buildCanSpamFooter({ leadId: lead.id, audience: 'inquiry' })
+  if (!footer.ok) {
     console.warn('[welcome] held: CAN-SPAM footer could not be built — send refused', {
-      leadId, locationId: loc.id, reason: footered.reason,
+      leadId, locationId: loc.id, reason: footer.reason,
     })
-    return { sent: false, error: `canspam_${footered.reason}` }
+    return { sent: false, error: `canspam_${footer.reason}` }
   }
+
+  const { html, text } = renderWelcomeEmailContent(
+    rendered.body,
+    {
+      location_name: loc.name,
+      location_phone: loc.phone,
+      reviews_link: loc.reviews_link,
+      signature,
+    },
+    { html: footer.html, text: footer.text },
+  )
 
   const result = await sendEmail({
     locationId: loc.id,
     to: lead.email.trim(),
     subject: rendered.subject,
-    html: footered.html,
-    text: footered.text,
+    html,
+    text,
     // Notebook context (#103): welcome shares the drip's sendEmail path and
     // had the same null email_kind / lead_id gap. Stamp it so it isn't the one
     // outbound rail still invisible to the notification_log queries.

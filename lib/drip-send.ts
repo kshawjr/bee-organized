@@ -365,9 +365,9 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // #90 — wrap the rendered body in the Bee Organized branded drip layout
   // (logo header, single column, teal footer band). The wrapper reads the
   // location chrome (name/phone/reviews) straight off ctx — the same resolved
-  // values the body tokens use — and never re-renders tokens. bodyToHtml is
-  // left for the welcome email only; stage emails use this same layout. The
-  // plain-text alternative is rebuilt to match, not left stale.
+  // values the body tokens use — and never re-renders tokens. The stage emails
+  // and the welcome use this same layout. The plain-text alternative is
+  // rebuilt to match, not left stale.
   //
   // {{signature}} is resolved only when the body actually uses it, so a drip
   // without the tag makes no extra reads and sends exactly as before.

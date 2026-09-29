@@ -173,12 +173,19 @@ describe('a new lead\'s welcome renders from this template', () => {
     expect(sent.subject).toBe('Welcome to the Bee Organized Hive!')
     expect(sent.to).toBe('sarah@email.com')
     expect(sent.email_kind).toBe('welcome')
-    expect(sent.text.startsWith('Sarah,\n\nWelcome to the Bee Organized Hive!')).toBe(true)
-    expect(sent.html).toContain('<p>Sarah,</p>')
-    for (const out of [sent.text, sent.html]) {
-      expect(out).toContain('https://beeorganized.com/)')
-      expect(out).toContain('https://beeorganized.com/pages/how-we-came-to-bee')
-    }
+    // Branded layout (2026-09-28): the text half opens with the wordmark line,
+    // exactly as drips do, and the greeting follows it.
+    expect(sent.text.startsWith('BEE ORGANIZED — Simplify Your Hive\n\nSarah,\n\nWelcome to the Bee Organized Hive!')).toBe(true)
+    expect(sent.html).toMatch(/<p [^>]*>Sarah,<\/p>/)
+    // Plain text can't hyperlink, so it keeps both addresses visible…
+    expect(sent.text).toContain('Quiz here (https://beeorganized.com/)')
+    expect(sent.text).toContain('business here! (https://beeorganized.com/pages/how-we-came-to-bee)')
+    // …the HTML makes Kevin's hand-typed "text (url)" links clickable on the
+    // word before the bracket, and the raw address is not shown. The second is
+    // typed "here! (url)", so the linked word is "here!", "!" included.
+    expect(sent.html).toMatch(/Quiz <a href="https:\/\/beeorganized\.com\/"[^>]*>here<\/a> to find out/)
+    expect(sent.html).toMatch(/business <a href="https:\/\/beeorganized\.com\/pages\/how-we-came-to-bee"[^>]*>here!<\/a>/)
+    expect(sent.html).not.toContain('(https://')
   })
 
   it('NOTHING renders as a literal {{ }} tag — subject, HTML or text — and no internal marker leaks', async () => {
@@ -192,7 +199,7 @@ describe('a new lead\'s welcome renders from this template', () => {
   it('a lead with no first_name is greeted by the first word of their name, not a blank', async () => {
     freshState({ lead: { first_name: null, name: 'Jordan Reyes' } })
     const sent = await sendAndCapture()
-    expect(sent.text.startsWith('Jordan,')).toBe(true)
+    expect(sent.text.startsWith('BEE ORGANIZED — Simplify Your Hive\n\nJordan,')).toBe(true)
   })
 
   it('the unsubscribe footer IS attached — the welcome is on the follow-ups\' side, not the drips\'', async () => {
@@ -225,7 +232,12 @@ describe('a new lead\'s welcome renders from this template', () => {
     expect(TPL_BODY).not.toContain('*')
     expect(TPL_SUBJECT).not.toContain('*')
     const sent = await sendAndCapture()
-    for (const out of [sent.subject, sent.html, sent.text]) {
+    // The branded layout's <style> block carries a CSS comment (/* … */) in the
+    // page head — never shown to the reader. That is the ONLY asterisk allowed:
+    // strip it and nothing visible may contain one.
+    const styleBlock = sent.html.match(/<style>[\s\S]*?<\/style>/)![0]
+    const visibleHtml = sent.html.replace(styleBlock, '')
+    for (const out of [sent.subject, visibleHtml, sent.text]) {
       expect(out).not.toContain('*')
     }
     expect(sent.text).toContain('it would be our HONOR to help you Simplify Your Hive!')
@@ -310,5 +322,68 @@ describe('with this template in place: new leads only', () => {
     expect(res).toEqual({ sent: false, error: 'returning_client' })
     expect(sendEmailMock).not.toHaveBeenCalled()
     expect(db.writes.filter(w => w.table === 'leads').map(w => w.payload)).toEqual([{ welcome_email_scheduled_at: null }])
+  })
+})
+
+// ═══ branded layout — footer inside the card (2026-09-28) ══
+// The welcome renders through the same Bee Organized layout as drips and the
+// follow-ups. It is COMMERCIAL, so the CAN-SPAM footer must sit INSIDE the
+// white card, directly above the teal band — never after </html>. This is the
+// compliance pin for Kevin's live copy on the real send path.
+describe('the welcome goes out on the branded layout, footer inside the card', () => {
+  const TEAL_BAND = 'bgcolor="#054E4A"'
+  const UNSUB = 'href="https://beehive.beeorganized.com/unsubscribe/tok-abc"'
+
+  it('logo, card and teal band are there', async () => {
+    const { html } = await sendAndCapture()
+    expect(html).toContain('BEE ORGANIZED')
+    expect(html).toContain('Simplify Your Hive')
+    expect(html).toContain('https://beehive.beeorganized.com/bee-organized-logo.png')
+    expect(html).toContain('class="bo-card"')
+    expect(html).toContain(TEAL_BAND)
+    expect(html).toContain('Bee Organized Boulder')
+  })
+
+  it('the unsubscribe link and postal address are inside the card, below the signature, above the teal band', async () => {
+    const { html, text } = await sendAndCapture()
+    // exactly one unsubscribe link
+    expect(html.split(UNSUB).length - 1).toBe(1)
+    const at = html.indexOf(UNSUB)
+    const postal = html.indexOf('123 Hive Lane, Suite 4, Omaha, NE 68102')
+    const sig = html.indexOf('Olive Owner')
+    const band = html.indexOf(TEAL_BAND)
+    expect(at).toBeGreaterThan(html.indexOf('class="bo-card"'))
+    expect(sig).toBeGreaterThan(-1)
+    expect(at).toBeGreaterThan(sig)
+    expect(postal).toBeGreaterThan(sig)
+    expect(at).toBeLessThan(band)
+    expect(postal).toBeLessThan(band)
+    // its own row of the card table, directly above the band row
+    expect(html.slice(at, band).match(/<\/tr>/g)?.length).toBe(1)
+    // nothing trails the document
+    expect(html.trimEnd().endsWith('</html>')).toBe(true)
+    // the accurate reason line for an enquirer
+    expect(html).toContain('because you inquired about Bee Organized')
+    // plain text: signature, then footer, then the band line
+    const t = text.indexOf('Unsubscribe at any time')
+    expect(t).toBeGreaterThan(text.indexOf('Olive Owner'))
+    expect(t).toBeLessThan(text.indexOf('Bee Organized Boulder | beeorganized.com'))
+  })
+
+  it('{{first_name}} and {{signature}} resolve inside the card', async () => {
+    const { html } = await sendAndCapture()
+    expect(html).toMatch(/<p [^>]*>Sarah,<\/p>/)
+    expect(html).toContain('mailto:olive@beeorganized.com')
+    expect(html.indexOf('Olive Owner')).toBeGreaterThan(html.indexOf('How We Came To Bee'))
+    expect(html.indexOf('Olive Owner')).toBeLessThan(html.indexOf(TEAL_BAND))
+    expect(html).not.toMatch(/\{\{|\}\}/)
+    expect(html).not.toContain('bo-signature')
+  })
+
+  it('a returning client still gets nothing — branded or not', async () => {
+    freshState({ lead: { import_source: 'jobber_import' } })
+    const res = await sendWelcomeEmail('lead-1')
+    expect(res).toEqual({ sent: false, error: 'returning_client' })
+    expect(sendEmailMock).not.toHaveBeenCalled()
   })
 })
