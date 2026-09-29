@@ -45,8 +45,11 @@
 //
 // Scope caveat: this sweeps migrations/seed_master_drip_paths.sql, the
 // repo source of master content (masters are corp-gated byte-pristine in
-// prod). Location-owned clones/templates live only in the DB and are
-// out of a repo test's reach — re-audit those by hand when they change.
+// prod) — EXCEPT the welcome, which is read from
+// migrations/restore_welcome_master_template.sql (see LIVE_WELCOME below).
+// Location-owned clones/templates live only in the DB and are out of a repo
+// test's reach — re-audit those by hand when they change. A master edited in
+// the app rather than by migration is out of reach too.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -82,9 +85,30 @@ function parseTemplates(): ParsedBody[] {
   return out
 }
 
+// The welcome production sends is NOT the seed's. It was retired (issue 314),
+// then restored on 2026-09-27 with Kevin's rewritten copy, inserted by
+// migrations/restore_welcome_master_template.sql — confirmed byte-identical to
+// the live master row on 2026-09-28 (sha256 3856f4917e51…). Until then this
+// tripwire classified the seed's older welcome, so the copy actually being
+// sent had never been through it. The live copy replaces the seed's welcome
+// in every check below. (The other six standard templates were checked the
+// same day: the seed matches production for all six.)
+const RESTORE_WELCOME_SQL = 'migrations/restore_welcome_master_template.sql'
+function parseLiveWelcome(): ParsedBody {
+  const sql = readFileSync(join(ROOT, RESTORE_WELCOME_SQL), 'utf8')
+  const m = sql.match(
+    /\('welcome', '[^']+', 'email', '[^']*',\s*\n\s*'((?:[^']|'')*)',\s*\n\s*\$tpl\$([\s\S]*?)\$tpl\$\)/,
+  )
+  if (!m) throw new Error(`could not parse the welcome row out of ${RESTORE_WELCOME_SQL}`)
+  return { key: 'welcome', subject: m[1], body: m[2] }
+}
+
 const steps = parseSteps()
 const templates = parseTemplates()
-const byKey = new Map([...steps, ...templates].map((p) => [p.key, p]))
+const LIVE_WELCOME = parseLiveWelcome()
+const byKey = new Map(
+  [...steps, ...templates.filter((t) => t.key !== 'welcome'), LIVE_WELCOME].map((p) => [p.key, p]),
+)
 
 // ── Classification machinery ──────────────────────────────────────────
 
@@ -154,11 +178,17 @@ const COMMERCIAL_BODY_HASHES: Record<string, string> = {
   // transactional content (the TRANSACTIONAL_ANCHOR check above still finds
   // none), so the primary purpose is unchanged — still commercial, still
   // pure brand promo, still sent WITH the #115 footer by lib/welcome-email.ts.
-  // NOTE this pins the SEED's welcome. The copy production sends is Kevin's
-  // 2026-09-27 rewrite in migrations/restore_welcome_master_template.sql
-  // (adds a {{first_name}} greeting and {{signature}}), which this tripwire
-  // does not read.
-  welcome: '5f4c801030dc',
+  //
+  // 2026-09-28 — was '5f4c801030dc' (the SEED's welcome, which production does
+  // not send). Now pins the LIVE welcome, Kevin's 2026-09-27 rewrite read from
+  // migrations/restore_welcome_master_template.sql. ASSESSED on first read,
+  // not waved through: it adds a {{first_name}} greeting and a {{signature}},
+  // keeps the Organizing Profile Quiz and How We Came To Bee / national-
+  // franchise paragraphs, and adds no offer and no transactional content (the
+  // TRANSACTIONAL_ANCHOR check finds none) — same promo profile
+  // [brand_story, quiz], still commercial, still sent WITH the #115 footer by
+  // lib/welcome-email.ts (inside the branded card since b5e114c).
+  welcome: '3856f4917e51',
   opp_closed_job_3mo: '5b28a1f22e7a',
   opp_closed_job_12mo: '3e5643fdf958',
 }
@@ -166,6 +196,18 @@ const COMMERCIAL_BODY_HASHES: Record<string, string> = {
 const hash12 = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 12)
 
 // ── Tests ─────────────────────────────────────────────────────────────
+
+describe('CAN-SPAM tripwire — the welcome checked is the one production sends', () => {
+  it('the welcome under test comes from the restore migration, not the seed', () => {
+    expect(byKey.get('welcome')).toBe(LIVE_WELCOME)
+    const seedWelcome = templates.find((t) => t.key === 'welcome')!
+    // If these ever match again, the seed was updated — fine, but say so here.
+    expect(LIVE_WELCOME.body).not.toBe(seedWelcome.body)
+    expect(LIVE_WELCOME.subject).toBe('Welcome to the Bee Organized Hive!')
+    expect(LIVE_WELCOME.body.startsWith('{{first_name}},')).toBe(true)
+    expect(LIVE_WELCOME.body.endsWith('{{signature}}')).toBe(true)
+  })
+})
 
 describe('CAN-SPAM tripwire — seed parse', () => {
   it('finds all 24 master step bodies and 7 standalone templates', () => {
