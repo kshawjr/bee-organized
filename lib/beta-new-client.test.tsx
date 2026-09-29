@@ -701,6 +701,84 @@ describe('NewClientSheet — common first names never trap the owner', () => {
 })
 
 // ═══ placement ═════════════════════════════════════════════
+describe('NewClientSheet — a partial phone never opens a client', () => {
+  // North Jersey's real shape: a facility's main line with an extension
+  // on one client, the bare line on others. "609 978-4046 x1216" CONTAINS
+  // Donna's whole number — the digits-contains match said "same person".
+  const EXIT = 'None of these — create a new client'
+  const search = (host: Element, q: string) => type(host.querySelector('input[aria-label="Search clients"]')!, q)
+  const listRows = (host: Element) => [...host.querySelectorAll('[aria-label="Possible matches"] [role="listitem"]')]
+  const annmarie = () => person({ id: 'nj-ext', name: 'Annmarie Corsetto', email: '', phone: '609 978-4046 x1216', locationId: 'loc-nj' })
+  const donna = () => person({ id: 'nj-donna', name: 'Donna Gidley', email: '', phone: '609 978-4046', locationId: 'loc-nj' })
+
+  it('an exact phone match still opens that client', async () => {
+    const { host, unmount } = await mount(<NewClientSheet people={[donna()]} locFilter="loc-nj" onClose={() => {}} />)
+    await search(host, '(609) 978-4046')
+    expect(host.textContent).toContain('Returning client')
+    expect(host.textContent).toContain('Donna Gidley')
+    expect(host.textContent).toContain('matched on phone')
+    expect(listRows(host)).toHaveLength(0)
+    await unmount()
+  })
+
+  it('a leading 1 is the same number — either side', async () => {
+    for (const [stored, typed] of [['609 978-4046', '1 609 978 4046'], ['+1 (609) 978-4046', '6099784046']]) {
+      const { host, unmount } = await mount(
+        <NewClientSheet people={[person({ id: 'one', name: 'Donna Gidley', email: '', phone: stored, locationId: 'loc-nj' })]} locFilter="loc-nj" onClose={() => {}} />
+      )
+      await search(host, typed)
+      expect(host.textContent, `${stored} vs ${typed}`).toContain('Returning client')
+      await unmount()
+    }
+  })
+
+  it('a partial phone match lists — nobody opened, with the exit', async () => {
+    const { host, unmount } = await mount(<NewClientSheet people={[donna()]} locFilter="loc-nj" onClose={() => {}} />)
+    await search(host, '978-4046') // 7 digits: the tail of Donna's number
+    expect(host.textContent).not.toContain('Returning client')
+    expect(listRows(host)).toHaveLength(1)
+    expect(listRows(host)[0].textContent).toContain('matched on part of phone')
+    expect(buttonByText(host, EXIT)).toBeTruthy()
+    await unmount()
+  })
+
+  it('a client whose number CONTAINS the typed one is never auto-opened', async () => {
+    // Before Donna existed, typing her number found only Annmarie.
+    const { host, unmount } = await mount(<NewClientSheet people={[annmarie()]} locFilter="loc-nj" onClose={() => {}} />)
+    await search(host, '609 978 4046')
+    expect(host.textContent).not.toContain('Returning client')
+    expect(listRows(host)).toHaveLength(1)
+    expect(listRows(host)[0].textContent).toContain('Annmarie Corsetto')
+    await click(buttonByText(host, EXIT)!)
+    expect(buttonByText(host, 'Create — opens card')).toBeTruthy()
+    await unmount()
+  })
+
+  it('an exact match next to a containing one lists both', async () => {
+    const { host, unmount } = await mount(<NewClientSheet people={[annmarie(), donna()]} locFilter="loc-nj" onClose={() => {}} />)
+    await search(host, '6099784046')
+    expect(host.textContent).not.toContain('Returning client')
+    expect(listRows(host)).toHaveLength(2)
+    await unmount()
+  })
+
+  it('names still behave as 1232d8e left them: listed, never opened', async () => {
+    const { host, unmount } = await mount(<NewClientSheet people={[donna()]} locFilter="loc-nj" onClose={() => {}} />)
+    await search(host, 'Donna')
+    expect(host.textContent).not.toContain('Returning client')
+    expect(listRows(host)).toHaveLength(1)
+    expect(listRows(host)[0].textContent).toContain('matched on name')
+    await unmount()
+  })
+
+  it('the Network search box still FINDS by part of a number (it filters, it never opens)', () => {
+    const hits = matchPeople([annmarie(), donna()], '978-4046')
+    expect(hits.map(h => h.person.id).sort()).toEqual(['nj-donna', 'nj-ext'])
+    expect(hits.every(h => h.exact === false)).toBe(true)
+    expect(matchPeople([donna()], '6099784046')[0].exact).toBe(true)
+  })
+})
+
 describe('New-client entry points', () => {
   it('desktop: one dark "New" pill in the shell top row', () => {
     const html = renderToString(<HiveShell engagements={[]} people={[]} />)

@@ -31,11 +31,12 @@
 //   A — search input. Matches as you type against the loaded people
 //       prop (see shared/clientMatch.js for the phone-storage story).
 //   L — possible matches: a list, NOBODY pre-selected. Any name match,
-//       and more than one email/phone match, lands here — the owner
-//       picks who it is, or takes "None of these — create a new client".
+//       any partial-phone match, and more than one email/phone match,
+//       lands here — the owner picks who it is, or takes "None of
+//       these — create a new client".
 //   B — returning client, matched-on line, open-engagement
 //       count + last contact, new-job-in-Jobber / open-profile actions.
-//       Opens by itself ONLY for exactly one email or phone match;
+//       Opens by itself ONLY for exactly one email or EXACT phone match;
 //       otherwise only after a pick from L.
 //   C — no match (or "create a new client" chosen): create the PERSON
 //       with founding-viable fields only.
@@ -51,7 +52,9 @@
 // both Portland Shelbys and the sheet silently took the first — and with
 // any match on screen there was no way to reach frame C, so a THIRD
 // Shelby could not be created at all. An email or phone match is strong
-// evidence it is the same person; a name match is not (71% of clients
+// evidence it is the same person; a name match is not — and neither is a
+// PARTIAL phone (2026-09-28: "609 978-4046 x1216" contains another
+// client's whole number, so typing that number opened the wrong one) (71% of clients
 // share a first name with someone at their own location). Every frame
 // with a match on it offers the "create a new client" exit.
 //
@@ -113,6 +116,8 @@ const linkBtn = {
 // Frame L shows this many rows; the rest wait for a narrower query
 // (Philadelphia Suburbs has 332 Jennifers).
 const MAX_LISTED = 8
+
+const matchedOnLabel = (m) => (m.matchedOn === 'phone' && m.exact === false ? 'part of phone' : m.matchedOn)
 
 function Badge({ tint, icon, label }) {
   return (
@@ -235,7 +240,10 @@ export default function NewClientSheet({
   // Only ONE email/phone match opens frame B by itself. A name match —
   // even a single one — never does, and neither does a strong key shared
   // by several people (a household phone): those go to the frame L list.
-  const autoMatch = matches.length === 1 && matches[0].matchedOn !== 'name' ? matches[0] : null
+  // A PARTIAL phone (digits-contains, not every digit) is no stronger
+  // than a name: it lists too.
+  const strongHit = (m) => m.matchedOn === 'email' || (m.matchedOn === 'phone' && m.exact)
+  const autoMatch = matches.length === 1 && strongHit(matches[0]) ? matches[0] : null
   const match = forceNew ? null : ((pickedId && matches.find(m => m.person.id === pickedId)) || autoMatch)
 
   // A query is "committed" once it could plausibly identify someone —
@@ -480,7 +488,7 @@ export default function NewClientSheet({
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px', padding: '8px 12px', borderRadius: T.radius.control, border: T.border.thin, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
                   <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary }}>{m.person.name}</span>
                   <span style={{ fontSize: '11px', color: T.ink.muted }}>
-                    matched on {m.matchedOn}{contact ? ` · ${contact}` : ''}
+                    matched on {matchedOnLabel(m)}{contact ? ` · ${contact}` : ''}
                   </span>
                 </button>
               )
@@ -512,7 +520,7 @@ export default function NewClientSheet({
                 {activeMatch.person.name}
               </p>
               <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
-                matched on {activeMatch.matchedOn}{activeMatch.matchedOn !== 'name' ? <> · {activeMatch.matchedValue}</> : null}
+                matched on {matchedOnLabel(activeMatch)}{activeMatch.matchedOn !== 'name' ? <> · {activeMatch.matchedValue}</> : null}
               </p>
             </div>
           </div>

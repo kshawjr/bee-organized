@@ -36,6 +36,12 @@
 
 export const normalizeEmail = (s) => (s || '').trim().toLowerCase()
 export const normalizePhone = (s) => (s || '').replace(/\D/g, '')
+// Digits with a leading US 1 dropped — two phones are the SAME number
+// only when these are equal.
+const phoneKey = (s) => {
+  const d = normalizePhone(s)
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d
+}
 
 // Masked display for the "matched on <field>" line — enough to confirm
 // it's them, without printing the full value back.
@@ -62,8 +68,16 @@ export function maskEmail(raw) {
 // '@', digits-contains when it has ≥7 digits, name-contains otherwise.
 // Junk rows are excluded ONLY when is_junk is affirmatively true —
 // NULL/undefined stays in (the NULL-equality gotcha, JS edition).
-// Returns [{ person, matchedOn, matchedValue }] ranked email > phone >
-// name, one row per person.
+// Returns [{ person, matchedOn, matchedValue, exact? }] ranked email >
+// phone > name, one row per person.
+//
+// PHONE stays digits-CONTAINS for finding people — the Network search
+// box filters on this, and typing the last 7 digits must still find
+// someone. But a contains-hit is not evidence it is the same person
+// ("609 978-4046 x1216" contains a whole other client's number), so
+// each phone hit carries `exact`: every digit equal, a leading US 1
+// ignored. Only an exact hit may open a client unasked (NewClientSheet
+// autoMatch, 2026-09-28); a partial one only lists.
 export function matchPeople(people, query) {
   const q = (query || '').trim().toLowerCase()
   if (!q) return []
@@ -77,8 +91,8 @@ export function matchPeople(people, query) {
     if (p?.isJunk === true) continue
     if (isEmailQ && normalizeEmail(p.email) && normalizeEmail(p.email) === q) {
       hits.push({ person: p, matchedOn: 'email', matchedValue: maskEmail(p.email), rank: 0 })
-    } else if (isPhoneQ && normalizePhone(p.phone) && normalizePhone(p.phone).includes(qDigits)) {
-      hits.push({ person: p, matchedOn: 'phone', matchedValue: maskPhone(p.phone), rank: 1 })
+    } else if (isPhoneQ && normalizePhone(p.phone) && (normalizePhone(p.phone).includes(qDigits) || phoneKey(p.phone) === phoneKey(qDigits))) {
+      hits.push({ person: p, matchedOn: 'phone', matchedValue: maskPhone(p.phone), exact: phoneKey(p.phone) === phoneKey(qDigits), rank: 1 })
     } else if (isNameQ && (p.name || '').toLowerCase().includes(q)) {
       hits.push({ person: p, matchedOn: 'name', matchedValue: p.name, rank: 2 })
     }
@@ -107,10 +121,6 @@ export function matchPeople(people, query) {
 // is `auto` — safe to link without asking. Everything else, a name
 // match above all, comes back as `candidates` for a person to choose
 // from, nobody pre-chosen (the NewClientSheet rule from 1232d8e).
-const phoneKey = (s) => {
-  const d = normalizePhone(s)
-  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d
-}
 const nameWords = (s) => (s || '').toLowerCase().split(/[^a-z0-9']+/).filter(Boolean)
 
 export function matchPartnerToClients(people, { name, email, phone, locationId } = {}) {
