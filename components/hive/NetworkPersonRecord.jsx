@@ -26,8 +26,10 @@
 // BADGES derive from FACTS (deriveNetworkBadges), never a type field.
 // CUSTOMER PATH: "Add as client" was a one-time state-only copy in
 // Classic (fake id, no link). Here it is a real LINK: match an existing
-// client first (shared clientMatch — no dupes), else POST /api/leads,
-// then PATCH isCustomer + customerLeadId so the Client badge deep-links.
+// client first (matchPartnerToClients — same location only; one exact
+// email/phone links, anything else is a list the owner picks from, with
+// a "none of these" exit), else POST /api/leads, then PATCH isCustomer
+// + customerLeadId so the Client badge deep-links.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -42,7 +44,8 @@ import TagsRow from './shared/TagsRow'
 import PickerModal from './shared/PickerModal'
 import { pillStyle } from './shared/cardKit'
 import { T } from './shared/tokens'
-import { matchPeople } from './shared/clientMatch'
+import { matchPartnerToClients, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
+import { createClient } from '@/lib/supabase'
 import {
   deriveNetworkBadges, BadgeChip, StageRail, StatTile, SectionLabel,
   InlineText, fmtLastTalk,
@@ -51,6 +54,7 @@ import { contactRecency } from './shared/networkGroups'
 
 const money = (n) => `$${Math.round(n).toLocaleString()}`
 const REFERRED_SHOWN = 8
+const LINK_CHOICES_SHOWN = 8
 
 const statusChip = {
   client: { label: 'Client', fam: 'green' },
@@ -176,39 +180,74 @@ export default function NetworkPersonRecord({
   }
 
   // ── customer path: match-first, then create; always end LINKED ──
+  // Only ONE exact email/phone match at the partner's location links by
+  // itself. Anything else — a name match above all, or two people on
+  // one phone — opens a list with nobody chosen, plus a "none of these"
+  // exit (the NewClientSheet rule, 1232d8e). The loaded people prop is
+  // only what is on screen, so the strong keys are re-checked in the DB.
   const [linkingClient, setLinkingClient] = useState(false)
+  const [linkChoices, setLinkChoices] = useState(null) // null = closed; [] never shown
   async function addAsClient() {
     if (linkingClient) return
+    if (!partner.locationId) {
+      setToast({ kind: 'error', msg: `Couldn't add as client: ${partner.name} has no location` })
+      return
+    }
     setLinkingClient(true)
     try {
-      // 1) An existing client with this email/phone IS this person —
-      // link, don't duplicate (the intake doors dedupe the same way).
-      const hit = matchPeople(people, partner.email || partner.phone || partner.name)[0]
-      if (hit) {
-        patch({ isCustomer: true, customerLeadId: hit.person.id })
-        setToast({ kind: 'success', msg: `Linked to existing client ${hit.person.name}` })
-        return
+      let universe = people
+      const keys = { email: normalizeEmail(partner.email), phone: normalizePhone(partner.phone) }
+      if (keys.email || keys.phone) {
+        try {
+          const rows = await queryLeadMatches(createClient(), { ...keys, locationUuid: partner.locationId })
+          const known = new Set(people.map(p => p.id))
+          universe = [...people, ...rows.filter(r => !known.has(r.id)).map(r => ({
+            id: r.id, name: r.name, email: r.email, phone: r.phone, locationId: r.location_uuid, isJunk: r.is_junk,
+          }))]
+        } catch (e) {
+          // DB re-check unavailable — the loaded set still gates.
+          console.warn('[network] add-as-client match query failed:', e?.message || e)
+        }
       }
-      // 2) No match → mint the real lead, then store the REAL id (the
-      // Classic path minted a fake local id and linked nothing).
-      const res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: partner.name, phone: partner.phone || null, email: partner.email || null,
-          location_id: partner.locationId, source: 'Referral',
-          request_details: `From the Network — ${[partner.title, partner.company].filter(Boolean).join(' at ')}`,
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json?.lead?.id) throw new Error(json?.error || `HTTP ${res.status}`)
-      patch({ isCustomer: true, customerLeadId: json.lead.id })
-      setToast({ kind: 'success', msg: `${partner.name} added as a client` })
+      const { auto, candidates } = matchPartnerToClients(universe, partner)
+      if (auto) return linkTo(auto.person)
+      if (candidates.length) { setLinkChoices(candidates); return }
+      await createClientLead()
     } catch (e) {
       setToast({ kind: 'error', msg: `Couldn't add as client: ${String(e?.message || e)}` })
     } finally {
       setLinkingClient(false)
     }
+  }
+  function linkTo(person) {
+    setLinkChoices(null)
+    patch({ isCustomer: true, customerLeadId: person.id })
+    setToast({ kind: 'success', msg: `Linked to existing client ${person.name}` })
+  }
+  async function createClientLead() {
+    // Mint the real lead, then store the REAL id (the Classic path
+    // minted a fake local id and linked nothing).
+    const res = await fetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: partner.name, phone: partner.phone || null, email: partner.email || null,
+        location_id: partner.locationId, source: 'Referral',
+        request_details: `From the Network — ${[partner.title, partner.company].filter(Boolean).join(' at ')}`,
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || !json?.lead?.id) throw new Error(json?.error || `HTTP ${res.status}`)
+    setLinkChoices(null)
+    patch({ isCustomer: true, customerLeadId: json.lead.id })
+    setToast({ kind: 'success', msg: `${partner.name} added as a client` })
+  }
+  async function noneOfThese() {
+    if (linkingClient) return
+    setLinkingClient(true)
+    try { await createClientLead() }
+    catch (e) { setToast({ kind: 'error', msg: `Couldn't add as client: ${String(e?.message || e)}` }) }
+    finally { setLinkingClient(false) }
   }
 
   // ── delete (two-tap confirm) ──
@@ -253,6 +292,38 @@ export default function NetworkPersonRecord({
             <span style={{ fontSize: '12px', color: T.state.danger.fg, flex: 1 }}>Remove {partner.name} from your network? (Recoverable from the recycle bin.)</span>
             <button onClick={() => { onDelete(partner.id); onClose() }} style={{ border: 'none', background: T.state.danger.strong, color: T.ink.inverse, borderRadius: T.radius.control, padding: '6px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>Remove</button>
             <button onClick={() => setConfirmDelete(false)} style={{ border: 'none', background: 'transparent', color: T.ink.muted, fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+          </div>
+        )}
+
+        {linkChoices && (
+          <div data-testid="link-choices" style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: T.surface.sunken, borderRadius: T.radius.control, padding: '10px 12px' }}>
+            <span style={{ fontSize: '12px', color: T.ink.primary, fontWeight: 500 }}>
+              Is {partner.name} already one of these clients?
+            </span>
+            <div role="list" aria-label="Possible clients" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {linkChoices.slice(0, LINK_CHOICES_SHOWN).map(m => {
+                const contact = [maskEmail(m.person.email), maskPhone(m.person.phone)].filter(Boolean).join(' · ')
+                return (
+                  <button key={m.person.id} role="listitem" disabled={linkingClient} onClick={() => linkTo(m.person)}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px', padding: '8px 12px', borderRadius: T.radius.control, border: T.border.thin, background: T.surface.raised, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary }}>{m.person.name}</span>
+                    <span style={{ fontSize: '11px', color: T.ink.muted }}>
+                      same {m.matchedOn.join(' + ')}{contact ? ` · ${contact}` : ''}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {linkChoices.length > LINK_CHOICES_SHOWN && (
+              <p style={{ fontSize: '11px', color: T.ink.muted }}>{linkChoices.length - LINK_CHOICES_SHOWN} more not shown — add an email or phone to narrow it down.</p>
+            )}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={noneOfThese} disabled={linkingClient}
+                style={{ border: T.border.control, background: T.surface.raised, color: T.ink.primary, borderRadius: T.radius.control, padding: '6px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                None of these — add as a new client
+              </button>
+              <button onClick={() => setLinkChoices(null)} style={{ border: 'none', background: 'transparent', color: T.ink.muted, fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+            </div>
           </div>
         )}
 

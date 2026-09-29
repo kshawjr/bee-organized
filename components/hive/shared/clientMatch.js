@@ -92,6 +92,55 @@ export function matchPeople(people, query) {
   })
 }
 
+// Network "Add as client" — which existing client (if any) IS this
+// partner. NOT matchPeople: that is an as-you-type search (substring
+// names from 2 letters, phone digits-contains) and it took ONE of
+// email/phone/name, so a Network "Karen" with no email or phone linked
+// silently to the first client whose name contained "karen" — at any
+// location. Here (2026-09-28):
+//   - scoped to the partner's own location, always
+//   - email and phone are EXACT (phone compared on digits, a leading US
+//     1 ignored); each key is tried, not just the first one present
+//   - a name only counts as whole words, all of them ("Karen" matches
+//     "Karen Smith", never "Karenina")
+// Only a strong key (email or phone) resolving to exactly ONE client
+// is `auto` — safe to link without asking. Everything else, a name
+// match above all, comes back as `candidates` for a person to choose
+// from, nobody pre-chosen (the NewClientSheet rule from 1232d8e).
+const phoneKey = (s) => {
+  const d = normalizePhone(s)
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d
+}
+const nameWords = (s) => (s || '').toLowerCase().split(/[^a-z0-9']+/).filter(Boolean)
+
+export function matchPartnerToClients(people, { name, email, phone, locationId } = {}) {
+  if (!locationId) return { auto: null, candidates: [] }
+  const e = normalizeEmail(email)
+  const d = phoneKey(phone)
+  const usablePhone = d.length >= 7
+  const words = nameWords(name)
+
+  const hits = []
+  const seen = new Set()
+  for (const p of people || []) {
+    if (!p?.id || seen.has(p.id) || p.isJunk === true) continue
+    if (p.locationId !== locationId) continue
+    const on = []
+    if (e && normalizeEmail(p.email) === e) on.push('email')
+    if (usablePhone && phoneKey(p.phone) === d) on.push('phone')
+    if (words.length) {
+      const theirs = new Set(nameWords(p.name))
+      if (words.every(w => theirs.has(w))) on.push('name')
+    }
+    if (!on.length) continue
+    seen.add(p.id)
+    hits.push({ person: p, matchedOn: on, strong: on.includes('email') || on.includes('phone') })
+  }
+  hits.sort((a, b) => (b.strong - a.strong) || (b.matchedOn.length - a.matchedOn.length))
+  const strong = hits.filter(h => h.strong)
+  return { auto: strong.length === 1 ? strong[0] : null, candidates: hits }
+}
+
 // The .or() filter string for the authoritative DB gate — built ONLY
 // from keys that actually exist. Returns null when there is no usable
 // key (never emit email.eq.null / phone_normalized.eq.). Values are

@@ -18,6 +18,9 @@
 //   E) WHAT'S NEXT: steps render, checking one PATCHes nextSteps.
 //   F) CUSTOMER PATH: "Add as client" matches an existing client FIRST
 //      (no duplicate lead), else POSTs /api/leads and stores the REAL id.
+//      Only ONE exact email/phone match at the partner's location links by
+//      itself; a name match never does — it lists, nobody chosen, with a
+//      "none of these" exit. Other locations are never offered.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -25,6 +28,21 @@ import { act } from 'react-dom/test-utils'
 import NetworkPersonRecord from '@/components/hive/NetworkPersonRecord'
 import { deriveNetworkBadges } from '@/components/hive/shared/networkKit'
 import { T } from '@/components/hive/shared/tokens'
+import { matchPartnerToClients } from '@/components/hive/shared/clientMatch'
+
+// The DB re-check (queryLeadMatches) — rows the test puts here come back
+// from the fake supabase chain, whatever the filter.
+let dbRows: any[] = []
+vi.mock('@/lib/supabase', () => ({
+  createClient: () => {
+    const chain: any = {
+      from: () => chain, select: () => chain, or: () => chain, not: () => chain,
+      range: () => chain, eq: () => chain,
+      then: (res: any, rej: any) => Promise.resolve({ data: dbRows, error: null }).then(res, rej),
+    }
+    return chain
+  },
+}))
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
@@ -87,7 +105,7 @@ const mount = async (props: any = {}) => {
   await act(async () => {}) // flush fetches
 }
 
-beforeEach(() => installFetch())
+beforeEach(() => { installFetch(); dbRows = [] })
 afterEach(async () => {
   if (root) await act(async () => root.unmount())
   host?.remove()
@@ -218,17 +236,124 @@ describe("E) what's next", () => {
 })
 
 describe('F) customer path — link, never a blind copy', () => {
-  it('matches an existing client first: links their REAL id, no lead POST', async () => {
-    const onUpdate = vi.fn()
-    const existing = { id: 'lead-77', name: 'Karen Martinez', email: 'karen@meridian.com', phone: '', isJunk: false }
-    await mount({ onUpdate, people: [existing] })
+  const client = (over: any = {}) => ({ id: 'lead-77', name: 'Karen Martinez', email: 'karen@meridian.com', phone: '', locationId: 'loc-1', isJunk: false, ...over })
+  const openAddAsClient = async () => {
     await act(async () => {
       (host.querySelector('[aria-label="Partner actions"]') as HTMLElement).click()
     })
     const item = [...document.querySelectorAll('button')].find(b => b.textContent!.includes('Add as client'))!
     await act(async () => { item.click() })
+    await act(async () => {})
+  }
+  const choiceRows = () => [...host.querySelectorAll('[aria-label="Possible clients"] [role="listitem"]')] as HTMLElement[]
+  const leadPosts = () => fetchCalls.filter(c => c.url.includes('/api/leads') && c.init?.method === 'POST')
+
+  it('an exact email match links straight through: their REAL id, no lead POST, no list', async () => {
+    const onUpdate = vi.fn()
+    await mount({ onUpdate, people: [client()] })
+    await openAddAsClient()
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ isCustomer: true, customerLeadId: 'lead-77' }))
-    expect(fetchCalls.some(c => c.url.includes('/api/leads') && c.init?.method === 'POST')).toBe(false)
+    expect(leadPosts()).toHaveLength(0)
+    expect(host.querySelector('[data-testid="link-choices"]')).toBeNull()
+  })
+
+  it('email on file but not matching → the phone is still tried (exact digits, any formatting)', async () => {
+    const onUpdate = vi.fn()
+    await mount({ onUpdate, people: [client({ id: 'lead-ph', email: 'other@x.com', phone: '816-555-0916' })] })
+    await openAddAsClient()
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-ph' }))
+  })
+
+  it('an exact match NOT loaded on screen is found by the DB re-check', async () => {
+    const onUpdate = vi.fn()
+    dbRows = [{ id: 'lead-db', name: 'Karen Martinez', email: 'karen@meridian.com', phone: null, location_uuid: 'loc-1', is_junk: null }]
+    await mount({ onUpdate, people: [] })
+    await openAddAsClient()
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-db' }))
+    expect(leadPosts()).toHaveLength(0)
+  })
+
+  it('a name match never links on its own — even a single one: it is listed, nobody chosen', async () => {
+    const onUpdate = vi.fn()
+    const karen = { ...PARTNER, name: 'Karen', email: '', phone: '' }
+    await mount({ onUpdate, partner: karen, people: [client({ id: 'lead-k', name: 'Karen Smith', email: 'ks@x.com' })] })
+    await openAddAsClient()
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(leadPosts()).toHaveLength(0)
+    expect(choiceRows().map(r => r.textContent)).toEqual([expect.stringContaining('Karen Smith')])
+  })
+
+  it('a partial phone never matches, and 2 letters inside a name never match', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-2' } } : {}) })
+    const partner = { ...PARTNER, name: 'Al', email: '', phone: '555-0916' }
+    await mount({ onUpdate, partner, people: [
+      client({ id: 'lead-a', name: 'Alice Walker', email: '', phone: '(816) 555-0916' }), // phone CONTAINS 5550916
+      client({ id: 'lead-b', name: 'Sally Albright', email: '' }),
+    ] })
+    await openAddAsClient()
+    expect(choiceRows()).toHaveLength(0)
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-new-2' }))
+  })
+
+  it('the Shelby case: two people sharing a first name are both listed with a way to tell them apart, nobody chosen', async () => {
+    const onUpdate = vi.fn()
+    const shelby = { ...PARTNER, name: 'Shelby', email: '', phone: '' }
+    await mount({ onUpdate, partner: shelby, people: [
+      client({ id: 'lead-s1', name: 'Shelby Grant', email: 'sgrant@mail.com', phone: '503-555-0101' }),
+      client({ id: 'lead-s2', name: 'Shelby Owens', email: 'owens.s@mail.com', phone: '503-555-0202' }),
+    ] })
+    await openAddAsClient()
+    expect(onUpdate).not.toHaveBeenCalled()
+    const rows = choiceRows()
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('s···@mail.com')
+    expect(rows[0].textContent).toContain('0101')
+    expect(rows[1].textContent).toContain('o···@mail.com')
+    expect(rows[1].textContent).toContain('0202')
+    // The owner picks the second Shelby — THAT one links.
+    await act(async () => { rows[1].click() })
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-s2' }))
+  })
+
+  it('two people on one phone list instead of linking the first', async () => {
+    const onUpdate = vi.fn()
+    await mount({ onUpdate, partner: { ...PARTNER, email: '' }, people: [
+      client({ id: 'lead-h1', name: 'Karen Martinez', email: '', phone: '8165550916' }),
+      client({ id: 'lead-h2', name: 'Luis Martinez', email: '', phone: '+1 (816) 555-0916' }),
+    ] })
+    await openAddAsClient()
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(choiceRows()).toHaveLength(2)
+  })
+
+  it('"None of these" exists and creates a new client; Cancel does nothing', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-3' } } : {}) })
+    await mount({ onUpdate, partner: { ...PARTNER, email: '', phone: '' }, people: [client({ email: 'x@y.com' })] })
+    await openAddAsClient()
+    const none = [...host.querySelectorAll('button')].find(b => b.textContent === 'None of these — add as a new client')!
+    expect(none).toBeTruthy()
+    await act(async () => { none.click() })
+    await act(async () => {})
+    expect(leadPosts()).toHaveLength(1)
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-new-3' }))
+    expect(host.querySelector('[data-testid="link-choices"]')).toBeNull()
+  })
+
+  it('a client at another location is never offered or linked, even on an exact email', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-4' } } : {}) })
+    dbRows = [] // the DB re-check is location-scoped
+    await mount({ onUpdate, people: [
+      client({ id: 'lead-far', locationId: 'loc-2' }),               // same email, other location
+      client({ id: 'lead-far2', locationId: 'loc-2', email: '' }),   // same name, other location
+    ] })
+    await openAddAsClient()
+    expect(choiceRows()).toHaveLength(0)
+    expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-far' }))
+    expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-far2' }))
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-new-4' }))
   })
 
   it('no match → POST /api/leads and store the REAL created id (the Classic copy stored nothing)', async () => {
@@ -239,14 +364,40 @@ describe('F) customer path — link, never a blind copy', () => {
         : {}),
     })
     await mount({ onUpdate, people: [] })
-    await act(async () => {
-      (host.querySelector('[aria-label="Partner actions"]') as HTMLElement).click()
-    })
-    const item = [...document.querySelectorAll('button')].find(b => b.textContent!.includes('Add as client'))!
-    await act(async () => { item.click() })
-    const post = fetchCalls.find(c => c.url.includes('/api/leads') && c.init?.method === 'POST')!
+    await openAddAsClient()
+    const post = leadPosts()[0]
     expect(JSON.parse(post.init.body)).toMatchObject({ name: 'Karen Martinez', location_id: 'loc-1' })
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ isCustomer: true, customerLeadId: 'lead-new-1' }))
+  })
+})
+
+describe('F) matchPartnerToClients — the pure rule', () => {
+  const P = { name: 'Karen Martinez', email: 'Karen@Meridian.com ', phone: '1-816-555-0916', locationId: 'loc-1' }
+  const c = (id: string, over: any = {}) => ({ id, name: 'Nobody', email: '', phone: '', locationId: 'loc-1', ...over })
+
+  it('tries every key: email, phone and whole-word name each count', () => {
+    const r = matchPartnerToClients([
+      c('e', { email: 'karen@meridian.com' }),
+      c('n', { name: 'Karen Martinez-Lopez' }), // words, not substrings — "martinez-lopez" splits
+    ], P)
+    expect(r.auto!.person.id).toBe('e')
+    expect(r.candidates.map(h => [h.person.id, h.matchedOn])).toEqual([['e', ['email']], ['n', ['name']]])
+  })
+
+  it('email to one person and phone to another is a conflict → no auto', () => {
+    const r = matchPartnerToClients([c('e', { email: 'karen@meridian.com' }), c('p', { phone: '816.555.0916' })], P)
+    expect(r.auto).toBeNull()
+    expect(r.candidates).toHaveLength(2)
+  })
+
+  it('no location → nothing, never a cross-location guess', () => {
+    expect(matchPartnerToClients([c('e', { email: 'karen@meridian.com', locationId: null })], { ...P, locationId: null }))
+      .toEqual({ auto: null, candidates: [] })
+  })
+
+  it('junk rows are skipped; NULL is_junk stays in', () => {
+    const r = matchPartnerToClients([c('j', { email: 'karen@meridian.com', isJunk: true }), c('ok', { email: 'karen@meridian.com', isJunk: null })], P)
+    expect(r.auto!.person.id).toBe('ok')
   })
 })
 
