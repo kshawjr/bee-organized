@@ -55,6 +55,13 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import {
+  COMMERCIAL_PRIMARY,
+  EXPECTED_STEP_PROFILES,
+  EXPECTED_TEMPLATE_PROFILES,
+  TRANSACTIONAL_ANCHOR,
+  promoProfile,
+} from '@/lib/canspam-classifier'
 
 const ROOT = join(__dirname, '..')
 const seedSql = readFileSync(join(ROOT, 'migrations/seed_master_drip_paths.sql'), 'utf8')
@@ -111,60 +118,16 @@ const byKey = new Map(
 )
 
 // ── Classification machinery ──────────────────────────────────────────
+// The lexicon, the transactional anchor and the per-body pins live in
+// lib/canspam-classifier.ts, shared with the live check
+// (scripts/scan-canspam-live.mjs), so the repo check and the live check can
+// never disagree about what counts as promotional. Growing the lexicon is
+// encouraged; shrinking it or re-profiling a body means the CAN-SPAM
+// assessment was redone.
 
-// Promo-marker lexicon. A body's profile is the sorted list of marker
-// names it matches. Growing this lexicon is encouraged; shrinking it or
-// re-profiling a body below means the CAN-SPAM assessment was redone.
-const PROMO_MARKERS: Record<string, RegExp> = {
-  reviews: /google reviews|\{\{reviews_link\}\}/i,
-  quiz: /profiles? quiz/i,
-  brand_story: /how we came to bee|national franchise/i,
-  offer: /free hour|% off|\boff your next\b|maintenance program|discount|special offer/i,
-}
-
-// A transactional email must actually be about the recipient's inquiry.
-const TRANSACTIONAL_ANCHOR =
-  /assessment|discovery|estimate|schedul|availability|interested|your (project|move)/i
-
-function promoProfile(body: string): string[] {
-  return Object.keys(PROMO_MARKERS)
-    .filter((k) => PROMO_MARKERS[k].test(body))
-    .sort()
-}
-
-// ── The pins ──────────────────────────────────────────────────────────
-
-// Every step-1 signs off with the Google Reviews line; five step-2s
-// carry the Profiles Quiz paragraph; every step-3 (and moving-a/b/c
-// step 2) is promo-free. Incidental under primary-purpose — allowed,
-// but pinned per body.
-const PATHS = [
-  'organizing-a', 'organizing-b', 'organizing-c', 'organizing-d',
-  'moving-a', 'moving-b', 'moving-c', 'moving-d',
-]
-const QUIZ_STEP2_PATHS = ['organizing-a', 'organizing-b', 'organizing-c', 'organizing-d', 'moving-d']
-
-const EXPECTED_STEP_PROFILES: Record<string, string[]> = {}
-for (const p of PATHS) {
-  EXPECTED_STEP_PROFILES[`${p}#1`] = ['reviews']
-  EXPECTED_STEP_PROFILES[`${p}#2`] = QUIZ_STEP2_PATHS.includes(p) ? ['quiz'] : []
-  EXPECTED_STEP_PROFILES[`${p}#3`] = []
-}
-
-const EXPECTED_TEMPLATE_PROFILES: Record<string, string[]> = {
-  welcome: ['brand_story', 'quiz'],
-  opp_closed_job_3mo: ['offer'],
-  opp_closed_job_12mo: [],
-  opp_organizing_estimate_3d: [],
-  opp_organizing_estimate_30d: [],
-  opp_moving_estimate_3d: [],
-  opp_moving_estimate_30d: [],
-}
-
-// Commercial-primary set per the audit. As of #115 these carry a CAN-SPAM
-// footer (appended at send time — see the rail-split block). Membership changes
-// only with a redone assessment.
-const COMMERCIAL_PRIMARY = ['welcome', 'opp_closed_job_3mo', 'opp_closed_job_12mo']
+// COMMERCIAL_PRIMARY (welcome + the two Closed-Job follow-ups) carries the
+// #115 CAN-SPAM footer at send time — see the rail-split block. Membership
+// changes only with a redone assessment.
 
 // The commercial trio is hash-pinned: any copy edit to a commercial email must
 // re-ask the CAN-SPAM question (12mo especially — its classification rests on

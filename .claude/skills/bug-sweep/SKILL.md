@@ -1,6 +1,6 @@
 ---
 name: bug-sweep
-description: Produce a read-only triage report of what's currently broken or newly reported in Bee Hub — new feedback_items in 'submitted', Vercel runtime errors over the last 24h, and silence checks on the lead intake, daily digest, and failure-alert cron. Use when asked for a bug sweep, a triage report, or "what's broken in Bee Hub". Report only — never fix, never file, never change a status.
+description: Produce a read-only triage report of what's currently broken or newly reported in Bee Hub — new feedback_items in 'submitted', Vercel runtime errors over the last 24h, silence checks on the lead intake, daily digest, and failure-alert cron, and the live CAN-SPAM check of owner-edited email copy. Use when asked for a bug sweep, a triage report, or "what's broken in Bee Hub". Report only — never fix, never file, never change a status.
 ---
 
 # Bee Hub bug sweep
@@ -35,6 +35,21 @@ Absence doesn't log, and it's how the worst failures hide. Check whether these a
 - **The digest** — should post once daily around 10:00 UTC.
 - **Failure alerts** — the `*/5` cron.
 
+### 4. Email compliance (CAN-SPAM, live copy)
+
+Owners edit their own drip sequences and template copies in the app, and nothing in the repo tests sees those edits. Run the live check from the repo root (read-only):
+
+```bash
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/scan-canspam-live.mjs
+```
+
+Exit `0` = nothing flagged, `1` = something flagged, `2` = couldn't read the data (say so plainly). It lists:
+
+- **NEEDS A LOOK** — an email that goes out with no unsubscribe footer (a drip step or estimate follow-up) but carries an offer or the brand story, or doesn't mention the recipient's own enquiry. An **offer** here is the one that matters most: an owner has turned a no-footer email into marketing. Name the location, the sequence and the step, quote the line, and say whether anyone is on that sequence now.
+- **CHANGED** — a standard email no longer matches what was assessed. The CAN-SPAM assessment needs redoing for it.
+
+A flag means "a person should read this email", not "this is a violation" — say it that way.
+
 ## How to triage
 
 Group bugs together, features together. Flag duplicates.
@@ -55,6 +70,7 @@ Check reports against recently shipped work before calling them real — a lot s
 - `resend` rejections for `*.test@example.com` — two fake test leads on the hourly drip. Ignore unless the recipients change.
 - `[jobber-webhook] request_not_found_in_jobber` — a deleted Jobber record, self-resolving.
 - Token-race webhook errors that self-heal within 5 minutes.
+- The email compliance check's 8 returning-client "nudge" emails (flagged 2026-09-28: "Just making sure this didn't get buried…", "This is the last you'll hear from us…" in Returning client Path A and C — master, North Houston, West St Louis, San Diego). They're awaiting Kevin's call on whether a follow-up nudge counts as part of the client's own enquiry. Report the count; list them only if the count or the list changes, or if any of them gains an offer.
 
 ## Rules
 
@@ -67,6 +83,6 @@ Check reports against recently shipped work before calling them real — a lot s
 
 Lead with anything urgent — a broken pipeline, a new error spike, a report describing something client-facing.
 
-Then: new feedback grouped and triaged. Then runtime errors with counts and first/last seen. Then the silence checks, stated even when everything is fine, because "intake is running normally" is information.
+Then: new feedback grouped and triaged. Then runtime errors with counts and first/last seen. Then the silence checks, stated even when everything is fine, because "intake is running normally" is information. Then email compliance — "nothing new flagged" is information too.
 
 Close with what you'd look at first, and be willing to say nothing needs attention.
