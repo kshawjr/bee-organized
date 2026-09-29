@@ -225,20 +225,35 @@ describe('scripts/waggle-add.mjs', () => {
   })
 
   it('with no key it says how to set up and exits 2, sending nothing', async () => {
-    const { main, KEY_FILE } = await script()
+    // HOME points at an empty folder, so there is no key file — on EVERY
+    // machine, including one that holds a real key (this used to read Kevin's
+    // real ~/.config/bee-hub/waggle-key and fail every run on his Mac).
+    const { main, keyFile } = await script()
     const { out, lines } = capture()
     const f = vi.fn(); (globalThis as any).fetch = f
     const home = fs.mkdtempSync(path.join(process.cwd(), '.tmp-home-'))
     try {
-      expect(fs.existsSync(KEY_FILE)).toBe(fs.existsSync(KEY_FILE)) // whatever this machine has; the env below overrides HOME only for the message
-      const code = await main(['fixed', GOOD.headline, GOOD.sentence], { HOME: home, WAGGLE_WRITE_KEY: '' }, out)
-      // readKey falls back to the real KEY_FILE path (computed at import from os.homedir), so only assert when it is absent
-      if (!fs.existsSync(KEY_FILE)) {
-        expect(code).toBe(2)
-        expect(lines[0]).toMatch(/Not set up — no WAGGLE_WRITE_KEY/)
-        expect(lines[0]).toContain('waggle-key')
-        expect(f).not.toHaveBeenCalled()
-      }
+      const env = { HOME: home, WAGGLE_WRITE_KEY: '' }
+      expect(keyFile(env)).toBe(path.join(home, '.config', 'bee-hub', 'waggle-key'))
+      expect(fs.existsSync(keyFile(env))).toBe(false)
+      const code = await main(['fixed', GOOD.headline, GOOD.sentence], env, out)
+      expect(code).toBe(2)
+      expect(lines[0]).toMatch(/Not set up — no WAGGLE_WRITE_KEY/)
+      expect(lines[0]).toContain(keyFile(env))
+      expect(f).not.toHaveBeenCalled()
+    } finally { fs.rmSync(home, { recursive: true, force: true }) }
+  })
+
+  it('a key file under HOME is found — no env var needed', async () => {
+    const { readKey, keyFile } = await script()
+    const home = fs.mkdtempSync(path.join(process.cwd(), '.tmp-home-'))
+    try {
+      const env = { HOME: home } as any
+      fs.mkdirSync(path.dirname(keyFile(env)), { recursive: true })
+      fs.writeFileSync(keyFile(env), '  file-key\n')
+      expect(readKey(env)).toBe('file-key')
+      // the environment variable still wins over the file
+      expect(readKey({ ...env, WAGGLE_WRITE_KEY: 'env-key' })).toBe('env-key')
     } finally { fs.rmSync(home, { recursive: true, force: true }) }
   })
 

@@ -31,13 +31,21 @@ import path from 'node:path'
 import { lintOwnerLine } from '../lib/waggle-line-rules.mjs'
 
 export const KEY_ENV = 'WAGGLE_WRITE_KEY'
-export const KEY_FILE = path.join(os.homedir(), '.config', 'bee-hub', 'waggle-key')
+// The key file lives under the HOME the script is given — read at call time,
+// not fixed at import. Real use passes process.env, whose HOME is the same
+// folder os.homedir() returns, so nothing changes; a test can point HOME at an
+// empty folder and get the honest "not set up" answer even on a machine that
+// holds a real key (it used to find Kevin's and fail every run).
+export function keyFile(env = process.env) {
+  return path.join(env.HOME || os.homedir(), '.config', 'bee-hub', 'waggle-key')
+}
+export const KEY_FILE = keyFile()
 export const DEFAULT_URL = 'https://beehive.beeorganized.com'
 export const ROUTE = '/api/help/releases/lines'
 
 export function readKey(env = process.env) {
   if (env[KEY_ENV]?.trim()) return env[KEY_ENV].trim()
-  try { return fs.readFileSync(KEY_FILE, 'utf8').trim() || null } catch { return null }
+  try { return fs.readFileSync(keyFile(env), 'utf8').trim() || null } catch { return null }
 }
 
 export function parseArgs(argv) {
@@ -67,7 +75,8 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
 
   const key = readKey(env)
   if (!key) {
-    out.error(`Not set up — no ${KEY_ENV} in the environment and no ${KEY_FILE}. Ask Kevin for the key, then: mkdir -p ~/.config/bee-hub && printf '%s' '<key>' > ${KEY_FILE} && chmod 600 ${KEY_FILE}`)
+    const file = keyFile(env)
+    out.error(`Not set up — no ${KEY_ENV} in the environment and no ${file}. Ask Kevin for the key, then: mkdir -p ~/.config/bee-hub && printf '%s' '<key>' > ${file} && chmod 600 ${file}`)
     return 2
   }
 

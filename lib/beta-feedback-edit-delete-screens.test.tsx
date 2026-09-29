@@ -20,7 +20,15 @@ import OwnerFeedbackScreen from '@/components/feedback/OwnerFeedbackScreen'
 import AdminFeedbackScreen from '@/components/admin/AdminFeedbackScreen'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 
-const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
+// ONE clock reading for the whole file. daysAgo() used to read Date.now() on
+// every call, so two reports both "10 days ago" were stamped 0 or 1 ms apart
+// depending on whether the clock ticked between building them. The screen
+// lists newest first, so a 1 ms tick put the SECOND report on top and the
+// delete test deleted the wrong one — about 1 run in 20, more under load or
+// when the test ran first (cold). Found 2026-09-28: shuffled seed 11 failed
+// 5/5; instrumented runs showed DELETE going to /api/feedback/y.
+const NOW = Date.now()
+const daysAgo = (n: number) => new Date(NOW - n * 86400000).toISOString()
 
 const item = (over: any) => ({
   id: 'x', title: 'Sort not permanent', description: 'The A-Z sort resets on refresh.',
@@ -71,9 +79,30 @@ const asUser = (id: string, node: React.ReactNode) => (
 const buttons = (host: HTMLElement) => Array.from(host.querySelectorAll('button')) as HTMLButtonElement[]
 const byText = (host: HTMLElement, text: string) =>
   buttons(host).find(b => (b.textContent || '').trim() === text) || null
-const click = async (el: Element | null) => { await act(async () => { (el as HTMLElement)?.click() }) }
+// A button that isn't there must FAIL here, loudly — not click nothing and let
+// the test fail three lines later with a puzzle (that is how the wrong-card
+// delete above hid as "Cannot read properties of undefined").
+const click = async (el: Element | null | undefined) => {
+  if (!el) throw new Error('click(): the button to click is not on the screen')
+  await act(async () => { (el as HTMLElement).click() })
+}
 
 afterEach(() => { vi.restoreAllMocks() })
+
+// Guard: the sample dates must not follow the clock. If daysAgo() goes back to
+// reading Date.now() per call, this fails EVERY time — not 1 run in 20.
+describe('the test data itself', () => {
+  it('daysAgo() is fixed for the whole file — a clock tick changes nothing', () => {
+    const before = daysAgo(10)
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(Date.now() + 60_000)
+      expect(daysAgo(10)).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 // ─── the owner's own card ─────────────────────────────────────────────
 
@@ -186,11 +215,14 @@ describe('the delete confirmation', () => {
 
   it('drops the card and the count when the delete goes through', async () => {
     const f = stubFetch({
-      '/api/admin/feedback': { items: [item({}), item({ id: 'y', title: 'Another thing' })] },
+      // y is clearly OLDER, so newest-first puts x on top on every run.
+      '/api/admin/feedback': { items: [item({}), item({ id: 'y', title: 'Another thing', created_at: daysAgo(12), updated_at: daysAgo(12) })] },
       '/api/feedback/x': { deleted: true, id: 'x' },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
     expect(host.textContent).toContain('2 things')
+    // The first card is x's — asserted, not assumed.
+    expect(host.textContent!.indexOf('Sort not permanent')).toBeLessThan(host.textContent!.indexOf('Another thing'))
 
     await click(buttons(host).filter(b => (b.textContent || '').trim() === 'Delete')[0])
     await click(byText(host, 'Yes, delete it'))

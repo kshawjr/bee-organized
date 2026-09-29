@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { T } from './tokens'
 
 // Parse "123 Main St, Denver CO 80202" → {street, city, state, zip, full}
@@ -56,6 +56,16 @@ export default function AddressAutofill({ value, onChange, onSelect, onParsed, p
     }
   }
   if (sessionTokenRef.current === null) newSessionToken()
+
+  // When the box goes away (Save or Cancel closes the edit), cancel a lookup
+  // still waiting out its debounce, and retire any request in flight so its
+  // answer is ignored. Without this, typing then saving inside 175 ms sent a
+  // billable Places lookup for a box nobody could see — and in the test suite
+  // that orphaned call landed in a later test (lib/beta-address-autofill-unmount.test.tsx).
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    reqIdRef.current++
+  }, [])
 
   async function fetchPredictions(query) {
     // reqId guards against stale responses: if user keeps typing while a
