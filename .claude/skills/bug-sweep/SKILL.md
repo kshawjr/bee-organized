@@ -70,7 +70,7 @@ Check reports against recently shipped work before calling them real — a lot s
 - `resend` rejections for `*.test@example.com` — two fake test leads on the hourly drip. Ignore unless the recipients change.
 - `[jobber-webhook] request_not_found_in_jobber` — a deleted Jobber record, self-resolving.
 - Token-race webhook errors that self-heal within 5 minutes.
-- The email compliance check's 8 returning-client "nudge" emails (flagged 2026-09-28: "Just making sure this didn't get buried…", "This is the last you'll hear from us…" in Returning client Path A and C — master, North Houston, West St Louis, San Diego). They're awaiting Kevin's call on whether a follow-up nudge counts as part of the client's own enquiry. Report the count; list them only if the count or the list changes, or if any of them gains an offer.
+- Email compliance: 8 returning-client "nudge" emails were reviewed and ACCEPTED by Kevin on 2026-09-28 (nudges on the client's own enquiry, nothing to sell — the reason and the list live in `lib/canspam-classifier.ts`). The check prints them as "Reviewed and accepted: 8" and does not flag them. Each is accepted only while its text is unchanged, so if one of them shows up under NEEDS A LOOK, it has been EDITED since — report it as new and quote what changed.
 
 ## Rules
 

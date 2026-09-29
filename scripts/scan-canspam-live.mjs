@@ -37,7 +37,14 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const { auditLiveEmail, COMMERCIAL_PRIMARY, PROMO_MARKERS, INCIDENTAL_PROMO } = await import(
+const {
+  auditLiveEmail,
+  COMMERCIAL_PRIMARY,
+  PROMO_MARKERS,
+  INCIDENTAL_PROMO,
+  STANDARD,
+  ACCEPTED_WITHOUT_ENQUIRY_WORDS,
+} = await import(
   pathToFileURL(join(ROOT, 'lib/canspam-classifier.ts')).href
 )
 
@@ -123,6 +130,7 @@ for (const t of masters) {
     isMaster: true,
     footered: COMMERCIAL_PRIMARY.includes(t.legacy_id),
     body: t.body ?? '',
+    place: STANDARD,
     where: where(null),
     what: t.name ?? t.legacy_id,
     inUse: 'standard copy',
@@ -135,6 +143,7 @@ for (const t of copies) {
     isMaster: false,
     footered: COMMERCIAL_PRIMARY.includes(m.legacy_id),
     body: t.body ?? '',
+    place: t.location_uuid,
     where: where(t.location_uuid),
     what: `${t.name ?? m.name} (their edited copy of "${m.name}")`,
     inUse: `edited ${String(t.updated_at).slice(0, 10)}`,
@@ -152,6 +161,7 @@ for (const s of steps) {
     isMaster: p.is_master === true,
     footered: false,
     body,
+    place: p.is_master ? STANDARD : p.location_uuid,
     where: where(p.is_master ? null : p.location_uuid),
     what: `"${p.name}" sequence, email ${s.step_order}`,
     inUse:
@@ -209,5 +219,10 @@ for (const level of ['problem', 'changed']) {
   console.log('')
 }
 
+console.log(
+  `Reviewed and accepted (lib/canspam-classifier.ts, with the reason): ${ACCEPTED_WITHOUT_ENQUIRY_WORDS.length} ` +
+    'returning-client nudges — they stay accepted only while their text is unchanged.',
+)
+console.log('')
 console.log(flagged.length ? `${flagged.length} email(s) need a person to read them.` : 'Nothing flagged.')
 process.exit(flagged.length ? 1 : 0)
