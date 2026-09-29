@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // OverlayShell close affordance: the mobile sheet's header X must render
-// in the drag-handle row and fire the SAME onClose the backdrop tap
-// fires — one close path, two affordances. Needs a real DOM (events),
+// in the drag-handle row and fire onClose. The backdrop tap no longer
+// closes (2026-09-29 — see beta-overlay-click-outside). Needs a real DOM (events),
 // hence the happy-dom override; the rest of the beta suite stays on the
 // node/renderToString path.
 import { describe, it, expect, vi } from 'vitest'
@@ -47,20 +47,20 @@ describe('OverlayShell close affordance', () => {
     await unmount()
   })
 
-  it('X fires the SAME onClose as the backdrop tap — exactly once per tap', async () => {
+  it('X fires onClose exactly once per tap; the backdrop tap does not', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(<OverlayShell isMobile onClose={onClose}><p>body</p></OverlayShell>)
 
     await click(host.querySelector('button[aria-label="Close"]')!)
     expect(onClose).toHaveBeenCalledTimes(1)
 
-    // Backdrop tap — the pre-existing close path, same handler.
+    // Backdrop tap — no longer a close path.
     await click(host.firstElementChild!)
-    expect(onClose).toHaveBeenCalledTimes(2)
+    expect(onClose).toHaveBeenCalledTimes(1)
 
-    // Tapping sheet content must NOT close (stopPropagation intact).
+    // Tapping sheet content must NOT close either.
     await click(host.querySelector('p')!)
-    expect(onClose).toHaveBeenCalledTimes(2)
+    expect(onClose).toHaveBeenCalledTimes(1)
     await unmount()
   })
 })
