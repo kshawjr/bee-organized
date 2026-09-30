@@ -48,6 +48,7 @@ import {
 } from '@/components/hive/shared/clientMatch'
 import { findOpenEngagementForClient, foundManualEngagement } from '@/lib/engagements'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
+import { routeByZip, zipRouteToken, type ZipRouteDecision } from '@/lib/zip-routing'
 
 export const runtime = 'nodejs'
 
@@ -189,6 +190,10 @@ export async function POST(req: NextRequest) {
     'location_slug', 'full_name', 'email', 'phone', 'address', 'city',
     'state', 'zip', 'project_type', 'message', 'preferred_contact',
     'source', 'metadata',
+    // The global form's "Global" | "Local" marker (20 Aug zip-routing plan).
+    // Routing does not read it — the ABSENCE of location_slug is what sends a
+    // lead down the zip path — but it is a contract key, not drift.
+    'form_source',
     // description aliases the DESC_KEYS loop above already accepts.
     'description', 'request_details',
   ])
@@ -232,40 +237,50 @@ export async function POST(req: NextRequest) {
     typeof email === 'string' && email.trim().length > 0
   const emailPresentToken = ` email_present=${emailPresent}`
 
-  if (!location_slug || typeof location_slug !== 'string') {
-    await logIntake({
-      status: 'error', landed: 'na', locationSlug: null,
-      entityId: 'unknown', detail: `error=location_slug required${emailPresentToken}${unknownKeysToken}`,
-    })
-    return NextResponse.json({ error: 'location_slug required' }, { status: 400 })
-  }
+  // ─── Location: named by the form, or decided by the zip ───────
+  // A payload that NAMES a location (location_slug) routes exactly as it
+  // always has — the zip is never read for it. A payload with NO location is
+  // the website's global form: the zip decides (lib/zip-routing.ts), and every
+  // non-match — missing, malformed, unmatched, conflicted, not-live, lookup
+  // error — lands at loc_other for Leslie. This used to be a 400
+  // ("location_slug required"), which would have dropped every global-form
+  // lead on the floor the day the website stopped sending a location.
+  const sentSlug =
+    typeof location_slug === 'string' && location_slug.trim() ? location_slug : null
+  const errEntity = sentSlug ?? 'unknown'
+
   if (!full_name || typeof full_name !== 'string' || !full_name.trim()) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: location_slug, detail: `error=full_name required${emailPresentToken}${unknownKeysToken}`,
+      entityId: errEntity, detail: `error=full_name required${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'full_name required' }, { status: 400 })
   }
   if (!validEmail && !hasPhone) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: location_slug, detail: `error=email_or_phone_required${emailPresentToken}${unknownKeysToken}`,
+      entityId: errEntity, detail: `error=email_or_phone_required${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'email_or_phone_required' }, { status: 400 })
   }
+
+  const zipRoute: ZipRouteDecision | null = sentSlug ? null : await routeByZip(zip)
+  const routeSlug: string = sentSlug ?? zipRoute!.slug
+  // Rides on the success row (both paths) — absent for a named location.
+  const zipRouteLogToken = zipRoute ? zipRouteToken(zipRoute) : ''
 
   // Slug lives in locations.location_id (Zoho-style ID, used as slug across repo).
   const { data: location, error: locErr } = await supabaseService
     .from('locations')
     .select('id, name, location_id, lifecycle_status')
-    .eq('location_id', location_slug)
+    .eq('location_id', routeSlug)
     .maybeSingle()
 
   if (locErr) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: location_slug,
-      detail: `error=location_lookup_failed slug=${location_slug} — ${locErr.message}${unknownKeysToken}`,
+      entityId: routeSlug,
+      detail: `error=location_lookup_failed slug=${routeSlug} — ${locErr.message}${zipRouteLogToken}${unknownKeysToken}`,
     })
     return NextResponse.json(
       { error: 'location_lookup_failed', detail: locErr.message },
@@ -277,8 +292,8 @@ export async function POST(req: NextRequest) {
     // straight off the dashboard row.
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: location_slug,
-      detail: `error=location_not_found slug=${location_slug} — no location with this slug (check the Make location mapping)${unknownKeysToken}`,
+      entityId: routeSlug,
+      detail: `error=location_not_found slug=${routeSlug} — no location with this slug (check the Make location mapping)${zipRouteLogToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'location_not_found' }, { status: 400 })
   }
@@ -333,6 +348,9 @@ export async function POST(req: NextRequest) {
         // #108 — same unknown-key signal on the merge (success) path: a
         // returning client's resubmission can drift its mapping too.
         unknownKeysToken,
+        // Zip routing — how this location was decided, when the form sent none.
+        zipRouteLogToken,
+        zipRoute,
       })
     }
 
@@ -688,6 +706,8 @@ export async function POST(req: NextRequest) {
       // don't recognize (KEY NAMES ONLY, never values). A clean payload
       // carries no token.
       unknownKeysToken +
+      // Zip routing: present only when the form sent no location.
+      zipRouteLogToken +
       // Only when muted, so the token's presence is the signal. Without it a
       // muted location reads as `notified=0`, which is indistinguishable from
       // "nobody was subscribed" — the ambiguity this flag has to avoid.
@@ -705,6 +725,8 @@ export async function POST(req: NextRequest) {
       slug: location.location_id,
       lifecycle_status: location.lifecycle_status ?? null,
     },
+    // Zip routing — only when the form sent no location.
+    ...(zipRoute ? { zip_route: zipRoute } : {}),
     drip_enrolled: dripEnrolled,
     assigned_count: assignedCount,
     ...(assignmentBasis ? { assigned_via: assignmentBasis } : {}),
@@ -765,8 +787,10 @@ async function mergeResubmission(args: {
   // #108 — pre-rendered ` unknown_keys=<names>` token (or '' when clean),
   // computed once in POST. KEY NAMES ONLY — never values.
   unknownKeysToken: string
+  zipRouteLogToken: string
+  zipRoute: ZipRouteDecision | null
 }): Promise<NextResponse> {
-  const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin, unknownKeysToken } = args
+  const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin, unknownKeysToken, zipRouteLogToken, zipRoute } = args
   const warnings: string[] = [...args.baseWarnings]
 
   const incoming: Record<string, string | null> = {
@@ -1175,6 +1199,7 @@ async function mergeResubmission(args: {
       (!submission.message?.trim() ? ' no_description=true' : '') +
       // #108 — producer-mapping drift, key names only (see POST).
       unknownKeysToken +
+      zipRouteLogToken +
       (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
       (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
   })
@@ -1190,6 +1215,8 @@ async function mergeResubmission(args: {
       slug: location.location_id,
       lifecycle_status: location.lifecycle_status ?? null,
     },
+    // Zip routing — only when the form sent no location.
+    ...(zipRoute ? { zip_route: zipRoute } : {}),
     drip_enrolled: dripEnrolled,
     assigned_count: mergeAssignedCount,
     // #94 — the engagement the resubmission founded or surfaced onto.

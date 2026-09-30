@@ -161,15 +161,18 @@ describe('intake observability — error rows', () => {
     expect(lastLog().message).toContain('error=invalid_json')
   })
 
-  it('missing slug (pre-slug path) → entity_id is "unknown", NEVER the email; email_present token carries the signal (#110a)', async () => {
-    const res = await POST(makeReq(submission({ location_slug: undefined })))
+  // A missing slug is no longer an error — the zip routes the lead
+  // (lib/beta-intake-zip-routing.test.ts). The pre-slug PII invariant still
+  // holds for a payload rejected before any location is known.
+  it('rejected with no slug → entity_id is "unknown", NEVER the email; email_present token carries the signal (#110a)', async () => {
+    const res = await POST(makeReq(submission({ location_slug: undefined, full_name: undefined })))
     expect(res.status).toBe(400)
     expect(lastLog()).toMatchObject({
       status: 'error', landed_status: 'na', location_id: null,
       entity_id: 'unknown',
     })
     expect(lastLog().entity_id).not.toContain('@') // PII invariant
-    expect(lastLog().message).toContain('error=location_slug required')
+    expect(lastLog().message).toContain('error=full_name required')
     expect(lastLog().message).toContain('email_present=true')
   })
 
@@ -340,12 +343,12 @@ describe('intake unknown-key detection (#108)', () => {
   })
 
   it('unknown key on a REJECTED request → still logged on the error row', async () => {
-    // Missing location_slug rejects at the validation gate (no DB touched),
+    // Missing full_name rejects at the validation gate (no DB touched),
     // but the unknown key must still surface on that error row.
-    const res = await POST(makeReq(submission({ location_slug: undefined, zipcode: '80301' })))
+    const res = await POST(makeReq(submission({ location_slug: undefined, full_name: undefined, zipcode: '80301' })))
     expect(res.status).toBe(400)
     expect(lastLog().status).toBe('error')
-    expect(lastLog().message).toContain('error=location_slug required')
+    expect(lastLog().message).toContain('error=full_name required')
     expect(lastLog().message).toContain('unknown_keys=zipcode')
   })
 

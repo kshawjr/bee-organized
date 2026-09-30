@@ -87,6 +87,7 @@ import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"
 // screen's own header said 28; both now come from here, so they cannot drift.
 import { summarizeFeedbackQueues } from "@/lib/feedback-queues"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
+import AdminZipCodesScreen from "@/components/admin/AdminZipCodesScreen"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // The compact, Home-sized cut of System Health — stands in for the operational
 // Home when an elevated user is viewing 'All Locations'. Reads the SAME
@@ -34452,6 +34453,9 @@ function SuperAdminLayout({
         // super_admin-only as a whole — putting it there would silently narrow
         // the gate to super_admin and re-create the discrepancy above.
         ...(showNotifications ? [{ key:'notifications', label:'Notifications', icon:'✉️' }] : []),
+        // Zip codes — the list that routes website global-form leads. Corporate
+        // owns it (same gate as Feedback; the API re-checks super_admin/admin).
+        ...(showFeedback ? [{ key:'zips', label:'Zip codes', icon:'📮' }] : []),
         // Content (Hive Hub Guide / manual editor) matches the legacy
         // AdminScreen gate — corporate edits it too, so it can't live in the
         // super_admin-only Advanced cluster.
@@ -34701,6 +34705,14 @@ function SuperAdminLayout({
           // header, so no serif h1 here.
           <div style={{ padding:'14px 8px 48px' }}>
             <AdminNotificationsScreen locations={locations} />
+          </div>
+        )
+
+      case 'zips':
+        return (
+          // Same wrapper as Notifications — the screen carries its own header.
+          <div style={{ padding:'14px 8px 48px' }}>
+            {showFeedback ? <AdminZipCodesScreen /> : null}
           </div>
         )
 
