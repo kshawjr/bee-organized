@@ -356,11 +356,15 @@ describe('cron route + registration pins', () => {
     expect(lib).not.toContain('writeSyncLog(')
   })
 
-  it('is an allowlist: notification_log is never read (Slack channel failures are the owner\'s fix)', () => {
+  it('is an allowlist: notification_log is read only for loc_other EMAIL (Slack channel failures are the owner\'s fix)', () => {
     // The Sept 2026 rebuild closed the one notification_log slice the
     // silent-sends rail had opened (channel='slack' failed): every such row is
-    // an owner's private channel, which Kevin cannot fix.
-    expect(lib).not.toContain("from('notification_log')")
+    // an owner's private channel, which Kevin cannot fix. Kind 9 (2026-09-30)
+    // reopens exactly one read — loc_other, channel email — and nothing else.
+    expect(lib.split("from('notification_log')").length - 1).toBe(1)
+    expect(lib).toContain(".eq('location_slug', LOC_OTHER_SLUG)")
+    expect(lib).toContain(".eq('channel', 'email')")
+    expect(lib).not.toMatch(/eq\('channel', 'slack'\)/)
     expect(route).not.toContain("from('notification_log')")
     // The original allowlisted sources ARE still queried.
     expect(lib).toContain("from('import_jobs')")

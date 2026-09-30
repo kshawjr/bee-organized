@@ -50,10 +50,11 @@ describe('resolveNotificationsLive', () => {
   // Its OWN read, keyed by uuid — never a widening of a caller's location
   // select. That isolation is what stops a missing column from 500-ing lead
   // intake, so it is pinned, not assumed.
-  it('reads only its own column, by location id', async () => {
+  it('reads only its own columns, by location id', async () => {
     maybeSingleMock.mockResolvedValue({ data: { notifications_live: true }, error: null })
     await resolveNotificationsLive('loc-uuid-9')
-    expect(selectMock).toHaveBeenCalledWith('notifications_live')
+    // location_id rides along so loc_other can be recognised (never muted).
+    expect(selectMock).toHaveBeenCalledWith('notifications_live, location_id')
     expect(eqMock).toHaveBeenCalledWith('id', 'loc-uuid-9')
   })
 

@@ -38,7 +38,24 @@
 // A read failure is logged loudly here precisely so that window is legible in
 // the console rather than looking like "no leads came in".
 
+// ── EXCEPT loc_other — never muted (2026-09-30) ─────────────────────────────
+// loc_other is corporate's queue of leads no franchise holds (Leslie's). The
+// migration left it muted "because Leslie is covered by Zoho"; the zip-only
+// website form posts straight to Bee Hub, and once zip routing is the website's
+// only door ~150 leads a month land there. A muted loc_other is a queue nobody
+// is told about. It was switched on by hand in the database, and nothing but
+// this line stops a hand switching it off again, so the rule lives in code:
+// when the row says loc_other, the flag is not read. The double-notify worry
+// that justified the flag is about franchise owners on Zoho — it does not apply
+// to corporate's own queue.
+//
+// A read FAILURE still fails closed here: without the row we cannot tell
+// loc_other from a Zoho location. That case is not silent — it writes a muted
+// row, and lib/failure-alerts pages Kevin for any loc_other lead that reached
+// nobody.
+
 import { supabaseService } from './supabase-service'
+import { LOC_OTHER_SLUG } from './hub-scope'
 
 // Why the location isn't cleared to send. Threaded to the notification_log row
 // so a muted location reads as INTENTIONALLY silent rather than broken — the
@@ -55,6 +72,10 @@ export type NotificationsLiveReason =
 
 export type NotificationsLiveVerdict = {
   live: boolean
+  // Present only when the location is loc_other: live by rule, not by flag.
+  // lib/lead-notification-email reads it to send the Bee Hub variant (the
+  // button straight to the lead) — corporate works this queue in Bee Hub.
+  unroutedQueue?: true
   reason?: NotificationsLiveReason
   // Present only on 'read_failed' — the underlying message, so a muted row in
   // the notebook says WHY rather than just "not live".
@@ -70,7 +91,7 @@ export async function resolveNotificationsLive(
   try {
     const { data, error } = await supabaseService
       .from('locations')
-      .select('notifications_live')
+      .select('notifications_live, location_id')
       .eq('id', locationId)
       .maybeSingle()
 
@@ -88,6 +109,9 @@ export async function resolveNotificationsLive(
       )
       return { live: false, reason: 'location_not_found' }
     }
+
+    // loc_other: live whatever the flag says. See the header.
+    if (data.location_id === LOC_OTHER_SLUG) return { live: true, unroutedQueue: true }
 
     // Coerced, not trusted: the column is NOT NULL in the schema, but a null
     // here (a stale PostgREST cache mid-migration) must read as muted, not as

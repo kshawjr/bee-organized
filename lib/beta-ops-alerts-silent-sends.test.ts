@@ -81,14 +81,17 @@ describe("slack channel failures are the owner's fix — never an alert", () => 
     expect(items).toEqual([])
   })
 
-  it('collect never reads notification_log, so failed Slack rows cannot reach Kevin', async () => {
+  // notification_log is read ONCE now — kind 9, loc_other email rows only
+  // (2026-09-30). Failed Slack rows handed to that read still reach nobody:
+  // the fetcher re-checks channel and location on every row.
+  it('failed Slack rows cannot reach Kevin, even through the one loc_other email read', async () => {
     const { supabase, enqueue, calls } = makeQueuedSupabase()
     enqueue('locations', [{ id: 'loc-uuid-1', location_id: 'loc_portland', name: 'Portland', subscription_status: 'active' }])
     enqueue('notification_log', [slackFail(), slackFail({ error: 'not_in_channel' })])
     const fetchEvents = vi.fn(async () => ({ events: [], truncated: false }))
     const out = await collectFailureAlerts({ nowMs: NOW, sinceMs: SINCE, supabase, fetchEvents: fetchEvents as any })
     expect(out.items).toEqual([])
-    expect(calls.map((c: any) => c.table)).not.toContain('notification_log')
+    expect(calls.filter((c: any) => c.table === 'notification_log')).toHaveLength(1)
   })
 })
 

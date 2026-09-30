@@ -232,14 +232,18 @@ describe('instant — a token that does not recover alerts once', () => {
 // ═══ 5. a Slack channel failure produces no message to Kevin ═════════
 
 describe("instant — a Slack failure on an owner's channel is not Kevin's", () => {
-  it('channel_not_found / not_in_channel rows produce no message and are never read', async () => {
+  // notification_log IS read now — for kind 9, loc_other EMAIL rows only
+  // (2026-09-30). This fake ignores query filters, so these Slack rows reach
+  // the fetcher: it proves the fetcher's own row check keeps an owner's Slack
+  // failure — even one at loc_other — from ever posting.
+  it('channel_not_found / not_in_channel rows produce no message', async () => {
     db.tables.notification_log = [
       { channel: 'slack', send_status: 'failed', location_slug: 'loc_portland', lead_name: 'Jane', error: 'channel_not_found', created_at: iso(IN_WIN) },
       { channel: 'slack', send_status: 'failed', location_slug: 'loc_nova', lead_name: 'Sam', error: 'not_in_channel', created_at: iso(IN_WIN) },
+      { channel: 'slack', send_status: 'failed', location_slug: 'loc_other', lead_name: 'Pat', error: 'not_in_channel', created_at: iso(IN_WIN) },
     ]
     await failureAlerts(req('/api/cron/failure-alerts'))
     expect(posts()).toHaveLength(0)
-    expect(db.reads).not.toContain('notification_log')
   })
 })
 

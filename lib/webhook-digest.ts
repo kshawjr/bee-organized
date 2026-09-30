@@ -17,6 +17,10 @@
 //   • STUCK — imports stalled / bouncing / origin SSO-gated; locations whose
 //     sends are held for a missing rate or booking link; locations still
 //     waiting on a Jobber reconnect.
+//   • UNROUTED WAITING — leads in loc_other (no franchise holds the zip) still
+//     unrouted a day after they arrived. Each one emailed corporate the moment
+//     it landed; this is the backstop for when nobody acted on that email —
+//     a holiday, a missed inbox. Zero waiting says nothing.
 //
 // WHAT IT NEVER CARRIES:
 //   • "healthy" rundowns — leads in, Jobber events landed, loc_other shares.
@@ -71,6 +75,8 @@ export type WebhookDigest = {
   bookingLinkMissing: number
   // locations still stamped RECONNECT REQUIRED (lib/jobber-reconnect)
   reconnectRequired: number
+  // loc_other leads unrouted for longer than UNROUTED_WAIT_MS
+  unroutedWaiting: number
   text: string
 }
 
@@ -258,6 +264,38 @@ export function buildReconnectSection(
   return { lines, count: rows.length }
 }
 
+// ── unrouted waiting ─────────────────────────────────────────────
+// Leslie's measured pace (2026-07-16 → 09-30, 28 transfers): median 4 hours,
+// slowest 3.6 days. A day is past the normal pace without paging on a lead
+// that simply arrived overnight.
+export const UNROUTED_WAIT_MS = 24 * 60 * 60 * 1000
+
+export type UnroutedWaitingDigestInput = {
+  // loc_other leads (not junk, not archived) created before now - UNROUTED_WAIT_MS
+  count: number
+  oldestCreatedAt: string | null
+}
+
+export function buildUnroutedWaitingSection(
+  input: UnroutedWaitingDigestInput | undefined,
+  appUrl: string,
+  nowMs: number,
+): { lines: string[]; count: number } {
+  const count = input?.count ?? 0
+  if (count === 0) return { lines: [], count: 0 }
+  const oldestMs = input?.oldestCreatedAt ? Date.parse(input.oldestCreatedAt) : NaN
+  const days = Number.isFinite(oldestMs) ? Math.max(1, Math.floor((nowMs - oldestMs) / 86_400_000)) : null
+  const oldest = days ? ` — oldest ${days} day${days !== 1 ? 's' : ''}` : ''
+  return {
+    lines: [
+      `*:round_pushpin: Unrouted leads waiting* — ${plural(count, 'lead')} in Other for over a day${oldest}. ` +
+        `No location holds their zip; corporate routes them from Needs transfer.`,
+      `<${appUrl}/|Open Bee Hub> — they are on the Inbox and the Home card`,
+    ],
+    count,
+  }
+}
+
 // ── never landed ─────────────────────────────────────────────────
 
 export type NeverLanded = {
@@ -336,6 +374,7 @@ export function buildWebhookDigest(opts: {
   rateHealth?: RateHealthDigestInput // blank-rate hold rollup (lib/rate-health)
   bookingLinkHealth?: BookingLinkHealthDigestInput // missing-link hold rollup (lib/booking-link-health)
   reconnect?: ReconnectDigestInput   // locations still stamped RECONNECT REQUIRED
+  unroutedWaiting?: UnroutedWaitingDigestInput // loc_other leads unrouted past a day
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 24h'
@@ -346,6 +385,7 @@ export function buildWebhookDigest(opts: {
   const rate = buildRateHealthSection(opts.rateHealth)
   const booking = buildBookingLinkHealthSection(opts.bookingLinkHealth)
   const reconnect = buildReconnectSection(opts.reconnect)
+  const unrouted = buildUnroutedWaitingSection(opts.unroutedWaiting, appUrl, nowMs)
 
   // Heartbeat counters — recorded on digest_runs, never posted.
   const leads = opts.events.filter(e => e.topic === 'LEAD_INTAKE')
@@ -358,11 +398,12 @@ export function buildWebhookDigest(opts: {
   // leads flowing and Jobber syncing but nothing wrong posts NOTHING.
   const problems =
     neverLanded.length + (imp.hasProblems ? 1 : 0) + rate.missingCount +
-    booking.missingCount + reconnect.count
+    booking.missingCount + reconnect.count + unrouted.count
   const suppressed = problems === 0
 
   const parts: string[] = []
   if (neverLanded.length) parts.push(`${plural(neverLanded.length, 'Jobber change')} never landed`)
+  if (unrouted.count) parts.push(`${plural(unrouted.count, 'unrouted lead')} waiting over a day`)
   if (reconnect.count) parts.push(`${plural(reconnect.count, 'location')} still disconnected from Jobber`)
   if (imp.originGated) parts.push('imports cannot self-resume')
   if (imp.stalledCount) parts.push(`${plural(imp.stalledCount, 'import')} stalled`)
@@ -390,7 +431,7 @@ export function buildWebhookDigest(opts: {
     neverLines.push(`<${appUrl}/admin?adminTab=webhooks&whFilter=failures&whWindow=24h|Open the webhook dashboard>`)
   }
 
-  const blocks = [neverLines, reconnect.lines, imp.lines, rate.lines, booking.lines]
+  const blocks = [unrouted.lines, neverLines, reconnect.lines, imp.lines, rate.lines, booking.lines]
     .filter(l => l.length)
     .map(l => l.join('\n'))
   const text = suppressed ? '' : [headline, ...blocks].join('\n\n')
@@ -412,6 +453,7 @@ export function buildWebhookDigest(opts: {
     rateMissing: rate.missingCount,
     bookingLinkMissing: booking.missingCount,
     reconnectRequired: reconnect.count,
+    unroutedWaiting: unrouted.count,
     text,
   }
 }

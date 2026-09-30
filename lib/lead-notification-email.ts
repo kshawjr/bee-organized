@@ -545,7 +545,13 @@ export async function notifyNewLead(args: {
   // email is. Special-casing them would mean two sends again. Fail-soft inside
   // the resolver: a read error yields NO-access (the clean email), never the
   // Bee Hub one — a failed lookup must not resurrect the confusing message.
-  const hasHubAccess = await locationHasActiveHubUser(location.id)
+  //
+  // loc_other is the exception, decided by the gate (gate.unroutedQueue): it
+  // has no hub_users of its own — corporate's accounts carry no location — so
+  // the lookup below says "not on Bee Hub" and Leslie got the clean email with
+  // no way into the lead. Corporate routes these IN Bee Hub; they get the
+  // button.
+  const hasHubAccess = gate.unroutedQueue === true || (await locationHasActiveHubUser(location.id))
   // #86 crosses #91: four possible kinds now, one per (resubmission × hub) cell.
   // The resubmission flag picks the row (returning-client vs new-lead), hasHubAccess
   // picks the column (Bee Hub vs clean non-hub) — same two-variant split #91 built,

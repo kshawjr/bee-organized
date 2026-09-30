@@ -39,6 +39,14 @@
 //      fetcher skips a group that already failed the same way in the
 //      previous DRIP_ENROL_REALERT_MS. By-design reasons (Drip not ticked,
 //      imported, opted out, location not live) never reach this rail.
+//   9. UNROUTED LEAD REACHED NOBODY (2026-09-30) — a new lead landed in
+//      loc_other (no franchise holds its zip) and its lead-alert email was
+//      not sent: nobody on the list, the send failed, or the location read
+//      failed. Those leads are corporate's to route and the email IS how
+//      corporate hears of them — without it the lead sits in Needs transfer
+//      until someone happens to look. Every cause is a setting or an outage
+//      Kevin fixes, so it is instant, ONE message per lead. A loc_other lead
+//      whose email went out is Leslie's and never reaches this rail.
 // (Stripe payment failures post instantly from app/api/webhooks/stripe
 //  itself, one message each — they never needed this rail.)
 //
@@ -55,7 +63,8 @@
 //   • SLACK LEAD-ALERT FAILURES (notification_log channel='slack' failed).
 //     Every one is channel_not_found / not_in_channel on the OWNER's Slack;
 //     the fix is theirs (invite the app, or reconnect), not Kevin's. The
-//     Settings Slack card is where that surfaces.
+//     Settings Slack card is where that surfaces. (Kind 9 reads
+//     notification_log for loc_other EMAIL rows only — never a Slack row.)
 //   • sync_log not_landed — moved to the daily digest as "never landed".
 //     26 in 30 days, almost all PROPERTY_UPDATE former-address syncs; stuck,
 //     not an emergency.
@@ -102,6 +111,7 @@ import { SELF_HEAL_WINDOW_MS } from './webhook-digest'
 import { parseReconnectStamp } from './jobber-reconnect'
 import { FEEDBACK_TRIAGE_PATH } from './feedback-triage-link'
 import { DRIP_ENROL_KIND, SETUP_REASONS, dripEnrolReasonText, type DripEnrolReason } from './drip-enrol-outcome'
+import { LOC_OTHER_SLUG } from './hub-scope'
 
 export { parseReconnectStamp }
 
@@ -123,6 +133,7 @@ export type AlertKind =
   | 'checkout_stranded'
   | 'email_held'
   | 'drip_not_starting'
+  | 'unrouted_untold'
 
 // How long an owner may sit on an unpaid checkout before it is a strand.
 // Measured, not guessed — see the window note in the module header.
@@ -148,6 +159,16 @@ export type DripEnrolFailureRow = {
   first_at: string
   count: number
   lead_name?: string | null
+}
+
+// A new loc_other lead whose lead-alert email was not sent (fetchUnroutedUntold
+// — one row per lead, the first non-send in the window).
+export type UnroutedUntoldRow = {
+  lead_id: string | null
+  lead_name?: string | null
+  send_status: string
+  error?: string | null
+  created_at: string
 }
 
 export type AlertItem = {
@@ -354,6 +375,7 @@ export function selectNewAlerts(input: {
   dripEnrolFailures?: DripEnrolFailureRow[]         // leads a location setup kept out of nurture
   ownerReports?: OwnerReportRow[]                   // feedback_items rows filed by owners
   reconnects?: ReconnectRow[]                       // locations stamped RECONNECT REQUIRED
+  unroutedUntold?: UnroutedUntoldRow[]              // loc_other leads whose alert email didn't go
   locNameByUuid?: Map<string, string>               // locations.id (uuid) → display name
   appUrl?: string                                   // for the triage link on owner reports
   sinceMs: number
@@ -364,7 +386,7 @@ export function selectNewAlerts(input: {
     events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs,
     pendingCheckouts = [], locBilling, resolvedSessions,
     heldEmails = [], ownerReports = [], reconnects = [], locNameByUuid, appUrl = '',
-    dripEnrolFailures = [],
+    dripEnrolFailures = [], unroutedUntold = [],
   } = input
   const items: AlertItem[] = []
   const uuidLabel = (id: string | null | undefined) =>
@@ -514,7 +536,33 @@ export function selectNewAlerts(input: {
     })
   }
 
+  // (9) an unrouted lead reached nobody — one message per lead. Says why in
+  // words Kevin can act on, and where the lead is waiting meanwhile.
+  for (const u of unroutedUntold) {
+    const t = Date.parse(u.created_at)
+    if (!inWindow(t, sinceMs, cutoffMs)) continue
+    const who = u.lead_name ? clean(u.lead_name, 60) : 'A new lead'
+    items.push({
+      kind: 'unrouted_untold',
+      ts: t,
+      text:
+        `Unrouted lead reached nobody — ${who} landed in Other (no location holds the zip) and ` +
+        `${unroutedWhy(u)}. It is waiting in Needs transfer; tell corporate, then fix the cause.`,
+    })
+  }
+
   return items.sort((a, b) => a.ts - b.ts)
+}
+
+// Why a loc_other lead-alert email didn't go, in the words of its fix.
+const unroutedWhy = (u: UnroutedUntoldRow): string => {
+  if (u.send_status === 'zero_recipients') {
+    return "nobody is on Other's lead-alert list (corporate was removed or unsubscribed)"
+  }
+  if (u.send_status === 'muted') {
+    return `Bee Hub couldn't read the location to send the alert (${clean(u.error || 'unknown', 80)})`
+  }
+  return `the alert email failed to send (${clean(u.error || 'unknown error', 80)})`
 }
 
 // ── the pure message builder ────────────────────────────────────────
@@ -530,6 +578,7 @@ const EMOJI: Record<AlertKind, string> = {
   checkout_stranded: ':hourglass_flowing_sand:',
   email_held: ':envelope:',
   drip_not_starting: ':mailbox_with_no_mail:',
+  unrouted_untold: ':round_pushpin:',
 }
 
 export type AlertMessage = { text: string; items: AlertItem[] }
@@ -962,6 +1011,55 @@ export async function fetchDripEnrolSetupFailures(
   return out
 }
 
+// New loc_other leads whose lead-alert EMAIL was not sent in (since, cutoff].
+// notification_log is the one record of every outcome (lib/lead-notification-
+// email logs muted / zero_recipients / failed itself; the resend layer logs a
+// failed send per address), so it is the source. Slack rows are not read:
+// loc_other has no Slack, and the email is the alert that matters. Grouped to
+// one row per lead — a failed send writes one row per address. Resubmissions
+// are left out: that person already reached corporate once.
+export const UNROUTED_UNTOLD_STATUSES = ['muted', 'zero_recipients', 'failed'] as const
+export const UNROUTED_ALERT_KINDS = ['lead_notification', 'lead_notification_non_hub'] as const
+
+export async function fetchUnroutedUntold(
+  supabase: typeof supabaseService,
+  sinceIso: string,
+  cutoffIso: string,
+): Promise<UnroutedUntoldRow[]> {
+  const { data, error } = await supabase
+    .from('notification_log')
+    .select('lead_id, lead_name, location_slug, channel, send_status, error, created_at')
+    .eq('location_slug', LOC_OTHER_SLUG)
+    .eq('channel', 'email')
+    .in('email_kind', UNROUTED_ALERT_KINDS as unknown as string[])
+    .in('send_status', UNROUTED_UNTOLD_STATUSES as unknown as string[])
+    .gt('created_at', sinceIso)
+    .lte('created_at', cutoffIso)
+    .order('created_at', { ascending: true })
+    .limit(200)
+  if (error || !data) return []
+  const seen = new Set<string>()
+  const out: UnroutedUntoldRow[] = []
+  for (const r of data as any[]) {
+    // Re-checked on the row, not just trusted to the query: this is the one
+    // notification_log read on this rail, and an owner's Slack failure must
+    // never be able to reach Kevin through it (the Sept 2026 rule).
+    if (r.channel !== 'email' || r.location_slug !== LOC_OTHER_SLUG) continue
+    if (!(UNROUTED_UNTOLD_STATUSES as readonly string[]).includes(r.send_status)) continue
+    const key = r.lead_id || `${r.created_at}|${r.lead_name}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      lead_id: r.lead_id ?? null,
+      lead_name: r.lead_name ?? null,
+      send_status: r.send_status,
+      error: r.error ?? null,
+      created_at: r.created_at,
+    })
+  }
+  return out
+}
+
 export async function collectFailureAlerts(opts: {
   nowMs: number
   sinceMs: number
@@ -981,7 +1079,7 @@ export async function collectFailureAlerts(opts: {
   // the (sinceMs, cutoffMs] filter — not the fetch window — is the real dedup
   // boundary. A cron outage longer than 24h would drop older failed-lead
   // detail here; the admin Webhooks tab still has every row.
-  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, ownerReports, heldEmails] =
+  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, ownerReports, heldEmails, unroutedUntold] =
     await Promise.all([
       fetchEvents({ window: '24h' }),
       fetchImportFailures(supabase, sinceIso, cutoffIso),
@@ -990,6 +1088,7 @@ export async function collectFailureAlerts(opts: {
       fetchPendingCheckouts(supabase, opts.sinceMs, cutoffMs),
       fetchOwnerReports(supabase, sinceIso, cutoffIso),
       fetchHeldSubjectEmails(supabase, opts.sinceMs, cutoffMs),
+      fetchUnroutedUntold(supabase, sinceIso, cutoffIso),
     ])
 
   // Nurture emails not starting (kind 8). After the batch, not inside it: its
@@ -1011,6 +1110,7 @@ export async function collectFailureAlerts(opts: {
     resolvedSessions,
     heldEmails,
     dripEnrolFailures,
+    unroutedUntold,
     ownerReports,
     reconnects: directory.reconnects,
     locNameByUuid: directory.namesByUuid,

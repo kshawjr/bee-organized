@@ -9,7 +9,8 @@
 // Reports ONLY what Kevin should know about but that is not an emergency:
 // Jobber changes that never landed after their retries, and things that are
 // STUCK (stalled imports, sends held for a missing rate or booking link,
-// locations still disconnected from Jobber). See lib/webhook-digest for the
+// locations still disconnected from Jobber, unrouted leads waiting over a
+// day). See lib/webhook-digest for the
 // rule and for what is deliberately never a line.
 //
 // SILENT WHEN EVERY COUNT IS ZERO: no "all healthy" message, ever. Returns
@@ -32,7 +33,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
-import { buildWebhookDigest } from '@/lib/webhook-digest'
+import { buildWebhookDigest, UNROUTED_WAIT_MS } from '@/lib/webhook-digest'
+import { LOC_OTHER_SLUG } from '@/lib/hub-scope'
+import { applyLeadActiveFilter } from '@/lib/lead-suppression'
 import { fetchImportHealth } from '@/lib/import-health'
 import { fetchRateHealth } from '@/lib/rate-health'
 import { fetchBookingLinkHealth } from '@/lib/booking-link-health'
@@ -125,6 +128,31 @@ export async function GET(req: NextRequest) {
       console.error('[cron webhook-digest] reconnect read failed (non-fatal)', err?.message || err)
     }
 
+    // Unrouted leads still in loc_other a day after they arrived — the
+    // backstop behind the instant email to corporate. Same row set as the
+    // Needs-transfer queue (not junk, not archived). Best-effort like the
+    // reads above.
+    let unroutedWaiting = { count: 0, oldestCreatedAt: null as string | null }
+    try {
+      const before = new Date(nowMs - UNROUTED_WAIT_MS).toISOString()
+      const { data, count, error } = await applyLeadActiveFilter(
+        supabaseService
+          .from('leads')
+          .select('created_at', { count: 'exact' })
+          .eq('location_id', LOC_OTHER_SLUG)
+          .lt('created_at', before)
+          .order('created_at', { ascending: true })
+          .limit(1),
+      )
+      if (error) throw error
+      unroutedWaiting = {
+        count: count ?? 0,
+        oldestCreatedAt: ((data as any[]) || [])[0]?.created_at ?? null,
+      }
+    } catch (err: any) {
+      console.error('[cron webhook-digest] unrouted-waiting read failed (non-fatal)', err?.message || err)
+    }
+
     digest = buildWebhookDigest({
       events,
       appUrl,
@@ -132,6 +160,7 @@ export async function GET(req: NextRequest) {
       nowMs,
       rateHealth,
       reconnect: { locations: reconnectLocations },
+      unroutedWaiting,
       bookingLinkHealth,
       importHealth: {
         failed: importJobs.failed,
@@ -178,7 +207,7 @@ export async function GET(req: NextRequest) {
 
   console.log(
     `[cron webhook-digest] window=24h posted=${post.ok} neverLanded=${digest.neverLanded} ` +
-      `reconnectRequired=${digest.reconnectRequired} ` +
+      `reconnectRequired=${digest.reconnectRequired} unroutedWaiting=${digest.unroutedWaiting} ` +
       `importFailed=${digest.importFailed} importStalled=${digest.importStalled} importOriginGated=${digest.importOriginGated} ` +
       `rateMissing=${digest.rateMissing} bookingLinkMissing=${digest.bookingLinkMissing} ` +
       `recovered=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
@@ -190,6 +219,7 @@ export async function GET(req: NextRequest) {
     suppressed: false,
     neverLanded: digest.neverLanded,
     reconnectRequired: digest.reconnectRequired,
+    unroutedWaiting: digest.unroutedWaiting,
     importStalled: digest.importStalled,
     importOriginGated: digest.importOriginGated,
     rateMissing: digest.rateMissing,
