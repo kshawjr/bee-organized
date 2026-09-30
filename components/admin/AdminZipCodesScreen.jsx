@@ -76,6 +76,9 @@ function sayError(code) {
 export default function AdminZipCodesScreen() {
   const [zips, setZips] = useState(null) // null = loading
   const [locations, setLocations] = useState([])
+  // Rows in the table per the server's exact count. If the list we hold is
+  // shorter, the screen says so instead of showing a quiet subset.
+  const [total, setTotal] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [msg, setMsg] = useState(null) // { kind: 'ok' | 'warn' | 'error', text }
   const [busy, setBusy] = useState(false)
@@ -90,6 +93,7 @@ export default function AdminZipCodesScreen() {
       const j = await send('GET', API)
       setZips(Array.isArray(j.zips) ? j.zips : [])
       setLocations(Array.isArray(j.locations) ? j.locations : [])
+      setTotal(typeof j.total === 'number' ? j.total : null)
     } catch (e) {
       setLoadError(e.message)
       setZips([])
@@ -180,6 +184,11 @@ export default function AdminZipCodesScreen() {
       </div>
 
       {loadError && <div style={{ ...card, color: T.state.danger.fg }}>Couldn’t load the zip list ({loadError}).</div>}
+      {total !== null && (zips || []).length < total && (
+        <div role="alert" style={{ ...card, color: T.state.danger.fg }}>
+          Only {(zips || []).length.toLocaleString()} of {total.toLocaleString()} zip rows loaded — counts and conflicts below are incomplete. Refresh to try again.
+        </div>
+      )}
       {msg && <div role="status" style={{ ...card, color: msgColor, padding: '10px 16px' }}>{msg.text}</div>}
 
       {conflicts.length > 0 && (

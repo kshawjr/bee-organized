@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { normalizeZip, ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
-import { requireCorporate, loadTargetLocation } from '@/lib/location-zips-admin'
+import { requireCorporate, loadTargetLocation, fetchAllLocationZips } from '@/lib/location-zips-admin'
 
 export const runtime = 'nodejs'
 
@@ -38,24 +38,20 @@ export async function GET() {
   if (!gate.ok) return gate.res
 
   const [zipsRes, locsRes] = await Promise.all([
-    supabaseService
-      .from('location_zips')
-      .select('id, zip, location_uuid, updated_at')
-      .order('zip', { ascending: true })
-      .range(0, 9999),
+    fetchAllLocationZips(),
     supabaseService
       .from('locations')
       .select('id, name, location_id, lifecycle_status')
       .order('name', { ascending: true }),
   ])
-  if (zipsRes.error) {
-    return NextResponse.json({ error: 'zips_read_failed', detail: zipsRes.error.message }, { status: 500 })
+  if ('error' in zipsRes) {
+    return NextResponse.json({ error: 'zips_read_failed', detail: zipsRes.error }, { status: 500 })
   }
   if (locsRes.error) {
     return NextResponse.json({ error: 'locations_read_failed', detail: locsRes.error.message }, { status: 500 })
   }
   const locations = (locsRes.data || []).filter((l: any) => l.location_id !== ZIP_FALLBACK_SLUG)
-  return NextResponse.json({ zips: zipsRes.data || [], locations })
+  return NextResponse.json({ zips: zipsRes.rows, total: zipsRes.total, locations })
 }
 
 export async function POST(request: NextRequest) {
