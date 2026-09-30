@@ -11,6 +11,8 @@ import {
   zipRouteToken,
   ZIP_FALLBACK_SLUG,
   ROUTE_ONLY_TO_ACTIVE,
+  zipDecides,
+  routeLogToken,
 } from '@/lib/zip-routing'
 
 const row = (location_id: string, lifecycle_status: string | null = 'active') => ({ location_id, lifecycle_status })
@@ -77,5 +79,38 @@ describe('zipRouteToken', () => {
   it('names the reason, and candidates only when a person has to choose', () => {
     expect(zipRouteToken(decideZipRoute('19373', [row('loc_a')]))).toBe(' routed_by=zip zip_route=matched')
     expect(zipRouteToken(decideZipRoute('80203', [row('loc_b'), row('loc_a')]))).toBe(' routed_by=zip zip_route=conflict zip_candidates=loc_a,loc_b')
+  })
+})
+
+// ── THE ZIP WINS (30 Sep 2026) ───────────────────────────────────
+describe('zipDecides — the zip decides whenever there is one', () => {
+  it.each([
+    ['19373', 'loc_portland', true],   // a zip beats a sent location
+    ['9720', 'loc_portland', true],    // even a malformed one (→ loc_other)
+    ['19373', null, true],
+    [undefined, null, true],           // nothing at all → zip path → loc_other 'missing'
+    [undefined, 'loc_portland', false], // NO zip → the sent location decides
+    ['   ', 'loc_portland', false],
+    [null, 'loc_portland', false],
+  ])('zip %s, sent %s → zip decides: %s', (zip, sent, expected) => {
+    expect(zipDecides(zip, sent as string | null)).toBe(expected)
+  })
+})
+
+describe('routeLogToken — both locations on every row', () => {
+  it('flags a disagreement', () => {
+    const d = decideZipRoute('78746', [{ location_id: 'loc_swaustin', lifecycle_status: 'active' }])
+    expect(routeLogToken(d, 'loc_centralaustin')).toBe(
+      ' routed_by=zip zip_route=matched zip_loc=loc_swaustin sent_loc=loc_centralaustin sent_overridden=true',
+    )
+  })
+  it('no flag when they agree, none when nothing was sent', () => {
+    const d = decideZipRoute('78746', [{ location_id: 'loc_swaustin', lifecycle_status: 'active' }])
+    expect(routeLogToken(d, 'loc_swaustin')).not.toContain('sent_overridden')
+    expect(routeLogToken(d, null)).toContain('sent_loc=none')
+    expect(routeLogToken(d, null)).not.toContain('sent_overridden')
+  })
+  it('a no-zip lead says the sent location decided', () => {
+    expect(routeLogToken(null, 'loc_portland')).toBe(' routed_by=sent_no_zip sent_loc=loc_portland')
   })
 })

@@ -18,12 +18,12 @@ env var in Vercel. Wrong or missing key → `401` (not logged, not retryable —
 
 | Field | Required | Notes |
 |---|---|---|
-| `location_slug` | no — see *Routing* | The target location's `locations.location_id`. When sent, it decides the location and the zip is not read. Unknown slug → `400 location_not_found` — this is a mapping bug, not a transient error. When absent or blank, the lead is routed by `zip`. |
+| `location_slug` | no — see *Routing* | A location's `locations.location_id`. **Only used when the lead has no zip** — a zip always decides. Recorded on the log row as `sent_loc` either way. Unknown slug on a no-zip lead → `400 location_not_found`. |
 | `full_name` | **yes** | Split into first/last on the first space. |
 | `email` | one of these two | Must look like an email. An invalid email is treated as absent (warned as `email_invalid_ignored`), never stored. |
 | `phone` | one of these two | Free-text accepted; must contain **≥7 digits** to count. Matching/dedup uses digits only. |
-| `address`, `city`, `state`, `zip` | no | Stored on the lead. `zip` also routes the lead when no `location_slug` is sent. |
-| `form_source` | no | `"Global"` or `"Local"` — the website's marker. Accepted (not flagged as an unknown key) but not read: routing follows whether `location_slug` is present. |
+| `address`, `city`, `state`, `zip` | no | Stored on the lead. `zip` decides the location whenever it is sent. |
+| `form_source` | no | `"Global"` or `"Local"` — the website's marker. Accepted (not flagged as an unknown key) but not read: the zip decides. |
 | `project_type` | no | Stored on the lead. |
 | `message` | no | The project-details free-text. Stored as the lead's `request_details` (the request record shown on the card and used as the engagement description); also echoed into the resubmission touchpoint on a merge. On a merge it only backfills when the matched lead has no `request_details` — an existing value is never overwritten. **Aliases:** `description` and `request_details` are accepted as fallbacks (priority: `message` → `description` → `request_details`) so a producer-side key rename can't silently blank descriptions — but `message` is the contract key; an alias winning is flagged on the sync_log row as `desc_key=<alias>` and should be fixed in the producer. A payload with no description under any key is flagged `no_description=true` on the sync_log row (visible on the admin Webhooks tab). |
 | `preferred_contact` | no | Preferred contact method (e.g. `Text`, `Email`, `Phone`), mirroring Zoho's `Preferred_Method_of_Contact`. Stored on the lead's `preferred_contact` column. Fill-empty on a merge. |
@@ -34,16 +34,28 @@ Neither email nor a usable phone → `400 email_or_phone_required`.
 
 ## Routing
 
-- **`location_slug` sent** → that location. Unchanged; the zip is not read.
-- **No `location_slug`** (the global form) → the zip is looked up in `location_zips`
-  (`lib/zip-routing.ts`), which corporate edits under Admin → Zip codes:
+**The zip wins** (30 Sep 2026 — the territory list in `location_zips` is the franchise
+agreements; corporate reassigns anything outside them). `location_slug` is still accepted
+and still sent by the website, but it only decides a lead that has **no zip**.
+
+- **A zip is sent** → it is looked up in `location_zips` (`lib/zip-routing.ts`), which
+  corporate edits under Admin → Zip codes. `location_slug` is ignored, even when it names
+  a different location:
   - exactly one **active** location claims it → that location;
-  - missing, malformed (not 5 digits / ZIP+4), no match, claimed by two or more locations,
+  - malformed (not 5 digits / ZIP+4), no match, claimed by two or more locations,
     claimed only by a non-active location, or the lookup errored → **`loc_other`**
     (Leslie's queue). The lead is never rejected for its zip.
-  - The sync_log row carries `routed_by=zip zip_route=<matched|missing|malformed|unmatched|conflict|not_live|lookup_failed>`
-    and, for a conflict or not-live location, `zip_candidates=<slugs>`. The 200 body carries
-    `zip_route`.
+- **No zip, `location_slug` sent** → that location (unknown slug → `400 location_not_found`).
+- **No zip, no `location_slug`** → **`loc_other`** (`zip_route=missing`).
+
+The sync_log row records both sides:
+- zip-decided: `routed_by=zip zip_route=<matched|malformed|unmatched|conflict|not_live|lookup_failed|missing>
+  zip_loc=<slug the zip chose> sent_loc=<slug the website sent, or none>`, plus
+  `zip_candidates=<slugs>` for a conflict or not-live location, and
+  **`sent_overridden=true`** when the zip chose a different location than the website sent.
+- no zip: `routed_by=sent_no_zip sent_loc=<slug>`.
+
+The 200 body carries `zip_route` whenever the zip decided.
 
 ## Response semantics
 

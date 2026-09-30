@@ -1,10 +1,21 @@
 // lib/zip-routing.ts
 // ─────────────────────────────────────────────────────────────
-// Which location a lead belongs to when the form sends only a zip.
+// Which location a lead belongs to. THE ZIP WINS (30 Sep 2026).
 //
-// POST /api/leads/intake calls this ONLY when the payload carries no
-// location_slug (the website's global form). A payload that names a location
-// never reaches here — that path is unchanged.
+// Leslie's ruling: the territory list (location_zips) is the franchise
+// agreements, and corporate reassigns anything outside them. So when a lead
+// has a zip, the zip decides and the location the website sent is IGNORED —
+// the form keeps sending one; Bee Hub no longer routes by it.
+//
+// NO ZIP AT ALL is the one case the sent location still decides
+// (zipDecides below). Bee Hub's list cannot say anything about a lead with no
+// zip, and at loc_other Leslie would have nothing to route it by either — the
+// location the form was filled in on is the only evidence there is. No zip and
+// no sent location → loc_other ('missing'), as before.
+//
+// Both are recorded on the intake log row (routeLogToken): the location the
+// zip chose, the one the website sent, and sent_overridden=true when they
+// disagree, so every overruled lead can be found later.
 //
 // THE RULE (decideZipRoute is pure; routeByZip adds the one DB read):
 //   missing zip                          → loc_other  (reason 'missing')
@@ -131,8 +142,27 @@ export async function routeByZip(rawZip: unknown): Promise<ZipRouteDecision> {
   return decideZipRoute(rawZip, rows)
 }
 
-// The sync_log token: presence-signal style, like unknown_keys= / desc_key=.
-// Only written for zip-routed leads, so its presence IS the signal.
+// Does the zip decide this lead? Yes whenever a zip was sent — blank counts as
+// none, a malformed one still decides (→ loc_other). Only a lead with NO zip
+// AND a sent location is left to the sent location. See the header.
+export function zipDecides(rawZip: unknown, sentSlug: string | null): boolean {
+  return !isBlankZip(rawZip) || !sentSlug
+}
+
+// The whole routing record for the intake log row. Zip-decided rows carry the
+// zip's verdict, the location it chose, and the location the website sent;
+// sent_overridden=true marks a disagreement. A no-zip row says the sent
+// location decided.
+export function routeLogToken(zipRoute: ZipRouteDecision | null, sentSlug: string | null): string {
+  if (!zipRoute) return ` routed_by=sent_no_zip sent_loc=${sentSlug ?? 'none'}`
+  return (
+    zipRouteToken(zipRoute) +
+    ` zip_loc=${zipRoute.slug} sent_loc=${sentSlug ?? 'none'}` +
+    (sentSlug && sentSlug !== zipRoute.slug ? ' sent_overridden=true' : '')
+  )
+}
+
+// The zip's own verdict: presence-signal style, like unknown_keys= / desc_key=.
 export function zipRouteToken(d: ZipRouteDecision): string {
   return (
     ` routed_by=zip zip_route=${d.reason}` +

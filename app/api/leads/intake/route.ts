@@ -48,7 +48,7 @@ import {
 } from '@/components/hive/shared/clientMatch'
 import { findOpenEngagementForClient, foundManualEngagement } from '@/lib/engagements'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
-import { routeByZip, zipRouteToken, type ZipRouteDecision } from '@/lib/zip-routing'
+import { routeByZip, zipDecides, routeLogToken, type ZipRouteDecision } from '@/lib/zip-routing'
 
 export const runtime = 'nodejs'
 
@@ -237,14 +237,14 @@ export async function POST(req: NextRequest) {
     typeof email === 'string' && email.trim().length > 0
   const emailPresentToken = ` email_present=${emailPresent}`
 
-  // ─── Location: named by the form, or decided by the zip ───────
-  // A payload that NAMES a location (location_slug) routes exactly as it
-  // always has — the zip is never read for it. A payload with NO location is
-  // the website's global form: the zip decides (lib/zip-routing.ts), and every
-  // non-match — missing, malformed, unmatched, conflicted, not-live, lookup
-  // error — lands at loc_other for Leslie. This used to be a 400
-  // ("location_slug required"), which would have dropped every global-form
-  // lead on the floor the day the website stopped sending a location.
+  // ─── Location: the zip decides ────────────────────────────────
+  // THE ZIP WINS (30 Sep 2026, Leslie's ruling — lib/zip-routing.ts): when a
+  // lead has a zip, the territory list decides and the location_slug the
+  // website sent is ignored. Every non-match — malformed, unmatched,
+  // conflicted, not-live, lookup error — lands at loc_other for Leslie.
+  // Only a lead with NO zip falls back to the sent location (no zip and no
+  // location → loc_other). The sent slug is not read anywhere else below:
+  // everything after this block uses the resolved `location`.
   const sentSlug =
     typeof location_slug === 'string' && location_slug.trim() ? location_slug : null
   const errEntity = sentSlug ?? 'unknown'
@@ -264,10 +264,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'email_or_phone_required' }, { status: 400 })
   }
 
-  const zipRoute: ZipRouteDecision | null = sentSlug ? null : await routeByZip(zip)
-  const routeSlug: string = sentSlug ?? zipRoute!.slug
-  // Rides on the success row (both paths) — absent for a named location.
-  const zipRouteLogToken = zipRoute ? zipRouteToken(zipRoute) : ''
+  const zipRoute: ZipRouteDecision | null = zipDecides(zip, sentSlug) ? await routeByZip(zip) : null
+  const routeSlug: string = zipRoute ? zipRoute.slug : sentSlug!
+  // Rides on every row from here (success and error): what the zip chose,
+  // what the website sent, and whether the zip overruled it.
+  const zipRouteLogToken = routeLogToken(zipRoute, sentSlug)
 
   // Slug lives in locations.location_id (Zoho-style ID, used as slug across repo).
   const { data: location, error: locErr } = await supabaseService
