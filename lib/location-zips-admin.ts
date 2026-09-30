@@ -7,8 +7,8 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
+import { territoryEditableServer } from '@/lib/territory-access'
 
-const ALLOWED_ROLES = ['super_admin', 'admin']
 
 export async function requireCorporate(): Promise<
   { ok: true; userId: string } | { ok: false; res: NextResponse }
@@ -25,7 +25,8 @@ export async function requireCorporate(): Promise<
     .select('id, role')
     .eq('id', user.id)
     .single()
-  if (!caller || !ALLOWED_ROLES.includes(caller.role)) {
+  // The ONE edit gate (lib/territory-access): corporate only, from every page.
+  if (!caller || !territoryEditableServer(caller.role)) {
     return { ok: false, res: NextResponse.json({ error: 'forbidden' }, { status: 403 }) }
   }
   return { ok: true, userId: user.id }
@@ -64,18 +65,22 @@ export async function loadTargetLocation(locationUuid: unknown) {
 export const ZIP_PAGE = 1000
 const ZIP_READ_CEILING = 50_000 // runaway guard; the list is ~1.5k today
 
-export async function fetchAllLocationZips(): Promise<
-  { rows: any[]; total: number } | { error: string }
-> {
+// `where` narrows the read (one location, a set of zips) — same paging, so a
+// narrowed read is never cut at the cap either.
+export async function fetchAllLocationZips(
+  where: (q: any) => any = (q) => q,
+): Promise<{ rows: any[]; total: number } | { error: string }> {
   const rows: any[] = []
   let total: number | null = null
   // Advance by what ACTUALLY came back, and stop on the exact count — so a
   // server cap below ZIP_PAGE can't masquerade as the end of the list.
   while (rows.length < ZIP_READ_CEILING) {
     const from = rows.length
-    const { data, error, count } = await supabaseService
-      .from('location_zips')
-      .select('id, zip, location_uuid, updated_at', from === 0 ? { count: 'exact' } : undefined)
+    const { data, error, count } = await where(
+      supabaseService
+        .from('location_zips')
+        .select('id, zip, location_uuid, updated_at', from === 0 ? { count: 'exact' } : undefined),
+    )
       .order('zip', { ascending: true })
       .order('id', { ascending: true })
       .range(from, from + ZIP_PAGE - 1)

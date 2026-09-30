@@ -88,6 +88,7 @@ import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"
 import { summarizeFeedbackQueues } from "@/lib/feedback-queues"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import AdminZipCodesScreen from "@/components/admin/AdminZipCodesScreen"
+import LocationZipsPanel from "@/components/admin/LocationZipsPanel"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // The compact, Home-sized cut of System Health — stands in for the operational
 // Home when an elevated user is viewing 'All Locations'. Reads the SAME
@@ -23743,6 +23744,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <SettingsEditRow label="Location ID"     value={settings.location.locId||'—'}   readOnly hint="Your unique franchise location identifier" />
             </div>
 
+            {/* Territory — the zips whose website leads come here. Next to the
+                address because it is the same kind of fact: where this
+                franchise is. Owners VIEW (Kevin: territories are a franchise-
+                agreement matter); corporate viewing this location edits. The
+                server's can_edit decides which. */}
+            <div style={{ margin:'12px 12px 0' }}>
+              <LocationZipsPanel locationId={realLocId} />
+            </div>
+
             <SectionHeader title="Online Presence" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>persistLocationField('bookingLink','calendar_link',v,'booking link')}  hint="Shared in your new lead emails" />
@@ -28012,6 +28022,12 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
               </div>
             ))}
           </div>
+
+          {/* Territory — this location's zips, right under its address. Above the
+              tabs on purpose: it answers "what does this franchise cover", the
+              same question as Quick info, not a billing or settings detail.
+              Corporate edits here; the server decides (can_edit). */}
+          <LocationZipsPanel locationId={currentLoc.id} />
 
           {/* Owners — up to two claimed owners (primary + co-owner), any
               pending owner invite, and an invite CTA while under the cap.
