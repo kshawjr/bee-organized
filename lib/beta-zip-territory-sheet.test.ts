@@ -12,7 +12,7 @@
 //     a join that loses a row raises instead of committing.
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { SHEET_TO_BEE_HUB, SHEET_COLUMN_ENTRY_COUNTS } from '@/lib/zip-territory-sheet'
+import { SHEET_TO_BEE_HUB, SHEET_COLUMN_ENTRY_COUNTS, EXCLUDED_SHEET_ENTRIES } from '@/lib/zip-territory-sheet'
 
 const SQL = readFileSync(new URL('../migrations/location_zips.sql', import.meta.url), 'utf8')
 
@@ -86,11 +86,22 @@ describe('the migration matches the mapping and the sheet', () => {
     }
   })
 
-  it('carries every sheet entry, count for count per column (unknown columns included)', () => {
-    expect(SQL_ENTRIES).toHaveLength(1608)
+  it('carries every sheet entry except the named exclusions, count for count per column (unknown columns included)', () => {
+    expect(SQL_ENTRIES).toHaveLength(1608 - EXCLUDED_SHEET_ENTRIES.length)
+    const want: Record<string, number> = { ...SHEET_COLUMN_ENTRY_COUNTS }
+    for (const x of EXCLUDED_SHEET_ENTRIES) want[x.sheet] -= 1
     const per: Record<string, number> = {}
     for (const [sheet] of SQL_ENTRIES) per[sheet] = (per[sheet] || 0) + 1
-    expect(per).toEqual(SHEET_COLUMN_ENTRY_COUNTS)
+    expect(per).toEqual(want)
+  })
+
+  it('the Dallas typo 7507 is left out — never padded into New Jersey 07507', () => {
+    expect(EXCLUDED_SHEET_ENTRIES).toEqual([expect.objectContaining({ sheet: 'Dallas', raw: '7507' })])
+    expect(SQL_ENTRIES.some(([, z]) => z === '07507')).toBe(false)
+    // Every padded (leading-zero) zip belongs to a New England / NJ location.
+    const padded = new Set(SQL_ENTRIES.filter(([, z]) => z.startsWith('0')).map(([s]) => s))
+    expect(Array.from(padded).sort()).toEqual(['Boston North Suburbs', 'Connecticut', 'Northern Jersey Shore', 'Rhode Island'])
+    expect(SQL).toContain('ONE ENTRY LEFT OUT: Dallas "7507"')
   })
 
   it('every zip is five digits (leading zeros restored)', () => {
@@ -99,19 +110,19 @@ describe('the migration matches the mapping and the sheet', () => {
     expect(SQL_ENTRIES).toContainEqual(['Connecticut', '06320'])
   })
 
-  it('1,580 unique zips; unknown columns hold 22 + 22 of them', () => {
-    expect(new Set(SQL_ENTRIES.map(([, z]) => z)).size).toBe(1580)
+  it('1,579 unique zips (1,580 less the Dallas typo); unknown columns hold 22 + 22 of them', () => {
+    expect(new Set(SQL_ENTRIES.map(([, z]) => z)).size).toBe(1579)
     const uniq = (col: string) => new Set(SQL_ENTRIES.filter(([s]) => s === col).map(([, z]) => z)).size
     expect(uniq('Central AR')).toBe(22)
     expect(uniq('South Valley')).toBe(22)
   })
 
-  it('the load guard expects exactly the pairs the mapped entries imply (1,547)', () => {
+  it('the load guard expects exactly the pairs the mapped entries imply (1,546)', () => {
     const pairs = new Set(
       SQL_ENTRIES.filter(([s]) => SHEET_TO_BEE_HUB[s]).map(([s, z]) => `${SHEET_TO_BEE_HUB[s]}|${z}`),
     )
-    expect(pairs.size).toBe(1547)
-    expect(SQL).toMatch(/IF n_wanted <> 1547 THEN\s+RAISE EXCEPTION/)
+    expect(pairs.size).toBe(1546)
+    expect(SQL).toMatch(/IF n_wanted <> 1546 THEN\s+RAISE EXCEPTION/)
   })
 
   it('the 11 Denver conflicts are in the data, and nothing picks a winner', () => {

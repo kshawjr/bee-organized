@@ -100,3 +100,16 @@ export const SHEET_COLUMN_ENTRY_COUNTS: Readonly<Record<string, number>> = {
   'Southeast Nashville': 10, 'Temecula': 17, 'Tulsa': 37, 'West Denver': 31,
   'West Raleigh': 11, 'West St. Louis': 13,
 }
+
+// Sheet entries deliberately NOT loaded, with why. Each is left out by the
+// migration generator and named in the migration header; the pin test checks
+// that the migration carries (raw count − these) for each column.
+//
+// Dallas "7507": four digits in a column of 75xxx zips — a typo, not a lost
+// leading zero. Re-padded it would be 07507 (Haledon, New Jersey) and route NJ
+// leads to Dallas. Left out until Kevin says what it should be. Every other
+// four-digit value is in Rhode Island, Boston North Suburbs or Northern Jersey
+// Shore, where the zero really was lost.
+export const EXCLUDED_SHEET_ENTRIES: ReadonlyArray<{ sheet: string; raw: string; why: string }> = [
+  { sheet: 'Dallas', raw: '7507', why: 'typo in a 75xxx column; padding would make it a New Jersey zip' },
+]

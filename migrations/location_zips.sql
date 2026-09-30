@@ -19,8 +19,12 @@
 -- SOURCE. Territory Zip Codes_2026.xlsx, sheet "Zip Codes" (Kevin's Drive,
 -- 30 Sep 2026): 54 columns, 1,608 entries, 1,580 unique zips.
 --   · 17 rows repeat a zip inside the SAME column — collapsed by DISTINCT.
---   · 133 zips lost their leading zero in the spreadsheet (New England, NJ:
---     2801 for 02801) — every zip below is re-padded to five digits.
+--   · 132 zips lost their leading zero in the spreadsheet (Rhode Island,
+--     Boston, North Jersey: 2801 for 02801) — re-padded to five digits below.
+--   · ONE ENTRY LEFT OUT: Dallas "7507". Four digits in a column of 75xxx
+--     zips is a typo, not a lost zero — padded it would be 07507 (Haledon, NJ)
+--     and send New Jersey leads to Dallas. Not loaded; the 1,607 other entries
+--     are all below. See EXCLUDED_SHEET_ENTRIES in lib/zip-territory-sheet.ts.
 --   · The sheet names are NOT Bee Hub's names. The mapping block below is the
 --     same list as lib/zip-territory-sheet.ts (a test pins the two together).
 --     "Central AR" and "South Valley" have no Bee Hub location: mapped to NULL,
@@ -266,7 +270,6 @@ BEGIN
     ('Dallas', '75034'),
     ('Dallas', '75035'),
     ('Dallas', '75070'),
-    ('Dallas', '07507'),
     ('SF Bay', '94506'),
     ('SF Bay', '94526'),
     ('SF Bay', '94582'),
@@ -1825,10 +1828,10 @@ BEGIN
   SELECT (SELECT count(*) FROM wanted), (SELECT count(*) FROM added)
     INTO n_wanted, n_added;
 
-  -- 2c. 52 mapped columns → 1547 distinct (zip, location) pairs.
+  -- 2c. 52 mapped columns → 1546 distinct (zip, location) pairs.
   --     Anything else means a row fell out of the join: undo it all.
-  IF n_wanted <> 1547 THEN
-    RAISE EXCEPTION 'location_zips NOT loaded — expected 1547 zip/location pairs, the join produced %', n_wanted;
+  IF n_wanted <> 1546 THEN
+    RAISE EXCEPTION 'location_zips NOT loaded — expected 1546 zip/location pairs, the join produced %', n_wanted;
   END IF;
 
   SELECT count(*) INTO n_conf
@@ -1840,7 +1843,7 @@ END
 $load$;
 
 -- ── Post-run checks (read-only; run after) ──────────────────────────────────
--- Expect 1547 rows and 1536 distinct zips (1,580 sheet zips − 44 unknown):
+-- Expect 1546 rows and 1535 distinct zips (1,580 sheet zips − 44 unknown − 1 left out):
 --   SELECT count(*) AS rows, count(DISTINCT zip) AS zips FROM public.location_zips;
 --
 -- Expect exactly the 11 Denver conflicts —
