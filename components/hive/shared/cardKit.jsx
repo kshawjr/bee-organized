@@ -131,12 +131,44 @@ export const actionBtn = (tone = 'gray') => {
 
 // The row — equal columns, even 8px gaps, sized to however many actions
 // the card actually renders (conditional buttons drop out of the count).
-export function ActionRow({ children }) {
+//
+// trailing (2026-09-30, the Reminder bell): one extra action that must NOT
+// become another equal column —
+//   · desktop: it sits at the END of the row at its own fixed width, and the
+//     real actions keep their equal columns in the space left;
+//   · phone (twoColumn): the row becomes a TWO-column grid with trailing as
+//     the last cell. Measured in WebKit at 320/375/393px: three equal
+//     columns already cut "Log touchpoint" / "Send to Jobber" / "Open in
+//     Jobber" on every phone width (109px cells at 375 vs 134–156px
+//     needed), and a fixed bell beside them cut deeper. Two columns give
+//     167px cells at 375, and every label fits.
+export function ActionRow({ children, trailing = null, twoColumn = false }) {
   const kids = React.Children.toArray(children).filter(Boolean)
-  if (kids.length === 0) return null
+  if (!trailing) {
+    if (kids.length === 0) return null
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${kids.length}, 1fr)`, gap: '8px' }}>
+        {kids}
+      </div>
+    )
+  }
+  if (twoColumn) {
+    const cells = [...kids, trailing]
+    return (
+      <div data-action-layout="two-column" style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(2, cells.length)}, minmax(0, 1fr))`, gap: '8px' }}>
+        {cells}
+      </div>
+    )
+  }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${kids.length}, 1fr)`, gap: '8px' }}>
-      {kids}
+    <div data-action-layout="row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      {kids.length > 0 && (
+        <div style={{ flex: 1, minWidth: 0, display: 'grid', gridTemplateColumns: `repeat(${kids.length}, 1fr)`, gap: '8px' }}>
+          {kids}
+        </div>
+      )}
+      {kids.length === 0 && <div style={{ flex: 1 }} />}
+      {trailing}
     </div>
   )
 }

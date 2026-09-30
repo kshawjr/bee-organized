@@ -18,9 +18,10 @@
 //               THIS caller owns the POST → /api/touchpoints with
 //               partner_id, the one writer, which stamps
 //               last_contacted_at) + the shared Timeline in partner mode
-//   reminder  — the shared RecordReminder strip under the name (it
-//               replaced the old "What's next" next_steps section,
-//               2026-09-30; partners.next_steps is no longer shown)
+//   reminder  — your reminders under the name + "Set a reminder" in the
+//               ··· menu (this card has no bottom action bar). Replaced the
+//               old "What's next" next_steps section, 2026-09-30;
+//               partners.next_steps is no longer shown
 //   referred  — the reverse list, each lead with status + value,
 //               deep-linking to the client record
 //
@@ -36,7 +37,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import OverlayShell from './OverlayShell'
-import { RecordReminder } from './shared/Reminders'
+import { useRecordReminder, RecordReminderList, reminderMenuItem } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import Timeline from './shared/Timeline'
 import useIsMobile from './shared/useIsMobile'
@@ -81,6 +82,9 @@ export default function NetworkPersonRecord({
 }) {
   const isMobile = useIsMobile()
   const nowMs = Date.now()
+  // Reminders — this card has no bottom action bar, so the door is the ···
+  // menu and the setter opens under the name (inlineSetter below).
+  const reminder = useRecordReminder(partner?.id ? { key: 'partner_id', id: partner.id } : null)
 
   // ── referral rollup (REAL numbers; null = loading → '—') ──
   const [referrals, setReferrals] = useState(null)
@@ -269,19 +273,24 @@ export default function NetworkPersonRecord({
               {partner.howWeMet && <span style={{ color: T.ink.quiet }}>· met via {partner.howWeMet}{partner.metDate ? ` (${partner.metDate})` : ''}</span>}
             </p>
           </div>
-          {!readOnly && (
-            <RecordMenu ariaLabel="Partner actions" items={[
+          {/* The menu now shows for read-only seats too, carrying only the
+              reminder item: a reminder is personal and changes nothing about
+              the person. The write items stay behind readOnly. */}
+          <RecordMenu ariaLabel="Partner actions" items={[
+            reminderMenuItem(reminder),
+            ...(readOnly ? [] : [
               ...(!partner.isCustomer ? [{ key: 'add-client', label: linkingClient ? 'Linking…' : 'Add as client', onClick: addAsClient }] : []),
               { key: 'remove', label: 'Remove from network', danger: true, onClick: () => setConfirmDelete(true) },
-            ]} />
-          )}
+            ]),
+          ]} />
         </div>
 
-        {/* Reminders — the same strip, same place (straight under the name)
-            as the client and engagement cards. It REPLACES the old "What's
-            next" section that lived lower down this record (2026-09-30):
-            two dated to-do lists on one person was one too many. */}
-        <RecordReminder record={{ key: 'partner_id', id: partner.id }} />
+        {/* Your reminders on this person, straight under the name — the same
+            spot as the client and engagement cards. It REPLACES the old
+            "What's next" section (2026-09-30). This card has NO bottom
+            action bar, so "Set a reminder" lives in the ··· menu and the
+            setter opens here. Nothing renders when there are none. */}
+        <RecordReminderList ctl={reminder} inlineSetter />
 
         {confirmDelete && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: T.state.danger.soft, borderRadius: T.radius.control, padding: '10px 12px' }}>

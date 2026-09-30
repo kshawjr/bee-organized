@@ -5,10 +5,11 @@
 // Every piece of the feature's UI lives here so the four records, Home and
 // the Reminders page cannot drift apart:
 //
-//   RecordReminder  — the strip under the name on EVERY record (client /
-//                     lead, engagement, Network person). Shows your reminder
-//                     ("Reminder: call about the garage, Tuesday") and the
-//                     one "Reminder" button. Same place, same look, on all.
+//   useRecordReminder + RecordReminderList / ReminderBarButton /
+//                     ReminderSetterPanel / reminderMenuItem — the record
+//                     half: your reminder under the name, the gold bell in
+//                     the card's action bar, and "Set a reminder" in the ···
+//                     menu, all driving one setter (see below).
 //   ReminderSetter  — the three-tap setter: Tomorrow / Next week / Pick a
 //                     date, a line saying why, Done. The pencil reuses it.
 //   ReminderRow     — one reminder with tick (finish), pencil (change the
@@ -205,46 +206,96 @@ export function ReminderRow({ reminder, today, showName = false, onOpen = null, 
 }
 
 // ── on every record ──────────────────────────────────────────
+// One hook per card, shared by the three places a reminder touches it:
+//
+//   RecordReminderList   — your reminders on this record, straight under the
+//                          name ("Reminder: call about the garage, Tuesday").
+//                          Renders NOTHING when there are none, so an empty
+//                          record has no stray strip.
+//   ReminderBarButton    — the bell in the card's bottom action bar (client
+//                          and engagement), beside Call / Log touchpoint /
+//                          Open in Jobber. Sits OUTSIDE ActionRow on purpose:
+//                          ActionRow sizes its grid from the child count, so
+//                          a fourth grid child would squeeze every button.
+//   ReminderSetterPanel  — the three-tap setter, opened by the bar button OR
+//                          the ··· menu item (reminderMenuItem). Same state,
+//                          same save, whichever door you used.
+//
+// The Network person card has no bottom bar, so it passes inlineSetter to
+// the list and the setter opens under the name instead.
+//
 // record: { key: 'lead_id' | 'engagement_id' | 'partner_id', id }
-// Place it directly under the record's name block — the same spot on every
-// record, so owners learn it once.
-export function RecordReminder({ record, now: nowProp = null }) {
+export function useRecordReminder(record, { now: nowProp = null } = {}) {
   const now = nowProp || new Date()
-  const today = todayYmd(now)
   const query = record?.id ? `${record.key}=${encodeURIComponent(record.id)}` : ''
-  const { reminders, create, finish, reschedule, remove } = useMyReminders(query, { enabled: !!record?.id })
+  const api = useMyReminders(query, { enabled: !!record?.id })
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
+  const save = async (due_on, note) => {
+    setSaving(true); setFailed(false)
+    try { await api.create({ [record.key]: record.id, due_on, note }); setAdding(false) }
+    catch { setFailed(true) }
+    finally { setSaving(false) }
+  }
+  return {
+    record, now, today: todayYmd(now), ...api,
+    list: api.reminders || [],
+    adding, saving, failed, save,
+    open: () => { setFailed(false); setAdding(true) },
+    cancel: () => { setFailed(false); setAdding(false) },
+  }
+}
 
-  if (!record?.id) return null
-  const list = reminders || []
+// The ··· menu entry. Both menus take { key, label }; CardMenu fires
+// onPick, RecordMenu fires onClick — this item carries both.
+export function reminderMenuItem(ctl) {
+  return { key: 'reminder', label: 'Set a reminder', testid: 'menu-reminder', icon: <IconBell size={15} />, onPick: ctl.open, onClick: ctl.open }
+}
 
+export function ReminderSetterPanel({ ctl }) {
+  if (!ctl.adding) return null
+  return (
+    <div data-testid="reminder-setter-panel" style={{ marginBottom: '8px' }}>
+      <ReminderSetter now={ctl.now} saving={ctl.saving} onCancel={ctl.cancel} onDone={ctl.save} />
+      {ctl.failed && <p role="alert" style={{ fontSize: '13px', color: T.state.danger.fg, marginTop: '4px' }}>That didn&rsquo;t save. Please try again.</p>}
+    </div>
+  )
+}
+
+export function RecordReminderList({ ctl, inlineSetter = false }) {
+  if (!ctl.record?.id) return null
+  if (ctl.list.length === 0 && !(inlineSetter && ctl.adding)) return null
   return (
     <div data-testid="record-reminder" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      {list.map(r => (
-        <ReminderRow key={r.id} reminder={r} today={today} now={now}
-          onFinish={finish} onReschedule={reschedule} onDelete={remove} />
+      {ctl.list.map(r => (
+        <ReminderRow key={r.id} reminder={r} today={ctl.today} now={ctl.now}
+          onFinish={ctl.finish} onReschedule={ctl.reschedule} onDelete={ctl.remove} />
       ))}
-      {adding ? (
-        <>
-          <ReminderSetter now={now} saving={saving} onCancel={() => { setAdding(false); setFailed(false) }}
-            onDone={async (due_on, note) => {
-              setSaving(true); setFailed(false)
-              try { await create({ [record.key]: record.id, due_on, note }); setAdding(false) }
-              catch { setFailed(true) }
-              finally { setSaving(false) }
-            }} />
-          {failed && <p role="alert" style={{ fontSize: '13px', color: T.state.danger.fg }}>That didn&rsquo;t save. Please try again.</p>}
-        </>
-      ) : (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" data-testid="reminder-button" onClick={() => setAdding(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', minHeight: '40px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, color: T.ink.primary, fontSize: '14px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-            <IconBell size={16} /> Reminder
-          </button>
-        </div>
-      )}
+      {inlineSetter && <ReminderSetterPanel ctl={ctl} />}
     </div>
+  )
+}
+
+// The bar button. Colour: the brand GOLD pair (T.brand.goldSoft fill,
+// T.brand.goldText ink, 5.6:1) — the bee's own colour, so it reads as its
+// own thing, and nothing like the teal accent that Call / Send to Jobber
+// wear. It is ActionRow's `trailing` action: fixed width at the end of the
+// row on desktop, the last cell of a two-column grid on a phone (fill).
+export function ReminderBarButton({ ctl, fill = false }) {
+  const on = ctl.adding
+  return (
+    <button type="button" data-testid="reminder-button" aria-label="Set a reminder" title="Set a reminder"
+      aria-expanded={on} onClick={on ? ctl.cancel : ctl.open}
+      style={{
+        flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+        height: '38px', width: fill ? '100%' : 'auto', minWidth: 0, padding: '0 14px',
+        borderRadius: T.radius.inset, border: on ? `1.5px solid ${T.brand.goldText}` : 'none',
+        background: T.brand.goldSoft, color: T.brand.goldText,
+        fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden',
+      }}>
+      <IconBell size={16} />
+      <span style={{ fontSize: '13px' }}>Reminder</span>
+    </button>
   )
 }

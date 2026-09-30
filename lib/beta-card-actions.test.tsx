@@ -476,8 +476,12 @@ describe('action bar — loc_other (transfer) lead', () => {
     expect(text).not.toContain('Log touchpoint')
     expect(text).not.toContain('Send to Jobber')
     expect(text).not.toContain('New engagement')
-    // Transfer is the bar's sole control — nothing else survived the gate.
-    expect(bar(host).querySelectorAll('button, a')).toHaveLength(1)
+    // Transfer is the bar's sole ACTION — nothing else survived the gate.
+    // The only other control is the Reminder bell (2026-09-30): a personal
+    // reminder is not a dead-end door, so it rides loc_other too.
+    const controls = [...bar(host).querySelectorAll('button, a')]
+    expect(controls.filter(c => c.getAttribute('data-testid') !== 'reminder-button')).toHaveLength(1)
+    expect(controls.filter(c => c.getAttribute('data-testid') === 'reminder-button')).toHaveLength(1)
     await unmount()
   })
 
@@ -528,7 +532,9 @@ describe('action bar — normal (non-loc_other) profile is unchanged', () => {
 
   it('ActionRow still sizes its grid per-action (each action is a separate child, not one wrapped block)', async () => {
     const { host, unmount } = await mountProfile()
-    const grid = bar(host).firstElementChild as HTMLElement
+    // The action grid sits in a row with the Reminder bell at the end
+    // (2026-09-30); the bell is not one of the equal columns.
+    const grid = bar(host).querySelector('[data-action-layout="row"]')!.firstElementChild as HTMLElement
     // Call + Log touchpoint + Send to Jobber = 3 columns. It was 4 until
     // "New engagement" was removed (2026-09-16); ActionRow sizes from the
     // CHILD COUNT, so dropping a child really does re-flow the row.

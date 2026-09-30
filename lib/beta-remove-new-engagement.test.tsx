@@ -88,7 +88,10 @@ afterEach(async () => {
   root = null; document.body.innerHTML = ''; vi.restoreAllMocks()
 })
 const bar = (host: Element) => host.querySelector('[aria-label="Card actions"]')!
-const grid = (host: Element) => bar(host).firstElementChild as HTMLElement
+// The equal-column grid of the card's own actions. Since 2026-09-30 it sits
+// inside a row with the Reminder bell at the end (ActionRow `trailing`) —
+// the bell is NOT one of the equal columns, so these counts are unchanged.
+const grid = (host: Element) => bar(host).querySelector('[data-action-layout="row"]')!.firstElementChild as HTMLElement
 
 describe('the button is absent from the card action bar', () => {
   it('for an ordinary writable client', async () => {

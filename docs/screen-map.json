@@ -474,10 +474,10 @@
     },
     {
       "id": "reminders.record",
-      "surface": "The Reminder strip and button under the name on every record (client, lead, engagement, Network person)",
+      "surface": "The gold Reminder button in a card's bottom action bar, and \"Set a reminder\" in the ··· menu (client, lead, engagement; Network person has the menu only)",
       "nav": "Clients",
       "file": "components/hive/shared/Reminders.jsx",
-      "symbol": "RecordReminder",
+      "symbol": "ReminderBarButton",
       "exported": "named",
       "routes": [
         "GET /api/reminders",
@@ -492,12 +492,13 @@
         "the reminder button",
         "set a reminder",
         "remind me to call",
-        "the reminder on the client"
+        "the reminder on the client",
+        "the gold button"
       ],
-      "note": "Same component on ClientProfile, EngagementPanel and NetworkPersonRecord. Nothing is emailed or sent to Slack.",
+      "note": "useRecordReminder drives the bar button, the ··· menu item (reminderMenuItem), the setter (ReminderSetterPanel) and the list under the name (RecordReminderList). The bar layout lives in cardKit ActionRow's `trailing`. Nothing is emailed or sent to Slack.",
       "lines": [
-        211,
-        251
+        285,
+        302
       ]
     },
     {
@@ -693,7 +694,7 @@
       ],
       "lines": [
         106,
-        1269
+        1289
       ]
     },
     {
@@ -996,7 +997,7 @@
       ],
       "lines": [
         260,
-        1389
+        1406
       ]
     },
     {
@@ -1430,8 +1431,8 @@
         "the person in my network"
       ],
       "lines": [
-        68,
-        494
+        69,
+        503
       ],
       "note": "The old 'What's next' (partners.next_steps) section was retired 2026-09-30; the shared Reminder strip replaced it (reminders.record)."
     },

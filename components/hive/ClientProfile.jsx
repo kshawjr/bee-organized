@@ -55,7 +55,7 @@ import {
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
-import { RecordReminder } from './shared/Reminders'
+import { useRecordReminder, RecordReminderList, ReminderBarButton, ReminderSetterPanel, reminderMenuItem } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import NewJobWizard from './NewJobWizard'
 import TransferLeadModal from './TransferLeadModal'
@@ -125,6 +125,10 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   // Closed Lost engagement (and the client's new status) reflects in place.
   const [reloadKey, setReloadKey] = useState(0)
   const [busy, setBusy] = useState(false)
+  // Reminders — one state behind the list under the name, the gold bell in
+  // the action bar and "Set a reminder" in the ··· menu. Keyed on clientId
+  // (always present) so the hook runs before any early return.
+  const reminder = useRecordReminder(clientId ? { key: 'lead_id', id: clientId } : null)
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -832,7 +836,17 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
       margin: isMobile ? '0 -16px' : '0 -24px',
       padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
     }}>
-      <ActionRow>
+      {/* The reminder setter opens HERE, just above the buttons, whether it
+          was the bell or the ··· menu that asked — the bar is pinned, so it
+          is on screen without scrolling. */}
+      <ReminderSetterPanel ctl={reminder} />
+      {/* The Reminder bell is ActionRow's `trailing` action, never another
+          equal column: desktop — one row, the bell at the end at its own
+          width; phone — a two-column grid with the bell as the last cell
+          (the three-across bar already cut labels on phones). See
+          cardKit ActionRow. */}
+      <div data-testid="card-action-bar">
+      <ActionRow twoColumn={isMobile} trailing={<ReminderBarButton key="reminder" ctl={reminder} fill={isMobile} />}>
         {!atLocOther && c.phone && (
           <a href={`tel:${c.phone}`} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
@@ -891,6 +905,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             survivors widen. loc_other is untouched — Transfer is still its
             only action. */}
       </ActionRow>
+      </div>
       {newJobOpen && canStartNewJob && (
         <NewJobWizard
           client={c}
@@ -1134,6 +1149,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             client name only pre-fills the human-facing title. Mutating items
             (Add to Network / Mark as junk) stay behind the read-only gate. */}
         <CardMenu items={[
+          // Reminders (2026-09-30) — in the menu AND in the action bar (Kevin
+          // wants both). Not behind readOnly: a reminder is personal.
+          ...(c ? [reminderMenuItem(reminder)] : []),
           ...(c ? [{ key: 'report', label: 'Report a problem with this client', onPick: () => onReportProblem({
             title: c.name ? `Problem with ${c.name}` : 'Problem with this client',
             context: {
@@ -1210,12 +1228,14 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         ]} />
       </div>
 
-      {/* Reminders — the SAME strip, in the SAME place (straight under the
-          name), on every record: client/lead, engagement, Network person.
-          A lead and a client are one leads row, so both hang off lead_id.
+      {/* Your reminders on this client, straight under the name — the same
+          spot on every record. Nothing renders when there are none (the
+          button lives in the action bar and the ··· menu, not here). A lead
+          and a client are one leads row, so both hang off lead_id. When the
+          card has no action bar (read-only loc_other) the setter opens here.
           Shown on read-only seats too: a reminder is personal and changes
           nothing about the client. */}
-      <RecordReminder record={{ key: 'lead_id', id: c.id }} />
+      <RecordReminderList ctl={reminder} inlineSetter={!actionBar} />
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
           Owing / Last touch. Owing spans ALL engagements incl. closed

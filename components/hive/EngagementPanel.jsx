@@ -71,7 +71,7 @@ import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { replaceInList, removeFromList } from './shared/noteStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
-import { RecordReminder } from './shared/Reminders'
+import { useRecordReminder, RecordReminderList, ReminderBarButton, ReminderSetterPanel, reminderMenuItem } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import MetaSelect from './MetaSelect'
 import Timeline from './shared/Timeline'
@@ -266,6 +266,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // gone, and its method/note state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Reminders — list under the masthead, gold bell in the action bar, and
+  // "Set a reminder" in the ··· menu, all on one state.
+  const reminder = useRecordReminder(engagementId ? { key: 'engagement_id', id: engagementId } : null)
   // The ··· masthead menu drives the close-out wizards (Won/Lost) and
   // Reopen — the standalone action-bar Close… button was retired here.
   const [wizard, setWizard] = useState(null) // null | 'won' | 'lost' | 'won-over-balance' | 'write-off'
@@ -607,6 +610,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // While a reopen is in flight the closed actions drop optimistically.
   // readOnly (868kawwmh) hides EVERY write affordance — the whole menu drops.
   const menuItems = eng ? [
+    // Reminders (2026-09-30) — in the menu AND the action bar (Kevin wants
+    // both). Not behind readOnly: a reminder is personal.
+    reminderMenuItem(reminder),
     // Always present once the record has loaded — non-mutating, so it rides
     // read-only surfaces too (everyone can report a problem). It also means the
     // menu is never empty: a Closed Won engagement (no Lost/Reopen) now still
@@ -940,7 +946,16 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           Not sent to Jobber — this job is only in Bee Hub. Nothing reaches Jobber until you send it.
         </p>
       )}
-      <ActionRow>
+      {/* The reminder setter opens here, above the buttons — the bar is
+          pinned, so it is on screen whichever door (bell or ···) opened it. */}
+      <ReminderSetterPanel ctl={reminder} />
+      {/* The Reminder bell is ActionRow's `trailing` action, never another
+          equal column: desktop — one row, the bell at the end at its own
+          width; phone — a two-column grid with the bell as the last cell
+          (the three-across bar already cut labels on phones). See
+          cardKit ActionRow. */}
+      <div data-testid="card-action-bar">
+      <ActionRow twoColumn={isMobile} trailing={<ReminderBarButton key="reminder" ctl={reminder} fill={isMobile} />}>
         {client?.phone && (
           <a href={`tel:${client.phone}`} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
@@ -964,6 +979,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         {/* Close… moved to the masthead ··· menu (Part 1) — the close-out
             wizards live there now, not as a standalone action-bar button. */}
       </ActionRow>
+      </div>
       {!readOnly && touchOpen && client && (
         <TouchpointModal
           personName={client.name}
@@ -1181,9 +1197,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </div>
       )}
 
-      {/* Reminders — the same strip, same place (straight under the
-          masthead) as the client card and the Network person. */}
-      {eng && <RecordReminder record={{ key: 'engagement_id', id: engagementId }} />}
+      {/* Your reminders on this engagement, straight under the masthead —
+          the same spot as the client card and the Network person. Nothing
+          renders when there are none; the button is in the bar and ···. */}
+      {eng && <RecordReminderList ctl={reminder} />}
 
       {/* WHY FINAL PROCESSING IS WAITING (issue 119) — the three cases
           read differently and are never collapsed into one sentence:

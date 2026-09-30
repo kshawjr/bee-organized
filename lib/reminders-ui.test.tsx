@@ -5,9 +5,15 @@
 // real one (the server half is pinned in reminders-api.test.ts).
 //
 //   A) On each record kind — a lead, a client, an engagement, a Network
-//      person — the one Reminder button sets a reminder in three taps
-//      (Tomorrow / Next week / pick, a line, Done) and the record then shows
-//      "Reminder: <note>" with its day. An existing one shows on open.
+//      person — a reminder sets in three taps (Tomorrow / Next week / pick,
+//      a line, Done) and the record then shows "Reminder: <note>" with its
+//      day under the name. The door is the gold bell in the bottom action
+//      bar (client, engagement) AND "Set a reminder" in the ··· menu (all
+//      four); both open the same setter and save the same thing. Nothing
+//      floats under the name when there is no reminder.
+//   E) The action bar at every child count, desktop (one row, bell at the
+//      end) and phone (two columns, bell last); the other actions still
+//      work beside it.
 //   B) Home: nothing when nothing is due; today's on its day (not before);
 //      overdue ones ABOVE today's, in amber; sits at the top of Home.
 //   C) The Reminders page: soonest first with the person's name and the
@@ -141,6 +147,7 @@ const type = (input: HTMLInputElement, value: string) => act(async () => {
   input.dispatchEvent(new Event('input', { bubbles: true }))
 })
 const strip = (host: Element) => host.querySelector('[data-testid="record-reminder"]') as HTMLElement
+const setterEl = () => document.querySelector('[data-testid="reminder-setter"]') as HTMLElement
 
 const PARTNER = {
   id: 'p1', name: 'Karen Martinez', type: 'partner', locationId: 'loc-1', title: 'Agent', company: 'Meridian Realty', companyId: null,
@@ -149,21 +156,39 @@ const PARTNER = {
   nextSteps: [{ id: 'ns1', text: 'Old next step', date: '2026-09-01', done: false }],
 }
 
+// hasBar: the card has a bottom action bar (client + engagement). The
+// Network person has none, so its door is the ··· menu alone.
 const RECORDS = [
-  { label: 'a lead (New)', key: 'lead_id', id: 'lead-new',
+  { label: 'a lead (New)', key: 'lead_id', id: 'lead-new', hasBar: true, menu: 'More',
     render: () => { profile = profileBody('New', 'lead-new', 'Nora New'); return <ClientProfile clientId="lead-new" people={[]} onClose={() => {}} setToast={() => {}} lookupOptions={{ sources: [], projectTypes: [] }} /> } },
-  { label: 'a client', key: 'lead_id', id: 'lead-9',
+  { label: 'a client', key: 'lead_id', id: 'lead-9', hasBar: true, menu: 'More',
     render: () => { profile = profileBody('Active', 'lead-9', 'Dana Client'); return <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}} lookupOptions={{ sources: [], projectTypes: [] }} /> } },
-  { label: 'an engagement', key: 'engagement_id', id: 'eng-1',
+  { label: 'an engagement', key: 'engagement_id', id: 'eng-1', hasBar: true, menu: 'Engagement actions',
     render: () => <EngagementPanel engagementId="eng-1" people={[]} onClose={() => {}} setToast={() => {}} lookupOptions={{ sources: [], projectTypes: [] }} /> },
-  { label: 'a Network person', key: 'partner_id', id: 'p1',
+  { label: 'a Network person', key: 'partner_id', id: 'p1', hasBar: false, menu: 'Partner actions',
     render: () => <NetworkPersonRecord partner={PARTNER} companies={[]} people={[]} /> },
 ]
 
+// The ··· menu's "Set a reminder" — CardMenu (client) renders in place,
+// RecordMenu (engagement, Network) portals to the body; search the document.
+const menuReminderItem = async (host: Element, rec: any) => {
+  await click(host.querySelector(`[aria-label="${rec.menu}"]`))
+  return [...document.querySelectorAll('button, [role="menuitem"]')].find(b => (b.textContent || '').trim() === 'Set a reminder') as HTMLElement | undefined
+}
+const openSetter = async (host: Element, rec: any, via: 'bar' | 'menu') => {
+  if (via === 'bar') await click(host.querySelector('[data-testid="reminder-button"]'))
+  else await click(await menuReminderItem(host, rec))
+}
+const fillAndSave = async (when: string, note: string) => {
+  await click(byText(setterEl(), when))
+  await type(setterEl().querySelector('input[aria-label="What is this reminder for?"]') as HTMLInputElement, note)
+  await click(byText(setterEl(), 'Done'))
+}
+
 // ── A) every record ──────────────────────────────────────────
-describe('A) the Reminder button, on every record', () => {
+describe('A) reminders on every record', () => {
   for (const rec of RECORDS) {
-    it(`${rec.label}: an existing reminder shows on open`, async () => {
+    it(`${rec.label}: an existing reminder shows under the name on open`, async () => {
       seed({ [rec.key]: rec.id, due_on: '2026-10-06', note: 'call about the garage' })
       const { host } = await mount(rec.render())
       const s = strip(host)
@@ -174,35 +199,77 @@ describe('A) the Reminder button, on every record', () => {
       expect(calls.some(c => c.method === 'GET' && c.url === `/api/reminders?${rec.key}=${rec.id}`)).toBe(true)
     })
 
+    it(`${rec.label}: nothing floats under the name when there is no reminder`, async () => {
+      const { host } = await mount(rec.render())
+      expect(strip(host)).toBeNull()
+      const btn = host.querySelector('[data-testid="reminder-button"]')
+      if (rec.hasBar) {
+        // …the button lives in the pinned bottom action bar, and ONLY there.
+        expect(host.querySelectorAll('[data-testid="reminder-button"]')).toHaveLength(1)
+        expect(btn!.closest('[data-testid="card-action-bar"]')).toBeTruthy()
+        expect(btn!.closest('[data-testid="record-reminder"]')).toBeNull()
+      } else {
+        // No bar on this card → no free-standing button at all.
+        expect(btn).toBeNull()
+      }
+    })
+
+    it(`${rec.label}: "Set a reminder" is in the ··· menu`, async () => {
+      const { host } = await mount(rec.render())
+      expect(await menuReminderItem(host, rec)).toBeTruthy()
+    })
+
     it(`${rec.label}: three taps — Tomorrow, a line, Done`, async () => {
       const { host } = await mount(rec.render())
-      const s = strip(host)
-      expect(s.textContent).not.toContain('Reminder:')
-      await click(host.querySelector('[data-testid="reminder-button"]'))
-      await click(byText(s, 'Tomorrow'))
-      await type(s.querySelector('input[aria-label="What is this reminder for?"]') as HTMLInputElement, 'send the quote')
-      await click(byText(s, 'Done'))
+      await openSetter(host, rec, rec.hasBar ? 'bar' : 'menu')
+      await fillAndSave('Tomorrow', 'send the quote')
       const post = calls.find(c => c.method === 'POST')!
       expect(post.body).toEqual({ [rec.key]: rec.id, due_on: '2026-10-01', note: 'send the quote' })
       expect(strip(host).textContent).toContain('Reminder: send the quote')
       expect(strip(host).textContent).toContain('Tomorrow')
-      expect(host.querySelector('[data-testid="reminder-setter"]')).toBeNull()
+      expect(setterEl()).toBeNull()
     })
   }
 
-  it('the button is in the same place on all four: straight under the name, one per record', async () => {
-    for (const rec of RECORDS) {
-      const { host, unmount } = await mount(rec.render())
-      expect(host.querySelectorAll('[data-testid="reminder-button"]')).toHaveLength(1)
-      expect((host.querySelector('[data-testid="reminder-button"]') as HTMLElement).textContent!.trim()).toBe('Reminder')
-      await unmount()
-    }
+  for (const rec of RECORDS.filter(r => r.hasBar)) {
+    it(`${rec.label}: the bar and the ··· menu do the SAME thing`, async () => {
+      const fromBar = await mount(rec.render())
+      await openSetter(fromBar.host, rec, 'bar')
+      // The setter opens in the pinned bar, above the buttons.
+      expect(setterEl().closest('[data-testid="reminder-setter-panel"]')).toBeTruthy()
+      await fillAndSave('Next week', 'chase deposit')
+      const barPost = calls.filter(c => c.method === 'POST')
+      const barText = strip(fromBar.host).textContent
+      await fromBar.unmount()
+
+      rows = []; calls = []
+      const fromMenu = await mount(rec.render())
+      await openSetter(fromMenu.host, rec, 'menu')
+      expect(setterEl().closest('[data-testid="reminder-setter-panel"]')).toBeTruthy() // same place
+      await fillAndSave('Next week', 'chase deposit')
+      const menuPost = calls.filter(c => c.method === 'POST')
+
+      expect(barPost).toHaveLength(1)
+      expect(menuPost).toEqual(barPost)
+      expect(strip(fromMenu.host).textContent).toBe(barText)
+    })
+  }
+
+  it('the bar button is gold (brand gold tokens), not the teal accent of Call / Send to Jobber', async () => {
+    const { host } = await mount(RECORDS[1].render())
+    const btn = host.querySelector('[data-testid="reminder-button"]') as HTMLElement
+    const norm = (v: string) => { const d = document.createElement('div'); d.style.color = v; return d.style.color }
+    expect(btn.style.background).toBe(norm(T.brand.goldSoft))
+    expect(btn.style.color).toBe(norm(T.brand.goldText))
+    expect(btn.style.background).not.toBe(norm(T.accent.soft))
+    expect(btn.textContent).toContain('Reminder')
+    expect(btn.getAttribute('aria-label')).toBe('Set a reminder')
   })
 
   it('Next week is seven days on; Pick a date takes any day; Done waits for a date AND a line', async () => {
     const { host } = await mount(RECORDS[0].render())
-    await click(host.querySelector('[data-testid="reminder-button"]'))
-    const s = strip(host)
+    await openSetter(host, RECORDS[0], 'bar')
+    const s = setterEl()
     const done = () => byText(s, 'Done') as HTMLButtonElement
     expect(done().disabled).toBe(true)
     await click(byText(s, 'Next week'))
@@ -216,11 +283,113 @@ describe('A) the Reminder button, on every record', () => {
     expect(calls.find(c => c.method === 'POST')!.body.due_on).toBe('2026-11-12')
   })
 
+  it('pressing the bell again (or Cancel) closes the setter without saving', async () => {
+    const { host } = await mount(RECORDS[1].render())
+    await openSetter(host, RECORDS[1], 'bar')
+    expect(setterEl()).toBeTruthy()
+    await click(host.querySelector('[data-testid="reminder-button"]'))
+    expect(setterEl()).toBeNull()
+    await openSetter(host, RECORDS[1], 'bar')
+    await click(byText(setterEl(), 'Cancel'))
+    expect(setterEl()).toBeNull()
+    expect(calls.some(c => c.method === 'POST')).toBe(false)
+  })
+
   it("the Network person's old What's next section is gone — Reminders replaced it", async () => {
     const { host } = await mount(RECORDS[3].render())
     expect(host.querySelector('[data-testid="next-steps"]')).toBeNull()
     expect(host.textContent).not.toContain('What’s next')
     expect(host.textContent).not.toContain('Old next step')
+  })
+})
+
+// ── E) the action bar at every child count ───────────────────
+// The real ClientProfile bar, desktop and phone. `kids` = the actions other
+// than the bell. Desktop: one row, kids in equal columns, bell last at its
+// own width. Phone: a two-column grid, bell as the last cell.
+describe('E) the action bar lays out at every child count, and the other actions still work', () => {
+  const LINKED = 'Z2lkOi8vSm9iYmVyL0NsaWVudC8x'
+  const CASES = [
+    { name: 'Call + Log + Send', over: { phone: '555-0100' }, props: {}, kids: ['Call', 'Log touchpoint', 'Send to Jobber'] },
+    { name: 'Call + Log + Open in Jobber', over: { phone: '555-0100', jobber_client_id: LINKED }, props: {}, kids: ['Call', 'Log touchpoint', 'Open in Jobber'] },
+    { name: 'Log + Send (no phone)', over: {}, props: {}, kids: ['Log touchpoint', 'Send to Jobber'] },
+    { name: 'Call + Open (read-only)', over: { phone: '555-0100', jobber_client_id: LINKED }, props: { readOnly: true }, kids: ['Call', 'Open in Jobber'] },
+    { name: 'Open only (read-only, no phone)', over: { jobber_client_id: LINKED }, props: { readOnly: true }, kids: ['Open in Jobber'] },
+    { name: 'loc_other: Transfer', over: { location_id: 'loc_other', phone: '555-0100' }, props: {}, kids: ['Transfer'] },
+    { name: 'nothing but the bell (read-only, no phone, not linked)', over: {}, props: { readOnly: true }, kids: [] },
+  ]
+  const mountCase = async (c: any, width: number, onSendToJobber = vi.fn()) => {
+    ;(globalThis as any).__BEE_TEST_WIDTH__ = width
+    ;(window as any).innerWidth = width
+    profile = profileBody('New', 'lead-new', 'Nora New')
+    Object.assign(profile.client, c.over)
+    const m = await mount(<ClientProfile clientId="lead-new" people={[]} onClose={() => {}} setToast={() => {}} onSendToJobber={onSendToJobber} lookupOptions={{ sources: [], projectTypes: [] }} {...c.props} />)
+    return { ...m, onSendToJobber }
+  }
+  const layout = (host: Element) => host.querySelector('[data-testid="card-action-bar"] > [data-action-layout]') as HTMLElement
+  const labels = (els: Element[]) => els.map(e => (e.textContent || '').trim())
+  afterEach(() => { (globalThis as any).__BEE_TEST_WIDTH__ = 1200; (window as any).innerWidth = 1200 })
+
+  for (const c of CASES) {
+    it(`desktop · ${c.name}: kids in ${c.kids.length || 'no'} equal column(s), bell at the end`, async () => {
+      const { host } = await mountCase(c, 1200)
+      const row = layout(host)
+      expect(row.dataset.actionLayout).toBe('row')
+      const [first, ...rest] = [...row.children] as HTMLElement[]
+      const bell = row.lastElementChild as HTMLElement
+      expect(bell.dataset.testid).toBe('reminder-button')
+      if (c.kids.length) {
+        expect(first.style.gridTemplateColumns).toBe(`repeat(${c.kids.length}, 1fr)`)
+        expect(labels([...first.children])).toEqual(c.kids)
+        expect(rest).toHaveLength(1) // the grid, then the bell — nothing else
+      } else {
+        expect(first.children).toHaveLength(0) // spacer: the bell still sits at the end
+      }
+    })
+
+    it(`phone · ${c.name}: two-column grid, bell as the last cell`, async () => {
+      const { host } = await mountCase(c, 375)
+      const grid = layout(host)
+      expect(grid.dataset.actionLayout).toBe('two-column')
+      const cells = [...grid.children] as HTMLElement[]
+      expect(grid.style.gridTemplateColumns).toBe(`repeat(${Math.min(2, c.kids.length + 1)}, minmax(0, 1fr))`)
+      expect(labels(cells.slice(0, -1))).toEqual(c.kids)
+      expect(cells[cells.length - 1].dataset.testid).toBe('reminder-button')
+      expect(cells[cells.length - 1].textContent).toContain('Reminder') // word shown on phones too
+    })
+  }
+
+  it('Call dials, Log touchpoint opens its window, Send to Jobber sends — with the bell beside them', async () => {
+    const { host, onSendToJobber } = await mountCase(CASES[0], 1200)
+    const row = layout(host)
+    const call = [...row.querySelectorAll('a')].find(a => a.textContent!.includes('Call')) as HTMLAnchorElement
+    expect(call.getAttribute('href')).toBe('tel:555-0100')
+    await click(byText(row, 'Log touchpoint'))
+    expect(document.querySelector('[aria-label="Log touchpoint"][role="dialog"], [aria-label="Log touchpoint"]:not(button)')).toBeTruthy()
+    await click([...row.querySelectorAll('button')].find(b => b.textContent!.includes('Send to Jobber')))
+    expect(onSendToJobber).toHaveBeenCalledWith('lead-new')
+  })
+
+  it('Open in Jobber still links out; Transfer still opens its window on loc_other', async () => {
+    const linked = await mountCase(CASES[1], 1200)
+    const open = [...layout(linked.host).querySelectorAll('a')].find(a => a.textContent!.includes('Open in Jobber')) as HTMLAnchorElement
+    expect(open.getAttribute('href')).toContain('secure.getjobber.com')
+    await linked.unmount()
+    const other = await mountCase(CASES[5], 1200)
+    await click([...layout(other.host).querySelectorAll('button')].find(b => b.textContent!.includes('Transfer')))
+    expect(document.querySelector('[aria-label="Transfer lead"]')).toBeTruthy()
+  })
+
+  it('the engagement bar carries the bell the same way', async () => {
+    ;(globalThis as any).__BEE_TEST_WIDTH__ = 375; (window as any).innerWidth = 375
+    const phone = await mount(RECORDS[2].render())
+    expect(layout(phone.host).dataset.actionLayout).toBe('two-column')
+    expect((layout(phone.host).lastElementChild as HTMLElement).dataset.testid).toBe('reminder-button')
+    await phone.unmount()
+    ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200; (window as any).innerWidth = 1200
+    const desk = await mount(RECORDS[2].render())
+    expect(layout(desk.host).dataset.actionLayout).toBe('row')
+    expect((layout(desk.host).lastElementChild as HTMLElement).dataset.testid).toBe('reminder-button')
   })
 })
 
@@ -366,10 +535,8 @@ describe('C) the Reminders page', () => {
 describe('D) the owner is never sent from the browser', () => {
   it('create and edit bodies carry no user id', async () => {
     const { host } = await mount(RECORDS[0].render())
-    await click(host.querySelector('[data-testid="reminder-button"]'))
-    await click(byText(strip(host), 'Tomorrow'))
-    await type(strip(host).querySelector('input[aria-label="What is this reminder for?"]') as HTMLInputElement, 'x')
-    await click(byText(strip(host), 'Done'))
+    await openSetter(host, RECORDS[0], 'bar')
+    await fillAndSave('Tomorrow', 'x')
     await click(strip(host).querySelector('[aria-label="Change date"]'))
     await click(byText(strip(host), 'Next week'))
     await click(byText(strip(host), 'Done'))

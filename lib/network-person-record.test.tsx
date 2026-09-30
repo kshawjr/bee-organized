@@ -15,8 +15,9 @@
 //   D) TOUCHPOINTS: TouchpointModal is mounted VERBATIM and THIS record
 //      owns the POST — /api/touchpoints with partner_id (the one
 //      writer); a confirmed write updates the local last-talked state.
-//   E) WHAT'S NEXT is retired (2026-09-30): the Reminder strip sits under
-//      the name instead, and old next_steps no longer render.
+//   E) WHAT'S NEXT is retired (2026-09-30): reminders replace it — listed
+//      under the name, set from the ··· menu — and old next_steps no longer
+//      render.
 //   F) CUSTOMER PATH: "Add as client" matches an existing client FIRST
 //      (no duplicate lead), else POSTs /api/leads and stores the REAL id.
 //      Only ONE exact email/phone match at the partner's location links by
@@ -223,12 +224,13 @@ describe('D) touchpoints — the record owns the POST', () => {
 })
 
 describe("E) what's next → Reminders", () => {
-  it('the old section is gone; the Reminder strip is in its place', async () => {
+  it('the old section is gone; reminders load for this person and "Set a reminder" is in the ··· menu', async () => {
     await mount()
     expect(host.querySelector('[data-testid="next-steps"]')).toBeNull()
     expect(host.textContent).not.toContain('Send gift') // the stored next step
-    expect(host.querySelector('[data-testid="record-reminder"]')).toBeTruthy()
     expect(fetchCalls.some(c => c.url === '/api/reminders?partner_id=p1')).toBe(true)
+    await act(async () => { (host.querySelector('[aria-label="Partner actions"]') as HTMLElement).click() })
+    expect([...document.querySelectorAll('button')].some(b => b.textContent!.trim() === 'Set a reminder')).toBe(true)
   })
 })
 
