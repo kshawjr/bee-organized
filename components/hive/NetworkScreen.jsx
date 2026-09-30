@@ -5,9 +5,9 @@
 // module (§8.5): props only, no BeeHub imports, tokens only.
 //
 // STRUCTURE (approved mockups):
-//   · "What's next" strip — partners.next_steps surfaced OUTSIDE the
-//     record for the first time: overdue (danger) + due-this-week, each
-//     item opens its record
+//   · (the "What's next" strip that sat here was retired 2026-09-30 —
+//     Reminders replaced next_steps; they show on Home and the Reminders
+//     page, not on this screen)
 //   · stats — in network · leads referred · converted · referral revenue
 //     · gone cold 60d+. Referral numbers come from /api/network/summary
 //     (REAL joins, Phase 1); until it resolves they render "—", NEVER a
@@ -44,7 +44,7 @@ import {
   FilterButton, FilterPopover, FilterSection, TogglePills, FilteredEmpty,
 } from './shared/FilterPopover'
 import {
-  buildNetworkBands, nextStepsDigest, networkStats, contactRecency,
+  buildNetworkBands, networkStats, contactRecency,
   stageFamilyKey, POTENTIAL_BAND, JUST_MET_BAND,
 } from './shared/networkGroups'
 import { CHIP_STYLES } from './shared/stageConfig'
@@ -198,16 +198,11 @@ export default function NetworkScreen({
   const toggleBand = (key) => setExpandedMap(prev => ({ ...prev, [key]: !prev[key] }))
   const isExpanded = (key) => (q || filterCount > 0 ? true : expandedMap[key] === true)
 
-  // ── what's-next + stats ──
-  const digest = useMemo(() => nextStepsDigest(scopedPartners, nowMs), [scopedPartners]) // eslint-disable-line react-hooks/exhaustive-deps
+  // ── stats ──
   const stats = useMemo(() => networkStats({ partners: scopedPartners, companies: scopedCompanies, totals: summary?.totals ?? null, nowMs }), [scopedPartners, scopedCompanies, summary]) // eslint-disable-line react-hooks/exhaustive-deps
-  const partnerById = useMemo(() => new Map(scopedPartners.map(p => [p.id, p])), [scopedPartners])
 
   const bandTone = (band) =>
     band.tone === 'potential' ? fam('purple') : band.tone === 'justmet' ? fam('quiet') : fam('teal')
-
-  const strip = [...digest.overdue, ...digest.dueSoon]
-  const STRIP_MAX = 6
 
   return (
     <div style={{ maxWidth: '860px', margin: '0 auto', padding: '16px 16px 80px', fontFamily: 'inherit' }}>
@@ -247,41 +242,6 @@ export default function NetworkScreen({
               carries, so the list below is <strong>incomplete</strong>. Nothing is
               lost — reach out so the limit can be raised.
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── "What's next" strip (next_steps, surfaced at last) ── */}
-      {!locationRequired && strip.length > 0 && (
-        <div data-testid="whats-next" style={{ background: T.surface.raised, border: T.border.card, borderRadius: T.radius.card, boxShadow: T.shadow.card, padding: '12px 14px', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: T.ink.primary }}>What’s next</span>
-            {digest.overdue.length > 0 && (
-              <span style={{ fontSize: '11px', fontWeight: 500, color: T.state.danger.fg, background: T.state.danger.soft, borderRadius: T.radius.pill, padding: '2px 9px', fontVariantNumeric: T.type.tabular }}>
-                {digest.overdue.length} overdue
-              </span>
-            )}
-            {digest.dueSoon.length > 0 && (
-              <span style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, background: T.surface.sunken, borderRadius: T.radius.pill, padding: '2px 9px', fontVariantNumeric: T.type.tabular }}>
-                {digest.dueSoon.length} this week
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {strip.slice(0, STRIP_MAX).map((item, i) => (
-              <button key={`${item.partnerId}-${i}`}
-                onClick={() => { const p = partnerById.get(item.partnerId); if (p) onOpenPerson(p) }}
-                style={{ display: 'flex', alignItems: 'baseline', gap: '8px', border: 'none', background: 'transparent', padding: '3px 0', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                <span style={{ fontSize: '11px', fontWeight: 500, color: item.overdue ? T.state.danger.fg : T.ink.muted, flexShrink: 0, fontVariantNumeric: T.type.tabular }}>
-                  {item.overdue ? 'overdue' : item.date.slice(5).replace('-', '/')}
-                </span>
-                <span title={item.text} style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.text}</span>
-                <span style={{ fontSize: '11px', color: T.ink.quiet, flexShrink: 0 }}>· {item.partnerName}</span>
-              </button>
-            ))}
-            {strip.length > STRIP_MAX && (
-              <p style={{ fontSize: '11px', color: T.ink.quiet, paddingTop: '2px' }}>+ {strip.length - STRIP_MAX} more inside the records</p>
-            )}
           </div>
         </div>
       )}

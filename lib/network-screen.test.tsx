@@ -12,8 +12,8 @@
 //   D) Stage chips render on person rows; 60d+ last-contact renders in
 //      the danger tone (fresh rows don't; NULL renders quiet "no
 //      touchpoints yet", not red).
-//   E) What's-next strip: overdue + due-this-week counts and items,
-//      overdue in danger; clicking an item opens the record.
+//   E) The What's-next strip is RETIRED (2026-09-30): Reminders replaced
+//      next_steps. Even with overdue steps in the data, nothing renders.
 //   F) STATS are honest: real numbers once /api/network/summary resolves
 //      ('$6,500', 6) — and '—' while pending, NEVER a fake zero.
 //   G) Routing: /network is canonical, /contacts stays a working alias.
@@ -216,26 +216,13 @@ describe('D) stage chips + staleness', () => {
   })
 })
 
-describe('E) what’s-next strip', () => {
-  it('surfaces overdue + due-this-week with correct counts; overdue in danger', async () => {
+describe('E) the retired What’s-next strip', () => {
+  it('renders nothing from next_steps any more — Reminders replaced it', async () => {
     await mount()
-    const strip = host.querySelector('[data-testid="whats-next"]') as HTMLElement
-    expect(strip).toBeTruthy()
-    expect(strip.textContent).toContain('1 overdue')
-    expect(strip.textContent).toContain('1 this week')
-    expect(strip.textContent).toContain('Send referral gift')
-    expect(strip.textContent).toContain('Karen Martinez')
-    expect(strip.textContent).not.toContain('Done thing') // done steps stay out
-  })
-
-  it('clicking an item opens that record', async () => {
-    const onOpenPerson = vi.fn()
-    await mount({ onOpenPerson })
-    const strip = host.querySelector('[data-testid="whats-next"]') as HTMLElement
-    const item = [...strip.querySelectorAll('button')].find(b => b.textContent!.includes('Send referral gift'))!
-    await act(async () => { item.click() })
-    expect(onOpenPerson).toHaveBeenCalledTimes(1)
-    expect(onOpenPerson.mock.calls[0][0].id).toBe('p1')
+    expect(host.querySelector('[data-testid="whats-next"]')).toBeNull()
+    expect(host.textContent).not.toContain('What’s next')
+    expect(host.textContent).not.toContain('Send referral gift') // an overdue step in the data
+    expect(host.textContent).not.toContain('overdue')
   })
 })
 

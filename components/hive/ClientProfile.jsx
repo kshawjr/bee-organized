@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
+import { RecordReminder } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import NewJobWizard from './NewJobWizard'
 import TransferLeadModal from './TransferLeadModal'
@@ -1208,6 +1209,13 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           ]),
         ]} />
       </div>
+
+      {/* Reminders — the SAME strip, in the SAME place (straight under the
+          name), on every record: client/lead, engagement, Network person.
+          A lead and a client are one leads row, so both hang off lead_id.
+          Shown on read-only seats too: a reminder is personal and changes
+          nothing about the client. */}
+      <RecordReminder record={{ key: 'lead_id', id: c.id }} />
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
           Owing / Last touch. Owing spans ALL engagements incl. closed

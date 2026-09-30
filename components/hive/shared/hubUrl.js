@@ -40,6 +40,8 @@ export const ROUTE_TO_NAV = {
   home:    'home',
   // The Help section (help_entries). Self-mapped like reports.
   help:    'help',
+  // Reminders — the caller's own reminders, soonest first. Self-mapped.
+  reminders:'reminders',
 }
 
 // activeNav key → canonical pathname (the tab's bare URL, no record id).
@@ -53,6 +55,7 @@ export const NAV_TO_URL = {
   settings:'/settings',
   admin:   '/admin',
   help:    '/help',
+  reminders:'/reminders',
 }
 
 // activeNav key → the human screen LABEL that rides a feedback item's
@@ -73,6 +76,7 @@ export const NAV_TO_SCREEN = {
   backoffice:'Back Office',
   settings:  'Settings',
   help:      'Help',
+  reminders: 'Reminders',
 }
 
 // Strict on purpose: an UNKNOWN nav returns null, not a fallback label.

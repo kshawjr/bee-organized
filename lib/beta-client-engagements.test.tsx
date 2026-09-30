@@ -248,7 +248,10 @@ describe('EngagementPanel — Also on this client', () => {
     ])
     expect(rows(c)).toHaveLength(4)
     // Four rows rendered off ONE request: the panel's own engagement GET.
+    // The card's one other request is its Reminder strip (2026-09-30) —
+    // once per open card, never per row, so it doesn't count against this.
     const urls = fetchMock.mock.calls.map((a: any[]) => String(a[0]))
-    expect(urls).toEqual(['/api/engagements/e-1'])
+    expect(urls.filter(u => !u.startsWith('/api/reminders?'))).toEqual(['/api/engagements/e-1'])
+    expect(urls.filter(u => u.startsWith('/api/reminders?'))).toEqual(['/api/reminders?engagement_id=e-1'])
   })
 })

@@ -18,8 +18,9 @@
 //               THIS caller owns the POST → /api/touchpoints with
 //               partner_id, the one writer, which stamps
 //               last_contacted_at) + the shared Timeline in partner mode
-//   what's next — next_steps, checkable + addable (the same items the
-//               Phase 2 strip surfaces)
+//   reminder  — the shared RecordReminder strip under the name (it
+//               replaced the old "What's next" next_steps section,
+//               2026-09-30; partners.next_steps is no longer shown)
 //   referred  — the reverse list, each lead with status + value,
 //               deep-linking to the client record
 //
@@ -35,6 +36,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import OverlayShell from './OverlayShell'
+import { RecordReminder } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import Timeline from './shared/Timeline'
 import useIsMobile from './shared/useIsMobile'
@@ -154,18 +156,6 @@ export default function NetworkPersonRecord({
     setLogging(false)
     setToast({ kind: 'success', msg: 'Touchpoint logged' })
   }
-
-  // ── next steps ──
-  const [newStep, setNewStep] = useState('')
-  const [newStepDate, setNewStepDate] = useState('')
-  const steps = partner.nextSteps || []
-  const addStep = () => {
-    if (!newStep.trim()) return
-    patch({ nextSteps: [...steps, { id: `step${Date.now()}`, text: newStep.trim(), date: newStepDate || null, done: false, createdAt: new Date().toISOString() }] })
-    setNewStep(''); setNewStepDate('')
-  }
-  const toggleStep = (id) => patch({ nextSteps: steps.map(s => s.id === id ? { ...s, done: !s.done } : s) })
-  const removeStep = (id) => patch({ nextSteps: steps.filter(s => s.id !== id) })
 
   // ── notes (partner jsonb — legacy free-text ts entries render raw) ──
   const [noteDraft, setNoteDraft] = useState('')
@@ -287,6 +277,12 @@ export default function NetworkPersonRecord({
           )}
         </div>
 
+        {/* Reminders — the same strip, same place (straight under the name)
+            as the client and engagement cards. It REPLACES the old "What's
+            next" section that lived lower down this record (2026-09-30):
+            two dated to-do lists on one person was one too many. */}
+        <RecordReminder record={{ key: 'partner_id', id: partner.id }} />
+
         {confirmDelete && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: T.state.danger.soft, borderRadius: T.radius.control, padding: '10px 12px' }}>
             <span style={{ fontSize: '12px', color: T.state.danger.fg, flex: 1 }}>Remove {partner.name} from your network? (Recoverable from the recycle bin.)</span>
@@ -395,37 +391,6 @@ export default function NetworkPersonRecord({
               setToast={setToast}
               readOnly={readOnly}
             />
-          </div>
-        </div>
-
-        {/* ── what's next (the Phase 2 strip's items, at their home) ── */}
-        <div data-testid="next-steps">
-          <SectionLabel>What’s next</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {steps.filter(s => !s.done).map(s => (
-              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button aria-label={`Mark done: ${s.text}`} disabled={readOnly} onClick={() => toggleStep(s.id)}
-                  style={{ width: '16px', height: '16px', borderRadius: '4px', border: T.border.control, background: T.surface.raised, cursor: readOnly ? 'default' : 'pointer', flexShrink: 0, padding: 0 }} />
-                <span title={s.text} style={{ fontSize: '12px', color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.text}</span>
-                {s.date && <span style={{ fontSize: '11px', color: new Date(`${s.date}T00:00:00`).getTime() < nowMs - 86400000 ? T.state.danger.fg : T.ink.quiet, fontVariantNumeric: T.type.tabular }}>{s.date.slice(5).replace('-', '/')}</span>}
-                {!readOnly && <button aria-label={`Delete step: ${s.text}`} onClick={() => removeStep(s.id)} style={{ border: 'none', background: 'transparent', color: T.ink.quiet, cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: '2px' }}>×</button>}
-              </div>
-            ))}
-            {steps.filter(s => !s.done).length === 0 && (
-              <p style={{ fontSize: '12px', color: T.ink.quiet }}>Nothing scheduled</p>
-            )}
-            {!readOnly && (
-              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                <input value={newStep} onChange={e => setNewStep(e.target.value)} placeholder="Add a next step…"
-                  onKeyDown={e => { if (e.key === 'Enter') addStep() }}
-                  aria-label="New next step"
-                  style={{ flex: 1, padding: '6px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none', minWidth: 0 }} />
-                <input type="date" value={newStepDate} onChange={e => setNewStepDate(e.target.value)} aria-label="Due date"
-                  style={{ padding: '6px 8px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }} />
-                <button onClick={addStep} disabled={!newStep.trim()}
-                  style={{ border: 'none', borderRadius: T.radius.control, background: newStep.trim() ? T.accent.fg : T.surface.sunken, color: newStep.trim() ? T.accent.onFill : T.ink.disabled, fontSize: '12px', fontWeight: 500, padding: '6px 12px', cursor: newStep.trim() ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>Add</button>
-              </div>
-            )}
           </div>
         </div>
 

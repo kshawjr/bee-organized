@@ -71,6 +71,7 @@ import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { replaceInList, removeFromList } from './shared/noteStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
+import { RecordReminder } from './shared/Reminders'
 import TouchpointModal from './TouchpointModal'
 import MetaSelect from './MetaSelect'
 import Timeline from './shared/Timeline'
@@ -1179,6 +1180,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           </div>
         </div>
       )}
+
+      {/* Reminders — the same strip, same place (straight under the
+          masthead) as the client card and the Network person. */}
+      {eng && <RecordReminder record={{ key: 'engagement_id', id: engagementId }} />}
 
       {/* WHY FINAL PROCESSING IS WAITING (issue 119) — the three cases
           read differently and are never collapsed into one sentence:

@@ -179,31 +179,6 @@ export function buildNetworkBands({ partners = [], companies = [], specialties =
   return bands
 }
 
-// ── what's-next digest ───────────────────────────────────────
-// partners.next_steps jsonb ([{id,text,date,done}]) surfaced OUTSIDE the
-// record for the first time. Items: open steps with a due date. Overdue =
-// strictly before today (local midnight); due-soon = today..+7d.
-export function nextStepsDigest(partners = [], nowMs) {
-  const today = new Date(nowMs); today.setHours(0, 0, 0, 0)
-  const todayMs = today.getTime()
-  const weekMs = todayMs + 7 * DAY_MS
-  const overdue = []
-  const dueSoon = []
-  for (const p of partners) {
-    for (const step of p?.nextSteps || []) {
-      if (step?.done || !step?.date) continue
-      const due = new Date(`${step.date}T00:00:00`).getTime()
-      if (!Number.isFinite(due)) continue
-      const item = { partnerId: p.id, partnerName: p.name, text: step.text, date: step.date }
-      if (due < todayMs) overdue.push({ ...item, overdue: true })
-      else if (due < weekMs) dueSoon.push({ ...item, overdue: false })
-    }
-  }
-  overdue.sort((a, b) => a.date.localeCompare(b.date))
-  dueSoon.sort((a, b) => a.date.localeCompare(b.date))
-  return { overdue, dueSoon }
-}
-
 // ── stats ────────────────────────────────────────────────────
 // totals: /api/network/summary totals (null while loading → stat renders
 // "—", never a fake zero). goneCold counts only KNOWN-stale people —

@@ -62,6 +62,9 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
+// Reminders (2026-09-30) — the page and the Home block. Props-only leaves
+// like NetworkScreen, imported statically for the same reason.
+import RemindersScreen, { HomeReminders } from "@/components/hive/RemindersScreen"
 import NetworkPersonRecord from "@/components/hive/NetworkPersonRecord"
 import NetworkCompanyRecord from "@/components/hive/NetworkCompanyRecord"
 import NetworkAddSheet from "@/components/hive/NetworkAddSheet"
@@ -24446,7 +24449,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{} }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -25009,7 +25012,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
           System health · All locations
         </p>
       </div>
-      <div style={{ padding:'1.25rem' }}>
+      <div style={{ padding:'1.25rem', display:'grid', gap:'1.5rem' }}>
+        {/* Reminders are the person's own, not a location's, so they show
+            on the all-locations Home too. */}
+        <HomeReminders onOpen={onOpenReminder} onSeeAll={()=>nav('reminders')} />
         <HomeSystemHealth onOpenFull={onOpenSystemHealth} />
       </div>
     </div>
@@ -25068,6 +25074,13 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       </div>
 
       <div style={{ padding:'1.25rem', display:'grid', gap:'1.5rem' }}>
+
+        {/* ═══ Reminders (2026-09-30) — the TOP of Home. Missed ones first,
+            in amber; then today's. Only the signed-in person's own, and
+            nothing at all when none are due, so an empty day adds no block.
+            This is the only place a reminder "goes off" — no email, no
+            Slack. ═══ */}
+        <HomeReminders onOpen={onOpenReminder} onSeeAll={()=>nav('reminders')} />
 
         {/* ═══ Truncation notice (Fix 2 Phase 4) ═══
             A load that hit its row ceiling used to whisper into Vercel's logs
@@ -37311,6 +37324,30 @@ if (Array.isArray(initialPeople)) return
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [people])
+  // Reminders (2026-09-30): open the record a reminder is about, from the
+  // Reminders page or the Home block. The same three doors the rest of the
+  // app uses — a client/lead opens its card at /clients/<id>, an engagement
+  // opens under its client at ?e=<id>, a Network person opens its record on
+  // the Network tab.
+  function openReminderRecord(r) {
+    if (!r) return
+    if (r.record_type === 'network') {
+      const partner = partners.find(p => p.id === r.partner_id)
+      nav('partners')
+      if (partner) setGlobalSelectedPartner(partner)
+      return
+    }
+    const clientId = r.record_type === 'engagement' ? r.client_id : r.lead_id
+    if (!clientId) return
+    const lead = people.find(p => p.id === clientId)
+    setActiveNav('hive')
+    setGlobalSelectedPerson(lead || { id: clientId })
+    setGlobalSelectedEngagementId(r.record_type === 'engagement' ? r.engagement_id : null)
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', r.record_type === 'engagement' ? engagementPath(clientId, r.engagement_id) : clientPath(clientId))
+      window.scrollTo(0, 0)
+    }
+  }
   function addPersonFromPartner(p) {
     setPeople(prev=>[{...p,id:`n${Date.now()}`,stage:'New',tags:['returning'],buzzNotes:[{id:`bn${Date.now()}`,text:'Was a partner',ts:'Just now',user:'System'}],jobNotes:[],invoices:[],jobs:[],finalProcessed:false,isJunk:false,activity:[],outreachTimeline:[]},...prev])
   }
@@ -37323,6 +37360,9 @@ if (Array.isArray(initialPeople)) return
   // setShowManual(true) instead of nav(key). No activeNav highlight either.
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
+    // Reminders (2026-09-30): the caller's own reminders, soonest first.
+    // Straight under Home because Home is where they turn up on their day.
+    { key:'reminders', icon:'🔔', label:'Reminders' },
     // Client List moved out of the Clients top tab row and in here as a nested
     // item (2026-09-10). `children` is new to this nav — the only nesting in
     // the sidebar — and both the desktop and mobile renders below understand
@@ -37398,6 +37438,7 @@ if (Array.isArray(initialPeople)) return
     const profileInitials = viewAsUser?.initials || (profileName ? getInitials(profileName) : 'KS')
     const screenTitle = (() => {
       if (activeNav === 'home') return 'Home'
+      if (activeNav === 'reminders') return 'Reminders'
       if (activeNav === 'hive') return 'Clients'
       if (activeNav === 'partners') return 'Network'
       if (activeNav === 'reports') return 'Reports'
@@ -37733,6 +37774,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       </div>
     )
     if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen /></div>
+    // Reminders — the caller's own, soonest first (2026-09-30).
+    if (activeNav==='reminders') return <div style={pageStyle}><RemindersScreen onOpen={openReminderRecord} /></div>
     // issue 140: deliberate render split. super_admin lands on the real
     // BackOfficeScreen (the build-out surface — a visibly-distinct work-in-
     // progress stub, NOT the placeholder), every other role lands on the shared
@@ -37802,6 +37845,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <DashboardScreen
           startNav='home'
           onReportProblem={openRecordReport}
+          onOpenReminder={openReminderRecord}
           role={role}
           franchiseRole={role==='franchise'?franchiseRole:'owner'}
           locFilter={locFilter}
@@ -37965,6 +38009,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           isMobile={isMobile}
           screenName={
             activeNav === 'hive' ? 'Clients'
+            : activeNav === 'reminders' ? 'Reminders'
             : activeNav === 'partners' ? 'Network'
             : activeNav === 'reports' ? 'Reports'
             : activeNav === 'backoffice' ? 'Back Office' /* issue 140 */

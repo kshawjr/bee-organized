@@ -189,6 +189,12 @@ export const IconPencil = make(<>
   <path d="M13.5 6.5l4 4" />
 </>)
 
+// Reminders — the one button on every record.
+export const IconBell = make(<>
+  <path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" />
+  <path d="M9 17v1a3 3 0 0 0 6 0v-1" />
+</>)
+
 export const IconPaperclip = make(
   <path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5" />
 )

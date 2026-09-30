@@ -23,7 +23,7 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 export const MAP_PATH = path.join(REPO_ROOT, 'docs', 'screen-map.json')
 
 export const NAV_SURFACES = [
-  'Home', 'Clients', 'Network', 'Inbox', 'Reports', 'Back Office',
+  'Home', 'Reminders', 'Clients', 'Network', 'Inbox', 'Reports', 'Back Office',
   'Settings', 'Admin', 'Feedback', 'Help', 'Onboarding', 'Auth', 'Public',
 ]
 
