@@ -438,13 +438,13 @@
       ],
       "note": "Only the signed-in person's own. Shows nothing when none are due today or earlier. Today/overdue is the browser's local date.",
       "lines": [
-        27,
-        62
+        32,
+        73
       ]
     },
     {
       "id": "reminders.page",
-      "surface": "The Reminders page in the sidebar — my reminders, soonest first",
+      "surface": "The Reminders page in the sidebar — two tabs: Mine (my reminders, soonest first) and Bee Hub noticed (the location's estimates waiting on an answer)",
       "nav": "Reminders",
       "file": "components/hive/RemindersScreen.jsx",
       "symbol": "RemindersScreen",
@@ -464,12 +464,15 @@
         "my reminders",
         "the reminders page",
         "the reminders list",
-        "I can't find my reminder"
+        "I can't find my reminder",
+        "bee hub noticed",
+        "the estimates waiting",
+        "the second tab"
       ],
-      "note": "A reminder belongs to whoever set it — a teammate's reminder on your lead is theirs, not yours, and shows only on their list.",
+      "note": "A reminder belongs to whoever set it — a teammate's reminder on your lead is theirs, not yours, and shows only on their list. The Bee Hub noticed tab is the LOCATION's, derived live from open Estimate engagements (components/hive/shared/noticed.js, same rule as Home's estimates card); nothing to tick — a row leaves when the job moves. It is NOT the automatic 'N day follow up' timeline entries, which are logs of emails already sent.",
       "lines": [
-        63,
-        101
+        116,
+        202
       ]
     },
     {
@@ -497,8 +500,8 @@
       ],
       "note": "useRecordReminder drives the bar button, the ··· menu item (reminderMenuItem), the setter (ReminderSetterPanel) and the list under the name (RecordReminderList). The bar layout lives in cardKit ActionRow's `trailing`. Nothing is emailed or sent to Slack.",
       "lines": [
-        285,
-        302
+        304,
+        321
       ]
     },
     {
@@ -1078,8 +1081,8 @@
         "the reason list is wrong"
       ],
       "lines": [
-        45,
-        189
+        59,
+        203
       ]
     },
     {

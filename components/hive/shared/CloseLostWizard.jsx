@@ -8,10 +8,22 @@
 //      when unconfigured). The picked LABEL is stored verbatim in
 //      closed_reason. "Other" REQUIRES a note; every other reason takes an
 //      optional one.
-//   2) Follow-up — "Set a reminder to follow up later?" Yes → a date + a
-//      short reason → writes a REAL follow-up (a persisted touchpoints
-//      marker via writeEngagementMarker, NOT the old client-side mock).
-//      Skip → nothing scheduled.
+//   2) Follow-up — "Set a reminder to follow up later?" Yes → the SAME
+//      three choices as the Reminder button (Tomorrow / Next week / Pick a
+//      date) + a line saying why → a real REMINDER on this client, owned by
+//      whoever answered (POST /api/reminders; the server stamps the owner).
+//      It shows on the client card, on Home on its day, and on the Reminders
+//      page. Skip → nothing scheduled.
+//
+//      Until 2026-09-30 this wrote a future-dated 'reach_out' touchpoint
+//      labelled "Follow-up · …" and nothing else. Nothing ever read it back:
+//      13 owners' follow-ups sat on timelines and never surfaced (they are
+//      carried over by migrations/reminders_from_lost_followups.sql). Worse,
+//      a future 'reach_out' counts as a contact in places. So the wizard now
+//      writes a real reminder, plus a plain HISTORY line on the timeline,
+//      dated now ("Reminder set for Tue, Oct 6 · …", kind 'system', the
+//      person attributed) — the team can see a follow-up was arranged even
+//      though the reminder itself is private to its owner.
 //
 // The terminal close (closed_at / closed_reason / closed_note) commits
 // through commitEngagementClose — the ONE shared write path (the board's
@@ -39,6 +51,8 @@ import { CLOSED_LOST } from './stageConfig'
 import { commitEngagementClose, writeEngagementMarker, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
 import { WizardShell, wizPrimaryBtn, wizQuietBtn, wizSeg, wizInput, wizLabel } from './CloseWizardKit'
 import { T } from './tokens'
+import { ReminderFields, createReminder } from './Reminders'
+import { fixedDateLabel } from '@/lib/reminders'
 
 const STEPS = [{ key: 'reason', label: 'Reason' }, { key: 'followup', label: 'Follow-up' }]
 
@@ -90,24 +104,29 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
           await fetch(`/api/leads/${leadId}/close-not-interested`, { method: 'POST' })
         } catch { /* drips are secondary — never unwind a committed close */ }
       }
-      // Real follow-up (the current model, not a mock): a persisted
-      // touchpoints marker the timeline surfaces and the future nurture
-      // scheduler can pick up. Non-fatal — the close already committed.
+      // The follow-up is a REAL reminder on the client, owned by whoever is
+      // answering (the server stamps the owner). Non-fatal — the close has
+      // already committed; a failure says so plainly.
       if (wantFollowUp && followUpDate && leadId) {
+        const why = followUpReason.trim()
         try {
-          await writeEngagementMarker({
-            leadId, engagementId: engId, kind: 'reach_out', method: null,
-            label: `Follow-up · ${followUpReason.trim() || 'reconnect'}`,
-            notes: note.trim() || null,
-            occurredAt: new Date(`${followUpDate}T09:00:00`).toISOString(),
-          })
+          await createReminder({ lead_id: leadId, due_on: followUpDate, note: why })
         } catch (e) {
-          setToast({ kind: 'error', msg: `Closed lost, but the follow-up reminder didn't save: ${e.message}` })
+          setToast({ kind: 'error', msg: `Closed lost, but the reminder didn't save: ${e.message}` })
           onClosed(CLOSED_LOST, j)
           return
         }
+        // History only (dated now, not the due date): the team can see a
+        // follow-up was arranged. Best-effort — the reminder is what counts.
+        try {
+          await writeEngagementMarker({
+            leadId, engagementId: engId, kind: 'system', method: null, status: null, actor: 'session',
+            label: `Reminder set for ${fixedDateLabel(followUpDate)} · ${why}`,
+            notes: null, occurredAt: null,
+          })
+        } catch { /* history line only — the reminder already saved */ }
       }
-      setToast({ kind: 'success', msg: wantFollowUp ? 'Closed lost · follow-up set' : 'Closed as lost' })
+      setToast({ kind: 'success', msg: wantFollowUp ? 'Closed as lost · reminder set' : 'Closed as lost' })
       onClosed(CLOSED_LOST, j)
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
@@ -151,16 +170,11 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
         </div>
       </div>
       {wantFollowUp && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {wizLabel('When')}
-            <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)} style={wizInput()} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {wizLabel('What for')}
-            <input value={followUpReason} onChange={e => setFollowUpReason(e.target.value)}
-              placeholder="e.g. check back on budget" style={wizInput()} />
-          </div>
+        // The same fields as the Reminder button, so owners learn it once.
+        // It lands on the Reminders page and on Home on its day.
+        <div data-testid="wizard-reminder-fields" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {wizLabel('When')}
+          <ReminderFields date={followUpDate} note={followUpReason} onDate={setFollowUpDate} onNote={setFollowUpReason} />
         </div>
       )}
     </>

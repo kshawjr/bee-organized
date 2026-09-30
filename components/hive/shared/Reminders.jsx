@@ -59,13 +59,9 @@ export function useMyReminders(query = '', { enabled = true } = {}) {
   useEffect(() => { if (enabled) load() }, [enabled, load])
 
   const create = useCallback(async (body) => {
-    const res = await fetch('/api/reminders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    })
-    const json = await readJson(res)
-    if (!res.ok || !json?.reminder) throw new Error(json?.error || 'save_failed')
-    setReminders(prev => sortReminders([...(prev || []), json.reminder]))
-    return json.reminder
+    const reminder = await createReminder(body)
+    setReminders(prev => sortReminders([...(prev || []), reminder]))
+    return reminder
   }, [])
 
   const change = useCallback(async (id, patch) => {
@@ -105,30 +101,53 @@ const chip = (on) => ({
   fontSize: '15px', fontWeight: on ? 600 : 500, cursor: 'pointer', fontFamily: 'inherit',
 })
 
+// The date choice + the line, as CONTROLLED fields — the one piece every
+// place that sets a reminder shares (the Reminder setter below, and the
+// lost-lead wizard's "Set a reminder to follow up later?"). Owners learn
+// Tomorrow / Next week / Pick a date once.
+export function ReminderFields({ date, note, onDate, onNote, now = new Date(), onEnter = null, autoFocusNote = false }) {
+  const { tomorrow, nextWeek } = quickDates(now)
+  const [picking, setPicking] = useState(!!date && date !== tomorrow && date !== nextWeek)
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button type="button" style={chip(!picking && date === tomorrow)} onClick={() => { setPicking(false); onDate(tomorrow) }}>Tomorrow</button>
+        <button type="button" style={chip(!picking && date === nextWeek)} onClick={() => { setPicking(false); onDate(nextWeek) }}>Next week</button>
+        <button type="button" style={chip(picking)} onClick={() => { setPicking(true); if (date === tomorrow || date === nextWeek) onDate('') }}>Pick a date</button>
+      </div>
+      {picking && (
+        <input type="date" aria-label="Reminder date" value={date} min={todayYmd(now)} onChange={e => onDate(e.target.value)}
+          style={{ padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, alignSelf: 'flex-start' }} />
+      )}
+      <input aria-label="What is this reminder for?" placeholder="What for? e.g. call about the garage" autoFocus={autoFocusNote}
+        value={note} maxLength={REMINDER_NOTE_MAX} onChange={e => onNote(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
+        style={{ padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised }} />
+    </>
+  )
+}
+
+// Set one reminder (the same POST the Reminder button makes). The server
+// stamps the owner — whoever is signed in — so nothing here names one.
+export async function createReminder(body) {
+  const res = await fetch('/api/reminders', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const json = await readJson(res)
+  if (!res.ok || !json?.reminder) throw new Error(json?.error || 'save_failed')
+  return json.reminder
+}
+
 // Three taps: pick when, say why, Done. `initial` pre-fills for the pencil.
 export function ReminderSetter({ initial = null, onDone, onCancel, now = new Date(), saving = false }) {
-  const { tomorrow, nextWeek } = quickDates(now)
-  const init = initial?.due_on || ''
-  const [date, setDate] = useState(init)
-  const [picking, setPicking] = useState(!!init && init !== tomorrow && init !== nextWeek)
+  const [date, setDate] = useState(initial?.due_on || '')
   const [note, setNote] = useState(initial?.note || '')
   const ready = !!date && note.trim().length > 0 && !saving
 
   return (
     <div data-testid="reminder-setter" style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: T.surface.sunken, borderRadius: T.radius.inset, padding: '12px' }}>
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button type="button" style={chip(!picking && date === tomorrow)} onClick={() => { setPicking(false); setDate(tomorrow) }}>Tomorrow</button>
-        <button type="button" style={chip(!picking && date === nextWeek)} onClick={() => { setPicking(false); setDate(nextWeek) }}>Next week</button>
-        <button type="button" style={chip(picking)} onClick={() => { setPicking(true); if (date === tomorrow || date === nextWeek) setDate('') }}>Pick a date</button>
-      </div>
-      {picking && (
-        <input type="date" aria-label="Reminder date" value={date} min={todayYmd(now)} onChange={e => setDate(e.target.value)}
-          style={{ padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, alignSelf: 'flex-start' }} />
-      )}
-      <input aria-label="What is this reminder for?" placeholder="What for? e.g. call about the garage"
-        value={note} maxLength={REMINDER_NOTE_MAX} onChange={e => setNote(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && ready) onDone(date, note.trim()) }}
-        style={{ padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised }} />
+      <ReminderFields date={date} note={note} onDate={setDate} onNote={setNote} now={now}
+        onEnter={() => { if (ready) onDone(date, note.trim()) }} />
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button type="button" onClick={onCancel}
           style={{ padding: '10px 16px', minHeight: '44px', border: 'none', background: 'transparent', color: T.ink.muted, fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>

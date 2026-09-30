@@ -6,7 +6,8 @@
 //      button). Open engagement → Won/Lost; Closed Lost → Reopen;
 //      Closed Won → no Reopen (out of scope).
 //   2) Close-LOST wizard — reason step (Other requires a note) + follow-up
-//      step that writes a REAL touchpoints marker.
+//      step that sets a REAL reminder (2026-09-30; it used to write a
+//      future-dated 'reach_out' marker nothing read back) plus a history line.
 //   3) Close-WON wizard — 4-step stepper; invoice total; satisfaction
 //      branch (unhappy → real flag); Google review offer (link present vs
 //      absent); re-engage marker; Won commits reason 'won'.
@@ -44,6 +45,7 @@ let panelPayload: any = null
 let patchCalls: { url: string; body: any }[] = []
 let touchpointPosts: any[] = []
 let reopenPosts: string[] = []
+let reminderPosts: any[] = []
 const fetchMock = vi.fn(async (url: any, init?: any) => {
   const u = String(url)
   const method = init?.method
@@ -55,6 +57,11 @@ const fetchMock = vi.fn(async (url: any, init?: any) => {
   if (method === 'POST' && /\/api\/engagements\/[^/]+\/reopen$/.test(u)) {
     reopenPosts.push(u)
     return { ok: true, json: async () => ({ reopened: true, stage: 'Estimate', prev_stage: 'Closed Lost' }) } as any
+  }
+  if (method === 'POST' && u === '/api/reminders') {
+    const body = JSON.parse(init.body)
+    reminderPosts.push(body)
+    return { ok: true, status: 201, json: async () => ({ reminder: { id: 'r1', ...body } }) } as any
   }
   if (method === 'POST' && /\/api\/touchpoints$/.test(u)) {
     const body = JSON.parse(init.body)
@@ -73,7 +80,7 @@ const lsMock = {
 }
 
 beforeEach(() => {
-  panelPayload = null; patchCalls = []; touchpointPosts = []; reopenPosts = []
+  panelPayload = null; patchCalls = []; touchpointPosts = []; reopenPosts = []; reminderPosts = []
   fetchMock.mockClear()
   vi.stubGlobal('fetch', fetchMock)
   vi.stubGlobal('localStorage', lsMock)
@@ -179,7 +186,7 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     expect((btnByText(container, 'Next')! as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('follow-up step writes a REAL touchpoints marker + commits the lost close', async () => {
+  it('follow-up step sets a REAL reminder (not a future reach_out) + commits the lost close', async () => {
     const { container, onChanged } = await mountPanel(eng(), emptyChildren())
     await openLost(container)
     // default reason lost_no_response, straight to Next
@@ -187,13 +194,15 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     // the first is 'No response' (stored verbatim now, not a slug).
     await fire(btnByText(container, 'Next')!)
     await fire(btnByText(container, 'Yes, remind me')!)
+    // Same fields as the Reminder button: Pick a date → the date input.
+    await fire(btnByText(container, 'Pick a date')!)
     const date = container.querySelector('input[type="date"]')! as HTMLInputElement
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-      setter.call(date, '2026-09-01')
+      setter.call(date, '2027-09-01')
       date.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const reason = container.querySelector('input[placeholder="e.g. check back on budget"]')! as HTMLInputElement
+    const reason = container.querySelector('input[aria-label="What is this reminder for?"]')! as HTMLInputElement
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
       setter.call(reason, 'check back on budget')
@@ -204,11 +213,15 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     expect(patchCalls).toHaveLength(1)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
     expect(patchCalls[0].body.closed_reason).toBe('No response')
+    // The reminder: on the client, the picked date, the line — no owner
+    // (the server stamps whoever answered).
+    expect(reminderPosts).toHaveLength(1)
+    expect(reminderPosts[0]).toEqual({ lead_id: expect.any(String), due_on: '2027-09-01', note: 'check back on budget' })
+    // History only: a 'system' line dated now, never a future 'reach_out'.
     expect(touchpointPosts).toHaveLength(1)
-    expect(touchpointPosts[0].kind).toBe('reach_out')
-    expect(touchpointPosts[0].label).toContain('Follow-up')
-    expect(touchpointPosts[0].status).toBe('pending')
-    expect(touchpointPosts[0].occurred_at).toBeTruthy()
+    expect(touchpointPosts[0].kind).toBe('system')
+    expect(touchpointPosts[0].label).toContain('Reminder set for')
+    expect(touchpointPosts[0].occurred_at).toBeUndefined()
     expect(onChanged).toHaveBeenCalledWith('e-1', { stage: CLOSED_LOST })
   })
 

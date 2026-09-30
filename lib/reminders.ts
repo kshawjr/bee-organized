@@ -79,6 +79,13 @@ export function dueLabel(dueOn: string, today: string): string {
     : { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// A FIXED date for history text ("Tue, Oct 6") — never relative, because a
+// timeline line is read long after it was written.
+export function fixedDateLabel(dueOn: string): string {
+  const [y, m, d] = dueOn.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
 // Soonest due first; ties keep the order they were made in.
 export function sortReminders<T extends { due_on: string; created_at?: string | null }>(list: T[]): T[] {
   return [...list].sort((a, b) =>

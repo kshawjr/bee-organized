@@ -37775,7 +37775,11 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen /></div>
     // Reminders — the caller's own, soonest first (2026-09-30).
-    if (activeNav==='reminders') return <div style={pageStyle}><RemindersScreen onOpen={openReminderRecord} /></div>
+    // Two tabs (2026-09-30): Mine (personal) and Bee Hub noticed (the
+    // location's waiting estimates, derived from the same open-engagement
+    // payload Home reads). On 'all' there is no location, so Noticed asks
+    // for one rather than blending locations.
+    if (activeNav==='reminders') return <div style={pageStyle}><RemindersScreen onOpen={openReminderRecord} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} locationId={locFilter!=='all' ? locFilter : (viewAsUser?.locationId || null)} locationName={selectedLoc?.name || null} /></div>
     // issue 140: deliberate render split. super_admin lands on the real
     // BackOfficeScreen (the build-out surface — a visibly-distinct work-in-
     // progress stub, NOT the placeholder), every other role lands on the shared

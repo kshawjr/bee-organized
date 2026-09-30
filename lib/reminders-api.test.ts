@@ -175,6 +175,19 @@ describe('B) a reminder belongs to whoever set it', () => {
     expect(await listMine('lead_id=lead-kims')).toHaveLength(0)
   })
 
+  it("the lost-lead wizard's reminder belongs to whoever ANSWERED the wizard", async () => {
+    // The exact body CloseLostWizard sends (reminders-two-tabs.test.tsx pins
+    // it): the client, the date, the line — no owner. Kim answers it on a
+    // lead that is not hers to own; the reminder is Kim's.
+    signIn('u-kim')
+    const { status, json } = await setReminder({ lead_id: 'lead-new', due_on: '2026-10-01', note: 'check back on budget' })
+    expect(status).toBe(201)
+    expect(json.reminder.user_id).toBe('u-kim')
+    expect((await listMine()).map(r => r.note)).toEqual(['check back on budget'])
+    signIn('u-pat')
+    expect(await listMine()).toHaveLength(0)
+  })
+
   it('the owner can never be chosen by the caller', async () => {
     signIn('u-pat')
     const { json } = await setReminder({ lead_id: 'lead-kims', user_id: 'u-kim', due_on: '2026-10-06', note: 'x' })

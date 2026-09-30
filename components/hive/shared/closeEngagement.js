@@ -120,15 +120,17 @@ export function closedFieldsFrom(j = {}) {
   return out
 }
 
-// Real, persisted follow-up / flag / re-engage MARKER (not the old
-// client-side mock). There is no reminder/nurture scheduler table yet
-// (schema-only nurture_started_at, no cron), so the honest primitive is
-// a touchpoints row the future step-5 machinery can pick up: a future
-// occurred_at + status 'pending' carries the intent, the label carries
-// the reason. Fire-and-forget from the caller's perspective; throws on a
-// hard failure so the wizard can surface it, but a failed marker never
-// unwinds the already-committed close.
-export async function writeEngagementMarker({ leadId, engagementId, kind = 'system', label, notes, occurredAt, method = null }) {
+// Real, persisted flag / re-engage MARKER on the timeline. A future
+// occurred_at + status 'pending' carries an intent, the label carries the
+// reason. Fire-and-forget from the caller's perspective; throws on a hard
+// failure so the wizard can surface it, but a failed marker never unwinds
+// the already-committed close.
+//
+// A follow-up the OWNER wants to be reminded of is no longer one of these
+// (2026-09-30): the lost-lead wizard sets a real Reminder instead, and only
+// writes a plain history line here (status null, dated now, attributed to
+// the person via actor 'session').
+export async function writeEngagementMarker({ leadId, engagementId, kind = 'system', label, notes, occurredAt, method = null, status = 'pending', actor = null }) {
   const res = await fetch('/api/touchpoints', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -138,7 +140,8 @@ export async function writeEngagementMarker({ leadId, engagementId, kind = 'syst
       kind,
       label,
       method,
-      status: 'pending',
+      status,
+      ...(actor ? { actor } : {}),
       ...(notes && notes.trim() ? { notes: notes.trim() } : {}),
       ...(occurredAt ? { occurred_at: occurredAt } : {}),
     }),
