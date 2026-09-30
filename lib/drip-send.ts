@@ -32,6 +32,12 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
+import {
+  FOLLOWUPS_OFF_REASON,
+  dripStepDecision,
+  readFollowupsOff,
+  stopAfterSend,
+} from './drip-followups'
 
 export type SendDripResult = {
   sent: boolean
@@ -142,7 +148,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     .from('drip_path_steps')
     .select(
       `
-      id, step_order, delay_days, channel, subject, body, master_template_id,
+      id, step_order, delay_days, channel, subject, body, master_template_id, is_active,
       templates:master_template_id ( subject, body )
       `,
     )
@@ -222,6 +228,31 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // treats 'location_not_active' as an expected skip. B2 is unaffected.
   if (loc.lifecycle_status !== 'active') {
     return { sent: false, error: 'location_not_active' }
+  }
+
+  // THE OWNER'S CHOICE AFTER THE FIRST EMAIL (lib/drip-followups.ts). Step 1
+  // always sends — dripStepDecision answers 'send' for it before it looks at
+  // the setting or the step's flag. After step 1:
+  //   switched off  → stop here, for good (reason 'followups_off'); nothing
+  //                   is sent and switching back on does not revive it.
+  //   step removed  → skip it: no send, no status write, move on to the next
+  //                   email on that email's own date.
+  const followupsOff = await readFollowupsOff(loc.id)
+  const decision = dripStepDecision({
+    stepOrder: row.current_step,
+    stepActive: (step as { is_active?: boolean | null }).is_active,
+    followupsOff,
+  })
+  if (decision === 'stop_followups_off') {
+    await supabaseService
+      .from('lead_drip_progress')
+      .update({ stopped_at: new Date().toISOString(), stopped_reason: FOLLOWUPS_OFF_REASON })
+      .eq('id', row.id)
+    return { sent: false, error: 'followups_off' }
+  }
+  if (decision === 'skip_removed') {
+    const skippedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
+    return { sent: false, error: 'step_removed', advanced_to_step: skippedTo }
   }
 
   // Location owner (two uses: phone fallback + location_owner_name). Resolves
@@ -560,6 +591,18 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   }
 
   const advancedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
+
+  // Switched off: this was step 1 (or a step already on its way when the
+  // switch flipped). Nobody is left waiting for an email that will never go —
+  // stopped now, so switching back on later can't quietly revive them. The
+  // welcome was scheduled above and is untouched: it never reads this row.
+  if (stopAfterSend({ followupsOff, hasNextStep: advancedTo !== undefined })) {
+    await supabaseService
+      .from('lead_drip_progress')
+      .update({ stopped_at: new Date().toISOString(), stopped_reason: FOLLOWUPS_OFF_REASON })
+      .eq('id', row.id)
+    return { sent: true }
+  }
   return { sent: true, advanced_to_step: advancedTo }
 }
 

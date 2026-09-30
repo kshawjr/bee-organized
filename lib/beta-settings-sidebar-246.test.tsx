@@ -112,6 +112,8 @@ describe('every modal SettingsScreen mounts has a live mount AND a live trigger'
     'TwoQuestionsModal',
     'TimingEditModal',
     'AddEmailModal',
+    // Remove one email after the first (lib/drip-followups.ts, 2026-09-30).
+    'RemoveEmailModal',
     'EmailTemplateEditor',
     'TemplatePreviewModal',
     'TemplateEditorPopup',

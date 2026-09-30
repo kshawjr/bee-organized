@@ -2,7 +2,12 @@
 //
 // PATCH /api/drip-paths/:id/steps
 //   Body: { steps: Array<{ id?, step_order, delay_days, channel,
-//          master_template_id?, subject?, body? }> }
+//          master_template_id?, subject?, body?, is_active? }> }
+//
+// is_active=false is an owner REMOVING that email (lib/drip-followups.ts):
+// the row stays, keeps its number and wording, and is skipped at send time.
+// Absent means true, so every caller that predates it saves exactly as before.
+// Step 1 can never be removed — refused below, after renumbering.
 //
 // Replaces the entire step set for a path with the provided list. New rows
 // (no id) are inserted; rows referenced by id are updated; rows in the DB
@@ -29,6 +34,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { renumberSteps } from '@/lib/drip-step-order'
+import { firstStepRemovalError } from '@/lib/drip-followups'
 
 const VALID_CHANNELS = new Set(['email', 'sms'])
 
@@ -86,7 +92,7 @@ export async function PATCH(
   }
 
   // Validate + normalize step payload
-  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null; origin: 'master' | 'added' }
+  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null; origin: 'master' | 'added'; is_active: boolean }
   const stepsIn: StepIn[] = []
   for (const raw of body.steps as Array<Record<string, unknown>>) {
     if (typeof raw !== 'object' || raw === null) {
@@ -121,6 +127,9 @@ export async function PATCH(
       // case to 'master' keeps a malformed payload from inventing an
       // unresettable step.
       origin: raw.origin === 'added' ? 'added' : 'master',
+      // Same trap as origin: named here or silently dropped. Only an explicit
+      // false removes; anything else is the email sending as normal.
+      is_active: raw.is_active === false ? false : true,
     })
   }
 
@@ -170,6 +179,14 @@ export async function PATCH(
   const renumber = renumberSteps(stepsIn)
   stepsIn.splice(0, stepsIn.length, ...renumber.steps)
 
+  // Kevin's rule: the first email always sends. Checked AFTER renumbering, so
+  // whichever step ends up first is the one protected, and BEFORE the
+  // delete-then-insert, so a refused save leaves the sequence untouched.
+  const firstStepErr = firstStepRemovalError(stepsIn)
+  if (firstStepErr) {
+    return NextResponse.json({ error: firstStepErr }, { status: 400 })
+  }
+
   // Two-phase write to avoid bumping into the UNIQUE(drip_path_id, step_order)
   // constraint when reordering: stash incoming step_orders into a high range
   // first by deleting all existing rows, then inserting fresh ones. The DB has
@@ -195,7 +212,7 @@ export async function PATCH(
     master_template_id: s.master_template_id,
     subject: s.subject,
     body: s.body,
-    is_active: true,
+    is_active: s.is_active,
     // Validated-but-not-inserted is the same silent failure as above.
     origin: s.origin,
   }))

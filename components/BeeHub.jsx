@@ -18329,6 +18329,9 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
           // loadLocationPaths gives real location rows a dbId.
           wording: s.fromMaster ? 'master' : 'yours',
           origin: s.origin === 'added' ? 'added' : 'master',
+          // Owner removed this email (drip_path_steps.is_active = false). It
+          // stays listed so it can be put back; the sender skips it.
+          removed: s.isActive === false,
           contentMissing: !subject && !body,
         }
       })
@@ -18820,11 +18823,14 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
   )
 }
 
-function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason }) {
+function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason, onRemove = null, onRestore = null, alwaysSendsNote = null }) {
   // issue 240 step 9a — a paused row is DIMMED, never hidden: the owner still
   // reads the wording and can still open it. Only the chrome recedes, and the
   // reason sits on the row so it is impossible to miss.
-  const paused = !!blockedReason
+  // A REMOVED row (lib/drip-followups.ts) reads the same way: still listed,
+  // still readable, one click from Put back.
+  const removed = !!row.removed
+  const paused = !!blockedReason || removed
   return (
     <div style={{ background: paused ? '#fffdf7' : 'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start', boxShadow: paused ? 'inset 3px 0 0 #8a6a0e' : 'none' }}>
       <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
@@ -18841,7 +18847,9 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason }) {
       <div style={{ flex:1, minWidth:0, opacity: paused ? 0.62 : 1 }}>
         <div style={{ display:'flex', alignItems:'baseline', gap:'8px', flexWrap:'wrap', marginBottom:'2px' }}>
           <b style={{ fontSize:'14.5px', fontWeight:600, color:'#1a2e2b' }}>{row.subject || 'No subject'}</b>
-          {paused && <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#fdf6e3', color:'#8a6a0e' }}>Paused</span>}
+          {removed
+            ? <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#efede6', color:'#7a8b87' }}>Removed</span>
+            : paused && <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#fdf6e3', color:'#8a6a0e' }}>Paused</span>}
           <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap',
             background: row.wording === 'yours' ? '#fdf6e3' : '#efede6', color: row.wording === 'yours' ? '#8a6a0e' : '#7a8b87' }}>
             {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
@@ -18850,10 +18858,17 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason }) {
         <p style={{ fontSize:'13px', color:'#4a5f5b', margin:0, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
           {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
         </p>
-        {paused && (
+        {removed ? (
+          <p style={{ fontSize:'12px', color:'#7a8b87', margin:'6px 0 0', lineHeight:1.5 }}>
+            Removed — this one won’t send. People skip straight to the next email.
+          </p>
+        ) : paused && (
           <p style={{ fontSize:'12px', color:'#8a6a0e', margin:'6px 0 0', lineHeight:1.5 }}>
             Not sending — {blockedReason}.
           </p>
+        )}
+        {alwaysSendsNote && (
+          <p style={{ fontSize:'12px', color:'#7a8b87', margin:'6px 0 0', lineHeight:1.5 }}>{alwaysSendsNote}</p>
         )}
       </div>
       <div style={{ display:'flex', gap:'7px', flexShrink:0 }}>
@@ -18861,6 +18876,114 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason }) {
         {onEdit && (
           <button onClick={onEdit} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Edit</button>
         )}
+        {removed && onRestore && (
+          <button onClick={onRestore} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Put back</button>
+        )}
+        {!removed && onRemove && (
+          <button onClick={onRemove} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#8a4a44', cursor:'pointer', whiteSpace:'nowrap' }}>Remove</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Owners choosing what goes after the first email (lib/drip-followups.ts) ───
+//
+// Which drip rows may be removed: every email in a sequence EXCEPT step 1.
+// Step 1 is Kevin's rule — a new client's first hello always goes — and the
+// save route refuses it too (firstStepRemovalError). The welcome and the
+// closed-job pair are not sequence steps and never get this control.
+export const FIRST_EMAIL_ALWAYS_SENDS_NOTE = 'Can’t be removed — it’s every new client’s first hello from Bee Organized.'
+export function rowCanBeRemoved(row) {
+  return row?.rail === 'drip' && Number(row.order) > 1
+}
+export function isAlwaysSentFirstEmail(row) {
+  return row?.rail === 'drip' && Number(row.order) === 1
+}
+// With the switch off, every sequence email after the first reads as not
+// sending, for the same reason, on every row.
+export const FOLLOWUPS_OFF_ROW_REASON = 'you’ve switched off emails after the first one'
+export function followupsOffReasonFor(row, followupsOff) {
+  return followupsOff && row?.rail === 'drip' && Number(row.order) > 1 ? FOLLOWUPS_OFF_ROW_REASON : null
+}
+
+// The switch. One setting per location, above the list it governs.
+//   state  { off, inFlight, busy, err } — null while loading
+// Switching OFF is confirmed first, quoting the live count of people it will
+// stop. Switching back ON needs no confirm: it stops nothing and revives no one.
+export function FollowupsSwitch({ state, onSetOff }) {
+  const [confirming, setConfirming] = React.useState(false)
+  if (!state) return null
+  const { off, inFlight, busy, err } = state
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'8px 14px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor: busy ? 'not-allowed' : 'pointer', maxWidth:CONTROL_W.action }
+  const people = n => `${n} ${n === 1 ? 'person' : 'people'}`
+  return (
+    <div role="group" aria-label="Emails after the first one" style={{ background:'white', borderRadius:'11px', padding:'14px 16px', margin:'0 12px 16px' }}>
+      <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px' }}>
+        Emails after the first one: {off ? 'off' : 'on'}
+      </b>
+      <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'0 0 10px', lineHeight:1.55, maxWidth:CONTROL_W.field }}>
+        {off
+          ? <>New enquiries get the first email and the welcome, then nothing else. Turning this back on only affects people who get in touch from then on — anyone already stopped stays stopped.</>
+          : <>Everything in the list below sends. The first email and the welcome always go, whatever you choose here.</>}
+      </p>
+      {!confirming && (
+        <button disabled={busy} style={btn}
+          onClick={() => off ? onSetOff(false) : setConfirming(true)}>
+          {busy ? 'Saving…' : off ? 'Turn them back on' : 'Switch off emails after the first one'}
+        </button>
+      )}
+      {confirming && (
+        <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+          {inFlight == null
+            ? <>Anyone partway through a sequence here will stop where they are — nothing more goes to them.</>
+            : inFlight > 0
+              ? <>Right now <b>{people(inFlight)}</b> {inFlight === 1 ? 'is' : 'are'} partway through. They’ll stop where they are — nothing more goes to them.</>
+              : <>Nobody is partway through right now.</>}
+          {' '}New enquiries will get the first email and the welcome, then nothing.
+          <br /><br />
+          If you turn this back on later, it only affects people who get in touch after that. <b>Anyone stopped now won’t pick up again.</b>
+          <div style={{ display:'flex', gap:'8px', marginTop:'12px', flexWrap:'wrap' }}>
+            <button style={btn} disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+            <button disabled={busy} onClick={async () => { await onSetOff(true); setConfirming(false) }}
+              style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none' }}>
+              {busy ? 'Saving…' : 'Switch them off'}
+            </button>
+          </div>
+        </div>
+      )}
+      {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+    </div>
+  )
+}
+
+// Remove one email: confirmed, because it changes what people partway through
+// receive. It is reversible (Put back), and the copy says so.
+export function RemoveEmailModal({ row, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+      <div role="dialog" aria-modal="true" aria-label="Remove this email"
+        style={{ maxWidth:'560px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Remove this email</div>
+        <div style={{ padding:'20px 24px 22px' }}>
+          <p style={{ fontSize:'14px', color:'#1a2e2b', margin:'0 0 8px', lineHeight:1.55 }}>
+            <b>{row?.subject || 'This email'}</b> won’t send any more. It stays in your list, marked Removed, and you can put it back any time.
+          </p>
+          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'14px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+            {ownsPath && liveLeadCount > 0
+              ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>
+              : <>Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>}
+          </div>
+          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
+          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor: busy ? 'not-allowed' : 'pointer' }}>
+            {busy ? 'Removing…' : 'Remove it'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -19021,7 +19144,7 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null, followupsOff = false }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
 
   // ─── issue 240 step 7b — which sequence is on screen ───
@@ -19098,7 +19221,9 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
       : null
   // issue 240 step 9a — computed per row from the row's own wording, because
   // the guards read the template text and step 8b lets an owner change it.
-  const blockedFor = row => blockedSentence(emailRowBlockers(row, sendConfig))
+  // The owner's switch comes first: with it off, the reason every later email
+  // isn't sending is the switch, not a missing rate or link.
+  const blockedFor = row => followupsOffReasonFor(row, followupsOff) || blockedSentence(emailRowBlockers(row, sendConfig))
 
   const Group = ({ id, title, count, note, rows }) => (
     <div style={{ marginBottom:'22px' }}>
@@ -19114,7 +19239,10 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
               blockedReason={blockedFor(r)}
               onRead={() => setOpen({ group:id, index:i })}
               onEdit={canEdit ? () => actions.edit(r) : null}
-              onEditTiming={actions && actions.editTiming ? () => actions.editTiming(r) : null} />
+              onEditTiming={actions && actions.editTiming ? () => actions.editTiming(r) : null}
+              onRemove={actions && actions.remove && rowCanBeRemoved(r) ? () => actions.remove(r) : null}
+              onRestore={actions && actions.restore && rowCanBeRemoved(r) ? () => actions.restore(r) : null}
+              alwaysSendsNote={actions && actions.remove && isAlwaysSentFirstEmail(r) ? FIRST_EMAIL_ALWAYS_SENDS_NOTE : null} />
           ))}
     </div>
   )
@@ -22310,6 +22438,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // issue 240 step 9b — commitSteps sends back what THIS map holds, so
           // a round trip that fails to read origin nulls it on the next save.
           origin: s.origin === 'added' ? 'added' : 'master',
+          // Removed by the owner — commitSteps sends it back, or a save would
+          // quietly put every removed email back.
+          isActive: s.is_active !== false,
         }))
       }
       setDbPaths(newDbPaths)
@@ -22432,6 +22563,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // The validator names this explicitly; anything it does not name is
           // dropped without error.
           origin: s.origin === 'added' ? 'added' : 'master',
+          // Same trap, same fix: named or dropped. The server refuses false on
+          // step 1 (lib/drip-followups.ts).
+          is_active: s.isActive === false ? false : true,
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -22636,6 +22770,83 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       setAddEmailState(null)
     } catch (e) {
       setAddEmailState(st => st && ({ ...st, busy: false, err: 'Could not add it: ' + (e?.message || e) }))
+    }
+  }
+
+  // ─── Remove / put back one email, and the after-the-first switch ───
+  // (lib/drip-followups.ts). Step 1 never gets here: rowCanBeRemoved keeps the
+  // control off it, and the save route refuses it.
+  const [removeEmailState, setRemoveEmailState] = useState(null)
+
+  async function openRemoveEmail(row) {
+    if (!rowCanBeRemoved(row)) return
+    const owned = !!dbPaths[row.pathKey]
+    let liveLeadCount = 0
+    try {
+      if (owned && dbPaths[row.pathKey]?.id) {
+        const res = await fetch(`/api/drip-paths/${dbPaths[row.pathKey].id}/active-lead-count`)
+        if (res.ok) liveLeadCount = (await res.json())?.count ?? 0
+      }
+    } catch { /* unknown — the copy then makes no claim about a number */ }
+    setRemoveEmailState({ row, ownsPath: owned, liveLeadCount, busy: false, err: '' })
+  }
+
+  // Shared by Remove and Put back. The flag is the ONLY field changed —
+  // wording, timing and numbering stay exactly as they are.
+  function setStepRemoved(row, removed) {
+    return new Promise((resolve, reject) => {
+      ensureOwnedThen(row.pathKey, async (steps) => {
+        try {
+          const next = steps.map(s => Number(s.order) === Number(row.order) ? { ...s, isActive: !removed } : s)
+          await commitSteps(row.pathKey, next)
+          resolve()
+        } catch (e) { reject(e) }
+      })
+    })
+  }
+
+  async function confirmRemoveEmail() {
+    const { row } = removeEmailState
+    setRemoveEmailState(st => ({ ...st, busy: true, err: '' }))
+    try {
+      await setStepRemoved(row, true)
+      setRemoveEmailState(null)
+    } catch (e) {
+      setRemoveEmailState(st => st && ({ ...st, busy: false, err: 'Could not remove it: ' + (e?.message || e) }))
+    }
+  }
+
+  async function emailsRowRestore(row) {
+    try { await setStepRemoved(row, false) }
+    catch (e) { alert('Could not put it back: ' + (e?.message || e)) }
+  }
+
+  const [followupsState, setFollowupsState] = useState(null)
+  useEffect(() => {
+    if (!realLocId) return
+    let cancelled = false
+    fetch(`/api/locations/${realLocId}/drip-followups`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => { if (!cancelled) setFollowupsState({ off: !!j.off, inFlight: j.in_flight ?? null, busy: false, err: '' }) })
+      .catch(() => { if (!cancelled) setFollowupsState(null) })
+    return () => { cancelled = true }
+  }, [realLocId])
+
+  async function setFollowupsOff(off) {
+    setFollowupsState(st => ({ ...(st || {}), busy: true, err: '' }))
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/drip-followups`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ off }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(j?.error === 'not_set_up_yet' ? 'this switch isn’t set up yet — ask Bee Organized' : (j?.error || `HTTP ${res.status}`))
+      }
+      setFollowupsState({ off: !!j.off, inFlight: off ? 0 : null, busy: false, err: '' })
+    } catch (e) {
+      setFollowupsState(st => ({ ...(st || {}), busy: false, err: 'Could not save that: ' + (e?.message || e) }))
     }
   }
 
@@ -23926,13 +24137,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 (step 7b); each row reads, edits, resets, retimes and pauses
                 through this component alone. ─────────────────────────────── */}
             <CommsLabel>Every email a client can receive</CommsLabel>
+            {realLocId && <FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} />}
             <EmailsList
+              followupsOff={!!followupsState?.off}
               pathSteps={pathSteps}
               templates={templates}
               masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions } : null}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions, remove: openRemoveEmail, restore: emailsRowRestore } : null}
               // issue 240 step 7b — resolves per sequence, so the sentence
               // describes whichever one is on screen.
               variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
@@ -24085,6 +24298,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           err={addEmailState.err}
           onCancel={() => setAddEmailState(null)}
           onConfirm={confirmAddEmail}
+        />
+      )}
+      {/* Remove one email after the first (lib/drip-followups.ts). */}
+      {removeEmailState && (
+        <RemoveEmailModal
+          row={removeEmailState.row}
+          ownsPath={removeEmailState.ownsPath}
+          liveLeadCount={removeEmailState.liveLeadCount}
+          busy={removeEmailState.busy}
+          err={removeEmailState.err}
+          onCancel={() => setRemoveEmailState(null)}
+          onConfirm={confirmRemoveEmail}
         />
       )}
       {/* issue 240 step 8b — rail B/C edit (welcome, closed job). */}

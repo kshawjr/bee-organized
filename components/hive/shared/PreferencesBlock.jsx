@@ -65,6 +65,8 @@ const DRIP_STOP_COPY = {
   opted_out:         { reason: 'the client opted out of marketing',        guide: 'Re-subscribe them above to resume nurture emails.' },
   stage_changed:     { reason: 'the client moved forward in the pipeline', guide: 'This is normal — nurture stops once a client is active.' },
   junk:              { reason: 'the client was marked as junk',            guide: 'Restore the client to resume nurture emails.' },
+  // lib/drip-followups.ts — the location switched off emails after the first.
+  followups_off:     { reason: 'your location switched off emails after the first one', guide: 'Turning them back on in Settings → Emails applies to new enquiries only — this client won’t pick up where they left off.' },
 }
 const DRIP_STOP_FALLBACK = { reason: 'nurture emails were stopped', guide: 'Contact support to restart nurture emails.' }
 
