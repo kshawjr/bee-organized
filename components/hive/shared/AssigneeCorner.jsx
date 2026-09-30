@@ -182,7 +182,7 @@ export default function AssigneeCorner({
       </button>
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10009 }} />
+          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
           <div onClick={e => e.stopPropagation()}
             style={{
               position: 'absolute', [align]: 0, top: 'calc(100% + 6px)', zIndex: 10010,
@@ -210,6 +210,11 @@ export default function AssigneeCorner({
             {users.length === 0 && (
               <p style={{ fontSize: '11px', color: T.ink.quiet, padding: '4px 0' }}>No team members at this location</p>
             )}
+            {/* Multi-select, so a pick doesn't close it — Done does (no outside-click close). */}
+            <button type="button" onClick={() => setOpen(false)}
+              style={{ display: 'block', width: '100%', marginTop: '6px', padding: '6px 8px', border: 'none', borderTop: T.border.thin, background: 'transparent', color: T.ink.muted, fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'right' }}>
+              Done
+            </button>
           </div>
         </>
       )}

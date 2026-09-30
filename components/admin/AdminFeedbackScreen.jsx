@@ -484,7 +484,7 @@ function InternalComposeModal({ onClose, onFiled }) {
   const label = { display: 'block', fontSize: '12px', fontWeight: 700, color: T.ink.primary, marginBottom: '6px' }
 
   return (
-    <div className="bee-fb-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
+    <div className="bee-fb-overlay" style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
       <div className="bee-fb-dialog" role="dialog" aria-modal="true" aria-label="File an internal item" style={{ background: T.surface.raised, borderRadius: T.radius.card, width: '100%', maxWidth: '560px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: T.shadow.overlay, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px 12px', borderBottom: T.border.divider, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
           <div>
@@ -751,7 +751,7 @@ function AdminFeedbackDetailModal({
   const section = { display: 'flex', flexDirection: 'column', gap: '6px' }
 
   return (
-    <div className="bee-fb-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
+    <div className="bee-fb-overlay" style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
       <style>{MODAL_CSS}</style>
       <div className="bee-fb-dialog" role="dialog" aria-modal="true" aria-label={item.title} style={{ background: T.surface.raised, borderRadius: T.radius.card, width: '100%', maxWidth: '680px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: T.shadow.overlay, overflow: 'hidden' }}>
 
@@ -1032,7 +1032,7 @@ function ClusterModal({ cluster, items, analyses, onClose, onSelect }) {
   const label = { fontSize: '12px', fontWeight: 700, color: T.ink.primary, margin: '0 0 6px' }
 
   return (
-    <div className="bee-fb-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
+    <div className="bee-fb-overlay" style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
       <style>{MODAL_CSS}</style>
       <div className="bee-fb-dialog" role="dialog" aria-modal="true" aria-label={headline} data-testid="cluster-modal" style={{ background: T.surface.raised, borderRadius: T.radius.card, width: '100%', maxWidth: '640px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: T.shadow.overlay, overflow: 'hidden' }}>
 

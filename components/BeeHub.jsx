@@ -1055,7 +1055,7 @@ function SadAnimation() {
 function Popup({ title, onClose, children, maxW='480px' }) {
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10002, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:maxW, borderRadius:'16px', padding:'1.25rem', zIndex:1, maxHeight:'88vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
           <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{title}</h3>
@@ -1446,7 +1446,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'460px', borderRadius:'20px', padding:'1.5rem', zIndex:1, boxShadow:'0 20px 60px rgba(26,46,43,0.25)', maxHeight:'88vh', overflowY:'auto' }}>
 
         {/* Progress dots */}
@@ -1633,7 +1633,7 @@ function SnoozePopup({ person, onSave, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'20px', padding:'1.5rem', zIndex:1, boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
           <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>💤 Snooze Client</h3>
@@ -2290,7 +2290,7 @@ function AddressSheet({ addr=null, onSave, onDelete=null, onClose }) {
 
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', boxSizing:'border-box', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', zIndex:1 }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
@@ -2470,7 +2470,6 @@ function AddAddressPopup({ person, update, onClose }) {
         padding: '24px',
         background: 'rgba(26,46,43,0.4)',
       }}
-      onClick={onClose}
     >
       <div
         style={{
@@ -3010,7 +3009,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <div>
@@ -3367,7 +3366,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       {/* Partner picker sheet */}
       {showPartnerPicker&&(
         <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={()=>{ setShowPartnerPicker(false); setPartnerSearch('') }} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, maxHeight:'75vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
             <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
@@ -3455,7 +3454,7 @@ function AssessmentSchedulerSheet({ person, onSave, onRemove, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ padding:'12px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
           <div>
@@ -3578,7 +3577,7 @@ function SourceInlineField({ person, onUpdate }) {
       {/* Source picker */}
       {showSourcePicker&&(
         <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={()=>setShowSourcePicker(false)} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, padding:'1rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
             <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 14px' }} />
             <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', fontFamily:'Georgia,serif' }}>Select Source</p>
@@ -3590,6 +3589,7 @@ function SourceInlineField({ person, onUpdate }) {
                 </button>
               ))}
             </div>
+            <button onClick={()=>setShowSourcePicker(false)} style={{ width:'100%', marginTop:'10px', padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontWeight:600, color:'#4a5e5a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
             <div style={{ height:'1rem' }} />
           </div>
         </div>
@@ -3598,7 +3598,7 @@ function SourceInlineField({ person, onUpdate }) {
       {/* Partner picker */}
       {showPartnerPicker&&(
         <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={()=>{ setShowPartnerPicker(false); setPartnerSearch('') }} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, maxHeight:'75vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
@@ -3647,7 +3647,7 @@ function JobContactModal({ contact, onSave, onClose }) {
   const inp = { width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   const lbl = { fontSize:'11px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', display:'block' }
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
       <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'400px', boxShadow:'0 24px 60px rgba(26,46,43,0.25)' }} onClick={e=>e.stopPropagation()}>
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{contact ? 'Edit Contact' : 'Add Job Contact'}</p>
@@ -3689,7 +3689,7 @@ function JobContactModal({ contact, onSave, onClose }) {
 function EditJobDetailModal({ person, onSave, onClose }) {
   const [text, setText] = React.useState(person.jobDetail||'')
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
       <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'460px', boxShadow:'0 24px 60px rgba(26,46,43,0.25)' }} onClick={e=>e.stopPropagation()}>
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>What They're Looking For</p>
@@ -3717,7 +3717,7 @@ function EditJobDetailModal({ person, onSave, onClose }) {
 // ─── Job Detail Modal ─────────────────────────────────────────────────────────
 function JobDetailModal({ text, onClose }) {
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
       <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'460px', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 60px rgba(26,46,43,0.25)' }} onClick={e=>e.stopPropagation()}>
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
           <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>What They're Looking For</p>
@@ -3855,13 +3855,6 @@ function HeaderChips({ person, update, children }) {
       {/* Children: `|` separator + tag pills + `+ tag` button passed in from PersonPanel */}
       {children}
 
-      {/* Backdrop to close the project dropdown on outside click */}
-      {editingProject && (
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-          onClick={() => setEditingProject(false)}
-        />
-      )}
     </div>
   )
 }
@@ -5069,7 +5062,6 @@ function PersonPanel({
           inset: 0,
           background: isMobile ? "rgba(26,46,43,0.25)" : "rgba(26,46,43,0.45)",
         },
-        onClick: onClose,
       }),
       React.createElement(
         "div",
@@ -5625,10 +5617,6 @@ function PersonPanel({
                 React.createElement(
                   React.Fragment,
                   null,
-                  React.createElement("div", {
-                    style: { position: "fixed", inset: 0, zIndex: 49 },
-                    onClick: () => setEditingSource(false),
-                  }),
                   React.createElement(
                     "div",
                     {
@@ -6574,14 +6562,6 @@ function PersonPanel({
                           selectReferrer({ id: created.id, kind: "partner" });
                         }
                         setShowQuickAddReferrer(null);
-                      },
-                    }),
-                  (editingSource || pickingReferral) &&
-                    React.createElement("div", {
-                      style: { position: "fixed", inset: 0, zIndex: 99 },
-                      onClick: () => {
-                        setEditingSource(false);
-                        setPickingReferral(false);
                       },
                     }),
                 ),
@@ -8793,7 +8773,6 @@ function PersonPanel({
         },
         React.createElement("div", {
           style: { position: "absolute", inset: 0, background: "rgba(26,46,43,0.5)" },
-          onClick: () => setPopup(null),
         }),
         React.createElement(
           "div",
@@ -8911,7 +8890,6 @@ function PersonPanel({
             justifyContent: "center",
             padding: "24px",
           },
-          onClick: () => setPopup(null),
         },
         React.createElement(
           "div",
@@ -9301,7 +9279,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
       {/* Source picker sheet */}
       {showSourcePicker && (
         <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={()=>setShowSourcePicker(false)} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, padding:'1rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
             <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 12px' }} />
             <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', fontFamily:'Georgia,serif' }}>Select Source</p>
@@ -9313,6 +9291,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
                 </button>
               ))}
             </div>
+            <button onClick={()=>setShowSourcePicker(false)} style={{ width:'100%', marginTop:'10px', padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontWeight:600, color:'#4a5e5a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
             <div style={{ height:'1rem' }} />
           </div>
         </div>
@@ -9321,7 +9300,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
       {/* Partner picker sheet */}
       {showPartnerPicker && (
         <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={()=>{ setShowPartnerPicker(false); setPartnerSearch('') }} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, maxHeight:'75vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
@@ -9401,7 +9380,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
   return (
     <>
       <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-        <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.2)' }} onClick={onClose} />
+        <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.2)' }} />
         <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'560px', borderRadius:'16px', zIndex:1, height:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 8px 40px rgba(26,46,43,0.18)' }}>
 
           {/* Header */}
@@ -10646,7 +10625,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
 
       {/* Kanban Legend */}
       {showKanbanLegend&&(
-        <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }} onClick={()=>setShowKanbanLegend(false)}>
+        <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10010, display:'flex', alignItems:'flex-end' }}>
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', boxSizing:'border-box', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }} onClick={e=>e.stopPropagation()}>
             <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
             <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'12px' }}>Card Icons</p>
@@ -10676,8 +10655,8 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
 
       {/* Description popup */}
       {descPopup&&(
-        <div style={{ position:'fixed', inset:0, zIndex:8000 }} onClick={()=>setDescPopup(null)}>
-          <div style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', left:'16px', right:'16px', background:'#1a2e2b', borderRadius:'14px', padding:'14px 16px', boxShadow:'0 8px 32px rgba(26,46,43,0.4)', zIndex:8001 }}
+        <div style={{ position:'fixed', inset:0, zIndex:8000, pointerEvents:'none' }}>
+          <div style={{ pointerEvents:'auto', position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', left:'16px', right:'16px', background:'#1a2e2b', borderRadius:'14px', padding:'14px 16px', boxShadow:'0 8px 32px rgba(26,46,43,0.4)', zIndex:8001 }}
             onClick={e=>e.stopPropagation()}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
               <p style={{ fontSize:'13px', fontWeight:700, color:'white' }}>💬 {descPopup.name}</p>
@@ -14373,7 +14352,7 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
@@ -14861,7 +14840,7 @@ function specialtyConf(id) { return getSpecialties().find(s=>s.id===id) }
 // ─── Business Card Viewer Modal ───────────────────────────────────────────────
 function CardViewerModal({ cardImage=null, onClose }) {
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:10060, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', background:'rgba(10,10,10,0.85)' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, zIndex:10060, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', background:'rgba(10,10,10,0.85)' }}>
       <div style={{ width:'100%', maxWidth:'380px', position:'relative' }} onClick={e=>e.stopPropagation()}>
         <button onClick={onClose} style={{ position:'absolute', top:'-40px', right:0, background:'none', border:'none', color:'white', fontSize:'24px', cursor:'pointer', padding:'4px 8px' }}>×</button>
         {cardImage ? (
@@ -14928,7 +14907,7 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <div>
@@ -15046,7 +15025,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Add to Network</h2>
@@ -15229,7 +15208,7 @@ function TouchpointPopup({ partner, onAdd, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
@@ -15258,7 +15237,7 @@ function PartnerStagePopup({ partner, onSave, onClose }) {
   const [stage, setStage] = useState(partner.stage)
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
@@ -15290,7 +15269,7 @@ function PartnerTagPopup({ partner, onSave, onClose }) {
   const toggle = id => setSelected(prev => prev.includes(id)?prev.filter(x=>x!==id):[...prev,id])
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
@@ -15324,7 +15303,7 @@ function AddPartnerNotePopup({ onAdd, onClose }) {
   const [text, setText] = useState('')
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
@@ -15348,7 +15327,7 @@ function PartnerSpecialtyPopup({ partner, onSave, onClose }) {
   const toggle = id => setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, maxHeight:'85vh', overflowY:'auto', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
@@ -15735,7 +15714,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
       <div style={isMobile
         ? { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }
         : { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-        <div style={{ position:'absolute', inset:0, background: isMobile ? 'rgba(26,46,43,0.25)' : 'rgba(26,46,43,0.45)' }} onClick={onClose} />
+        <div style={{ position:'absolute', inset:0, background: isMobile ? 'rgba(26,46,43,0.25)' : 'rgba(26,46,43,0.45)' }} />
         <div onClick={e=>e.stopPropagation()} style={isMobile
           ? { position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }
           : { position:'relative', background:'white', width:'100%', maxWidth:'720px', maxHeight:'90vh', borderRadius:'16px', zIndex:1, minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', overflow:'hidden', boxSizing:'border-box' }}>
@@ -16266,7 +16245,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
       {popup==='specialty'&&<PartnerSpecialtyPopup partner={partner} onSave={handleSpecialty} onClose={()=>setPopup(null)} />}
       {popup==='tier'&&(
         <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={()=>setPopup(null)} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
             <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem' }} />
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
@@ -16295,7 +16274,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
       {popup==='note'&&<AddPartnerNotePopup onAdd={handleAddNote} onClose={()=>setPopup(null)} />}
       {showDeleteConfirm&&(
         <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>setShowDeleteConfirm(false)} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, padding:'1.5rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
             <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'-0.5rem auto 1rem' }} />
             <div style={{ textAlign:'center', marginBottom:'1.25rem' }}>
@@ -16558,7 +16537,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
 
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'540px', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         {/* Header */}
         <div style={{ padding:'0.75rem 1.25rem', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
@@ -16717,7 +16696,7 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
 
   return (
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'540px', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         {/* Header */}
         <div style={{ padding:'0.75rem 1.25rem 0', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
@@ -16921,7 +16900,7 @@ function TemplateQuickPeekModal({ template, settings=null, showSelectButton=fals
   if (!template) return null
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'14px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'560px', maxHeight:'85vh', borderRadius:'14px', display:'flex', flexDirection:'column', zIndex:1, boxShadow:'0 8px 40px rgba(26,46,43,0.3)', overflow:'hidden' }}>
         <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
           <span style={{ fontSize:'16px' }}>{template.type==='email'?'📧':template.type==='sms'?'💬':'📞'}</span>
@@ -17009,7 +16988,7 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10004, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Pick Template</h3>
@@ -17508,7 +17487,7 @@ export function JobberCard({ settings, updateLocation }) {
       </div>
 
       {confirming&&(
-        <div onClick={()=>{ if(!busy) setConfirming(false) }}
+        <div
           style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
           <div onClick={e=>e.stopPropagation()}
             style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
@@ -18396,7 +18375,7 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
   const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'5px 11px', font:'inherit', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer' }
   const dim = { ...btn, opacity:0.35, cursor:'default' }
   return (
-    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:60 }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:60 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Read: ${row.subject}`}
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)' }}>
@@ -18467,7 +18446,7 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
   const changed = subject !== (row.subject || '') || body !== (row.body || '')
   const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'9px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:70 }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:70 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit this email"
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Editing · {row.when}</div>
@@ -18582,7 +18561,7 @@ export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, b
   const opt = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, background: on ? '#fafcfb' : 'white', borderRadius:'10px', padding:'10px 15px', font:'inherit', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', textAlign:'left' })
   const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid #e4d5a8', borderRadius:'8px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="How these emails work"
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>How these emails work</div>
@@ -18704,7 +18683,7 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
   const eff = timingChangeEffect(steps, row.order, n)
   const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="When this sends"
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>When this sends · {row.subject || 'this email'}</div>
@@ -18778,7 +18757,7 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
   const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
   const card = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, borderRadius:'11px', padding:'12px 14px', marginBottom:'8px', cursor:'pointer', background: on ? '#fafcfb' : 'white', maxWidth:CONTROL_W.field, textAlign:'left', width:'100%', font:'inherit', fontFamily:'inherit' })
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add another email"
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Add another email</div>
@@ -20141,7 +20120,7 @@ function BillingHistorySheet({ onClose, locationId=null }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
           <div>
@@ -20227,7 +20206,7 @@ function UpdatePaymentModal({ current, onSave, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
         <div style={{ padding:'1.25rem' }}>
@@ -20272,7 +20251,7 @@ function SubscriptionPaymentModal({ plan, amount, annual, renewDate, isProrated,
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, boxShadow:'0 20px 60px rgba(26,46,43,0.25)', maxHeight:'85vh', overflowY:'auto' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
@@ -20427,7 +20406,7 @@ function SmsVoiceInfoModal({ onClose }) {
   }
 
   return (
-    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10050, background:'rgba(26,46,43,0.55)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }} onClick={onClose}>
+    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10050, background:'rgba(26,46,43,0.55)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
       <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'420px', height:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 60px rgba(26,46,43,0.3)' }} onClick={function(e){ e.stopPropagation() }}>
 
         {/* Fixed header */}
@@ -20931,7 +20910,7 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'400px', maxHeight:'80vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
 
         {/* Header */}
@@ -21536,7 +21515,7 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
       </div>
 
       {confirming && (
-        <div onClick={()=>{ if(!busy) setConfirming(false) }}
+        <div
           style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
           <div onClick={e=>e.stopPropagation()}
             style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
@@ -21587,7 +21566,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.55)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.55)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         {/* Header */}
         <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
@@ -27096,7 +27075,7 @@ export function SeatRosterSection({ location, role }) {
       )}
       {showGrant && (
         <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={()=>setShowGrant(false)} />
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
           <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
               <p style={{ flex:1, fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Give a free seat</p>
@@ -27134,7 +27113,7 @@ function FieldChangeConfirm({
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10002, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={busy ? undefined : onCancel} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
         <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'4px' }}>{title}</p>
         {intro && <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'12px', lineHeight:1.5 }}>{intro}</p>}
@@ -27229,7 +27208,7 @@ function AdminInviteToSeatModal({ location, seat, onClose, onInvited }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, padding:'16px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
           <div style={{ flex:1 }}>
@@ -27323,7 +27302,7 @@ export function AdminAddSeatModal({ location, onClose, onAdded }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
           <div style={{ flex:1 }}>
@@ -27727,7 +27706,7 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.2)' }}>
 
         {/* Header */}
@@ -28536,7 +28515,7 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
 
         {step==='success' && result ? (
@@ -28707,7 +28686,7 @@ function RecordPaymentModal({ location, onClose, onRecorded }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
 
         {step==='success' ? (
@@ -29005,7 +28984,7 @@ function InviteModal({
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
@@ -29271,7 +29250,7 @@ export function InviteOwnerModal({ location, onSuccess, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10000, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
@@ -29436,7 +29415,7 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
         <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -29519,7 +29498,7 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
   }
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', maxHeight:'70vh', display:'flex', flexDirection:'column' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
         <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -29666,7 +29645,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'60px 20px 20px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.65)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.65)' }} />
       <div style={{ position:'relative', background:'white', zIndex:1, borderRadius:'16px', width:'100%', maxWidth:'620px', boxShadow:'0 20px 60px rgba(0,0,0,0.3)', display:'flex', flexDirection:'column', maxHeight:'75vh' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <span style={{ fontSize:'28px', flexShrink:0 }}>🔍</span>
@@ -29799,7 +29778,7 @@ function ViewAsUserSheet({ users=USERS_DATA, locations=ALL_LOCATIONS, onConfirm,
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10002, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         {/* Header */}
         <div style={{ padding:'12px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
@@ -32137,7 +32116,7 @@ function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] 
   const canSave = !!title.trim() && !!(chapter || '').trim() && !videoError
 
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
       <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <h2 style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{isNew ? 'Add Manual Slide' : 'Edit Manual Slide'}</h2>
@@ -32816,7 +32795,7 @@ function MasterDripPathsEditor() {
 // nothing.
 function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10008, padding:'16px' }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10008, padding:'16px' }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:'white', borderRadius:'14px', maxWidth:'440px', width:'100%', boxShadow:'0 8px 32px rgba(0,0,0,0.2)', overflow:'hidden' }}>
         <div style={{ padding:'18px 20px 14px' }}>
           <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'8px' }}>Customize these emails for your location?</p>
@@ -32882,7 +32861,7 @@ function DripPathStepEditor({ step, onSave, onClose }) {
   }
 
   return (
-    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'12px' }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'12px' }}>
       <div onClick={(e)=>e.stopPropagation()} style={{ background:'white', borderRadius:'12px', maxWidth:'640px', width:'100%', maxHeight:'90vh', overflow:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Edit Step {step.step_order}</p>
@@ -33601,7 +33580,7 @@ function AddLocationModal({ onClose, onCreated, onInviteOwner }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} />
       <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'580px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
 
         {step==='success' && created ? (
@@ -34549,7 +34528,7 @@ function SuperAdminLayout({
         {/* Mobile sidebar overlay */}
         {isMobile && sidebarOpen && (
           <>
-            <div onClick={()=>setSidebarOpen(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:200 }} />
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:200 }} />
             <div style={{ position:'fixed', top:`${topOffset}px`, left:0, bottom:0, width:'260px', background:'#f0ece4', zIndex:201, overflowY:'auto', boxShadow:'4px 0 24px rgba(0,0,0,0.18)' }}>
               <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.8px' }}>
@@ -35869,7 +35848,7 @@ export function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'440px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
         <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
@@ -36249,7 +36228,7 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} />
       <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'440px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
         <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
@@ -37481,7 +37460,7 @@ if (Array.isArray(initialPeople)) return
       : ''
     return (
       <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex' }}>
-        <div onClick={()=>setShowMobileNav(false)} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)' }} />
+        <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)' }} />
         <div style={{ position:'relative', width:'280px', maxWidth:'85vw', background:'#1a2e2b', height:'100%', display:'flex', flexDirection:'column', boxShadow:'4px 0 24px rgba(0,0,0,0.3)', overflowY:'auto', borderRight:'1px solid rgba(168,201,196,0.1)' }}>
           {/* Header */}
           <div style={{ padding:'18px 18px 14px', borderBottom:'1px solid rgba(168,201,196,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
@@ -37583,7 +37562,6 @@ if (Array.isArray(initialPeople)) return
     const menuTop = LOC_BAR_H + 48 + 4
     return (
       <>
-        <div onClick={()=>setShowMobileProfile(false)} style={{ position:'fixed', inset:0, zIndex:9001, background:'transparent' }} />
         <div style={{ position:'fixed', top:`${menuTop}px`, right:'8px', zIndex:9002, width:'240px', background:'white', borderRadius:'12px', boxShadow:'0 10px 30px rgba(0,0,0,0.2)', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
           <div style={{ padding:'14px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profileName}</p>
@@ -37650,7 +37628,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
 
     return (
       <>
-        <div style={{ position:'fixed', inset:0, zIndex:9998 }} onClick={()=>setShowLocPicker(false)} />
         <div style={{ position:'fixed', ...(isMobile
           ? { top:`${TOTAL_TOP}px`, left:0, right:0, borderBottom:'1px solid rgba(0,0,0,0.1)' }
           // Desktop: the trigger lives in the sidebar footer (lower left),
@@ -37658,14 +37635,15 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           : { bottom:'16px', left:'228px', width:'360px', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)' }
         ), background:'white', zIndex:9999, boxShadow:'0 4px 20px rgba(0,0,0,0.12)', maxHeight:'70vh', display:'flex', flexDirection:'column' }}>
           {/* Search */}
-          <div style={{ padding:'10px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
+          <div style={{ padding:'10px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0, display:'flex', alignItems:'center', gap:'8px' }}>
             <input
               autoFocus
               value={locSearch}
               onChange={e=>setLocSearch(e.target.value)}
               placeholder="Search locations…"
-              style={{ width:'100%', padding:'8px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
+              style={{ width:'100%', minWidth:0, padding:'8px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
             />
+            <button onClick={()=>setShowLocPicker(false)} aria-label="Close location picker" style={{ flexShrink:0, width:'32px', height:'32px', background:'none', border:'none', fontSize:'18px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, fontFamily:'inherit' }}>✕</button>
           </div>
           <div style={{ overflowY:'auto', flex:1 }}>
             {/* All locations option */}
@@ -37829,7 +37807,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locFilter={locFilter}
           selectedLoc={selectedLoc}
           locationName={selectedLoc?.name || null}
-          onClickLocation={()=>setShowLocPicker(true)}
+          onClickLocation={()=>setShowLocPicker(v=>!v)}
           isElevated={isElevated}
           crmStatus={effectiveCrmStatus}
           ownerName={(viewAsUser?.name || selectedLoc?.owner || currentUser?.name || '').trim() || 'Kevin Shaw'}

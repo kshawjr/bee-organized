@@ -139,7 +139,7 @@ export default function IdentityScopeControl({
 
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10001 }} />
+          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
           <div
             role="menu"
             style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, width: '256px', zIndex: 10002, background: T.surface.raised, borderRadius: T.radius.inset, border: T.border.thin, boxShadow: T.shadow.drawer, overflow: 'hidden', paddingBottom: '4px' }}

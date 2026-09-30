@@ -170,8 +170,7 @@ export function CardMenu({ items = [], label = 'More' }) {
       </button>
       {open && (
         <>
-          {/* fixed click-catcher — overlay-safe (above the OverlayShell) */}
-          <div style={{ position: 'fixed', inset: 0, zIndex: 10009 }} onClick={() => setOpen(false)} />
+          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
           <div style={{
             position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 10010,
             minWidth: '210px', background: T.surface.raised,

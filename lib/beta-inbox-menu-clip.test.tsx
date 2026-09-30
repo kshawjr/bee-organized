@@ -7,7 +7,7 @@
 //   - first AND last row: menu portaled out of the clipped card, all
 //     items present and interactable (a pick fires the row's PATCH)
 //   - only one menu at a time; re-click toggles closed
-//   - outside-click closes; clicks INSIDE the portal do not
+//   - an outside click does NOT close it (2026-09-30); the ··· again does
 //   - Esc closes
 //   - source guards: cardStyle keeps overflow:hidden, the menu
 //     re-anchors on scroll (capture) + resize, and the mobile/desktop
@@ -149,7 +149,7 @@ describe('portal escapes the clipped card', () => {
 })
 
 describe('close behaviors', () => {
-  it('outside click closes; a click INSIDE the portal menu does not', async () => {
+  it('an outside click leaves it open; the ··· again closes it (Kevin, 2026-09-30)', async () => {
     const m = await mount(inbox([person()]))
     await click(moreButtons(m.host)[0])
     const menu = openMenu()!
@@ -158,10 +158,14 @@ describe('close behaviors', () => {
     await click(menu)
     expect(openMenu()).toBeTruthy()
 
-    // genuinely outside — closes, and nothing was written
+    // genuinely outside — stays open, and nothing was written
     await click(document.body)
-    expect(openMenu()).toBeFalsy()
+    expect(openMenu()).toBeTruthy()
     expect(patches).toHaveLength(0)
+
+    // its own ··· closes it
+    await click(moreButtons(m.host)[0])
+    expect(openMenu()).toBeFalsy()
     await m.unmount()
   })
 

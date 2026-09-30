@@ -55,7 +55,7 @@ export default function MetaSelect({ label, value, options = [], onPick, renderT
       )}
       {open && (
         <>
-          <div onClick={e => { e.stopPropagation(); setOpen(false) }} style={{ position: 'fixed', inset: 0, zIndex: 10009 }} />
+          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
           <div className="bee-meta-pop" onClick={e => e.stopPropagation()}
             style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '8px 12px' }}>
             <style>{`.bee-meta-item:hover { background:${T.surface.hover} } .bee-meta-pop { max-height: 46vh; max-height: 46dvh; }`}</style>

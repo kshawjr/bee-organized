@@ -131,17 +131,8 @@ export default function AskBeeHubPanel({
     }
   }, [onClose, isMobile])
 
-  // Desktop has no scrim to click, so outside-click closes via a document
-  // listener instead. mousedown (not click) so a drag that starts on the
-  // page closes it immediately, matching scrim behavior.
-  useEffect(() => {
-    if (isMobile) return
-    const onDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) onClose()
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [isMobile, onClose])
+  // No outside-click close on either breakpoint (Kevin, 2026-09-30): the
+  // panel closes by its ✕ or Esc, so a stray click never drops a question.
 
   // Keep the thread pinned to the newest content as it streams.
   useEffect(() => {
@@ -585,7 +576,6 @@ export default function AskBeeHubPanel({
         justifyContent: 'center',
         alignItems: 'flex-end',
       }}
-      onClick={onClose}
     >
       {panel}
     </div>

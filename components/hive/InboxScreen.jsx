@@ -562,22 +562,11 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     return m
   }, [locationUsers])
 
-  // Any click that bubbles to the document closes the open ··· menu.
-  // The trigger + menu items stopPropagation; the target check covers
-  // the portal explicitly (its DOM lives under <body>, so don't lean on
-  // delegation order alone) — only genuinely-outside clicks close.
-  useEffect(() => {
-    if (!menuFor) return
-    const close = (ev) => {
-      if (ev.target instanceof Element && ev.target.closest('[data-bee-row-menu]')) return
-      setMenuFor(null)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [menuFor])
+  // No outside-click close (Kevin, 2026-09-30): the row ··· menu closes
+  // by picking an item, pressing its ··· again (or another row's), or Esc.
 
   // The single mark-as-junk confirm is scoped to the open menu — any close
-  // path (outside click, Escape, reopening another row) disarms it, so a
+  // path (a pick, Escape, the ··· again, reopening another row) disarms it, so a
   // stale "confirm junk" can never fire against a row whose menu is shut.
   useEffect(() => { if (!menuFor) setConfirmFor(null) }, [menuFor])
 

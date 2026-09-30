@@ -14,9 +14,10 @@
 //     half-typed buzz note still there; X → close
 //   · the close wizards (WizardShell): backdrop → no close; X and the
 //     wizard's own Cancel → close
-//   · menus and pickers are NOT on OverlayShell and KEEP closing on an
-//     outside click: the engagement ··· menu (and the panel behind it
-//     stays open), the card ··· menu, PickerModal's backdrop.
+//   · the ··· menus inside the records (2026-09-30: nothing closes on an
+//     outside click anywhere — see beta-no-outside-close): an outside
+//     click leaves the menu AND the record open; the ··· again closes
+//     the menu, never the record.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -25,8 +26,6 @@ import OverlayShell from '@/components/hive/OverlayShell'
 import ClientProfile from '@/components/hive/ClientProfile'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 import { WizardShell } from '@/components/hive/shared/CloseWizardKit'
-import { CardMenu } from '@/components/hive/shared/cardKit'
-import PickerModal from '@/components/hive/shared/PickerModal'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -180,18 +179,20 @@ describe('client card (ClientProfile)', () => {
     await unmount()
   })
 
-  it('the card ··· menu still closes on an outside click — and the card stays open', async () => {
+  it('the card ··· menu stays open on an outside click; the ··· again closes it — the card stays open throughout', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(
       <ClientProfile clientId="lead-9" people={[]} onClose={onClose} setToast={() => {}} />
     )
     const menuBtn = host.querySelector('button[aria-label="More"]')
     expect(menuBtn, 'card ··· menu trigger').toBeTruthy()
+    const menuOpen = () => menuBtn!.parentElement!.children.length > 1
     await click(menuBtn!)
-    const catcher = [...host.querySelectorAll('div')].find(d => d.style.position === 'fixed' && d.style.zIndex === '10009')
-    expect(catcher, 'card ··· menu should be open').toBeTruthy()
-    await click(catcher!)
-    expect([...host.querySelectorAll('div')].some(d => d.style.zIndex === '10009')).toBe(false)
+    expect(menuOpen(), 'card ··· menu should be open').toBe(true)
+    await click(backdrop(host))
+    expect(menuOpen()).toBe(true)
+    await click(menuBtn!)
+    expect(menuOpen()).toBe(false)
     expect(onClose).not.toHaveBeenCalled()
     await unmount()
   })
@@ -212,7 +213,7 @@ describe('engagement panel (EngagementPanel)', () => {
     await unmount()
   })
 
-  it('its ··· menu still closes on an outside click — and the panel stays open', async () => {
+  it('its ··· menu stays open on an outside click; the ··· again closes it — the panel stays open throughout', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(
       <EngagementPanel engagementId="eng-1" onClose={onClose} setToast={() => {}} />
@@ -222,6 +223,8 @@ describe('engagement panel (EngagementPanel)', () => {
     await click(trigger!)
     expect(document.querySelector('[data-bee-record-menu]')).toBeTruthy()
     await click(backdrop(host))
+    expect(document.querySelector('[data-bee-record-menu]')).toBeTruthy()
+    await click(trigger!)
     expect(document.querySelector('[data-bee-record-menu]')).toBeNull()
     expect(onClose).not.toHaveBeenCalled()
     await unmount()
@@ -244,32 +247,6 @@ describe('close wizards (WizardShell)', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     await click(closeX(host))
     expect(onClose).toHaveBeenCalledTimes(2)
-    await unmount()
-  })
-})
-
-// ═══ pickers and menus: outside click STILL closes ═════════════
-describe('pickers and menus keep closing on an outside click', () => {
-  it('PickerModal: a click on its backdrop closes it', async () => {
-    const onClose = vi.fn()
-    const { host, unmount } = await mount(
-      <PickerModal category="client_tags" locationId="loc-1" selected={[]} mode="multi"
-        allowCreate title="Tags" subtitle="sub" onSave={() => {}} onClose={onClose} />
-    )
-    await click(host.querySelector('.bee-picker-modal')!)
-    expect(onClose).toHaveBeenCalledTimes(1)
-    await unmount()
-  })
-
-  it('card ··· menu (CardMenu): the outside click-catcher closes it', async () => {
-    const { host, unmount } = await mount(
-      <CardMenu items={[{ key: 'a', label: 'Do a thing', onPick: () => {} }]} />
-    )
-    await click(host.querySelector('button[aria-label="More"]')!)
-    expect(host.textContent).toContain('Do a thing')
-    const catcher = [...host.querySelectorAll('div')].find(d => d.style.position === 'fixed')!
-    await click(catcher)
-    expect(host.textContent).not.toContain('Do a thing')
     await unmount()
   })
 })

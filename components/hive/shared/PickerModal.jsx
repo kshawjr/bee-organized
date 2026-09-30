@@ -214,7 +214,7 @@ export default function PickerModal({
   }
 
   return (
-    <div className="bee-picker-modal" onClick={onClose}
+    <div className="bee-picker-modal"
       style={{ position: 'fixed', inset: 0, zIndex: 10010, background: T.surface.scrim, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       {/* :focus-visible can't be expressed inline — token-interpolated, no literals */}
       <style>{`

@@ -407,7 +407,7 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   const canSave = !!title.trim() && !!(chapter || '').trim()
 
   return (
-    <div onClick={onCancel} style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
       <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <h2 style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{isNew ? 'Add Slide' : 'Edit Slide'}</h2>

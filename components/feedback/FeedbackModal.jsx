@@ -127,7 +127,7 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
     : { background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }
 
   return (
-    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={shell} data-feedback-modal={isMobile ? 'sheet' : 'modal'}>
+    <div style={shell} data-feedback-modal={isMobile ? 'sheet' : 'modal'}>
       <div style={panel}>
         {/* Sticky header */}
         <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>

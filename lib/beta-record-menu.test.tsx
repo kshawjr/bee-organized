@@ -11,7 +11,7 @@
 //   - a trigger click OPENS the menu and it STAYS open (not eaten by the
 //     document outside-click closer on the same opening click)
 //   - a menu-item click fires that item's handler and closes the menu
-//   - outside-click closes; a click INSIDE the portal does not
+//   - an outside click does NOT close it (Kevin, 2026-09-30); the ··· again does
 //   - Esc closes
 //   - source/stacking guard: the portal outranks the overlay layer (10005)
 //     so a menu spawned from inside an overlay floats OVER it
@@ -97,7 +97,7 @@ describe('item clicks fire handlers', () => {
 })
 
 describe('close behaviors', () => {
-  it('outside click closes; a click INSIDE the portal does not fire any handler', async () => {
+  it('an outside click leaves it open; a click INSIDE fires nothing; the ··· again closes it', async () => {
     const won = vi.fn(); const lost = vi.fn(); const reopen = vi.fn()
     const m = await mount(<RecordMenu items={items(won, lost, reopen)} />)
     await click(trigger())
@@ -107,12 +107,16 @@ describe('close behaviors', () => {
     await click(el)
     expect(menu()).toBeTruthy()
 
-    // genuinely outside — closes, nothing fired
+    // genuinely outside — stays open, nothing fired
     await click(document.body)
-    expect(menu()).toBeFalsy()
+    expect(menu()).toBeTruthy()
     expect(won).not.toHaveBeenCalled()
     expect(lost).not.toHaveBeenCalled()
     expect(reopen).not.toHaveBeenCalled()
+
+    // its own control closes it
+    await click(trigger())
+    expect(menu()).toBeFalsy()
     await m.unmount()
   })
 

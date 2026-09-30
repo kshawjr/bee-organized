@@ -9,7 +9,7 @@
 // (the overlay card) can never amputate it — the failure the inbox row
 // menus hit. It re-anchors on scroll (capture phase, so scrolling
 // ancestors count) + resize, flips ABOVE the trigger when the viewport
-// bottom would clip it, closes on outside-click AND Esc, and only ever
+// bottom would clip it, closes on a pick, the ··· again, or Esc (never an outside click), and only ever
 // shows ONE menu (self-contained open state).
 //
 // STACKING (why NOT the inbox's zIndex:80): unlike the inbox row (a
@@ -95,20 +95,8 @@ export default function RecordMenu({ items = [], ariaLabel = 'Record actions' })
   const triggerRef = useRef(null)
   const rows = items.filter(Boolean)
 
-  // Any click that bubbles to the document closes the menu; the trigger
-  // and the portal itself stopPropagation, and the portal DOM lives under
-  // <body> so the target check covers it explicitly (delegation order
-  // alone can't be trusted across the portal boundary).
-  useEffect(() => {
-    if (!open) return
-    const close = (ev) => {
-      if (ev.target instanceof Element &&
-        (ev.target.closest('[data-bee-record-menu]') || ev.target.closest('[data-bee-record-menu-trigger]'))) return
-      setOpen(false)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [open])
+  // No outside-click close (Kevin, 2026-09-30): the menu closes by
+  // picking an item, pressing the ··· again, or Esc.
 
   if (rows.length === 0) return null
 
