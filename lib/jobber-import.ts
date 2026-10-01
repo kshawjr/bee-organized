@@ -23,6 +23,7 @@ import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { getLeadAssigneeIds } from './lead-assignment'
 import { writeSyncLog } from './sync-log'
+import { leadSourceFromJobber } from './lead-source'
 import { mapQuoteStatus, quoteStatusStampsApproval } from './quote-status-map'
 import {
   queryLeadMatches,
@@ -35,7 +36,7 @@ export const CLIENTS_QUERY = `
   query GetClients($after: String) {
     clients(first: 50, after: $after) {
       nodes {
-        id firstName lastName companyName createdAt
+        id firstName lastName companyName createdAt leadSource
         emails { address primary }
         phones  { number  primary }
         billingAddress { street city province postalCode }
@@ -52,7 +53,7 @@ export const INCREMENTAL_CLIENTS_QUERY = `
   query GetRecentClients($after: String, $since: ISO8601DateTime!) {
     clients(first: 50, after: $after, filter: { updatedAt: { greaterThan: $since } }) {
       nodes {
-        id firstName lastName companyName createdAt
+        id firstName lastName companyName createdAt leadSource
         emails { address primary }
         phones  { number  primary }
         billingAddress { street city province postalCode }
@@ -140,7 +141,7 @@ export const JOB_INVOICES_QUERY = `
 export const SINGLE_CLIENT_QUERY = `
   query GetClient($id: EncodedId!) {
     client(id: $id) {
-      id firstName lastName companyName createdAt isArchived
+      id firstName lastName companyName createdAt isArchived leadSource
       emails { address primary }
       phones  { number  primary }
       billingAddress { street city province postalCode }
@@ -152,7 +153,7 @@ export const SINGLE_REQUEST_QUERY = `
   query GetRequest($id: EncodedId!) {
     request(id: $id) {
       id createdAt jobberWebUri requestStatus
-      client { id firstName lastName companyName createdAt
+      client { id firstName lastName companyName createdAt leadSource
                emails { address primary }
                phones  { number  primary }
                billingAddress { street city province postalCode } }
@@ -990,6 +991,11 @@ export async function upsertLead(
       assigned_to: primaryOwner?.id ?? null,
       created_at: client.createdAt || new Date().toISOString(),
       import_source: importSource,
+      // How the client heard about us, as the owner recorded it in Jobber
+      // (Client.leadSource). INSERT ONLY, like import_source: an existing or
+      // adopted lead keeps whatever source it already has — filling those
+      // would be a backfill, and that is Kevin's separate decision.
+      source: leadSourceFromJobber(client.leadSource),
       paused: true,
       // IN QUESTION only — an ambiguous match creates the row (never
       // merge two possible people) but records what it might collide

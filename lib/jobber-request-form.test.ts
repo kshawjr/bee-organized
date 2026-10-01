@@ -15,7 +15,9 @@
 //
 // Pinned here:
 //   * the section + both items, mapped from project_type / request_details
-//   * source is NEVER sent (three disjoint vocabularies; stays in Bee Hub)
+//   * source IS sent, as a third "Source" item (reversed 2026-09-30 — it used
+//     to stay in Bee Hub). Tidied first, so a raw MAKE slug never lands in a
+//     franchisee's Jobber. Full coverage: send-to-jobber-source.test.ts
 //   * blanks OMIT their item, never a placeholder; both blank → no key at all
 //   * the rest of the request payload is untouched, and job_direct never
 //     learns about the form
@@ -58,16 +60,24 @@ describe('buildRequestDetails', () => {
     expect(REQUEST_FORM_ITEM_COMMENTS).toBe('Additional Comments/Questions')
   })
 
-  it('never sends source — even when the lead carries one (raw MAKE slugs stay in Bee Hub)', () => {
+  it('sends the source as a third item — tidied, so a raw MAKE slug arrives as its label', () => {
     const out = buildRequestDetails({
       project_type: 'Pantry',
       request_details: 'help',
-      // @ts-expect-error — deliberately passing a field the builder must ignore
       source: 'seattle_assessment',
     })
     expect(JSON.stringify(out)).not.toContain('seattle_assessment')
-    expect(JSON.stringify(out)).not.toContain('source')
+    expect(out!.form.sections[0].items).toEqual([
+      { label: 'Type of Project', answerText: 'Pantry' },
+      { label: 'Additional Comments/Questions', answerText: 'help' },
+      { label: 'Source', answerText: 'Website' },
+    ])
+  })
+
+  it('no source → no Source item (blank is blank, never a default)', () => {
+    const out = buildRequestDetails({ project_type: 'Pantry', request_details: 'help', source: null })
     expect(out!.form.sections[0].items).toHaveLength(2)
+    expect(JSON.stringify(out)).not.toContain('Source')
   })
 
   it('null project_type OMITS that item — no placeholder, no empty answer', () => {
@@ -119,8 +129,8 @@ describe('buildRequestDetails', () => {
 //   FormSectionInput.items:            [FormItemInput!]!
 //   FormItemInput.label:               String!
 //   FormItemInput.answerText:          String       (nullable)
-// RequestCreateInput exposes NO `source` field — pushing source was never
-// possible except as a form item, which we deliberately don't do.
+// RequestCreateInput exposes NO `source` field — the form item is the only
+// way a source can ride on a request (and since 2026-09-30 it does).
 //
 // This validator mirrors those types, so if the builder ever drifts from the
 // confirmed shape the suite fails instead of a Jobber round trip.
@@ -196,7 +206,9 @@ describe('send-to-jobber route wiring', () => {
     expect(route).toContain("import { buildRequestDetails } from '@/lib/jobber-request-form'")
     // A send riding a card with words of its own uses them (2026-09-28);
     // otherwise the lead, exactly as before.
-    expect(route).toContain('const requestDetails = buildRequestDetails(engagementWords ?? lead)')
+    expect(route).toContain('...(engagementWords ?? lead),')
+    // …and the source is always the LEAD's, whichever words ride along.
+    expect(route).toContain('source: (lead as any).source,')
     expect(route).toContain('if (requestDetails) requestInput.requestDetails = requestDetails')
     // the "no form mapping today" placeholder comment from the May audit is gone
     expect(route).not.toContain('until we wire form sync')
@@ -210,9 +222,8 @@ describe('send-to-jobber route wiring', () => {
     expect(route).toContain('mutation RequestCreate($input: RequestCreateInput!)')
   })
 
-  it('never puts source on the request input', () => {
+  it('never puts source on the request input ITSELF — Jobber has no such field; it rides in the form', () => {
     expect(route).not.toMatch(/requestInput\.source\s*=/)
-    expect(route).not.toMatch(/source:\s*lead\.source/)
   })
 
   it('requestDetails is NON-FATAL: rejection strips the form and re-runs the ladder', () => {

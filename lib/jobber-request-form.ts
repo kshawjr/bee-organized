@@ -27,18 +27,27 @@
 //   FormItemInput.answerText:          String        ← nullable
 // Note `answerText` being nullable means an empty answer WOULD have been
 // legal; omitting the item is a product choice, not a schema constraint.
-// RequestCreateInput has no `source` field at all — the form item was the
-// only route for it, and we deliberately don't take it.
+// RequestCreateInput has no `source` field at all — and Request.source is
+// read-only (Jobber stamps "Bee Organized Interface" on everything our app
+// creates; re-checked 2026-09-30, RequestEditInput has none either). The
+// form item below is the ONLY way a source can ride on a request.
 //
-// What we deliberately DON'T send: `source`. leads.source holds three
-// disjoint vocabularies (MAKE scenario slugs like "seattle_assessment",
-// human labels, and ~7,000 nulls) with no display mapping, so pushing it
-// would forward raw slugs into a franchisee's Jobber. Source stays in Bee
-// Hub — Kevin's call.
+// SOURCE IS NOW SENT (Kevin, 2026-09-30 — reversing the earlier "Source
+// stays in Bee Hub" call). The old worry was raw slugs ("seattle_assessment")
+// landing in a franchisee's Jobber; the value now goes through
+// normalizeLeadSource first, so a slug arrives as its label. It is whatever
+// is on the lead at the moment Send to Jobber is pressed, as a "Source" line
+// in this form. That line works for a brand-new client AND for a client who
+// already exists in Jobber, whose own source field we cannot edit
+// (ClientEditInput has no source). A lead with no source sends no line —
+// never a default.
 
 export const REQUEST_FORM_SECTION_LABEL = 'BEE ORGANIZED INTERFACE DETAILS'
 export const REQUEST_FORM_ITEM_PROJECT_TYPE = 'Type of Project'
 export const REQUEST_FORM_ITEM_COMMENTS = 'Additional Comments/Questions'
+export const REQUEST_FORM_ITEM_SOURCE = 'Source'
+
+import { normalizeLeadSource } from './lead-source'
 
 export type RequestFormItem = { label: string; answerText: string }
 export type RequestDetailsInput = {
@@ -53,18 +62,19 @@ function answer(value: unknown): string {
 /**
  * Build the `requestDetails` value for RequestCreateInput from a lead row.
  *
- * Empty handling — OMIT, never placeholder: a blank project_type or
- * request_details drops THAT item from the section (a labeled row with an
- * empty answer is noise in the franchisee's Jobber, and inventing "N/A"
- * would be fabricating data). If BOTH are blank the whole form is dropped
- * and the caller omits `requestDetails` entirely — an empty section is
- * worse than no section.
+ * Empty handling — OMIT, never placeholder: a blank project_type,
+ * request_details or source drops THAT item from the section (a labeled row
+ * with an empty answer is noise in the franchisee's Jobber, and inventing
+ * "N/A" would be fabricating data). If ALL are blank the whole form is
+ * dropped and the caller omits `requestDetails` entirely — an empty section
+ * is worse than no section.
  *
  * Returns null when there is nothing to send.
  */
 export function buildRequestDetails(lead: {
   project_type?: unknown
   request_details?: unknown
+  source?: unknown
 }): RequestDetailsInput | null {
   const items: RequestFormItem[] = []
 
@@ -76,6 +86,11 @@ export function buildRequestDetails(lead: {
   const comments = answer(lead?.request_details)
   if (comments) {
     items.push({ label: REQUEST_FORM_ITEM_COMMENTS, answerText: comments })
+  }
+
+  const source = normalizeLeadSource(lead?.source)
+  if (source) {
+    items.push({ label: REQUEST_FORM_ITEM_SOURCE, answerText: source })
   }
 
   if (!items.length) return null

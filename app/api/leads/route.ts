@@ -30,6 +30,7 @@ import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { logSlackNotification } from '@/lib/notification-log'
 import { writeLeadAssignment } from '@/lib/lead-assignment'
 import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
+import { normalizeLeadSource } from '@/lib/lead-source'
 
 export const runtime = 'nodejs'
 
@@ -193,7 +194,9 @@ export async function POST(req: NextRequest) {
     last_name:     lastName  || null,
     email:         (body.email || '').trim() || null,
     phone:         (body.phone || '').trim() || null,
-    source:        body.source || null,
+    // Same tidy-up as the website door: google → Google, ig → Instagram;
+    // anything else stays as typed.
+    source:        normalizeLeadSource(body.source),
     project_type:  body.project_type || null,
     drip_path:     body.drip_path || null,
     address:       body.address || null,

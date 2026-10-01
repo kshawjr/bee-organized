@@ -850,9 +850,15 @@ export async function POST(
     // sections/items — NOT a string (the May audit removed the string form as
     // schema-invalid) and NOT custom fields (CustomFieldAppliesTo has no
     // `request` value). One section, two items, no per-account ids:
-    // lib/jobber-request-form.ts. Blank project_type / request_details drop
-    // their item; both blank drops the key entirely — never a placeholder.
-    const requestDetails = buildRequestDetails(engagementWords ?? lead)
+    // lib/jobber-request-form.ts. Blank project_type / request_details /
+    // source drop their item; all blank drops the key entirely — never a
+    // placeholder. The source is the LEAD's, read at this moment, whichever
+    // card's words ride along: it is how the client found us, not what the
+    // job is.
+    const requestDetails = buildRequestDetails({
+      ...(engagementWords ?? lead),
+      source: (lead as any).source,
+    })
     if (requestDetails) requestInput.requestDetails = requestDetails
     // Only include propertyId when we actually have one — Deluge mirrored
     // this with two requestCreate variants. Omitting the key lets Jobber

@@ -34,6 +34,7 @@ import { syncLeadAddressToJobber, createPropertyForMove, type MovePropertyResult
 import { diffNamePatch, normalizeNamePatch, touchesName, composeLeadName, nameValidationError, nameSyncFailed, NOT_LINKED_NOTE, type NameWriteback } from '@/lib/lead-name'
 import { syncLeadNameToJobber } from '@/lib/jobber-name-sync'
 import type { AddressWriteback } from '@/lib/jobber-address-writeback'
+import { normalizeLeadSource } from '@/lib/lead-source'
 
 const VALID_STAGES = [
   'New',
@@ -255,6 +256,11 @@ export async function PATCH(
     if (!PATCHABLE_FIELDS.has(key)) continue // silently drop unknown
     patch[key] = value
   }
+
+  // A source set or changed by hand gets the same tidy-up as every other
+  // door (google → Google, ig → Instagram); anything unrecognised stays as
+  // the owner typed it, and clearing it stays cleared.
+  if ('source' in patch) patch.source = normalizeLeadSource(patch.source)
 
   // Stage validation
   if ('stage' in patch) {
