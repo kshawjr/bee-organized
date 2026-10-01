@@ -245,9 +245,10 @@ describe('NewClientSheet frames', () => {
     const create = buttonByText(host, 'Create — opens card')!
     expect(create, 'create button missing').toBeTruthy()
 
-    // Name prefilled from the query; defaults Source=Manual Type=Client.
+    // Name prefilled from the query; Source starts BLANK (it used to default
+    // to "Manual" — 30 Sept 2026), Type defaults to Client.
     expect((host.querySelector('input[aria-label="Name"]') as HTMLInputElement).value).toBe('Fresh Person')
-    expect((host.querySelector('select[aria-label="Source"]') as HTMLSelectElement).value).toBe('Manual')
+    expect((host.querySelector('select[aria-label="Source"]') as HTMLSelectElement).value).toBe('')
     expect((host.querySelector('select[aria-label="Type"]') as HTMLSelectElement).value).toBe('Client')
     // On-create notification multi-select — all three pills default OFF.
     const pills = [...host.querySelectorAll('[role="checkbox"]')]
@@ -264,7 +265,7 @@ describe('NewClientSheet frames', () => {
       name: 'Fresh Person',
       first_name: 'Fresh',
       last_name: 'Person',
-      source: 'Manual',
+      source: null,
       project_type: 'Client',
       stage: 'New',
       // All three opt-in actions default OFF → silent create.
@@ -277,6 +278,65 @@ describe('NewClientSheet frames', () => {
     expect(onCreated).toHaveBeenCalledTimes(1)
     expect(onCreated.mock.calls[0][0].id).toBe('lead-new-1') // the REAL returned row
     await unmount()
+  })
+
+  // ── Source starts blank (30 Sept 2026) ───────────────────────────────
+  // The sheet used to default Source to "Manual", which told an owner
+  // nothing: 151 hand-entered leads in 90 days carried it. It now starts
+  // empty and stays OPTIONAL — a forced choice just gets the first option
+  // picked. No choice saves no source (and no source sends nothing to
+  // Jobber — pinned in send-to-jobber-source.test.ts).
+  describe('Source starts blank and stays optional', () => {
+    const SOURCES = { sources: ['Website', 'Referral', 'Google', 'Manual'], projectTypes: ['Client'] }
+    const openCreateForm = async () => {
+      const m = await mount(
+        <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" lookupOptions={SOURCES} onClose={() => {}} onCreated={() => {}} />
+      )
+      await type(m.host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+      const select = m.host.querySelector('select[aria-label="Source"]') as HTMLSelectElement
+      return { ...m, select }
+    }
+    const choose = (select: HTMLSelectElement, value: string) => act(async () => {
+      select.value = value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    it('a new hand-entered lead starts with no source — even with a full list to choose from', async () => {
+      const { select, unmount } = await openCreateForm()
+      expect(select.value).toBe('')
+      expect(select.selectedOptions[0].textContent).toBe('Not set')
+      // "Manual" is not smuggled in as the first or the chosen option.
+      expect(select.options[0].value).toBe('')
+      await unmount()
+    })
+
+    it('saving without choosing one leaves it empty — and the save is not blocked', async () => {
+      const { host, unmount } = await openCreateForm()
+      await click(buttonByText(host, 'Create — opens card')!)
+      expect(createdBodies).toHaveLength(1)
+      expect(createdBodies[0].source).toBeNull()
+      expect(JSON.stringify(createdBodies[0])).not.toContain('Manual')
+      await unmount()
+    })
+
+    it('an owner can still pick a real source and it saves', async () => {
+      const { host, select, unmount } = await openCreateForm()
+      await choose(select, 'Google')
+      expect(select.value).toBe('Google')
+      await click(buttonByText(host, 'Create — opens card')!)
+      expect(createdBodies).toHaveLength(1)
+      expect(createdBodies[0].source).toBe('Google')
+      await unmount()
+    })
+
+    it('a picked source can be put back to blank', async () => {
+      const { host, select, unmount } = await openCreateForm()
+      await choose(select, 'Google')
+      await choose(select, '')
+      await click(buttonByText(host, 'Create — opens card')!)
+      expect(createdBodies[0].source).toBeNull()
+      await unmount()
+    })
   })
 
   it('frame C: on-create pills fire INDEPENDENTLY — selecting Email + Drip sends only those two', async () => {

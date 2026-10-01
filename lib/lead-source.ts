@@ -45,7 +45,6 @@ const ALIAS_TO_LABEL: Record<string, string> = {
   yelp: 'Yelp',
   nextdoor: 'NextDoor',
   tiktok: 'TikTok',
-  manual: 'Manual',
 }
 
 // What an intake submission with no source at all lands as: this door is

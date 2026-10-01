@@ -211,7 +211,7 @@ export default function NewClientSheet({
   // notifyEmail / notifySlack / startDrip: the on-create multi-select, all
   // default OFF (a manual lead with nothing selected is silent). startDrip
   // replaces the old `drip` toggle default-ON.
-  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false, street: '', apt: '', city: '', state: '', zip: '' })
+  const [form, setForm] = useState({ name: null, email: null, phone: null, source: '', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false, street: '', apt: '', city: '', state: '', zip: '' })
   // Address is OPTIONAL and collapsed by default — the sheet's stated
   // intent is founding-viable fields only, so the block stays hidden until
   // the user asks for it (mirrors Classic's default-off "📍 Add address").
@@ -606,6 +606,11 @@ export default function NewClientSheet({
                 }}
                 aria-label="Source"
               >
+                {/* Starts blank and stays optional (30 Sept 2026). It used to
+                    default to "Manual", which told an owner nothing — 151
+                    leads in 90 days carried it. No choice saves no source,
+                    and no source sends nothing to Jobber. */}
+                <option value="">Not set</option>
                 {withDefault(lookupOptions.sources || [], form.source).map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
