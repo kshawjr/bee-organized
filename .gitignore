@@ -42,6 +42,7 @@ backfill-assessment-appointment-ids.report*.json
 backfill-assessment-completion.report*.json
 backfill-assessment-duration.report*.json
 backfill-archived-quote-close.report*.json
+backfill-lead-source.report*.json
 # #125 report carries the pre-redaction names — never commit
 redact-sync-log-names.report*.json
 # property-drift backfill checkpoint — carries client names and home
