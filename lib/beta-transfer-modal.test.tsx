@@ -161,7 +161,10 @@ describe('TransferLeadModal', () => {
     await flush()
     expect(onDone).not.toHaveBeenCalled()
     expect(host.textContent).toContain("Couldn't transfer")
-    expect(host.textContent).toContain('destination_has_linked_duplicate')
+    // In WORDS since 1 Oct 2026 (lib/lead-transfer-rule transferErrorCopy) —
+    // the banner used to print the route's raw code.
+    expect(host.textContent).toContain('already has this person as a Jobber client')
+    expect(host.textContent).not.toContain('destination_has_linked_duplicate')
   })
 
   it('Esc closes it (OverlayShell owns the backdrop + X, not this)', async () => {

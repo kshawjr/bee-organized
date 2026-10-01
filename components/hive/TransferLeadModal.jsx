@@ -1,6 +1,19 @@
 // components/hive/TransferLeadModal.jsx
 // ─────────────────────────────────────────────────────────────
-// Corp/admin routes a loc_other global-form lead to a REAL location.
+// Corp/admin moves a lead to a REAL location. Built for a loc_other
+// global-form lead (the unrouted queue); since 1 Oct 2026 it also moves a
+// lead that ALREADY HAS A HOME, from the card's ··· menu. Same picker, same
+// endpoint. What a lead with a home changes — all of it driven by one prop,
+// `from` (its current location):
+//   · that location is left out of the list (you cannot move a lead to where
+//     it already is)
+//   · a REASON is asked for and Transfer waits on it — the endpoint refuses
+//     without one, and it is kept on the lead's timeline
+//   · the note under the list also says what the lead LEAVES behind: its
+//     assigned person and the old location's emails
+// and `blocked`: when the card already knows the lead cannot move (it is in
+// Jobber, or has an engagement — lib/lead-transfer-rule), the modal says why
+// instead of offering a list. The endpoint refuses those regardless.
 // Same modal system as TouchpointModal / SendToJobberModal: OverlayShell
 // owns the backdrop / centered-vs-sheet geometry / scroll-lock / X; this
 // file owns the Esc listener, role="dialog", padding, and (since it posts)
@@ -28,6 +41,7 @@ import useIsMobile from './shared/useIsMobile'
 import { inp } from './shared/formKit'
 import { T } from './shared/tokens'
 import { IconSearch, IconMapPin, IconAlertTriangle, IconCheck } from '@/components/ui/icons'
+import { transferErrorCopy, TRANSFER_BLOCK_COPY, TRANSFER_REASON_MAX } from '@/lib/lead-transfer-rule'
 
 const MODAL_WIDTH = 440
 
@@ -102,8 +116,12 @@ function LocationRow({ t, selected, onPick }) {
 // person: { id, name }; subline: pre-composed origin string; preselectId:
 // optional destination to pre-select (the zip-suggestion seam);
 // onDone(destination): success handler — the caller closes + removes the row.
-export default function TransferLeadModal({ person, subline = null, preselectId = null, onDone = () => {}, onClose = () => {} }) {
+// from: { id, name } — the lead's CURRENT location, when it has one (omit for
+// an unrouted lead); blocked: 'in_jobber' | 'has_engagement' | null.
+export default function TransferLeadModal({ person, subline = null, preselectId = null, from = null, blocked = null, onDone = () => {}, onClose = () => {} }) {
   const isMobile = useIsMobile()
+  const needsReason = !!from
+  const [reason, setReason] = useState('')
   const [targets, setTargets] = useState(null)   // null = loading
   const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
@@ -120,6 +138,7 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
 
   // Fetch destination locations once on open.
   useEffect(() => {
+    if (blocked) return
     let dead = false
     setTargets(null); setLoadError(null)
     fetch('/api/locations/transfer-targets')
@@ -127,10 +146,14 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`)
         return r.json()
       })
-      .then((j) => { if (!dead) setTargets(Array.isArray(j.targets) ? j.targets : []) })
+      .then((j) => {
+        if (dead) return
+        const list = Array.isArray(j.targets) ? j.targets : []
+        setTargets(from?.id ? list.filter((t) => t.id !== from.id) : list)
+      })
       .catch((e) => { if (!dead) setLoadError(String(e.message || e)) })
     return () => { dead = true }
-  }, [])
+  }, [blocked, from?.id])
 
   const filtered = useMemo(() => {
     const list = targets || []
@@ -145,8 +168,11 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
     [targets, selectedId],
   )
 
+  const reasonText = reason.trim()
+  const ready = !!selected && (!needsReason || reasonText.length > 0)
+
   async function confirm() {
-    if (submitting || !selected) return
+    if (submitting || !ready) return
     setErrorMsg(null)
     setSubmitting(true)
     let json
@@ -154,12 +180,15 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
       const res = await fetch(`/api/leads/${person.id}/transfer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ destination_location_id: selected.id }),
+        body: JSON.stringify({
+          destination_location_id: selected.id,
+          ...(needsReason ? { reason: reasonText } : {}),
+        }),
       })
       json = await res.json().catch(() => ({}))
       if (!res.ok || !json || json.success !== true) {
         const msg = json && json.error
-          ? json.error
+          ? transferErrorCopy(json.error)
           : `Transfer failed (HTTP ${res.status})`
         setErrorMsg(msg)
         setSubmitting(false)
@@ -177,6 +206,36 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
 
   const head = [person?.name, subline].filter(Boolean).join(' · ')
   const selectedActive = selected && selected.lifecycle_status === 'active'
+  // What the lead leaves behind — only a lead with a home has anything to leave.
+  const leaves = from ? ` ${person?.name || 'This lead'} leaves ${from.name}: the person assigned there is cleared and ${from.name}'s emails stop.` : ''
+
+  if (blocked) {
+    return (
+      <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={MODAL_WIDTH}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Transfer lead"
+          style={{ padding: isMobile ? '0 16px 18px' : '0 24px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}
+        >
+          <div>
+            <h2 style={{ fontSize: '17px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle }}>
+              This one can&apos;t be moved
+            </h2>
+            {head && (
+              <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '3px' }}>{head}</p>
+            )}
+          </div>
+          <p data-testid="transfer-blocked" style={{ fontSize: '13px', color: T.ink.secondary, lineHeight: 1.45 }}>
+            {(TRANSFER_BLOCK_COPY[blocked] || TRANSFER_BLOCK_COPY.in_jobber).long}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="button" style={ghostBtn} onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </OverlayShell>
+    )
+  }
 
   return (
     <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={MODAL_WIDTH}>
@@ -238,17 +297,38 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
             <div style={{ display: 'flex', gap: '9px', padding: '10px 12px', background: T.accent.faint, border: `1px solid ${T.accent.soft}`, borderRadius: T.radius.control }}>
               <span style={{ color: T.accent.fg, flexShrink: 0, marginTop: '1px', display: 'inline-flex' }}><IconCheck size={15} /></span>
               <p style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.4 }}>
-                Notifies {ownerLabel(selected)} and starts {selected.name}&apos;s drip.
+                Notifies {ownerLabel(selected)} and starts {selected.name}&apos;s drip.{leaves}
               </p>
             </div>
           ) : (
             <div style={{ display: 'flex', gap: '9px', padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
               <span style={{ color: T.state.warning.fg, flexShrink: 0, marginTop: '1px', display: 'inline-flex' }}><IconAlertTriangle size={15} /></span>
               <p style={{ fontSize: '12px', color: T.state.warning.deep, lineHeight: 1.4 }}>
-                {selected.name} isn&apos;t live yet — {ownerLabel(selected)} will be notified, but the drip won&apos;t start until they activate.
+                {selected.name} isn&apos;t live yet — {ownerLabel(selected)} will be notified, but the drip won&apos;t start until they activate.{leaves}
               </p>
             </div>
           )
+        )}
+
+        {/* Why — only for a lead that already has a home. */}
+        {needsReason && (
+          <div>
+            <label htmlFor="transfer-reason" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: T.ink.secondary, marginBottom: '5px' }}>
+              Why is it moving?
+            </label>
+            <textarea
+              id="transfer-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={TRANSFER_REASON_MAX}
+              rows={2}
+              placeholder={`e.g. Their zip belongs to another location`}
+              style={{ ...inp, resize: 'vertical', minHeight: '54px' }}
+            />
+            <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '4px' }}>
+              Kept on the lead&apos;s timeline, with your name.
+            </p>
+          </div>
         )}
 
         {/* Error banner (mirrors SendToJobberModal) */}
@@ -262,7 +342,7 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
         {/* Footer */}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button type="button" style={ghostBtn} onClick={onClose} disabled={submitting}>Cancel</button>
-          <button type="button" style={primaryBtn(!!selected && !submitting)} onClick={confirm} disabled={!selected || submitting}>
+          <button type="button" style={primaryBtn(ready && !submitting)} onClick={confirm} disabled={!ready || submitting}>
             {submitting ? 'Transferring…' : selected ? `Transfer to ${selected.name}` : 'Transfer'}
           </button>
         </div>

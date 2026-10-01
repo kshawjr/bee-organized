@@ -2,11 +2,34 @@
 //
 // POST /api/leads/:id/transfer — corp/admin only.
 //
-// Routes a lead (in practice a loc_other global-form lead that landed
-// outside any service area) to a REAL location. This is the load-bearing
-// server gate: isAdmin(role). The client "Needs transfer" section and the
-// card Transfer button are cosmetic — view-as flips only the client role,
-// so the move itself must be re-checked here.
+// Moves a lead to a REAL location. Two callers, one route:
+//   · the unrouted queue — a loc_other global-form lead that landed outside
+//     any service area. What this was built for.
+//   · ANY lead that already has a home (1 Oct 2026). Zip routing made
+//     reassignment routine, and until then a lead sitting at the wrong
+//     location could only be moved with a database update.
+// This is the load-bearing server gate: isAdmin(role). The client "Needs
+// transfer" section, the card Transfer button and the card's ··· item are
+// cosmetic — view-as flips only the client role, so the move itself must be
+// re-checked here. An OWNER cannot move a lead out of their own location.
+//
+// WHICH LEADS MAY MOVE — lib/lead-transfer-rule. A lead that has reached
+// Jobber, or has an engagement, is REFUSED (409) with nothing written: its
+// Jobber record lives in the old location's own Jobber account, and its
+// engagement is what the old location's reports count. Read that file before
+// loosening either.
+//
+// A lead that already has a home additionally:
+//   • OWES A REASON (400 reason_required). It is written on the transfer
+//     touchpoint, beside who moved it (user_id), so the timeline says why.
+//   • LOSES ITS ASSIGNEE — leads.assigned_to AND the lead_assignees rows. The
+//     person who had it works at the old location. Both, because the junction
+//     is the plural truth: clearing only the column leaves the old location's
+//     person assigned.
+//   • TAKES ITS HISTORY WITH IT — touchpoints, notes and extra contacts carry
+//     a location of their own, and corporate's per-location load reads them
+//     BY that location (lib/hub-scope CHILD_LOCATION_SCOPE). Left behind, the
+//     lead would arrive with its timeline invisible on that load.
 //
 // On EVERY transfer (regardless of the destination's lifecycle):
 //   • Move BOTH location columns coherently — location_id (the slug string
@@ -58,6 +81,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import {
+  transferBlockFor,
+  transferNeedsReason,
+  TRANSFER_BLOCK_ERROR,
+  TRANSFER_BLOCK_COPY,
+  TRANSFER_REASON_MAX,
+} from '@/lib/lead-transfer-rule'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
@@ -105,7 +135,7 @@ export async function POST(
   // move writes with the service role, never an RLS-scoped client) ─
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, name, email, phone, project_type, request_details, preferred_contact, address, city, state, zip, location_id, location_uuid, jobber_client_id')
+    .select('id, name, email, phone, project_type, request_details, preferred_contact, address, city, state, zip, location_id, location_uuid, assigned_to, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status')
     .eq('id', id)
     .single()
   if (loadError || !existing) {
@@ -135,16 +165,84 @@ export async function POST(
     return NextResponse.json({ error: 'already_at_destination' }, { status: 400 })
   }
 
+  // ─── A lead that already has a home owes a reason ─────────────
+  const hasHome = transferNeedsReason(existing.location_id)
+  const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
+  if (hasHome && !reason) {
+    return NextResponse.json({ error: 'reason_required' }, { status: 400 })
+  }
+  if (reason.length > TRANSFER_REASON_MAX) {
+    return NextResponse.json({ error: 'reason_too_long' }, { status: 400 })
+  }
+
+  // ─── May this lead move at all? (lib/lead-transfer-rule) ──────
+  // Checked for EVERY origin, the unrouted queue included: a lead that has
+  // reached Jobber is no safer to move from there. FAIL CLOSED — a read that
+  // errors refuses the move rather than guessing the lead is clean.
+  const childTables: Array<[string, string]> = [
+    ['engagements', 'client_id'],
+    ['service_requests', 'lead_id'],
+    ['quotes', 'lead_id'],
+    ['jobs', 'lead_id'],
+    ['invoices', 'lead_id'],
+    ['assessments', 'lead_id'],
+    ['payments', 'lead_id'],
+  ]
+  const childCounts = await Promise.all(
+    childTables.map(([table, column]) =>
+      supabaseService.from(table).select('id', { count: 'exact', head: true }).eq(column, id),
+    ),
+  )
+  const failedCheck = childCounts.findIndex((r) => r.error)
+  if (failedCheck >= 0) {
+    return NextResponse.json(
+      { error: 'transfer_check_failed', detail: `${childTables[failedCheck][0]}: ${childCounts[failedCheck].error?.message}` },
+      { status: 500 },
+    )
+  }
+  const [engagementCount, ...jobberRecordCounts] = childCounts.map((r) => r.count ?? 0)
+  const block = transferBlockFor({
+    inJobber:
+      !!existing.jobber_client_id || !!existing.jobber_request_id || !!existing.jobber_quote_id ||
+      !!existing.jobber_job_id || !!existing.jobber_invoice_id || !!existing.jobber_assessment_id ||
+      // A recorded send with no client id (4 such rows, 1 Oct 2026) still
+      // means a request exists in the old location's Jobber.
+      !!existing.jobber_sync_status ||
+      jobberRecordCounts.some((n) => n > 0),
+    engagementCount,
+  })
+  if (block) {
+    return NextResponse.json(
+      { error: TRANSFER_BLOCK_ERROR[block], detail: TRANSFER_BLOCK_COPY[block].long },
+      { status: 409 },
+    )
+  }
+
+  // The old location's NAME, for the record. Cosmetic: a failed read falls
+  // back to the slug rather than stopping a move.
+  let originName: string = existing.location_id || 'global form'
+  if (hasHome && existing.location_uuid) {
+    const { data: origin } = await supabaseService
+      .from('locations')
+      .select('name')
+      .eq('id', existing.location_uuid)
+      .maybeSingle()
+    if (origin?.name) originName = origin.name
+  }
+
   const now = new Date().toISOString()
 
   // ─── Move BOTH location columns coherently ────────────────────
   // Dedicated write (NOT the generic PATCH allowlist, which deliberately
   // excludes the location columns) via the service client.
-  const { error: moveError } = await supabaseService
+  const { data: moved, error: moveError } = await supabaseService
     .from('leads')
     .update({
       location_id: dest.location_id,   // slug string
       location_uuid: dest.id,          // NOT-NULL FK
+      // The person who had it works at the OLD location. The junction rows —
+      // the plural truth — are cleared just below.
+      assigned_to: null,
       // A dismiss/snooze is a hold on the OLD owner's inbox, not a property of
       // the lead. Cleared in the SAME write that moves the location, so there
       // is no window where the lead sits at its new location still hidden.
@@ -153,12 +251,17 @@ export async function POST(
       updated_at: now,
     })
     .eq('id', id)
+    // The check above and this write are two statements. A Send to Jobber
+    // landing between them would link the lead after it was judged clean, so
+    // the write itself refuses a lead that has gained a client id.
+    .is('jobber_client_id', null)
+    .select('id')
   if (moveError) {
     // The partial unique index leads_jobber_client_id_location_idx on
     // (jobber_client_id, location_id) can collide when a Jobber-linked lead
     // moves into a location that already holds the same jobber_client_id.
-    // Global-form leads aren't Jobber-linked so this shouldn't fire, but
-    // report it cleanly instead of 500ing.
+    // A Jobber-linked lead is refused before this write, so this shouldn't
+    // fire, but report it cleanly instead of 500ing.
     if ((moveError as any).code === '23505') {
       return NextResponse.json(
         {
@@ -174,7 +277,45 @@ export async function POST(
     )
   }
 
+  if (Array.isArray(moved) && moved.length === 0) {
+    return NextResponse.json({ error: 'lead_changed' }, { status: 409 })
+  }
+
   const warnings: string[] = []
+
+  // ─── Clear the assignee rows ──────────────────────────────────
+  // Best effort like everything after the move — but a failure here is said
+  // out loud, because a leftover row keeps the old location's person on a
+  // lead they can no longer open.
+  let assigneesCleared = 0
+  try {
+    const { data: gone, error: clearError } = await supabaseService
+      .from('lead_assignees')
+      .delete()
+      .eq('lead_id', id)
+      .select('hub_user_id')
+    if (clearError) throw clearError
+    assigneesCleared = Array.isArray(gone) ? gone.length : 0
+  } catch (err: any) {
+    console.error('[transfer] lead_assignees clear failed', err)
+    warnings.push(`assignee_clear_failed: ${err?.message || String(err)}`)
+  }
+
+  // ─── The lead's history follows it ────────────────────────────
+  // Runs BEFORE the transfer touchpoint is written, so that row is not
+  // re-stamped by its own carry.
+  for (const table of ['touchpoints', 'lead_notes', 'lead_contacts']) {
+    try {
+      const { error: carryError } = await supabaseService
+        .from(table)
+        .update({ location_uuid: dest.id })
+        .eq('lead_id', id)
+      if (carryError) throw carryError
+    } catch (err: any) {
+      console.error(`[transfer] ${table} carry failed`, err)
+      warnings.push(`history_move_failed: ${table}: ${err?.message || String(err)}`)
+    }
+  }
 
   // ─── Tell both ends, live ─────────────────────────────────────
   // The move has committed, so every open Hive can be told directly rather
@@ -208,7 +349,10 @@ export async function POST(
       kind:          'system',
       method:        'system',
       label:         TRANSFER_IN_LABEL,
-      notes:         `Routed from ${existing.location_id || 'global form'} to ${dest.name}`,
+      // Who moved it is user_id; WHY is here, in words the timeline shows.
+      notes:         hasHome
+        ? `Moved from ${originName} to ${dest.name}. Reason: ${reason}`
+        : `Routed from ${existing.location_id || 'global form'} to ${dest.name}`,
       status:        'done',
       occurred_at:   now,
       user_id:       hubUser.id,
@@ -282,24 +426,48 @@ export async function POST(
     // (b) THEN start against the DESTINATION uuid (never existing.location_uuid).
     //     startDripForLead self-gates on active + not-paused + not-opted-out
     //     and SCHEDULES step 1 (no inline blast — mirrors drip-restart).
-    await startDripForLead(id, dest.id)
+    const enrol = await startDripForLead(id, dest.id)
     // (c) VERIFY a fresh active progress row actually exists. The
     //     UNIQUE(lead_id, drip_path_id) DO-NOTHING path can silently no-op a
     //     re-enroll onto a master path the lead already carries a row for.
     //     For a global-form loc_other lead (never previously enrolled) the
     //     insert is clean; the check guards the edge and reports it.
-    const { data: activeRow } = await supabaseService
+    const findActiveRow = async () => (await supabaseService
       .from('lead_drip_progress')
       .select('id')
       .eq('lead_id', id)
       .is('stopped_at', null)
       .is('completed_at', null)
       .limit(1)
-      .maybeSingle()
+      .maybeSingle()).data
+    let activeRow = await findActiveRow()
+    // (d) THE SAME-SEQUENCE CASE, which a lead with a home makes ordinary.
+    //     Two locations that both use the shared master sequence resolve to
+    //     the SAME drip_path_id, so the start above collides with the row
+    //     step (a) just stopped, reports "enrolled", and leaves nothing
+    //     running. Clear the lead's old rows and start once more — exactly
+    //     what drip-restart does. What was already sent stays on the timeline
+    //     as touchpoints; only the bookkeeping rows go.
+    if (!activeRow && hasHome && enrol?.enrolled) {
+      const { error: resetError } = await supabaseService
+        .from('lead_drip_progress')
+        .delete()
+        .eq('lead_id', id)
+      if (resetError) {
+        warnings.push(`drip_reset_failed: ${resetError.message}`)
+      } else {
+        await startDripForLead(id, dest.id)
+        activeRow = await findActiveRow()
+      }
+    }
     if (activeRow) {
       dripEnrolled = true
     } else {
-      warnings.push('drip_not_enrolled_after_start')
+      warnings.push(
+        enrol && !enrol.enrolled && enrol.reason
+          ? `drip_not_enrolled_after_start: ${enrol.reason}`
+          : 'drip_not_enrolled_after_start',
+      )
     }
   } else {
     // Skip the drip ENTIRELY. Do NOT seed a row that would auto-fire when the
@@ -321,6 +489,8 @@ export async function POST(
       lifecycle_status: dest.lifecycle_status ?? null,
     },
     notified:      notifiedCount,
+    assignees_cleared: assigneesCleared,
+    ...(hasHome ? { reason } : {}),
     destination_staffed: destinationStaffed,
     drip_enrolled: dripEnrolled,
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),

@@ -21,8 +21,9 @@ const h = vi.hoisted(() => {
     queue: [] as { table: string; resp: Resp }[],
     updates: [] as { table: string; arg: any }[],
     inserts: [] as { table: string; arg: any }[],
+    deletes: [] as { table: string }[],
   }
-  const reset = () => { state.queue = []; state.updates = []; state.inserts = [] }
+  const reset = () => { state.queue = []; state.updates = []; state.inserts = []; state.deletes = [] }
   const enqueue = (table: string, data: any, error: any = null) =>
     state.queue.push({ table, resp: { data, error } })
   const makeBuilder = (table: string) => {
@@ -36,6 +37,7 @@ const h = vi.hoisted(() => {
     }
     b.update = (arg: any) => { state.updates.push({ table, arg }); return b }
     b.insert = (arg: any) => { state.inserts.push({ table, arg }); return b }
+    b.delete = () => { state.deletes.push({ table }); return b }
     b.single = () => Promise.resolve(resp)
     b.maybeSingle = () => Promise.resolve(resp)
     b.then = (res: any, rej: any) => Promise.resolve(resp).then(res, rej)

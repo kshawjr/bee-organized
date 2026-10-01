@@ -137,3 +137,19 @@ export const JUNK_POINTS_TO_CLOSE =
 
 export const CONFIRM_YES = { dismiss: 'Yes, dismiss', junk: 'Yes, mark as Junk' }
 export const CONFIRM_NO = 'Keep it'
+
+// TRANSFER (1 Oct 2026) — corporate only, on the client card's ··· menu. Not
+// one of the three groups above: those are what a LOCATION does with its own
+// lead, and this takes the lead away from the location altogether. It sits
+// under its own heading, last, so an owner's menu is unchanged (they never
+// see it) and corporate's reads as the same menu plus one thing.
+//
+// The item shows even when the lead cannot move — a missing Transfer is what
+// sent Kevin to the database for Kim Terry. The card's description then says
+// why in the row itself; those sentences live in lib/lead-transfer-rule.
+export const TRANSFER_MENU = {
+  heading: 'Corporate',
+  label: 'Transfer to another location',
+  description: 'Move this lead to a different location. Clears who it is assigned to and tells the new location.',
+}
+

@@ -83,7 +83,8 @@ import { upsertNote, replaceNote, removeNote } from './shared/noteStream'
 import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { useLeadNotesRealtime } from '@/lib/use-lead-notes-realtime'
 import { upsertContact } from './shared/contactStream'
-import { DISPOSITIONS, DISPOSITION_GROUPS, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
+import { DISPOSITIONS, DISPOSITION_GROUPS, TRANSFER_MENU, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
+import { canTransferLeads, transferBlockFor, TRANSFER_BLOCK_COPY } from '@/lib/lead-transfer-rule'
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
 
 const QUIET = T.surface.sunken
@@ -115,7 +116,8 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   // state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
   const [newJobOpen, setNewJobOpen] = useState(false)
-  // Transfer modal — only reachable for a loc_other lead (see actionBar).
+  // Transfer modal — the action bar's button for a loc_other lead, and (for
+  // corporate) the ··· menu's "Transfer to another location" for any other.
   const [transferOpen, setTransferOpen] = useState(false)
   // "Add to Network" sheet + this client's Network twin, if any.
   const [convertOpen, setConvertOpen] = useState(false)
@@ -263,9 +265,21 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
     ? [
         [[c.city, c.state].filter(Boolean).join(', '), c.zip].filter(Boolean).join(' '),
         c.project_type,
-        'from global form',
+        atLocOther ? 'from global form' : (c.location_name ? `at ${c.location_name}` : null),
       ].filter(Boolean).join(' · ')
     : ''
+  // TRANSFER A LEAD THAT ALREADY HAS A HOME — corporate only (the RAW role,
+  // like the note rule above; view-as flips it, and the route re-checks
+  // regardless). The item is DRAWN even when the lead cannot move, saying why
+  // in its own row: a Transfer that is simply absent is what sent Kevin to the
+  // database. The route refuses those leads whatever is drawn here.
+  const canTransferHere = !!c && !readOnly && !atLocOther && canTransferLeads(currentUserRole)
+  const transferBlock = c
+    ? transferBlockFor({
+        inJobber: jobberLinked || !!c.jobber_request_id || !!c.jobber_job_id,
+        engagementCount: engagements.length,
+      })
+    : null
 
   const tags = data?.tags ?? []
   const lastTouchTs = touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
@@ -925,16 +939,19 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           onSubmit={logTouchpoint}
         />
       )}
-      {transferOpen && !readOnly && c && atLocOther && (
+      {transferOpen && !readOnly && c && (atLocOther || canTransferHere) && (
         <TransferLeadModal
           person={{ id: c.id, name: c.name }}
           subline={transferSubline}
+          from={atLocOther ? null : { id: c.location_uuid, name: c.location_name || 'its current location' }}
+          blocked={atLocOther ? null : transferBlock}
           onClose={() => setTransferOpen(false)}
           onDone={(dest) => {
             setTransferOpen(false)
             setToast({ kind: 'success', msg: `${c.name} transferred to ${dest?.name || 'location'}` })
-            // The lead left loc_other — close the card; the inbox refetch
-            // drops it from Needs transfer and re-maps it under its new home.
+            // The lead left this location — close the card; the route's live
+            // broadcast drops it from the list it left (the unrouted queue or
+            // the old location) and lands it under its new home.
             onClose()
           }}
         />
@@ -1224,6 +1241,14 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
                 confirm: { prompt: confirmPrompt('junk', c?.name), yes: CONFIRM_YES.junk, no: CONFIRM_NO },
                 onPick: markJunk },
             ]),
+            // Corporate only, last, under its own heading — see TRANSFER_MENU.
+            ...(canTransferHere ? [
+              { key: 'transfer-h', heading: TRANSFER_MENU.heading },
+              { key: 'transfer', label: TRANSFER_MENU.label,
+                description: transferBlock ? TRANSFER_BLOCK_COPY[transferBlock].short : TRANSFER_MENU.description,
+                testid: 'menu-transfer',
+                onPick: () => setTransferOpen(true) },
+            ] : []),
           ]),
         ]} />
       </div>
