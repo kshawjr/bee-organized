@@ -55,6 +55,7 @@ import {
 import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
+import { normalizeLeadSource } from '@/lib/lead-source'
 import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
 import {
   buildAddressChoices,
@@ -737,9 +738,41 @@ export async function POST(
       phone: phone ? 'added' : 'unchanged',
       email: email ? 'added' : 'unchanged',
     }
-    const create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
+    // The client's OWN lead source in Jobber — writable here and nowhere
+    // else (ClientEditInput has no source, so a matched client above can't
+    // get one). Proven on Test Location 2026-09-30 with two real creates:
+    //   · sourceText "Google" → Jobber shows "Google". Our value survives.
+    //   · sourceText ""       → Jobber shows "Bee Organized Interface", the
+    //     same stamp as leaving the field out.
+    // So a lead WITH a source sets it; a lead with NONE cannot be made blank
+    // in Jobber — it gets Jobber's app-name stamp whatever we send — and the
+    // field is simply left out. The value is the lead's source at this
+    // moment, tidied (ig → Instagram, an old form slug → Website).
+    const clientSource = normalizeLeadSource((lead as any).source)
+    if (clientSource) createInput.sourceAttribution = { sourceText: clientSource }
+    let create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
       input: createInput,
     })
+    // The source is NON-FATAL, same philosophy as requestDetails below: if
+    // Jobber rejects the create with it, try once more without, so a source
+    // can never be the reason a client fails to reach Jobber. The Source
+    // line on the request still carries it.
+    if (create.userErrors?.length && createInput.sourceAttribution) {
+      console.warn('[send-to-jobber] clientCreate with sourceAttribution failed — retrying without the source', {
+        leadId, userErrors: JSON.stringify(create.userErrors),
+      })
+      await writeSyncLog({
+        location_id: locationSlug,
+        entity_id: leadId,
+        entity_type: 'client',
+        status: 'success',
+        message: `[send-to-jobber] topic=CLIENT_SOURCE_RETRY sourceAttribution rejected (${create.userErrors[0]?.message ?? 'unknown'}) — client created without its lead source`,
+      })
+      const { sourceAttribution: _source, ...withoutSource } = createInput
+      create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
+        input: withoutSource,
+      })
+    }
     if (create.userErrors?.length) {
       return fail('client_create', create.userErrors[0].message)
     }

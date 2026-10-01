@@ -9,6 +9,12 @@
 //   · a JOB — has no lead source at all.
 //   · the request's DETAILS FORM — always. So every send carries a "Source"
 //     line there, for a brand-new client and for one already in Jobber.
+//   · a brand-new CLIENT's own lead source — yes, on create only. Proven on
+//     Test Location 2026-09-30: "Google" sent → Jobber shows "Google". An
+//     EMPTY value does not give a blank: Jobber stamps "Bee Organized
+//     Interface", the same as leaving the field out. So no source → the
+//     field is left out. A client already in Jobber can't be given one
+//     (ClientEditInput has no source).
 //
 // Settled rules pinned here:
 //   · the value is whatever is on the lead when Send to Jobber is pressed
@@ -143,6 +149,79 @@ const linkedNode = () => ({
 })
 
 beforeEach(() => { vi.clearAllMocks() })
+
+describe("send-to-jobber — a NEW client's own lead source in Jobber", () => {
+  const clientInput = () => {
+    const calls = mutationInputs('clientCreate')
+    expect(calls).toHaveLength(1)
+    return calls[0].input
+  }
+
+  it("sets the client's lead source from the lead's source", async () => {
+    wire(baseLead({ source: 'Google' }))
+    await send()
+    expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Google' })
+    // …and the rest of the client is untouched
+    expect(clientInput()).toMatchObject({ firstName: 'Martha', lastName: 'Wassel' })
+  })
+
+  it('the value is tidied on the way out: ig → Instagram, an old form slug → Website', async () => {
+    wire(baseLead({ source: 'ig' }))
+    await send()
+    expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Instagram' })
+
+    vi.clearAllMocks()
+    wire(baseLead({ source: 'seattle_assessment' }))
+    await send()
+    expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Website' })
+  })
+
+  it("an owner's own label goes over exactly as typed", async () => {
+    wire(baseLead({ source: 'Hershey Mills Ads' }))
+    await send()
+    expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Hershey Mills Ads' })
+  })
+
+  it('a lead with NO source leaves the field out — never an empty value, never a default', async () => {
+    // An empty value was tested for real and Jobber stamps its app name on
+    // it anyway, so there is nothing to gain by sending one.
+    for (const source of [null, '', '   ']) {
+      vi.clearAllMocks()
+      wire(baseLead({ source }))
+      await send()
+      expect(clientInput()).not.toHaveProperty('sourceAttribution')
+    }
+  })
+
+  it('a client ALREADY in Jobber is edited without any source (Jobber has no such field on edit)', async () => {
+    wire(baseLead({ source: 'Referral', jobber_client_id: LINKED_ID }), linkedNode())
+    await send()
+    expect(mutationInputs('clientCreate')).toHaveLength(0)
+    const edits = mutationInputs('clientEdit')
+    expect(edits).toHaveLength(1)
+    expect(JSON.stringify(edits[0].input)).not.toContain('sourceAttribution')
+    expect(JSON.stringify(edits[0].input)).not.toContain('Referral')
+  })
+
+  it('if Jobber rejects the source, the client is still created — once more, without it', async () => {
+    wire(baseLead({ source: 'Google' }))
+    const base = (jobberMutation as any).getMockImplementation()
+    ;(jobberMutation as any).mockImplementation(async (loc: string, mutation: string, vars: any) => {
+      if (mutation.includes('clientCreate') && vars.input.sourceAttribution) {
+        return { userErrors: [{ message: 'Source attribution is invalid' }] }
+      }
+      return base(loc, mutation, vars)
+    })
+    await send()
+    const calls = mutationInputs('clientCreate')
+    expect(calls).toHaveLength(2)
+    expect(calls[0].input.sourceAttribution).toEqual({ sourceText: 'Google' })
+    expect(calls[1].input).not.toHaveProperty('sourceAttribution')
+    expect(calls[1].input).toMatchObject({ firstName: 'Martha', lastName: 'Wassel' })
+    // the request still carries the source line
+    expect(sourceLine()).toEqual({ label: 'Source', answerText: 'Google' })
+  })
+})
 
 describe("send-to-jobber — the lead's source reaches Jobber", () => {
   it('NEW client: the request carries a Source line with the lead\'s source', async () => {

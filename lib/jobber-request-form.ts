@@ -41,6 +41,10 @@
 // already exists in Jobber, whose own source field we cannot edit
 // (ClientEditInput has no source). A lead with no source sends no line —
 // never a default.
+//
+// A brand-new client ALSO gets the source on the client itself
+// (ClientCreateInput.sourceAttribution, set in the send route). That one
+// cannot be blank: with no source Jobber stamps its app name there.
 
 export const REQUEST_FORM_SECTION_LABEL = 'BEE ORGANIZED INTERFACE DETAILS'
 export const REQUEST_FORM_ITEM_PROJECT_TYPE = 'Type of Project'
