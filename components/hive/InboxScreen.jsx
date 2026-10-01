@@ -68,6 +68,7 @@ import InitialsAvatar from './shared/InitialsAvatar'
 import MiniAvatar from './shared/MiniAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
+import { pageOfQueue } from '@/lib/transfer-queue-page'
 import NoCoverageModal from './NoCoverageModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -149,12 +150,35 @@ function SentWaiting({ settled }) {
   )
 }
 
-// Origin line for a Needs-transfer row: "city, ST zip · project · from
-// global form". Each part drops out when absent (a lead may carry a zip but
-// no street, or no project_type yet).
+// What the territory list says about a queued lead's zip, in the reader's
+// words (p.zipHint comes from lib/transfer-queue.ts):
+//   one live location      → "→ Lake Norman"
+//   one, not live yet      → "→ Omaha (not live yet)"
+//   two claim it (Denver)  → "→ Central Denver or West Denver"
+//   nobody has it          → "no location has this zip"
+// No hint (no zip, or the lookup failed) says nothing — never a guess.
+export const zipHintText = (hint) => {
+  if (!hint) return ''
+  if (hint.kind === 'none') return 'no location has this zip'
+  const names = hint.matches.map(m => m.name)
+  if (hint.kind === 'one') {
+    return `→ ${names[0]}${hint.matches[0].lifecycle_status === 'active' ? '' : ' (not live yet)'}`
+  }
+  return `→ ${names.join(' or ')}`
+}
+
+// The picker opens with the suggestion already selected ONLY when exactly one
+// location claims the zip. A conflict is a person's call, so nothing is
+// pre-picked; the row names both.
+export const zipHintPreselectId = (hint) =>
+  (hint && hint.kind === 'one' ? hint.matches[0].id : null)
+
+// Origin line for a Needs-transfer row: "city, ST zip → Location · project ·
+// from global form". Each part drops out when absent (a lead may carry a zip
+// but no street, or no project_type yet).
 const transferOriginLine = (p) => {
   const cityState = [p.originCity, p.originState].filter(Boolean).join(', ')
-  const place = [cityState, p.originZip].filter(Boolean).join(' ')
+  const place = [cityState, p.originZip, zipHintText(p.zipHint)].filter(Boolean).join(' ')
   return [place, p.project, 'from global form'].filter(Boolean).join(' · ')
 }
 
@@ -458,6 +482,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // Held as the person so the modal's origin subline survives the row
   // re-deriving out of the section the instant the move lands.
   const [transferFor, setTransferFor] = useState(null)
+  // Which ten of the routing queue are on screen (0-based). Clamped where it
+  // is read, so routing the last row of the last page steps back a page.
+  const [transferPage, setTransferPage] = useState(0)
   const [noCoverageFor, setNoCoverageFor] = useState(null)
   // The lead whose "Add to Network" sheet is open. Held as the person for the
   // same reason as the two above: a Move re-derives the row out of its section
@@ -661,7 +688,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       : inboxSort === 'name' ? (a, b) => (a.name || '').localeCompare(b.name || '')
       : inboxSort === 'last_touch' ? (a, b) => lastReach(b) - lastReach(a)
       : (a, b) => created(b) - created(a)
-    transfer.sort(cmp)
+    // The routing queue is ALWAYS oldest-first, whatever the Inbox sort says:
+    // it is a line of people waiting, the longest wait is next, and a fixed
+    // order keeps its pages still while they are being worked.
+    transfer.sort((a, b) => created(a) - created(b) || String(a.id).localeCompare(String(b.id)))
     fresh.sort(cmp)
     working.sort(cmp)
     return { transfer, fresh, working }
@@ -1597,7 +1627,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           {/* Needs transfer — ABOVE New/Attempting, ONLY when loc_other leads
               are in scope (self-gating to corp/admin). */}
-          {transfer.length > 0 && (
+          {transfer.length > 0 && (() => {
+            const tq = pageOfQueue(transfer, transferPage)
+            return (
             <div id="bee-inbox-sec-transfer" style={corpShellStyle}>
               {/* Says WHOSE these are before it says what to do with them —
                   the confusion this container exists to end is readers taking
@@ -1612,10 +1644,36 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 These leads don&apos;t belong to any location yet. Route them to assign an owner.
               </p>
               <div style={transferCardStyle}>
-                {transfer.map(p => <Row key={p.id} p={p} family={AMBER} pill="Transfer" />)}
+                {tq.rows.map(p => <Row key={p.id} p={p} family={AMBER} pill="Transfer" />)}
               </div>
+              {/* Ten at a time (Kevin, 30 Sept 2026) — the queue must not take
+                  over the Inbox, and no lead may be unreachable. Oldest first,
+                  so page 1 is who has waited longest. Hidden while everything
+                  fits on one page. */}
+              {tq.pages > 1 && (
+                <div data-testid="transfer-pager" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '10px' }}>
+                  <span style={{ fontSize: '12px', color: T.corp.deep }}>
+                    Showing {tq.from}–{tq.to} of {tq.total} · longest waiting first
+                  </span>
+                  <span style={{ display: 'inline-flex', gap: '6px' }}>
+                    {[['Previous', tq.hasPrev, tq.page - 1], ['Next', tq.hasNext, tq.page + 1]].map(([label, on, to]) => (
+                      <button key={label} type="button" className="bee-small-action" disabled={!on}
+                        aria-label={`${label} ten unrouted leads`}
+                        onClick={() => setTransferPage(to)}
+                        style={{
+                          padding: '5px 12px', borderRadius: '6px', fontFamily: 'inherit', fontWeight: 600,
+                          border: `1px solid ${T.corp.border}`, background: 'transparent', color: T.corp.fg,
+                          cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.4,
+                        }}>
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
           {/* On 'All Locations' the New/Attempting sections have no records to
               show — no leads are loaded on that scope (Fix 2 Phase 4b). The
               Needs-transfer section ABOVE stays live, because unrouted leads
@@ -1720,6 +1778,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <TransferLeadModal
           person={{ id: transferFor.id, name: transferFor.name }}
           subline={transferOriginLine(transferFor)}
+          preselectId={zipHintPreselectId(transferFor.zipHint)}
           onClose={() => setTransferFor(null)}
           onDone={(dest) => onTransferred(transferFor, dest)}
         />

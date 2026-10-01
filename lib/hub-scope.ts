@@ -235,11 +235,11 @@ export const ACTIVE_LIFECYCLE = 'active'
 // picking any real location would silently empty the routing queue.
 export const LOC_OTHER_SLUG = 'loc_other'
 
-// Bound on the always-on transfer queue. Two non-junk rows today; 50 is a
-// ceiling that keeps the query O(1) on the page load rather than a data policy.
-// If it is ever hit, the queue is badly backed up and the number itself is the
-// signal — hence the log at the call site rather than a silent slice.
-export const TRANSFER_QUEUE_MAX = 50
+// The transfer queue used to be capped here at the 50 newest rows
+// (TRANSFER_QUEUE_MAX). That cap is GONE (30 Sept 2026): with zip routing a
+// backlog over 50 is possible and the oldest leads would have dropped off the
+// bottom unseen. Everything waiting is loaded and ten are shown at a time —
+// see lib/transfer-queue.ts.
 
 // WHERE the transfer queue's rows come from on a given load.
 //

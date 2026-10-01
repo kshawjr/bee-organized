@@ -25,11 +25,11 @@ import {
   isUuid,
   ACTIVE_LIFECYCLE,
   LOC_OTHER_SLUG,
-  TRANSFER_QUEUE_MAX,
   transferQueueSource,
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
+import { fetchTransferQueueRows, fetchZipHintMatches, attachZipHints } from '@/lib/transfer-queue'
 // issue 226 step 2 — per-location seat composition. The derivation moved to
 // lib/billing-state.ts so it could be tested; this is its only caller.
 import { deriveSeatComposition } from '@/lib/billing-state'
@@ -1659,19 +1659,16 @@ export default async function HubPage({
       locationSlug: scope.locationSlug,
     }) === 'filter-loaded'
     if (alreadyLoaded) {
-      initialTransferPeople = initialPeople
-        .filter((p: any) => p.atLocOther)
-        .slice(0, TRANSFER_QUEUE_MAX)
+      initialTransferPeople = initialPeople.filter((p: any) => p.atLocOther)
     } else {
-      const { data: transferRaw, error: transferErr } = await applyLeadActiveFilter(
-        supabaseService
-          .from('leads')
-          .select('*')
-          .eq('location_id', LOC_OTHER_SLUG)
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: true })
-          .limit(TRANSFER_QUEUE_MAX),
-      )
+      // EVERYTHING waiting, oldest first — no cap. The section shows ten at a
+      // time; what it must never do is leave the longest-waiting leads
+      // unreachable (lib/transfer-queue.ts).
+      const {
+        rows: transferRaw,
+        error: transferErr,
+        truncated: transferTruncated,
+      } = await fetchTransferQueueRows(supabaseService)
 
       if (transferErr) {
         // Non-fatal: the queue is additive to the page. Log loudly — a silently
@@ -1683,7 +1680,7 @@ export default async function HubPage({
         // two child tables that can legitimately carry data for an unrouted
         // lead. The Jobber-owned tables are skipped: a lead that has never been
         // routed cannot have quotes/jobs/invoices/assessments/service_requests.
-        // Bounded at TRANSFER_QUEUE_MAX ids, so this is one chunk per table.
+        // The fetcher chunks the ids, so a long queue is still a few reads.
         const fetchTransferChildRows = createChildRowFetcher(supabaseService, { unscoped: false })
         const transferIds = transferRaw.map((r: any) => r.id)
         const [transferNotes, transferTouches, transferAssignees] = await Promise.all([
@@ -1711,11 +1708,22 @@ export default async function HubPage({
           })
         )
       }
-      if (initialTransferPeople.length >= TRANSFER_QUEUE_MAX) {
-        console.warn(
-          `[hub-page] transfer queue hit its ${TRANSFER_QUEUE_MAX}-row bound — more unrouted leads exist than are being shown`
+      if (transferTruncated) {
+        console.error(
+          `[hub-page] transfer queue hit its runaway stop at ${initialTransferPeople.length} rows — more unrouted leads exist than were loaded`
         )
       }
+    }
+    // Which location each lead's zip would have matched (the Denver overlaps,
+    // locations not live yet) — shown on the row and pre-selected in the
+    // picker, so nobody opens a lead just to see where it is. Fail-soft: no
+    // answer means no suggestion, never a wrong one.
+    if (initialTransferPeople.length > 0) {
+      const zipMatches = await fetchZipHintMatches(
+        supabaseService,
+        initialTransferPeople.map((p: any) => p.originZip),
+      )
+      initialTransferPeople = attachZipHints(initialTransferPeople, zipMatches)
     }
     if (initialTransferPeople.length > 0) {
       console.log(`[hub-page] ${initialTransferPeople.length} lead(s) awaiting transfer for ${hubUser.email}`)

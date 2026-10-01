@@ -24,7 +24,6 @@ import {
   resolveHubScope,
   isElevatedPickedScope,
   LOC_OTHER_SLUG,
-  TRANSFER_QUEUE_MAX,
 } from '@/lib/hub-scope'
 
 const KC = { id: '80ffb75d-44a9-4160-aee1-9919dd97de97', slug: 'loc_kc' }
@@ -106,9 +105,13 @@ describe('Phase 2 — transfer queue constants', () => {
     const route = readFileSync('app/api/locations/transfer-targets/route.ts', 'utf8')
     expect(route).toContain(`.neq('location_id', 'loc_other')`)
   })
-  it('the queue is bounded', () => {
-    expect(TRANSFER_QUEUE_MAX).toBeGreaterThan(0)
-    expect(TRANSFER_QUEUE_MAX).toBeLessThanOrEqual(200)
+  it('the queue is NOT capped any more — everything waiting loads, ten show at a time', () => {
+    // It used to be bounded at the 50 newest (TRANSFER_QUEUE_MAX). With zip
+    // routing a backlog over 50 is possible and the oldest dropped off unseen
+    // (30 Sept 2026). Full coverage: transfer-queue-paging.test.tsx.
+    const hubScope = readFileSync('lib/hub-scope.ts', 'utf8')
+    expect(hubScope).not.toMatch(/export const TRANSFER_QUEUE_MAX/)
+    expect(readFileSync('lib/transfer-queue-page.ts', 'utf8')).toContain('export const TRANSFER_QUEUE_PAGE_SIZE = 10')
   })
 })
 
@@ -150,11 +153,15 @@ describe('_hub-page wiring — Phase 2', () => {
   it('the transfer queue is elevated-only and ignores the selected scope', () => {
     const block = src.slice(src.indexOf('loc_other transfer queue'), src.indexOf('/clients/[id] passes initialSelectedLeadId'))
     expect(block).toContain('if (isElevated) {')
-    expect(block).toContain(`.eq('location_id', LOC_OTHER_SLUG)`)
-    // Active-surface filter via the shared #122 predicate (junk + archived) —
-    // one helper so this can't drift from the main leads query.
-    expect(block).toContain('applyLeadActiveFilter(')
-    expect(block).toContain('.limit(TRANSFER_QUEUE_MAX)')
+    // The read itself moved to lib/transfer-queue.ts (it pages now, with no
+    // cap), and it still asks for loc_other through the shared #122 active
+    // predicate (junk + archived) — one helper so this can't drift from the
+    // main leads query.
+    expect(block).toContain('await fetchTransferQueueRows(supabaseService)')
+    const loader = readFileSync('lib/transfer-queue.ts', 'utf8')
+    expect(loader).toContain(`.eq('location_id', LOC_OTHER_SLUG)`)
+    expect(loader).toContain('applyLeadActiveFilter(')
+    expect(block).not.toContain('.limit(')
     // The whole point: it must NOT carry the page's location filter.
     expect(block).not.toContain('scopeLocationUuid)')
   })

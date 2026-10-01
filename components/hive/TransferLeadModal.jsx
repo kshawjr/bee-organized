@@ -6,10 +6,10 @@
 // file owns the Esc listener, role="dialog", padding, and (since it posts)
 // the submitting / errorMsg pattern SendToJobberModal established.
 //
-// The picker is MANUAL by design. ZIP-based suggestion is out of scope for
-// this build (location_zips isn't synced from Zoho yet). The `preselectId`
-// prop is the clean seam a future suggested-location pre-select drops into —
-// nothing else changes.
+// The picker is still a person's choice. Since 30 Sept 2026 it can OPEN on a
+// suggestion: when exactly one location claims the lead's zip (the Inbox
+// passes it as `preselectId`), that location is already selected — one press
+// to confirm, or pick another. Nothing is pre-selected on a zip conflict.
 //
 // NON-ACTIVE DESTINATIONS are a real rule, not an edge case: 44 of 50
 // locations are onboarding. Transfer is ALWAYS allowed; the confirm note
