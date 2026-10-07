@@ -177,8 +177,10 @@ describe('getEngagementAssignees', () => {
     ])
     const out = await getEngagementAssignees('eng-1')
     expect(out).toEqual([
-      { hub_user_id: 'u1', name: 'Kevin Shaw', email: 'kevin@bmave.com', jobber_user_id: 'j1' },
-      { hub_user_id: 'u2', name: 'wendy@x.com', email: 'wendy@x.com', jobber_user_id: null }, // falls back to email
+      // location_id rides along since 6 Oct 2026 — resolveJobberAssignment
+      // holds back anyone whose location is not the one being pushed to.
+      { hub_user_id: 'u1', name: 'Kevin Shaw', email: 'kevin@bmave.com', jobber_user_id: 'j1', location_id: null },
+      { hub_user_id: 'u2', name: 'wendy@x.com', email: 'wendy@x.com', jobber_user_id: null, location_id: null }, // falls back to email
     ])
     const call = h.state.calls.find(c => c.table === 'engagement_assignees')!
     expect(call.ops.some(o => o[0] === 'order')).toBe(true) // ordered

@@ -522,15 +522,20 @@ export async function POST(
   // them from allJobberUserIds. We retain the count here (was discarded) so the
   // terminal row can STATE the shortfall instead of reporting a bare ok.
   let assigneeUnmappedCount = 0
+  // Assignees who work at ANOTHER location (or none): held back from Jobber,
+  // because their Jobber user belongs to a different account. Counted so the
+  // log says so. See resolveJobberAssignment.
+  let assigneeOffLocationCount = 0
   if (engagementId) {
     // Send on an already-founded engagement: assignment lives on the
     // engagement junction (engagement_assignees) and already has a real
     // answer. Read it, resolve nothing.
     const engAssignees = await getEngagementAssignees(engagementId)
-    const resolved = resolveJobberAssignment(engAssignees)
+    const resolved = resolveJobberAssignment(engAssignees, { locationUuid: lead.location_uuid })
     salesPersonJobberId = resolved.primaryJobberUserId
     allAssigneeJobberIds = resolved.allJobberUserIds
     assigneeUnmappedCount = resolved.unmappedCount
+    assigneeOffLocationCount = resolved.offLocationCount
   } else {
     // issue 150 — the common path: a BARE lead with no engagement yet. The
     // Jobber webhook founds the engagement ~11s AFTER this send, so there is
@@ -571,10 +576,11 @@ export async function POST(
     // assessment to carry a team, no salesperson by choice. 67 such sends went
     // out between 2026-07-31 and 2026-09-03, every one logged `assignment=ok`.
     const leadAssignees = await getLeadAssignees(leadId)
-    const resolved = resolveJobberAssignment(leadAssignees)
+    const resolved = resolveJobberAssignment(leadAssignees, { locationUuid: lead.location_uuid })
     salesPersonJobberId = resolved.primaryJobberUserId
     allAssigneeJobberIds = resolved.allJobberUserIds
     assigneeUnmappedCount = resolved.unmappedCount
+    assigneeOffLocationCount = resolved.offLocationCount
   }
 
   // issue 145 — assignment-outcome signals for the terminal sync_log row.
@@ -1324,6 +1330,11 @@ export async function POST(
   if (requestSalespersonDropped) assignmentProblems.push('request salesperson dropped (Jobber rejected the id)')
   if (jobSalespersonDropped)     assignmentProblems.push('job salesperson dropped (Jobber rejected the id)')
   if (assessmentTeamShortfall)   assignmentProblems.push(assessmentTeamShortfall)
+  // A held-back person IS a problem: someone the owner sees as assigned did
+  // not reach Jobber, and the reason is a wrong assignment, not a missing link.
+  if (assigneeOffLocationCount > 0) {
+    assignmentProblems.push(`${assigneeOffLocationCount} assignee(s) work at another location — not sent to this location's Jobber`)
+  }
   const assignmentOutcome = summarizeAssignmentOutcome({
     problems:  assignmentProblems,
     mapped:    allAssigneeJobberIds.length,

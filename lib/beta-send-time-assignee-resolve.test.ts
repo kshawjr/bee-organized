@@ -89,7 +89,9 @@ describe('send-to-jobber send-time resolution wiring (issue 150)', () => {
     // issue 157 split the single-line resolve so unmappedCount is retained too;
     // the mapped ids still flow to allAssigneeJobberIds from the same resolve.
     expect(route).toContain('const leadAssignees = await getLeadAssignees(leadId)')
-    expect(route).toContain('const resolved = resolveJobberAssignment(leadAssignees)')
+    // Since 6 Oct 2026 the resolve also names the SENDING location, so a
+    // person from another location is held back (beta-jobber-blank-guard).
+    expect(route).toContain('const resolved = resolveJobberAssignment(leadAssignees, { locationUuid: lead.location_uuid })')
     expect(route).toContain('allAssigneeJobberIds = resolved.allJobberUserIds')
   })
 

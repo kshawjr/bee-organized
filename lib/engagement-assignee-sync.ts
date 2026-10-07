@@ -209,6 +209,10 @@ export type EngagementAssignee = {
   name: string | null
   email: string | null
   jobber_user_id: string | null
+  // The person's OWN location (hub_users.location_id — TEXT holding the
+  // location uuid). Read so resolveJobberAssignment can refuse to push a
+  // person into a Jobber account that is not their location's.
+  location_id?: string | null
 }
 
 // The junction → hub_users join, ordered by assignment time (created_at)
@@ -216,7 +220,7 @@ export type EngagementAssignee = {
 export async function getEngagementAssignees(engagementId: string): Promise<EngagementAssignee[]> {
   const { data, error } = await supabaseService
     .from('engagement_assignees')
-    .select('hub_user_id, created_at, hub_users(id, full_name, first_name, last_name, email, jobber_user_id)')
+    .select('hub_user_id, created_at, hub_users(id, full_name, first_name, last_name, email, jobber_user_id, location_id)')
     .eq('engagement_id', engagementId)
     .order('created_at', { ascending: true })
   if (error || !data) return []
@@ -228,6 +232,7 @@ export async function getEngagementAssignees(engagementId: string): Promise<Enga
       name: name || u?.email || null,
       email: u?.email ?? null,
       jobber_user_id: u?.jobber_user_id ?? null,
+      location_id: u?.location_id ?? null,
     }
   })
 }
@@ -242,7 +247,7 @@ export async function getEngagementAssignees(engagementId: string): Promise<Enga
 export async function getLeadAssignees(leadId: string): Promise<EngagementAssignee[]> {
   const { data, error } = await supabaseService
     .from('lead_assignees')
-    .select('hub_user_id, created_at, hub_users(id, full_name, first_name, last_name, email, jobber_user_id)')
+    .select('hub_user_id, created_at, hub_users(id, full_name, first_name, last_name, email, jobber_user_id, location_id)')
     .eq('lead_id', leadId)
     .order('created_at', { ascending: true })
   if (error || !data) return []
@@ -254,6 +259,7 @@ export async function getLeadAssignees(leadId: string): Promise<EngagementAssign
       name: name || u?.email || null,
       email: u?.email ?? null,
       jobber_user_id: u?.jobber_user_id ?? null,
+      location_id: u?.location_id ?? null,
     }
   })
 }
@@ -263,13 +269,30 @@ export async function getLeadAssignees(leadId: string): Promise<EngagementAssign
 //             assessment appointment and each job visit (both MULTI).
 //   primary = first mapped assignee, retained only as metadata (the
 //             owner-as-salesperson decision is open — see request notes).
-export function resolveJobberAssignment(assignees: EngagementAssignee[]) {
-  const mapped = assignees.filter(a => a.jobber_user_id)
+//
+// ONLY THE SENDING LOCATION'S OWN PEOPLE (Kevin, 6 Oct 2026). Every location
+// has its OWN Jobber account, and a jobber_user_id belongs to the account of
+// the person's location. Travis Lawson (Central Austin) was still assigned to
+// two leads moved by hand to Southwest Austin; when Southwest Austin sent
+// them, his Central Austin Jobber user was pushed as salesperson into
+// Southwest Austin's account — and Jobber accepted it. So: pass the location
+// the push is going to, and anyone who works elsewhere — or has no location,
+// as corporate does — is held back and COUNTED (offLocationCount), never
+// sent. They stay assigned in Bee Hub; the send's log says they were held.
+export function resolveJobberAssignment(
+  assignees: EngagementAssignee[],
+  opts: { locationUuid?: string | null } = {},
+) {
+  const target = opts.locationUuid ?? null
+  const atTarget = (a: EngagementAssignee) => !target || (!!a.location_id && String(a.location_id) === String(target))
+  const offLocation = assignees.filter(a => a.jobber_user_id && !atTarget(a))
+  const mapped = assignees.filter(a => a.jobber_user_id && atTarget(a))
   return {
     primaryJobberUserId: mapped[0]?.jobber_user_id ?? null,
     allJobberUserIds: mapped.map(a => a.jobber_user_id as string),
     mappedCount: mapped.length,
-    unmappedCount: assignees.length - mapped.length,
+    unmappedCount: assignees.filter(a => !a.jobber_user_id).length,
+    offLocationCount: offLocation.length,
   }
 }
 
@@ -302,8 +325,14 @@ export async function syncEngagementAssignmentToJobber(
   locationSlug: string,
 ): Promise<AssignmentSyncResult> {
   const assignees = await getEngagementAssignees(engagementId)
+  // The crew goes into THIS location's Jobber account — only its own people.
+  const { data: engLoc } = await supabaseService
+    .from('engagements')
+    .select('location_uuid')
+    .eq('id', engagementId)
+    .maybeSingle()
   const { allJobberUserIds, mappedCount, unmappedCount } =
-    resolveJobberAssignment(assignees)
+    resolveJobberAssignment(assignees, { locationUuid: (engLoc as any)?.location_uuid ?? null })
 
   const result: AssignmentSyncResult = {
     request: 'skipped', job: 'none', assessment: 'none',

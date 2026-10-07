@@ -630,13 +630,11 @@ const UNKNOWN_NAME = 'Unknown'
 
 // Columns the import fills on an adopted row only when the row has none.
 //
-// SCOPE — this is an AT-ADOPTION rule, not a permanent one. Once adopted,
-// the row carries a jobber_client_id, so the next sync (webhook, or a
-// re-run of the idempotent bulk import) takes the `existing` branch in
-// upsertLead, which applies the full payload — Jobber becomes the source
-// of truth for these contact columns, exactly as it already is for every
-// other Jobber-linked lead. That is the intended contract; fill-empty
-// here just avoids a pointless clobber on the adopting write itself.
+// SCOPE — at adoption, Jobber only FILLS these: a column the row already
+// has is left alone. After adoption the row carries a jobber_client_id, so
+// the next sync takes the `existing` branch in upsertLead, where Jobber may
+// CHANGE them — but, since 6 Oct 2026, never BLANK them. See
+// withoutBlankPersonFields below.
 //
 // The web-form context that must survive PERMANENTLY — request_details,
 // source, project_type, preferred_contact, metadata, stage, and the
@@ -646,6 +644,36 @@ const ADOPT_FILL_EMPTY_COLS = [
   'name', 'first_name', 'last_name', 'company',
   'email', 'phone', 'address', 'city', 'state', 'zip',
 ] as const
+
+// A BLANK FROM JOBBER NEVER BEATS A REAL VALUE OF OURS (Kevin, 6 Oct 2026).
+//
+// The person's details — the same ten columns — were copied from Jobber onto
+// an existing lead WHOLESALE on every client sync, blanks included. Send to
+// Jobber creates the client with no billing address (it has no field for
+// one), so a website lead that gave a zip but no street was wiped seconds
+// after its send: REQUEST_CREATE arrived, upsertLead copied the empty
+// billing address, and the zip — which zip routing and every territory check
+// read — became null. Proven on 8 leads in the first six days of zip
+// routing, and on Kim Terry and Sarah Jane Paton before it.
+//
+// So on every UPDATE of an existing lead, a blank Jobber value is dropped
+// from the write and ours stands. A REAL Jobber value still wins — an owner
+// correcting an email or an address in Jobber still reaches Bee Hub.
+//
+// The name is the one trap: upsertLead's payload names a nameless client
+// 'Unknown' (UNKNOWN_NAME) so an INSERT is never nameless. That is not a
+// value from Jobber, so it counts as blank here too.
+//
+// Insert is untouched — a brand-new lead has nothing of ours to protect.
+export const JOBBER_PERSON_COLS = ADOPT_FILL_EMPTY_COLS
+
+export function withoutBlankPersonFields<T extends Record<string, any>>(payload: T): Partial<T> {
+  const out: Record<string, any> = { ...payload }
+  for (const col of JOBBER_PERSON_COLS) {
+    if (isBlank(out[col]) || (col === 'name' && out[col] === UNKNOWN_NAME)) delete out[col]
+  }
+  return out as Partial<T>
+}
 
 // The insert–insert race recovery below and the adopt race guard both key
 // off the partial unique index leads_jobber_client_id_location_idx
@@ -871,7 +899,7 @@ async function adoptLead(args: {
         .eq('location_id', payload.location_id)
         .maybeSingle()
       if (winner) {
-        await supabaseService.from('leads').update(payload).eq('id', winner.id)
+        await supabaseService.from('leads').update(withoutBlankPersonFields(payload)).eq('id', winner.id)
         return { id: winner.id, created: false, stage: (winner.stage as string | null) ?? null }
       }
     }
@@ -920,7 +948,7 @@ export async function upsertLead(
     location_id,
     location_uuid,
     jobber_client_id: jobberClientId,
-    name: `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || 'Unknown',
+    name: `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || UNKNOWN_NAME,
     first_name: client.firstName || null,
     last_name:  client.lastName  || null,
     company:    client.companyName || null,
@@ -940,7 +968,8 @@ export async function upsertLead(
     .maybeSingle()
 
   if (existing) {
-    await supabaseService.from('leads').update(payload).eq('id', existing.id)
+    // Jobber may CHANGE the person's details here, never BLANK them.
+    await supabaseService.from('leads').update(withoutBlankPersonFields(payload)).eq('id', existing.id)
     return { id: existing.id, created: false, stage: existing.stage as string | null }
   }
 
@@ -1021,7 +1050,7 @@ export async function upsertLead(
         .eq('location_id', location_id)
         .maybeSingle()
       if (winner) {
-        await supabaseService.from('leads').update(payload).eq('id', winner.id)
+        await supabaseService.from('leads').update(withoutBlankPersonFields(payload)).eq('id', winner.id)
         return { id: winner.id, created: false, stage: winner.stage as string | null }
       }
     }

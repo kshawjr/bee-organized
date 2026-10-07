@@ -139,6 +139,7 @@ import {
   SINGLE_INVOICE_QUERY,
   SINGLE_PROPERTY_QUERY,
   upsertLead,
+  withoutBlankPersonFields,
   upsertServiceRequest,
   upsertAssessment,
   upsertQuote,
@@ -1679,14 +1680,18 @@ async function handlePropertyCore(
     .filter(Boolean)
     .join(', ') || null
 
-  const patch: Record<string, any> = {
+  // The link always moves; the address fields only when Jobber HAS them.
+  // A blank from Jobber never beats a real value of ours (Kevin, 6 Oct 2026 —
+  // see withoutBlankPersonFields in lib/jobber-import): a property saved in
+  // Jobber without a postal code must not erase the zip zip routing reads.
+  const patch: Record<string, any> = withoutBlankPersonFields({
     jobber_property_id: propertyNumeric,
     address: addrJoined,
     city:    a.city       || null,
     state:   a.province   || null,
     zip:     a.postalCode || null,
     updated_at: new Date().toISOString(),
-  }
+  })
   await supabaseService.from('leads').update(patch).eq('id', lead.id)
 
   return {
