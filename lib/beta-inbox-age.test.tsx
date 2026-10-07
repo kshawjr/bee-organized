@@ -144,7 +144,18 @@ describe('age/icon alignment — one center line', () => {
   })
 
   it('anchor rides --text-secondary, the "· relative" hint rides --text-muted, nowrap', () => {
-    const html = renderToString(inbox([person({ created: daysAgo(29) })]))
+    // PINNED to the fixed NOW (4 Jul). The hint only exists for a lead from
+    // THIS year, so on the real clock this test failed every run from 1 Jan
+    // to ~29 Jan, when "29 days ago" falls in December (found 6 Oct 2026 by
+    // running the suite with the clock moved forward). Date only.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    let html: string
+    try {
+      html = renderToString(inbox([person({ created: new Date(NOW - 29 * D).toISOString() })]))
+    } finally {
+      vi.useRealTimers()
+    }
     const age = html.match(/class="bee-inbox-age"[^>]*style="([^"]*)"/)
     expect(age).toBeTruthy()
     expect(age![1]).toContain(`var(--text-secondary, ${TEXT_SECONDARY})`)

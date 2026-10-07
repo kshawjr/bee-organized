@@ -434,6 +434,16 @@ describe('closeStaleEnquiry — what a close writes', () => {
 })
 
 describe('GET /api/cron/auto-close — the route', () => {
+  // THE ROUTE READS THE REAL CLOCK (new Date() in the handler); every world in
+  // this file is built from the fixed NOW above. Unpinned, the two drift apart
+  // a day at a time, and each test passes only while its dates happen to sit
+  // far enough from the 35-day line. "dry_run=1" crossed it on 6 Oct 2026 —
+  // its reach-out, 3 days old at NOW, was 35 days old for real — and failed
+  // on every run from then on. Pin the clock so the route sees the same NOW
+  // the data was built for. Date only: promises and timers stay real.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW) })
+  afterEach(() => { vi.useRealTimers() })
+
   const get = (qs = '', auth = 'Bearer test-secret') =>
     GET(new NextRequest(`http://test/api/cron/auto-close${qs}`, { headers: auth ? { authorization: auth } : {} }))
 
