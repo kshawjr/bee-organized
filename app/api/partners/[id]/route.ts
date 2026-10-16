@@ -15,6 +15,8 @@ import {
   canReadLocation,
   canWriteLocation,
 } from '@/lib/crm'
+import { phoneForWrite } from '@/lib/phone'
+import { recordPhoneNote } from '@/lib/phone-note'
 
 export const runtime = 'nodejs'
 
@@ -86,6 +88,11 @@ export async function PATCH(
   }
   if (body?.restore === true) update.deleted_at = null
 
+  // Same rule as a lead (lib/phone.ts): a second number or words in the
+  // field → the first number is the phone, the original a timeline note.
+  const phoneW = body && 'phone' in body ? phoneForWrite(body.phone) : null
+  if (phoneW) update.phone = phoneW.value
+
   const { data, error } = await supabaseService
     .from('partners')
     .update(update)
@@ -96,6 +103,11 @@ export async function PATCH(
   if (error) {
     console.error('[partners PATCH]', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (phoneW?.note && phoneW.value) {
+    const noted = await recordPhoneNote({ partnerId: id, locationUuid: existing.location_id, original: phoneW.note, kept: phoneW.value })
+    if (!noted.ok) console.error('[partners PATCH] phone note', noted.error)
   }
 
   return NextResponse.json(mapPartnerRow(data))

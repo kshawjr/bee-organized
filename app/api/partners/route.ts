@@ -21,6 +21,8 @@ import {
   canWriteLocation,
 } from '@/lib/crm'
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
+import { phoneForWrite } from '@/lib/phone'
+import { recordPhoneNote } from '@/lib/phone-note'
 
 export const runtime = 'nodejs'
 
@@ -157,6 +159,12 @@ export async function POST(request: NextRequest) {
     created_by: caller.userId,
   }
 
+  // A Network person's phone follows the lead rule (lib/phone.ts): a field
+  // with a second number or words keeps the first number, and the whole
+  // original becomes a note on their timeline once the row exists.
+  const phoneW = body && 'phone' in body ? phoneForWrite(body.phone) : null
+  if (phoneW) row.phone = phoneW.value
+
   const { data, error } = await supabaseService
     .from('partners')
     .insert(row)
@@ -166,6 +174,11 @@ export async function POST(request: NextRequest) {
   if (error) {
     console.error('[partners POST]', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (phoneW?.note && phoneW.value) {
+    const noted = await recordPhoneNote({ partnerId: (data as any).id, locationUuid: locationId, original: phoneW.note, kept: phoneW.value })
+    if (!noted.ok) console.error('[partners POST] phone note', noted.error)
   }
 
   // Tags picked on the create form (body.tagIds — lookups ids from the one

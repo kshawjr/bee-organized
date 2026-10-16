@@ -132,8 +132,9 @@ function mapPatch(patch: Record<string, any>, fieldMap: Record<string, string>) 
     if (clientKey in patch) row[dbKey] = patch[clientKey]
   }
   // Universal phone shape (lib/phone.ts). formatPhone never reduces a field
-  // holding a second number or words — Network writes have nowhere to keep
-  // the rest, so such a field is saved whole.
+  // holding a second number or words, so a COMPANY (no timeline to keep a
+  // note on) saves such a field whole. The partners routes override this
+  // with phoneForWrite + a timeline note, the same as a lead.
   if ('phone' in row) row.phone = formatPhone(row.phone)
   return row
 }

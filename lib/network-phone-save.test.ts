@@ -5,8 +5,10 @@
 // mapping helper, so removing the line from lib/crm.ts (or the partners
 // routes' override) fails here.
 //
-// A company has no timeline, so a field holding two numbers is saved whole
-// and no note is written.
+// And a Network person follows the lead rule for a field holding two
+// numbers (Kevin, 16 Oct 2026): the first is the phone, the whole original
+// is ONE note on their timeline. A company has no timeline, so it saves
+// such a field whole and writes no note.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const LOC = '11111111-2222-4333-8444-555555555555'
@@ -87,6 +89,23 @@ describe('a Network PERSON, through the real routes', () => {
     expect(res.status).toBe(200)
     expect(writes('partners', 'update')[0].phone).toBe('(732) 755-0037')
     expect(writes('touchpoints', 'insert')).toHaveLength(0)
+  })
+  it('create with two numbers: the first is the phone, the original is ONE timeline note', async () => {
+    await partnersPOST(req({ location_id: LOC, name: 'Karen', phone: 'Office 321-348-8720 & cell 407-230-3116' }))
+    expect(writes('partners', 'insert')[0].phone).toBe('(321) 348-8720')
+    const notes = writes('touchpoints', 'insert')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ partner_id: 'p-1', kind: 'note', location_uuid: LOC })
+    expect(notes[0]).not.toHaveProperty('lead_id')
+    expect(notes[0].notes).toContain('Office 321-348-8720 & cell 407-230-3116')
+  })
+  it('edit with two numbers: same — first number, one note', async () => {
+    await partnerPATCH(req({ phone: '407-393-5901 & 407-392-1931' }), params('p-1'))
+    expect(writes('partners', 'update')[0].phone).toBe('(407) 393-5901')
+    const notes = writes('touchpoints', 'insert')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ partner_id: 'p-1', kind: 'note' })
+    expect(notes[0].notes).toContain('407-393-5901 & 407-392-1931')
   })
 })
 
