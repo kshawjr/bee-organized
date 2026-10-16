@@ -3072,7 +3072,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             <div><label style={lbl}>First Name</label><input autoFocus style={inp} placeholder='Sarah' value={form.firstName} onChange={e=>set('firstName',e.target.value)} /></div>
             <div><label style={lbl}>Last Name</label><input style={inp} placeholder='Johnson' value={form.lastName} onChange={e=>set('lastName',e.target.value)} /></div>
           </div>
-          <div><label style={lbl}>Phone</label><input style={{...inp,width:'100%'}} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
+          <div><label style={lbl}>Phone</label><PhoneInput style={{...inp,width:'100%'}} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
           <div>
             <label style={lbl}>Project Type <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>optional</span></label>
             <select style={{...inp,appearance:'none',width:'100%'}} value={form.project} onChange={e=>set('project',e.target.value)}>
@@ -3270,7 +3270,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             <div><label style={lbl}>Last Name</label><input style={inp} placeholder='Mitchell' value={form.lastName} onChange={e=>set('lastName',e.target.value)} /></div>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-            <div><label style={lbl}>Phone</label><input style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
+            <div><label style={lbl}>Phone</label><PhoneInput style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
             <div><label style={lbl}>Email</label><input style={inp} type='email' placeholder='sarah@email.com' value={form.email} onChange={e=>set('email',e.target.value)} /></div>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
@@ -3782,7 +3782,7 @@ function LeadContactEditModal({ person, onSave, onClose }) {
             <div><label style={lbl}>First Name</label><input style={inp} value={vals.firstName} onChange={e=>setVals(p=>({...p,firstName:e.target.value}))} placeholder='Sarah' /></div>
             <div><label style={lbl}>Last Name</label><input style={inp} value={vals.lastName} onChange={e=>setVals(p=>({...p,lastName:e.target.value}))} placeholder='Johnson' /></div>
           </div>
-          <div><label style={lbl}>Phone</label><input style={inp} value={vals.phone} onChange={e=>setVals(p=>({...p,phone:e.target.value}))} placeholder='(303) 555-0000' /></div>
+          <div><label style={lbl}>Phone</label><PhoneInput style={inp} value={vals.phone} onChange={e=>setVals(p=>({...p,phone:e.target.value}))} placeholder='(303) 555-0000' /></div>
           <div><label style={lbl}>Email</label><input style={inp} type='email' value={vals.email} onChange={e=>setVals(p=>({...p,email:e.target.value}))} placeholder='sarah@email.com' /></div>
         </div>
         <div style={{ padding:'12px 20px 20px', display:'flex', gap:'8px' }}>
@@ -9234,8 +9234,8 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
         <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>{label}</p>
         {editingField===fieldKey
           ? <div style={{ display:'flex', gap:'6px' }}>
-              <input autoFocus value={fieldVal} onChange={e=>setFieldVal(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') saveField(fieldKey); if(e.key==='Escape') setEditingField(null) }}
-                style={{ flex:1, padding:'5px 8px', border:'1.5px solid #6366f1', borderRadius:'7px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+              {React.createElement(fieldKey==='phone' ? PhoneInput : 'input', { autoFocus:true, value:fieldVal, onChange:e=>setFieldVal(e.target.value), onKeyDown:e=>{ if(e.key==='Enter') saveField(fieldKey); if(e.key==='Escape') setEditingField(null) },
+                style:{ flex:1, padding:'5px 8px', border:'1.5px solid #6366f1', borderRadius:'7px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' } })}
               <button onClick={()=>saveField(fieldKey)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'12px', color:'white', cursor:'pointer', fontFamily:'inherit' }}>Save</button>
               <button onClick={()=>setEditingField(null)} style={{ padding:'5px 8px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>✕</button>
             </div>
@@ -9453,8 +9453,11 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
             {/* Client Details - editable */}
             <Section title="Client Details">
               <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', padding:'0 14px' }}>
-                <EditableField icon="📞" label="Phone"   fieldKey="phone"   val={person.phone} show={phoneDisplay} />
-                <EditableField icon="✉️" label="Email"   fieldKey="email"   val={person.email} />
+                {/* Called as functions, not <EditableField/>: it is defined inside
+                    this render, so as a component React remounted the input on every
+                    keystroke and the cursor jumped to the end. */}
+                {EditableField({ icon:"📞", label:"Phone", fieldKey:"phone", val:person.phone, show:phoneDisplay })}
+                {EditableField({ icon:"✉️", label:"Email", fieldKey:"email", val:person.email })}
                 {/* Project and Path live on the record overview, not here */}
                 {(person.addresses||[]).filter(a=>a.value).map((addr,i)=>(
                   <div key={i} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
@@ -14946,7 +14949,7 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
           <div><label style={lbl}>Company Name <span style={{ color:'#ef4444' }}>*</span></label><input autoFocus style={inp} placeholder='ABC Moving & Storage' value={form.name} onChange={e=>set('name',e.target.value)} /></div>
           <div><label style={lbl}>Industry</label><input style={inp} placeholder='Moving Services, Real Estate…' value={form.industry} onChange={e=>set('industry',e.target.value)} /></div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-            <div><label style={lbl}>Phone</label><input style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
+            <div><label style={lbl}>Phone</label><PhoneInput style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
             <div><label style={lbl}>Email</label><input style={inp} placeholder='info@company.com' value={form.email} onChange={e=>set('email',e.target.value)} /></div>
           </div>
           <div><label style={lbl}>Website</label><input style={inp} placeholder='company.com' value={form.website} onChange={e=>set('website',e.target.value)} /></div>
@@ -15141,7 +15144,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
             )}
           </div>
           <div><label style={lbl}>Title / Role</label><input style={inp} placeholder={type==='contact'?'Realtor, neighbor, past client…':'Real Estate Agent'} value={form.title} onChange={e=>set('title',e.target.value)} /></div>
-          <div><label style={lbl}>Phone</label><input style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
+          <div><label style={lbl}>Phone</label><PhoneInput style={inp} placeholder='(303) 555-0000' value={form.phone} onChange={e=>set('phone',e.target.value)} /></div>
           <div><label style={lbl}>Email</label><input style={inp} type='email' placeholder='karen@email.com' value={form.email} onChange={e=>set('email',e.target.value)} /></div>
           <div><label style={lbl}>Website <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>optional</span></label><input style={inp} placeholder='company.com' value={form.website} onChange={e=>set('website',e.target.value)} /></div>
           {/* Address toggle */}
@@ -15416,7 +15419,7 @@ function EntityInfoEditModal({ fields, extraFields=null, onSave, onClose }) {
         </div>
         <div style={{ padding:'16px 20px', display:'grid', gap:'14px' }}>
           <ScanCardButton />
-          <div><label style={lbl}>Phone</label><input style={inp} value={vals.phone} onChange={e=>setVals(p=>({...p,phone:e.target.value}))} placeholder='(303) 555-0000' /></div>
+          <div><label style={lbl}>Phone</label><PhoneInput style={inp} value={vals.phone} onChange={e=>setVals(p=>({...p,phone:e.target.value}))} placeholder='(303) 555-0000' /></div>
           <div><label style={lbl}>Email</label><input style={inp} type='email' value={vals.email} onChange={e=>setVals(p=>({...p,email:e.target.value}))} placeholder='name@company.com' /></div>
           <div><label style={lbl}>Website</label><input style={inp} value={vals.website} onChange={e=>setVals(p=>({...p,website:e.target.value}))} placeholder='company.com' /></div>
           {extraFields&&extraFields(vals, setVals, inp, lbl)}
@@ -18218,6 +18221,7 @@ const CLOSED_JOB_ROWS = [
 // resolver so Settings shows the same emails the intake enrols.
 import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
 import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
+import PhoneInput from '@/components/hive/shared/PhoneInput'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.

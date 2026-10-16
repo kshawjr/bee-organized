@@ -138,7 +138,7 @@ export default function NetworkCompanyRecord({
           <SectionLabel>Company</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
             <InlineText label="Industry" value={company.industry} placeholder="add industry" readOnly={readOnly} onSave={v => patch({ industry: v })} />
-            <InlineText label="Phone" value={company.phone} href={telHref(company.phone)} display={displayPhone} placeholder="add phone" readOnly={readOnly} onSave={v => patch({ phone: v })} />
+            <InlineText label="Phone" value={company.phone} href={telHref(company.phone)} display={displayPhone} phone placeholder="add phone" readOnly={readOnly} onSave={v => patch({ phone: v })} />
             <InlineText label="Email" value={company.email} href={company.email ? `mailto:${company.email}` : null} placeholder="add email" readOnly={readOnly} onSave={v => patch({ email: v })} />
             <InlineText label="Website" value={company.website} placeholder="add website" readOnly={readOnly} onSave={v => patch({ website: v })} />
             <InlineText label="Address" value={firstAddress} placeholder="add address" readOnly={readOnly}

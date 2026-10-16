@@ -79,6 +79,7 @@ import { composeLeadAddress } from '@/lib/lead-address'
 import { IconSearch, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend, IconMapPin } from '@/components/ui/icons'
 import { inp, lbl } from './shared/formKit'
 import { T } from './shared/tokens'
+import PhoneInput from './shared/PhoneInput'
 
 const ACCENT = T.accent.fg // THE action accent
 const AMBER = T.family.amber // warning tint (design language)
@@ -586,7 +587,7 @@ export default function NewClientSheet({
             </div>
             <div>
               <label style={lbl}>Phone · optional</label>
-              <input style={inp} type="tel" value={effPhone} onChange={e => set('phone', e.target.value)} aria-label="Phone" />
+              <PhoneInput style={inp} value={effPhone} onChange={e => set('phone', e.target.value)} aria-label="Phone" />
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

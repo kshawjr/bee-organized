@@ -47,6 +47,7 @@ import { EditPencil, InlineEditControls } from './inlineEdit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 import { normalizePhoneDigits } from '@/lib/jobber-contact-writeback'
 import { telHref, displayPhone } from '@/lib/phone'
+import PhoneInput from './PhoneInput'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -67,6 +68,8 @@ const FIELD = {
 
 export default function ContactField({ kind, leadId, value, onSaved = () => {}, setToast = () => {}, readOnly = false }) {
   const f = FIELD[kind]
+  // A phone types through the as-you-type mask (shared/PhoneInput).
+  const Box = kind === 'phone' ? PhoneInput : 'input'
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [err, setErr] = useState(null)
@@ -123,7 +126,7 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
           <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
-          <input
+          <Box
             autoFocus
             type={f.type}
             value={draft}

@@ -47,6 +47,7 @@ import AddressAutofill from './shared/AddressAutofill'
 import { T } from './shared/tokens'
 import TagPickField from './shared/TagPickField'
 import { inp, lbl } from './shared/formKit'
+import PhoneInput from './shared/PhoneInput'
 
 const primaryBtn = (enabled) => ({
   width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
@@ -247,7 +248,7 @@ export default function NetworkAddSheet({
   const sharedContactBlock = (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-        <div><label style={lbl}>Phone · optional</label><input style={inp} type="tel" value={shared.phone} onChange={e => setS('phone', e.target.value)} aria-label="Phone" /></div>
+        <div><label style={lbl}>Phone · optional</label><PhoneInput style={inp} value={shared.phone} onChange={e => setS('phone', e.target.value)} aria-label="Phone" /></div>
         <div><label style={lbl}>Email · optional</label><input style={inp} type="email" value={shared.email} onChange={e => setS('email', e.target.value)} aria-label="Email" /></div>
       </div>
       <div><label style={lbl}>Website · optional</label><input style={inp} value={shared.website} onChange={e => setS('website', e.target.value)} aria-label="Website" /></div>

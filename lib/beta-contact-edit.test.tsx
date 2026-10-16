@@ -194,7 +194,8 @@ describe('ContactField — inline edit save/cancel/validate', () => {
     await click(host.querySelector('p')!)
     await type(input(host)!, '7045550142')
     await key(input(host)!, 'Enter')
-    expect(leadPatches[0].body).toEqual({ phone: '7045550142' })
+    // the phone box masks as it is typed (shared/PhoneInput)
+    expect(leadPatches[0].body).toEqual({ phone: '(704) 555-0142' })
     expect(setToast).toHaveBeenCalledWith({ kind: 'success', msg: 'Phone added' })
     await unmount()
   })
@@ -341,16 +342,20 @@ describe('two mounts, one implementation + cross-view propagation', () => {
     expect(phoneDigits).toBe('7045550142')
   })
 
-  it('formatting-only reformat still saves the display string (PATCH fires; the server-side diff is what keeps Jobber quiet)', async () => {
+  it('retyping the same number in another shape is no change: the box masks it back, nothing saves', async () => {
+    // Was: '561.555.0100' saved as typed and the server-side diff kept Jobber
+    // quiet. The phone box now masks as it is typed (shared/PhoneInput), so
+    // the draft is the stored '(561) 555-0100' again — no PATCH at all.
     const setToast = vi.fn()
     const { host, unmount } = await mount(
       <ContactField kind="phone" leadId="lead-9" value="(561) 555-0100" onSaved={() => {}} setToast={setToast} />
     )
     await click(host.querySelector('p')!)
     await type(input(host)!, '561.555.0100')
+    expect(input(host)!.value).toBe('(561) 555-0100')
     await key(input(host)!, 'Enter')
-    expect(leadPatches[0].body).toEqual({ phone: '561.555.0100' })
-    expect(setToast).toHaveBeenCalledWith({ kind: 'success', msg: 'Phone updated' })
+    expect(leadPatches).toEqual([])
+    expect(setToast).not.toHaveBeenCalled()
     await unmount()
   })
 })

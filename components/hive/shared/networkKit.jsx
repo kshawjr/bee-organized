@@ -17,6 +17,7 @@
 import React, { useState } from 'react'
 import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
+import PhoneInput from './PhoneInput'
 
 // ── pure: badge derivation ───────────────────────────────────
 // referralCount: null = unknown (rollup still loading) — the Refers-us
@@ -130,7 +131,7 @@ export function StageRail({ stage, stages = null, onChange = () => {}, readOnly 
 
 // ── inline-editable text row (the shared inline-edit standard:
 // always-visible ✎, green-✓/✗ pair, Esc cancels) ─────────────
-export function InlineText({ label, value, onSave, href = null, placeholder = 'add', readOnly = false, multiline = false, display = null }) {
+export function InlineText({ label, value, onSave, href = null, placeholder = 'add', readOnly = false, multiline = false, display = null, phone = false }) {
   // display: how the saved value READS (e.g. displayPhone); editing always
   // starts from the stored value.
   const shown = value && display ? display(value) : value
@@ -145,7 +146,8 @@ export function InlineText({ label, value, onSave, href = null, placeholder = 'a
   }
 
   if (editing) {
-    const Input = multiline ? 'textarea' : 'input'
+    // phone: the as-you-type mask (shared/PhoneInput).
+    const Input = phone ? PhoneInput : multiline ? 'textarea' : 'input'
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>{label}</span>

@@ -26,6 +26,7 @@ import { T } from './tokens'
 import { MicroLabel, pillStyle } from './cardKit'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 import { telHref, displayPhone } from '@/lib/phone'
+import PhoneInput from './PhoneInput'
 
 const ROLE_PRESETS = ['Spouse', 'Partner', 'Family member', 'Assistant', 'Property manager', 'Tenant', 'Other']
 
@@ -47,7 +48,7 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
           {draft.role && !ROLE_PRESETS.includes(draft.role) && <option value={draft.role}>{draft.role}</option>}
         </select>
       </div>
-      <input type="tel" value={draft.phone} onChange={set('phone')} placeholder="Phone (optional)" aria-label="Contact phone" style={inputStyle} />
+      <PhoneInput value={draft.phone} onChange={set('phone')} placeholder="Phone (optional)" aria-label="Contact phone" style={inputStyle} />
       <input type="email" value={draft.email} onChange={set('email')} placeholder="Email (optional)" aria-label="Contact email" style={inputStyle} />
       {err && <p style={{ fontSize: '11px', color: T.state.danger.fg }}>{err}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
