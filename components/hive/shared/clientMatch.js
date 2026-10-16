@@ -17,7 +17,8 @@
 // PHONE-STORAGE NOTE (2026-07-04, updated same day post-migration):
 // leads.phone is mixed free-text — bare digits, formatted
 // ("###-###-####"), some with inline text ("3039949176 (stuart)").
-// leads.phone_normalized now exists: a GENERATED digits-only column,
+// leads.phone_normalized now exists: a GENERATED column holding the
+// phoneKey (lib/phone.ts) of phone,
 // indexed — the DB-side gate matches phone_normalized.eq and covers
 // every storage shape; never match raw phone DB-side. Because the
 // column is generated, NEVER include phone_normalized in an insert or
@@ -34,14 +35,14 @@
 //     1000 rows.
 // ─────────────────────────────────────────────────────────────
 
+import { phoneKey } from '@/lib/phone'
+
 export const normalizeEmail = (s) => (s || '').trim().toLowerCase()
-export const normalizePhone = (s) => (s || '').replace(/\D/g, '')
-// Digits with a leading US 1 dropped — two phones are the SAME number
-// only when these are equal.
-const phoneKey = (s) => {
-  const d = normalizePhone(s)
-  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d
-}
+// The phone MATCHING key — lib/phone.ts phoneKey: digits, a leading US 1
+// dropped, an extension's digits kept on the end. Two phones are the SAME number only when
+// these are equal. (Was bare digits until 16 Oct 2026, so "+1 336…" and
+// "336…" never matched: 11 same-location pairs slipped through.)
+export const normalizePhone = (s) => phoneKey(s)
 
 // Masked display for the "matched on <field>" line — enough to confirm
 // it's them, without printing the full value back.
@@ -162,7 +163,10 @@ export function buildLeadMatchOr({ email, phone } = {}) {
   const e = normalizeEmail(email)
   const d = normalizePhone(phone)
   if (e) parts.push(`email.eq."${e.replace(/"/g, '')}"`)
-  if (d) parts.push(`phone_normalized.eq."${d}"`)
+  // Both the 10-digit key and its "1"-prefixed twin: rows saved before
+  // migrations/phone_normalized_drop_leading_one.sql still hold the 1 in
+  // phone_normalized. Harmless once the migration has run.
+  if (d) parts.push(d.length >= 10 ? `phone_normalized.in.("${d}","1${d}")` : `phone_normalized.eq."${d}"`)
   return parts.length ? parts.join(',') : null
 }
 
@@ -212,7 +216,9 @@ export function classifyLeadMatches(rows, { email, phone } = {}) {
     // Re-verify per key: guards against a NULL/empty stored value ever
     // reading as a hit, and attributes WHICH key matched.
     if (e && normalizeEmail(r.email) === e) emailIds.add(r.id)
-    if (d && (r.phone_normalized || '') === d) phoneIds.add(r.id)
+    // The "1"-prefixed twin only matters for rows stored before the
+    // phone_normalized migration ran (see buildLeadMatchOr).
+    if (d && (r.phone_normalized === d || (d.length >= 10 && r.phone_normalized === `1${d}`))) phoneIds.add(r.id)
   }
   const union = new Set([...emailIds, ...phoneIds])
   if (union.size === 0) return { tier: 'none' }

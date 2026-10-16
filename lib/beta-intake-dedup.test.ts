@@ -186,7 +186,7 @@ describe('intake dedup — SOLID auto-merge', () => {
     // The match query ran against phone_normalized — never raw phone.
     const matchCall = callsFor('leads')[0]
     const orArg = opsOf(matchCall, 'or')[0][1][0] as string
-    expect(orArg).toContain('phone_normalized.eq."3039949176"')
+    expect(orArg).toContain('phone_normalized.in.("3039949176","13039949176")')
     expect(orArg).not.toMatch(/(^|,)phone\.eq\./)
 
     // Matched lead had no email → the submitted one fills the gap.

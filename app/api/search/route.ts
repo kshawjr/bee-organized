@@ -26,6 +26,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { PARTNER_COLS, mapPartnerRow } from '@/lib/crm'
 import { TAG_CATEGORIES } from '@/lib/tags'
+import { phoneKey } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -49,10 +50,10 @@ function sanitizeTerm(raw: string): string {
   return raw.replace(/[,()*%_\\.]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
-// Digits-only variant, so "5615550199", "561-555-0199" and "(561) 555-0199" all
-// find the same lead. leads.phone_normalized is the DB-side match key (a
-// GENERATED column — never written directly).
-const digitsOf = (s: string) => s.replace(/\D/g, '')
+// Phone search uses phoneKey (lib/phone.ts), so "5615550199", "561-555-0199",
+// "(561) 555-0199" and "+1 561 555 0199" all find the same lead.
+// leads.phone_normalized is the DB-side match key (a GENERATED column — never
+// written directly).
 
 // ── tag matches (2026-10-15) ─────────────────────────────────────────────────
 // Typing "realtor" must find people TAGGED Realtor, not only names containing
@@ -117,7 +118,8 @@ export async function GET(req: Request) {
   }
 
   const like = `*${term}*`
-  const digits = digitsOf(term)
+  // phoneKey, not bare digits: "+1 336 207" must find a stored 336… number.
+  const digits = phoneKey(term)
   const ors = [
     `name.ilike.${like}`,
     `email.ilike.${like}`,

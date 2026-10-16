@@ -19,6 +19,8 @@
 //   - NEVER *ToDelete. Never touch non-primary entries.
 //   - lead value empty → field omitted (we never erase Jobber-side data).
 
+import { phoneKey } from '@/lib/phone'
+
 export type ContactFieldOutcome = 'updated' | 'added' | 'unchanged' | 'failed'
 
 export interface ContactWriteback {
@@ -38,10 +40,9 @@ interface JobberEmail { id?: string | null; address?: string | null; primary?: b
 
 // Digits-only comparison key. US country-code prefix is formatting, not
 // identity: "+1 (413) 297-8444" and "4132978444" are the same number.
+// Now the shared lib/phone.ts phoneKey (an extension's digits stay on the end).
 export function normalizePhoneDigits(raw: string | null | undefined): string {
-  const digits = String(raw ?? '').replace(/\D+/g, '')
-  if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1)
-  return digits
+  return phoneKey(raw)
 }
 
 export function normalizeEmail(raw: string | null | undefined): string {
