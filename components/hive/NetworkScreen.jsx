@@ -45,6 +45,7 @@ import {
   stageFamilyKey, matchesTags, tagOptionsInUse, companiesWithMatchingPeople,
 } from './shared/networkGroups'
 import { tagText } from './shared/tagText'
+import { sectionTags } from '@/lib/tags'
 import { CHIP_STYLES } from './shared/stageConfig'
 import PickALocation from './shared/PickALocation'
 
@@ -218,6 +219,8 @@ export default function NetworkScreen({
   const tagOptions = useMemo(() => tagOptionsInUse(tags, scopedPartners), [tags, scopedPartners])
   const tagNeedle = tagSearch.trim().toLowerCase()
   const shownTagOptions = tagOptions.filter(t => !tagNeedle || t.label.toLowerCase().includes(tagNeedle) || tagFilter.includes(t.id))
+  // Relationship (list order) then Trade (A–Z), as in every tag picker.
+  const shownTagSections = useMemo(() => sectionTags(shownTagOptions), [shownTagOptions])
 
   // ── stats ──
   const stats = useMemo(() => networkStats({ partners: scopedPartners, companies: scopedCompanies, totals: summary?.totals ?? null, nowMs }), [scopedPartners, scopedCompanies, summary]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -321,8 +324,13 @@ export default function NetworkScreen({
                     style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', marginBottom: '6px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '12px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }}
                   />
                   <div data-testid="network-tag-options" style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                    {shownTagOptions.map(t => (
-                      <CheckRow key={t.id} label={`${tagText(t)} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
+                    {shownTagSections.map(sec => (
+                      <div key={sec.key} data-section={sec.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+                        <p style={{ fontSize: '10px', fontWeight: 500, color: T.ink.quiet, letterSpacing: '0.4px', textTransform: 'uppercase', margin: 0 }}>{sec.label}</p>
+                        {sec.rows.map(t => (
+                          <CheckRow key={t.id} label={`${tagText(t)} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
+                        ))}
+                      </div>
                     ))}
                     {shownTagOptions.length === 0 && (
                       <p style={{ fontSize: '11px', color: T.ink.quiet }}>No tag matches “{tagSearch.trim()}”</p>

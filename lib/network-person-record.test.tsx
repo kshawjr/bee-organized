@@ -416,9 +416,10 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
   }
   const TAG_LOOKUPS = {
     lookups: [
-      { id: 't-realtor', label: 'Realtor', icon: '🏠', category: 'tags', location_id: null, is_active: true, attrs: { key: 'real-estate' } },
-      { id: 't-senior', label: 'Senior Living', icon: '🏥', category: 'tags', location_id: null, is_active: true, attrs: { key: 'senior-living' } },
-      { id: 't-partner', label: 'Partner', icon: null, category: 'tags', location_id: null, is_active: true, attrs: {} },
+      { id: 't-realtor', label: 'Realtor', icon: '🏠', category: 'tags', location_id: null, is_active: true, sort_order: 2010, attrs: { key: 'real-estate', section: 'trade' } },
+      // NO section on purpose — it must still show, under Trade.
+      { id: 't-senior', label: 'Senior Living', icon: '🏥', category: 'tags', location_id: null, is_active: true, sort_order: 2190, attrs: { key: 'senior-living' } },
+      { id: 't-partner', label: 'Partner', icon: null, category: 'tags', location_id: null, is_active: true, sort_order: 3010, attrs: { section: 'relationship' } },
     ],
     location: { id: 'loc-1', name: 'Denver' },
   }
@@ -464,8 +465,16 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
       Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, '')
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })
+    // Two sections, driven by attrs.section: Relationship first, then
+    // Trade A–Z. Senior Living has NO section and still shows — under Trade.
     // Options draw each tag's own icon; Partner (none) reads bare.
-    expect([...dialog.querySelectorAll('[role="checkbox"]')].map(b => b.textContent!.trim())).toEqual(['🏠 Realtor', '🏥 Senior Living', 'Partner'])
+    const inSection = (key: string) => [...dialog.querySelectorAll(`[data-section="${key}"] [role="checkbox"]`)].map(b => b.textContent!.trim())
+    expect([...dialog.querySelectorAll('[data-section]')].map(s => s.getAttribute('data-section'))).toEqual(['relationship', 'trade'])
+    expect(inSection('relationship')).toEqual(['Partner'])
+    expect(inSection('trade')).toEqual(['🏠 Realtor', '🏥 Senior Living'])
+    expect(dialog.querySelector('[data-section="relationship"]')!.textContent).toContain('What they are to you')
+    expect(dialog.querySelector('[data-section="trade"]')!.textContent).toContain('What they do')
+    expect(dialog.textContent).not.toContain('Corporate standard')
     const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === '🏥 Senior Living')!
     await act(async () => { row.click() })
     const save = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Save')!

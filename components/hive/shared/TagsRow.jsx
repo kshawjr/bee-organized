@@ -120,6 +120,7 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
           selected={tags.map(t => t.id)}
           mode="multi"
           showIcons
+          sections
           title="Tags"
           subtitle="One list for clients and Network people"
           onSave={saveSelection}

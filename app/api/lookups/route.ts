@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { TAG_CATEGORY, TAG_CATEGORIES } from '@/lib/tags'
+import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS } from '@/lib/tags'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -226,6 +226,12 @@ export async function POST(req: NextRequest) {
       label: label.trim(),
       sort_order: nextSortOrder,
       attrs: attrs && typeof attrs === 'object' ? attrs : {},
+    }
+    // A tag always carries a valid section (lib/tags.ts). The Configure tab
+    // makes corporate choose; anything else reaching here lands in Trade —
+    // the same place a section-less tag shows.
+    if (category === TAG_CATEGORY && !TAG_SECTIONS.some((s) => s.key === insert.attrs.section)) {
+      insert.attrs = { ...insert.attrs, section: 'trade' }
     }
     if (location_id != null) insert.location_id = location_id
     if (typeof color       === 'string') insert.color       = color.trim()       || null

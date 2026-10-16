@@ -1213,7 +1213,9 @@ const TAG_CATEGORY_OFFSET = { client_tags: 1000, partner_specialties: 2000, part
 function tagSortKey(row) { return (TAG_CATEGORY_OFFSET[row.category] || 0) + (row.sort_order || 0) }
 function toTagListShape(rows) {
   return rows.slice().sort((a, b) => tagSortKey(a) - tagSortKey(b))
-    .map(r => ({ id: r.id, label: r.label, icon: r.icon || null, key: (r.attrs && r.attrs.key) || null }))
+    .map(r => ({ id: r.id, label: r.label, icon: r.icon || null, key: (r.attrs && r.attrs.key) || null,
+      // Relationship / Trade (lib/tags.ts) — read straight off the row's data.
+      section: (r.attrs && r.attrs.section) || null, sort_order: tagSortKey(r) }))
 }
 let _tagList = []
 function getTagList() { return _tagList }
@@ -30408,7 +30410,9 @@ const LOOKUP_CATEGORIES_CONFIG = {
     label: 'Tags',
     desc: 'One list for clients and Network people. Owners pick from it; only corporate adds to it',
     section: 'TAGS',
-    fields: ['label', 'color', 'icon'],
+    // tag_section: Relationship (what they are to you) or Trade (what they
+    // do) — every tag picker splits the list by it (lib/tags.ts).
+    fields: ['label', 'color', 'icon', 'tag_section'],
     defaultColor: '#6366f1',
     syncGetter: 'tags',
   },
@@ -30528,6 +30532,13 @@ function LookupRow({ row, config, isFirst, isLast, busy, onEdit, onMoveUp, onMov
         {config.fields.includes('description') && row.description && (
           <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>{row.description}</p>
         )}
+        {config.fields.includes('tag_section') && (
+          <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>
+            Section: <span style={{ fontWeight: 600, color: '#1a2e2b' }}>
+              {row.attrs && row.attrs.section === 'relationship' ? 'Relationship' : row.attrs && row.attrs.section === 'trade' ? 'Trade' : 'Trade (not set)'}
+            </span>
+          </p>
+        )}
         {config.fields.includes('drip_category') && row.attrs && row.attrs.drip_category && (
           <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>
             Drip: <span style={{ fontWeight: 600, color: row.attrs.drip_category === 'move' ? '#0ea5e9' : '#1a2e2b' }}>
@@ -30568,8 +30579,12 @@ function LookupForm({ row, config, busy, onSave, onCancel }) {
   const [icon, setIcon]   = useState(row?.icon || '')
   const [description, setDescription] = useState(row?.description || '')
   const [dripCategory, setDripCategory] = useState((row?.attrs && row?.attrs.drip_category) || 'general')
+  // Tags: Relationship or Trade. Required — a new tag starts unchosen so it
+  // can't land in the wrong section by default.
+  const [tagSectionValue, setTagSectionValue] = useState((row?.attrs && (row.attrs.section === 'relationship' || row.attrs.section === 'trade')) ? row.attrs.section : '')
+  const needsSection = config.fields.includes('tag_section')
 
-  const canSave = label.trim().length > 0 && !busy
+  const canSave = label.trim().length > 0 && !busy && (!needsSection || !!tagSectionValue)
 
   function submit() {
     if (!canSave) return
@@ -30582,6 +30597,14 @@ function LookupForm({ row, config, busy, onSave, onCancel }) {
     if (config.fields.includes('description')) payload.description = description.trim()
     if (config.fields.includes('drip_category')) {
       payload.attrs = { ...(row?.attrs || {}), drip_category: dripCategory }
+    }
+    // Spread the row's attrs: a PATCH replaces attrs whole, and a tag's
+    // slug (key) and merge markers live there too. section_set_by is
+    // dropped — a person has now set this section, so the migration's
+    // undo (tag_sections_undo.sql) must leave it alone.
+    if (needsSection) {
+      const { section_set_by, ...keep } = (row?.attrs || {})
+      payload.attrs = { ...keep, section: tagSectionValue }
     }
     onSave(payload)
   }
@@ -30652,6 +30675,24 @@ function LookupForm({ row, config, busy, onSave, onCancel }) {
           >
             <option value="general">Organizing drip</option>
             <option value="move">Move drip</option>
+          </select>
+        )}
+        {needsSection && (
+          <select
+            aria-label="Tag section"
+            value={tagSectionValue}
+            onChange={e => setTagSectionValue(e.target.value)}
+            style={{
+              padding: '7px 10px',
+              border: `1.5px solid ${tagSectionValue ? 'rgba(0,0,0,0.1)' : 'rgba(239,68,68,0.45)'}`,
+              borderRadius: 7,
+              fontSize: 13, fontFamily: 'inherit',
+              outline: 'none', background: 'white',
+            }}
+          >
+            <option value="" disabled>Section…</option>
+            <option value="relationship">Relationship — what they are to you</option>
+            <option value="trade">Trade — what they do</option>
           </select>
         )}
       </div>

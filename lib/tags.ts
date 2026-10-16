@@ -62,3 +62,40 @@ export function cleanTagIds(raw: unknown): string[] {
   }
   return out
 }
+
+// ── Sections (2026-10-15, Kevin) ─────────────────────────────
+// Every place a tag is PICKED shows the one list in two sections:
+//   relationship — what the person is to you (Hot Lead, VIP, Vendor…),
+//                  in the list's own order (sort_order)
+//   trade        — what they do (Realtor, Mover…), alphabetical
+// A tag's section is DATA, not a list of names: lookups.attrs.section,
+// written by migrations/tag_sections.sql for the existing tags and chosen
+// on the Configure tab for a new one. A tag with NO section (or an
+// unrecognised one) shows under Trade — it never vanishes from a picker.
+export const TAG_SECTIONS = [
+  { key: 'relationship', label: 'Relationship', hint: 'What they are to you' },
+  { key: 'trade', label: 'Trade', hint: 'What they do' },
+] as const
+export type TagSectionKey = (typeof TAG_SECTIONS)[number]['key']
+
+export function tagSection(tag: { attrs?: any; section?: any } | null | undefined): TagSectionKey {
+  const s = tag?.section ?? tag?.attrs?.section
+  return s === 'relationship' ? 'relationship' : 'trade'
+}
+
+// Split tag rows into the two sections, each ordered its own way; a
+// section with no rows is left out. Rows are lookups-shaped
+// ({ label, sort_order?, attrs? }) or the list shape ({ label, section }).
+export function sectionTags<T extends { label: string; sort_order?: number | null }>(rows: T[]) {
+  const bySort = (a: T, b: T) =>
+    ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || a.label.localeCompare(b.label)
+  const byLabel = (a: T, b: T) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+  return TAG_SECTIONS
+    .map((s) => ({
+      key: s.key,
+      label: s.label,
+      hint: s.hint,
+      rows: rows.filter((r) => tagSection(r as any) === s.key).sort(s.key === 'relationship' ? bySort : byLabel),
+    }))
+    .filter((s) => s.rows.length > 0)
+}

@@ -184,6 +184,24 @@ describe('/api/lookups POST — the one tag list is corporate-only', () => {
     expect(insert.payload.category).toBe('tags')
     expect(insert.payload.location_id).toBeUndefined()
     expect(insert.payload.sort_order).toBe(4000)
+    // No section sent → Trade, so the new tag shows in every picker.
+    expect(insert.payload.attrs.section).toBe('trade')
+  })
+
+  it.each([
+    ['relationship', 'relationship'],
+    ['trade', 'trade'],
+    ['nonsense', 'trade'],
+  ])('a new tag sent with section %s is stored as %s', async (sent, stored) => {
+    h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'lookups' && ctx.op === 'insert') return { data: { id: 'new-1', ...ctx.payload }, error: null }
+      return { data: null, error: null }
+    }
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Mentor', attrs: { section: sent, key: 'mentor' } }))
+    expect(res.status).toBe(200)
+    const insert = h.state.calls.find((c: any) => c.table === 'lookups' && c.op === 'insert')
+    expect(insert.payload.attrs).toEqual({ section: stored, key: 'mentor' })
   })
 
   it('a corporate tag whose name is already in the one list (any pre-merge category) is 409', async () => {

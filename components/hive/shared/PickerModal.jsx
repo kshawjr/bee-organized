@@ -35,6 +35,10 @@
 //   maxSelected — multi only: cap; the blocked toggle explains itself
 //                 BEFORE save, never a post-save surprise (step 2B, the
 //                 8-specialty cap the conversion route enforces)
+//   sections    — tags: group the options into Relationship (list order)
+//                 and Trade (A–Z) by each row's attrs.section (lib/tags.ts)
+//                 instead of corporate / location's own. A row with no
+//                 section shows under Trade — never dropped.
 //   showIcons   — draw each option's own icon before its label (tags:
 //                 "🏠 Realtor"). Off by default — tier and stage rows
 //                 carry icons too, and those pickers never showed them.
@@ -51,6 +55,7 @@ import { T } from './tokens'
 import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
 import { tagText } from './tagText'
+import { sectionTags } from '@/lib/tags'
 
 export default function PickerModal({
   category,
@@ -60,6 +65,7 @@ export default function PickerModal({
   allowCreate = false,
   maxSelected = null,
   showIcons = false,
+  sections = false,
   title = 'Choose',
   subtitle = null,
   onSave = () => {},
@@ -126,6 +132,13 @@ export default function PickerModal({
   const own = useMemo(
     () => (options || []).filter(o => o.location_id && o.location_id === locationId && matches(o)),
     [options, needle, locationId] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+  // Tags: Relationship / Trade instead of corporate / own (both kinds of
+  // row go into whichever section they belong to).
+  const sectioned = useMemo(
+    () => (sections ? sectionTags([...corporate, ...own]) : null),
+    [sections, corporate, own]
   )
 
   // The create row shows only when the trimmed text matches NO existing
@@ -245,7 +258,24 @@ export default function PickerModal({
 
         <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', margin: '12px -8px 0', padding: '0 8px', flex: 1, minHeight: '80px' }}>
           {options == null && <p style={{ fontSize: '12px', color: T.ink.quiet, padding: '8px 0' }}>Loading…</p>}
-          {options != null && (
+          {options != null && sectioned && (
+            <>
+              {sectioned.map((sec, i) => (
+                <div key={sec.key} data-section={sec.key}
+                  style={{ borderTop: i > 0 ? T.border.divider : 'none', paddingTop: i > 0 ? '10px' : 0, marginBottom: '12px' }}>
+                  {groupHeader(sec.label)}
+                  <p style={{ fontSize: '11px', color: T.ink.quiet, margin: '-2px 0 4px' }}>{sec.hint}</p>
+                  {sec.rows.map(optionRow)}
+                </div>
+              ))}
+              {sectioned.length === 0 && (
+                <p style={{ fontSize: '12px', color: T.ink.quiet, padding: '8px 0' }}>
+                  {needle ? 'No matches' : 'No options yet'}
+                </p>
+              )}
+            </>
+          )}
+          {options != null && !sectioned && (
             <>
               {corporate.length > 0 && (
                 <div style={{ marginBottom: own.length > 0 || showCreate ? '12px' : 0 }}>

@@ -71,16 +71,18 @@ export function companiesWithMatchingPeople(companies = [], people = []) {
   return companies.filter((c) => ids.has(c.id))
 }
 
-// The filter's options: only tags someone in view actually carries, most
-// used first, then by label — the list an owner can act on, with counts.
-// tags: [{ id, label, icon }] (the one list); partners: the in-scope people.
+// The filter's options: only tags someone in view actually carries, with
+// counts — the list an owner can act on. Each keeps its section and
+// sort_order so the screen can split them into Relationship / Trade the
+// same way the picker does (lib/tags.ts sectionTags).
+// tags: [{ id, label, icon, section, sort_order }] (the one list);
+// partners: the in-scope people.
 export function tagOptionsInUse(tags = [], partners = []) {
   const counts = new Map()
   for (const p of partners) for (const id of p?.tagIds || []) counts.set(id, (counts.get(id) || 0) + 1)
   return tags
     .filter((t) => counts.has(t.id))
-    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, count: counts.get(t.id) }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, section: t.section ?? null, sort_order: t.sort_order ?? 0, count: counts.get(t.id) }))
 }
 
 // ── mixed-row assembly ───────────────────────────────────────

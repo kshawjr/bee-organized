@@ -140,3 +140,18 @@ describe('F) regression: Partner Tiers stays wired', () => {
     expect(UI).not.toMatch(/\bPARTNER_TIERS\.find\b/)
   })
 })
+
+describe('G) Configure: a tag needs a section', () => {
+  const form = SRC.slice(SRC.indexOf('function LookupForm'), SRC.indexOf('function LookupForm') + 9000)
+  it('the Tags tile edits a section', () => {
+    expect(SRC).toMatch(/fields: \['label', 'color', 'icon', 'tag_section'\]/)
+  })
+  it('a new tag starts with NO section chosen and cannot be saved until one is', () => {
+    expect(form).toMatch(/useState\(\(row\?\.attrs && \(row\.attrs\.section === 'relationship' \|\| row\.attrs\.section === 'trade'\)\) \? row\.attrs\.section : ''\)/)
+    expect(form).toMatch(/canSave = [^\n]*\(!needsSection \|\| !!tagSectionValue\)/)
+  })
+  it("saving keeps the tag's other attrs and drops the migration marker", () => {
+    expect(form).toMatch(/const \{ section_set_by, \.\.\.keep \} = \(row\?\.attrs \|\| \{\}\)/)
+    expect(form).toMatch(/payload\.attrs = \{ \.\.\.keep, section: tagSectionValue \}/)
+  })
+})

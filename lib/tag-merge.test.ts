@@ -26,7 +26,7 @@ vi.mock('@/lib/supabase-service', () => ({
   },
 }))
 
-import { TAG_CATEGORIES, isTagCategory, tagApplyError, cleanTagIds, MAX_TAGS_PER_CREATE } from '@/lib/tags'
+import { TAG_CATEGORIES, isTagCategory, tagApplyError, cleanTagIds, MAX_TAGS_PER_CREATE, tagSection, sectionTags } from '@/lib/tags'
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { mapPartnerRow, partnerPatchToRow, PARTNER_COLS } from '@/lib/crm'
 import { PARTNER_PATCH_FIELDS, computePartnerPatch } from '@/lib/partner-writes'
@@ -138,5 +138,37 @@ describe("E) a tag reads as its own icon + label", () => {
     expect(tagText({ label: 'Partner' })).toBe('Partner')
     expect(tagText({ label: 'Lead', icon: '  ' })).toBe('Lead')
     expect(tagText(null)).toBe('')
+  })
+})
+
+describe('F) sections: Relationship and Trade, driven by attrs.section', () => {
+  it('a tag with NO section, or one the app does not know, is Trade — it never vanishes', () => {
+    expect(tagSection({ attrs: {} })).toBe('trade')
+    expect(tagSection({})).toBe('trade')
+    expect(tagSection(null)).toBe('trade')
+    expect(tagSection({ attrs: { section: 'nonsense' } })).toBe('trade')
+    expect(tagSection({ attrs: { section: 'relationship' } })).toBe('relationship')
+    expect(tagSection({ section: 'relationship' })).toBe('relationship')   // the list shape
+  })
+
+  it('Relationship keeps list order, Trade goes A–Z, and a section-less tag lands in Trade', () => {
+    const rows = [
+      { label: 'Vendor', sort_order: 3020, attrs: { section: 'relationship' } },
+      { label: 'Hot Lead', sort_order: 1010, attrs: { section: 'relationship' } },
+      { label: 'Realtor', sort_order: 2010, attrs: { section: 'trade' } },
+      { label: 'Brand New', sort_order: 9999, attrs: {} },
+      { label: 'Assisted Living', sort_order: 2200, attrs: { section: 'trade' } },
+    ]
+    const out = sectionTags(rows)
+    expect(out.map(s => [s.key, s.rows.map(r => r.label)])).toEqual([
+      ['relationship', ['Hot Lead', 'Vendor']],
+      ['trade', ['Assisted Living', 'Brand New', 'Realtor']],
+    ])
+    expect(out.reduce((n, s) => n + s.rows.length, 0)).toBe(rows.length)   // nothing dropped
+  })
+
+  it('a section with no tags is left out', () => {
+    expect(sectionTags([{ label: 'Realtor', attrs: { section: 'trade' } }]).map(s => s.key)).toEqual(['trade'])
+    expect(sectionTags([])).toEqual([])
   })
 })

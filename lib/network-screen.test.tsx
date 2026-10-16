@@ -50,6 +50,7 @@ const TAGS = [
   { id: 't-realtor', label: 'Realtor', icon: '🏠', key: 'real-estate' },
   { id: 't-senior', label: 'Senior Living', icon: null, key: 'senior-living' },
   { id: 't-mover', label: 'Mover', icon: '📦', key: 'moving-company' },   // nobody carries it
+  { id: 't-vendor', label: 'Vendor', icon: '🧰', key: 'vendor', section: 'relationship', sort_order: 3020 },
 ]
 
 const PARTNERS = [
@@ -200,6 +201,15 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     await openFilters()
     const opts = [...host.querySelectorAll('[data-testid="network-tag-options"] button')].map(b => b.textContent)
     expect(opts).toEqual(['🏠 Realtor (2)', 'Senior Living (1)'])   // Mover: nobody carries it
+  })
+
+  it('options split into Relationship then Trade; tags with no section show under Trade', async () => {
+    await mount({ partners: PARTNERS.map(p => (p.id === 'p3' ? { ...p, tagIds: ['t-vendor'] } : p)) })
+    await openFilters()
+    const opts = (key: string) => [...host.querySelectorAll(`[data-testid="network-tag-options"] [data-section="${key}"] button`)].map(b => b.textContent)
+    expect([...host.querySelectorAll('[data-testid="network-tag-options"] [data-section]')].map(s => s.getAttribute('data-section'))).toEqual(['relationship', 'trade'])
+    expect(opts('relationship')).toEqual(['🧰 Vendor (1)'])
+    expect(opts('trade')).toEqual(['🏠 Realtor (2)', 'Senior Living (1)'])   // neither carries a section
   })
 
   it('the search box narrows the options', async () => {
