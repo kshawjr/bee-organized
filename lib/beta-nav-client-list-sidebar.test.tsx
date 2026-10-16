@@ -87,7 +87,8 @@ const tabLabels = (host: Element) =>
 // so it is how "the client list is actually on screen" is asserted rather than
 // "the screen is not blank".
 const clientListShowing = (host: Element) =>
-  !!host.querySelector('input[placeholder="Search name, email, phone…"]')
+  // The Everyone search box (its placeholder grew ", tag…" when tags joined the search).
+  !!host.querySelector('input[placeholder^="Search name, email, phone"]')
 
 // ═══════════════════════════════════════════════════════════
 // The two renames.

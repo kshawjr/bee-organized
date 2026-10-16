@@ -221,6 +221,10 @@ export default function HiveShell({
   // partners state (PartnersScreen) shows it without a reload. The
   // picker never touches PartnersContext (§8.5).
   onPartnerCreated = null,
+  // THE one tag list [{ id, label, icon, section, sort_order }] — BeeHub's
+  // getTagList(), the same list the Network tab gets. Everyone's tag filter
+  // and tag search read it.
+  tags = [],
   setToast = () => {},
   onExitBeta = () => {},
   // Read-only mode (868kawwmh) — lite_user or paused/inactive location.
@@ -953,6 +957,7 @@ export default function HiveShell({
           locFilter={locFilter}
           locations={locations}
           onOpenClient={openClient}
+          tags={tags}
         />
       ) : engView === 'list' ? (
         <EngagementGroupedList

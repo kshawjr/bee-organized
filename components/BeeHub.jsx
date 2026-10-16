@@ -10093,6 +10093,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // merge it into the same partners state PartnersScreen reads so it
           // shows in Classic's Partners/Contacts tabs without a reload.
           onPartnerCreated={(row)=>{ hivePartnersCtx?.mergePartner?.(row) }}
+          tags={getTagList()}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           // URL id the beta board's open client should reflect. HiveShell
@@ -29930,7 +29931,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
           <div style={{ padding:'2.5rem', textAlign:'center', color:'#b0c0bc' }}>
             <p style={{ fontSize:'32px', marginBottom:'10px' }}>🔍</p>
             <p style={{ fontSize:'14px', fontWeight:500, color:'#8a9e9a' }}>Searching {scopeLabel}</p>
-            <p style={{ fontSize:'12px', marginTop:'4px' }}>Name, phone, email, project type</p>
+            <p style={{ fontSize:'12px', marginTop:'4px' }}>Name, phone, email, project type, tag</p>
           </div>
         )}
         {q && !hasResults && (
@@ -29956,7 +29957,10 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                   // REAL locations roster — the old lookup read ALL_LOCATIONS,
                   // the mock array, and therefore showed nothing for real data.
                   const locName = p.locationName || locationsById[p.locationId] || null
-                  const sub = [p.project, locName, p.phone || p.email].filter(Boolean).join(' · ')
+                  // A hit found BY A TAG says so ("tagged 🏠 Realtor") — the name
+                  // may not contain the search at all (/api/search matchedTag).
+                  const tagWhy = p.matchedTag ? `tagged ${p.matchedTag.icon ? p.matchedTag.icon + ' ' : ''}${p.matchedTag.label}` : null
+                  const sub = [tagWhy, p.project, locName, p.phone || p.email].filter(Boolean).join(' · ')
                   return (
                     <button key={p.id} onClick={()=>{ onSelectPerson(p); onClose() }} style={{ width:'100%', padding:'14px 20px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                       <div style={{ width:'42px', height:'42px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:700, color:'white', flexShrink:0 }}>
@@ -30003,7 +30007,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                     </div>
                     <div style={{ flex:1, minWidth:0 }}>
                       <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px' }}>{p.name}</p>
-                      <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{p.title}{p.company?` · ${p.company}`:''}</p>
+                      <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{[p.matchedTag ? `tagged ${p.matchedTag.icon ? p.matchedTag.icon + ' ' : ''}${p.matchedTag.label}` : null, p.title, p.company].filter(Boolean).join(' · ')}</p>
                     </div>
                     {locName && (
                       <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.05)', color:'#5a6e6a', fontWeight:600, flexShrink:0, maxWidth:'40%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>📍 {locName}</span>

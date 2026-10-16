@@ -45,6 +45,10 @@ const LEAD_COL_TO_PERSON_FIELD = {
   // `address` col the field PATCHes is the full display string, so the
   // flat field stays correct on its own.
   address: 'address',
+  // NOT a column: the client record's Tags row hands its link ids up here
+  // after /api/lead-tags has written them, so Everyone's tag filter and
+  // tag search reflect the change without a reload (same seam as above).
+  tag_ids: 'tagIds',
 }
 
 export function leadColsToPersonFields(cols) {

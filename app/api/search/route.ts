@@ -25,6 +25,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { PARTNER_COLS, mapPartnerRow } from '@/lib/crm'
+import { TAG_CATEGORIES } from '@/lib/tags'
 
 export const runtime = 'nodejs'
 
@@ -46,6 +47,42 @@ function sanitizeTerm(raw: string): string {
 // find the same lead. leads.phone_normalized is the DB-side match key (a
 // GENERATED column — never written directly).
 const digitsOf = (s: string) => s.replace(/\D/g, '')
+
+// ── tag matches (2026-10-15) ─────────────────────────────────────────────────
+// Typing "realtor" must find people TAGGED Realtor, not only names containing
+// the word. Active tags from THE one list (lib/tags.ts) whose name contains the
+// term — corporate, plus the caller's own location's (an elevated caller: any
+// location's, as with every other hit). The people behind them are then read
+// through the SAME fence as the name search. Each such hit says which tag it
+// matched on, so a result named "Karen Pell" for "realtor" is not a mystery.
+// Name matches always come first; a tag hit never pushes one out.
+type TagHit = { id: string; label: string; icon: string | null }
+async function matchingTags(term: string, scopeUuid: string | null): Promise<TagHit[]> {
+  let tq = supabaseService
+    .from('lookups')
+    .select('id, label, icon')
+    .in('category', TAG_CATEGORIES)
+    .eq('is_active', true)
+    .ilike('label', `%${term}%`)
+    .limit(20)
+  tq = scopeUuid ? tq.or(`location_id.is.null,location_id.eq.${scopeUuid}`) : tq
+  const { data, error } = await tq
+  if (error) {
+    console.error('[search] tag lookup failed:', error.message)
+    return []
+  }
+  return (data || []).map((t: any) => ({ id: t.id, label: t.label, icon: t.icon || null }))
+}
+// First matched tag per record id, from a junction's rows.
+function firstTagBy(rows: any[], idCol: string, tags: TagHit[]): Map<string, TagHit> {
+  const byId = new Map(tags.map((t) => [t.id, t]))
+  const out = new Map<string, TagHit>()
+  for (const r of rows || []) {
+    const t = byId.get(r.tag_lookup_id)
+    if (t && !out.has(r[idCol])) out.set(r[idCol], t)
+  }
+  return out
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -94,10 +131,40 @@ export async function GET(req: Request) {
     .limit(LIMIT)
   if (scopeUuid) q = q.eq('location_uuid', scopeUuid)
 
-  const { data, error } = await q
+  const { data: nameRows, error } = await q
   if (error) {
     console.error('[search] lead search failed:', error.message)
     return NextResponse.json({ error: 'search_failed', detail: error.message }, { status: 500 })
+  }
+
+  // Tag hits — clients tagged with a matching tag, fenced exactly like the
+  // name search, appended after the name matches up to the same LIMIT.
+  // Non-fatal: a failure here leaves the name results standing.
+  const tagHits = await matchingTags(term, scopeUuid)
+  const tagByLead = new Map<string, TagHit>()
+  let data: any[] = nameRows || []
+  if (tagHits.length > 0 && data.length < LIMIT) {
+    const { data: links, error: linkErr } = await supabaseService
+      .from('lead_tags').select('lead_id, tag_lookup_id')
+      .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(1000)
+    if (linkErr) console.error('[search] lead tag links failed:', linkErr.message)
+    const first = firstTagBy(links || [], 'lead_id', tagHits)
+    const have = new Set(data.map((r: any) => r.id))
+    const wanted = Array.from(first.keys()).filter((id) => !have.has(id))
+    if (wanted.length > 0) {
+      let tq = supabaseService
+        .from('leads')
+        .select('id, name, email, phone, location_uuid, location_id, is_junk')
+        .not('is_junk', 'is', true)
+        .in('id', wanted.slice(0, 500))
+        .order('created_at', { ascending: false })
+        .limit(LIMIT - data.length)
+      if (scopeUuid) tq = tq.eq('location_uuid', scopeUuid)
+      const { data: tagged, error: taggedErr } = await tq
+      if (taggedErr) console.error('[search] tagged lead read failed:', taggedErr.message)
+      for (const r of tagged || []) tagByLead.set(r.id, first.get(r.id)!)
+      data = [...data, ...(tagged || [])]
+    }
   }
 
   // Partners (the Network tab's rows) ride the same fence: every location for
@@ -123,6 +190,31 @@ export async function GET(req: Request) {
     const { data: partnerRows, error: partnerErr } = await pq
     if (partnerErr) console.error('[search] partner search failed:', partnerErr.message)
     else partnerHits = (partnerRows || []).map(mapPartnerRow)
+
+    // Tag hits — Network people tagged with a matching tag, same fence,
+    // after the name matches, up to PARTNER_LIMIT.
+    if (!partnerErr && tagHits.length > 0 && partnerHits.length < PARTNER_LIMIT) {
+      const { data: links, error: linkErr } = await supabaseService
+        .from('partner_tags').select('partner_id, tag_lookup_id')
+        .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(1000)
+      if (linkErr) console.error('[search] partner tag links failed:', linkErr.message)
+      const first = firstTagBy(links || [], 'partner_id', tagHits)
+      const have = new Set(partnerHits.map((p: any) => p.id))
+      const wanted = Array.from(first.keys()).filter((id) => !have.has(id))
+      if (wanted.length > 0) {
+        let tpq = supabaseService
+          .from('partners')
+          .select(PARTNER_COLS)
+          .is('deleted_at', null)
+          .in('id', wanted.slice(0, 500))
+          .order('name', { ascending: true })
+          .limit(PARTNER_LIMIT - partnerHits.length)
+        if (scopeUuid) tpq = tpq.eq('location_id', scopeUuid)
+        const { data: tagged, error: taggedErr } = await tpq
+        if (taggedErr) console.error('[search] tagged partner read failed:', taggedErr.message)
+        partnerHits = [...partnerHits, ...(tagged || []).map((r: any) => ({ ...mapPartnerRow(r), matchedTag: first.get(r.id) }))]
+      }
+    }
   }
 
   // Resolve location NAMES for the hits — the point of a cross-location search
@@ -153,6 +245,8 @@ export async function GET(req: Request) {
       locationId: r.location_uuid || null,
       locationName: r.location_uuid ? (nameByLoc[r.location_uuid] || null) : null,
       atLocOther: r.location_id === 'loc_other',
+      // Present only when this client was found BY A TAG, not by name.
+      ...(tagByLead.has(r.id) ? { matchedTag: tagByLead.get(r.id) } : {}),
     })),
   })
 }

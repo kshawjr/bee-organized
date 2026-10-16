@@ -1,6 +1,6 @@
 // components/hive/shared/networkGroups.js
 // ─────────────────────────────────────────────────────────────
-// PURE module (§8.5 — zero imports) — the Network screen's brains:
+// PURE module (§8.5 — no imports but the shared tag filter) — the Network screen's brains:
 // mixed-row assembly, the tag filter, and the staleness rule.
 // NetworkScreen renders what THIS computes, so every counting/filtering
 // decision is unit-testable without a mount.
@@ -51,14 +51,9 @@ export function stageFamilyKey(stage) {
 }
 
 // ── tag filter ───────────────────────────────────────────────
-// partner.tagIds: lookups ids from partner_tags (lib/crm mapPartnerRow).
-// picked: the filter's tag ids. ANY-of: picking Realtor and Senior Living
-// shows people who are either. Empty pick → everyone passes.
-export function matchesTags(partner, picked = []) {
-  if (!picked.length) return true
-  const mine = partner?.tagIds || []
-  return picked.some((id) => mine.includes(id))
-}
+// Lifted into shared/tagFilter.js (every people list uses it); re-exported
+// here so existing imports keep working.
+export { matchesTags, tagOptionsInUse } from './tagFilter.js'
 
 // A company carries no tags and no stage of its own, so under a filter it
 // is judged by its PEOPLE: it shows when any person linked to it
@@ -69,20 +64,6 @@ export function matchesTags(partner, picked = []) {
 export function companiesWithMatchingPeople(companies = [], people = []) {
   const ids = new Set(people.map((p) => p?.companyId).filter(Boolean))
   return companies.filter((c) => ids.has(c.id))
-}
-
-// The filter's options: only tags someone in view actually carries, with
-// counts — the list an owner can act on. Each keeps its section and
-// sort_order so the screen can split them into Relationship / Trade the
-// same way the picker does (lib/tags.ts sectionTags).
-// tags: [{ id, label, icon, section, sort_order }] (the one list);
-// partners: the in-scope people.
-export function tagOptionsInUse(tags = [], partners = []) {
-  const counts = new Map()
-  for (const p of partners) for (const id of p?.tagIds || []) counts.set(id, (counts.get(id) || 0) + 1)
-  return tags
-    .filter((t) => counts.has(t.id))
-    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, section: t.section ?? null, sort_order: t.sort_order ?? 0, count: counts.get(t.id) }))
 }
 
 // ── mixed-row assembly ───────────────────────────────────────

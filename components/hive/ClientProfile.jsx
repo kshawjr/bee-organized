@@ -642,7 +642,12 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         leadId={c.id}
         locationId={c.location_uuid || null}
         tags={tags}
-        onChange={next => setData(d => d ? { ...d, tags: next } : d)}
+        onChange={next => {
+          setData(d => d ? { ...d, tags: next } : d)
+          // Up to the people list, so Everyone's tag filter agrees with
+          // the record without a reload (leadPatchMap: tag_ids → tagIds).
+          onLeadPatched(c.id, { tag_ids: next.map(t => t.id) })
+        }}
         setToast={setToast}
         readOnly={readOnly}
       />

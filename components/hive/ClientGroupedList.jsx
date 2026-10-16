@@ -10,8 +10,14 @@
 // COLLAPSED and each remembers its own last choice — persisted per status id
 // under one keyed store (bee_hive_clients_collapsed, SSR-safe via
 // useStoredState, SEPARATE from Engagements' memory). A collapsed group
-// renders only its header. An active search force-expands every band so
-// matches are never hidden behind a collapsed header.
+// renders only its header. An active search or tag filter force-expands every
+// band so matches are never hidden behind a collapsed header.
+//
+// TAGS (2026-10-15): the SAME tag filter the Network tab has
+// (shared/TagFilterSection + TagFilterChips — one copy, not a fork), over
+// each client's tagIds, and the search box also matches tag names ("realtor"
+// finds clients tagged Realtor). A row's tags show beside its location, so a
+// tag match is visible, not a mystery.
 //
 // SAME data, SAME source as the directory — NOT a divergent lens:
 //   · status + its color come from shared/clientStatus (deriveClientStatus
@@ -43,6 +49,11 @@ import { HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { IconChevronRight } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { useStoredState } from './shared/useStoredControls'
+import { FilterButton, FilterPopover, FilteredEmpty } from './shared/FilterPopover'
+import TagFilterSection from './shared/TagFilterSection'
+import TagFilterChips from './shared/TagFilterChips'
+import { matchesTags, matchesTagSearch } from './shared/tagFilter'
+import { tagText } from './shared/tagText'
 
 // A small filled dot in the status's dark stop — sourced from CHIP_STYLES
 // (the same status color source the directory chip reads), never a literal.
@@ -69,8 +80,12 @@ const STATUS_DEFS = {
   no_contact: "No email or phone on file, so there's no way to reach out.",
 }
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [] }) {
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [] }) {
   const [search, setSearch] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
+  const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
   const nowMs = Date.now()
 
   // Per-group collapse memory — one keyed store, statusKey → true when
@@ -97,19 +112,20 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
 
   const locName = (id) => (locations.find(l => l.id === id) || {}).name || null
 
-  // Classify once, then search-filter. Grouping is by STATUS (present on the
-  // shape via the shared derivation) — search is name/email/phone.
+  // Classify once, then filter. Grouping is by STATUS (present on the shape
+  // via the shared derivation) — search is name/email/phone/tag name, the
+  // tag filter is any-of over the picked tags.
   const classified = useMemo(() => scoped.map(p => ({
     p, status: deriveClientStatus(p, openClientIds, nowMs, wonClientIds),
   })), [scoped, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.trim().toLowerCase()
-  const visible = q
-    ? classified.filter(({ p }) =>
-        (p.name || '').toLowerCase().includes(q)
-        || (p.email || '').toLowerCase().includes(q)
-        || (p.phone || '').toLowerCase().includes(q))
-    : classified
+  const visible = classified.filter(({ p }) =>
+    matchesTags(p, tagFilter) && (!q
+      || (p.name || '').toLowerCase().includes(q)
+      || (p.email || '').toLowerCase().includes(q)
+      || (p.phone || '').toLowerCase().includes(q)
+      || !!matchesTagSearch(p, q, tagById)))
 
   // Bucket into status → rows, name-sorted within each group.
   const groups = useMemo(() => {
@@ -123,29 +139,48 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   }, [visible])
 
   // A search reveals its matches regardless of the saved collapse state.
-  const isExpanded = (gid) => (q ? true : expandedMap[gid] === true)
+  const isExpanded = (gid) => (q || tagFilter.length ? true : expandedMap[gid] === true)
   const totalShown = visible.length
 
   return (
     <div>
       <style>{`.bee-grp-row:hover { border-color:${T.hairline.strong} }`}</style>
 
-      <input
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search name, email, phone…"
-        style={{
-          width: '100%', boxSizing: 'border-box', marginBottom: '12px',
-          padding: '9px 14px', borderRadius: T.radius.control,
-          border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: T.surface.raised,
-          fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none',
-        }}
-      />
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: tagFilter.length ? '8px' : '12px' }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, email, phone, tag…"
+          style={{
+            flex: 1, boxSizing: 'border-box',
+            padding: '9px 14px', borderRadius: T.radius.control,
+            border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: T.surface.raised,
+            fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none',
+          }}
+        />
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <FilterButton count={tagFilter.length} open={filtersOpen} onToggle={() => setFiltersOpen(o => !o)} />
+          <FilterPopover open={filtersOpen} count={tagFilter.length} onClear={() => setTagFilter([])}>
+            <TagFilterSection tags={tags} rows={scoped} picked={tagFilter} onToggle={toggleTag}
+              emptyNote="No one here is tagged yet — add tags from a client's record." testId="clients-tag-options" />
+          </FilterPopover>
+        </div>
+      </div>
+
+      {tagFilter.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+          <TagFilterChips picked={tagFilter} tagById={tagById} onRemove={toggleTag} />
+        </div>
+      )}
 
       {totalShown === 0 && (
-        <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
-          {q ? 'No clients match that search' : 'No clients in this view'}
-        </div>
+        tagFilter.length > 0
+          ? <FilteredEmpty count={tagFilter.length} onClear={() => setTagFilter([])} noun="clients" />
+          : (
+            <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
+              {q ? 'No clients match that search' : 'No clients in this view'}
+            </div>
+          )
       )}
 
       {CLIENT_STATUS_ORDER.map(statusKey => {
@@ -190,13 +225,15 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {rows.map(p => {
                   const loc = locName(p.locationId)
+                  // Location, then the client's tags — so a tag match shows why.
+                  const sub = [loc, (p.tagIds || []).map(id => tagById.get(id)).filter(Boolean).map(tagText).join(', ')].filter(Boolean).join(' · ')
                   return (
                     <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, rows.map(r => r.id))}
                       style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
                       <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p title={p.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                        {loc && <p title={loc} style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{loc}</p>}
+                        {sub && <p title={sub} style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{sub}</p>}
                       </div>
                     </div>
                   )

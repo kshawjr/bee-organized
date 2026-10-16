@@ -235,6 +235,11 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
       return def.attrs?.key || def.id
     })
     .filter(Boolean)
+  // tagIds — the same links as plain lookups ids, the shape Network rows
+  // carry (lib/crm). Every people-list tag filter and tag search reads
+  // these (components/hive/shared/tagFilter.js); `tags` above keeps the
+  // retired Classic screens' short codes.
+  const tagIds = (joined.lead_tags || []).map(lt => lt.tag_lookup_id).filter(Boolean)
 
   // Assessment — most recent
   const assessmentRow = (joined.assessments || [])
@@ -337,6 +342,7 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // ("May 24") which lost the time and forced a hash-derived fake.
     created: row.created_at || '',
     tags,
+    tagIds,
     isJunk: row.is_junk || false,
     finalProcessed: row.final_processed || false,
     referredBy: row.referred_by_id || null,

@@ -248,6 +248,18 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     expect(host.querySelector('[data-testid="network-companies-hidden"]')).toBeNull()
   })
 
+  it('the search box matches tag NAMES — "realtor" finds people tagged Realtor', async () => {
+    await mount()
+    const box = host.querySelector('input[placeholder^="Search people"]') as HTMLInputElement
+    expect(box.placeholder).toContain('tags')
+    await typeInto(box, 'realtor')
+    // Neither name contains "realtor"; both carry the Realtor tag. No
+    // company matches (Meridian Realty is "realty", not "realtor").
+    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])
+    await typeInto(box, 'senior')
+    expect(rowNames()).toEqual(['Stale Sam'])
+  })
+
   it('a view saved before the merge (specFilter slug) maps onto the tag with that slug', async () => {
     lsStore.set('bee_network_saved_views', JSON.stringify({
       views: [{ id: 'v1', name: 'Realtors', filters: { stageFilter: '', specFilter: 'real-estate' } }],

@@ -38,14 +38,16 @@ import InitialsAvatar from './shared/InitialsAvatar'
 import { HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { matchPeople } from './shared/clientMatch'
 import {
-  FilterButton, FilterPopover, FilterSection, TogglePills, CheckRow, FilteredEmpty,
+  FilterButton, FilterPopover, FilterSection, TogglePills, FilteredEmpty,
 } from './shared/FilterPopover'
 import {
   buildNetworkRows, networkStats, contactRecency,
-  stageFamilyKey, matchesTags, tagOptionsInUse, companiesWithMatchingPeople,
+  stageFamilyKey, companiesWithMatchingPeople,
 } from './shared/networkGroups'
+import { matchesTags, matchesTagSearch } from './shared/tagFilter'
+import TagFilterSection from './shared/TagFilterSection'
+import TagFilterChips from './shared/TagFilterChips'
 import { tagText } from './shared/tagText'
-import { sectionTags } from '@/lib/tags'
 import { CHIP_STYLES } from './shared/stageConfig'
 import PickALocation from './shared/PickALocation'
 
@@ -144,13 +146,11 @@ export default function NetworkScreen({
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [stageFilter, setStageFilter] = useState(null)
   const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
-  const [tagSearch, setTagSearch] = useState('')
   const filterCount = (stageFilter ? 1 : 0) + tagFilter.length
   const clearFilters = () => { setStageFilter(null); setTagFilter([]) }
   const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
   // Tags draw as their own icon + label ("🏠 Realtor", shared/tagText).
   const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
-  const tagLabel = (id) => tagById.get(id)?.label
 
   // Saved views — SAME store the Phase 1 persistence fix established
   // (bee_network_saved_views). Views now carry {stageFilter, tagIds}.
@@ -191,8 +191,10 @@ export default function NetworkScreen({
   const filteredPartners = useMemo(() => {
     if (!q) return peopleInFilter
     const matched = new Set(matchPeople(peopleInFilter, q).map(m => m.person.id))
-    return peopleInFilter.filter(p => matched.has(p.id) || (p.company || '').toLowerCase().includes(q))
-  }, [peopleInFilter, q])
+    // …or a TAG whose name contains it: "realtor" finds people tagged
+    // Realtor, not only names containing the word (shared/tagFilter).
+    return peopleInFilter.filter(p => matched.has(p.id) || (p.company || '').toLowerCase().includes(q) || !!matchesTagSearch(p, q, tagById))
+  }, [peopleInFilter, q, tagById])
 
   // Companies carry no tags and no stage. Under a filter a company shows
   // when one of ITS people passes it (shared/networkGroups); the rest are
@@ -212,15 +214,6 @@ export default function NetworkScreen({
     () => buildNetworkRows({ partners: filteredPartners, companies: filteredCompanies, rollups }),
     [filteredPartners, filteredCompanies, rollups]
   )
-
-  // The filter's options: tags someone here carries, with counts; the
-  // search box narrows them. A picked tag stays listed even if a search
-  // hides it, so it can always be unticked.
-  const tagOptions = useMemo(() => tagOptionsInUse(tags, scopedPartners), [tags, scopedPartners])
-  const tagNeedle = tagSearch.trim().toLowerCase()
-  const shownTagOptions = tagOptions.filter(t => !tagNeedle || t.label.toLowerCase().includes(tagNeedle) || tagFilter.includes(t.id))
-  // Relationship (list order) then Trade (A–Z), as in every tag picker.
-  const shownTagSections = useMemo(() => sectionTags(shownTagOptions), [shownTagOptions])
 
   // ── stats ──
   const stats = useMemo(() => networkStats({ partners: scopedPartners, companies: scopedCompanies, totals: summary?.totals ?? null, nowMs }), [scopedPartners, scopedCompanies, summary]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -302,7 +295,7 @@ export default function NetworkScreen({
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search people, companies, phone, email…"
+          placeholder="Search people, companies, tags, phone, email…"
           style={{ flex: 1, boxSizing: 'border-box', padding: '9px 14px', borderRadius: T.radius.control, border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: T.surface.raised, fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }}
         />
         <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -311,34 +304,8 @@ export default function NetworkScreen({
             <FilterSection label="Stage">
               <TogglePills options={PARTNER_STAGE_KEYS.map(k => ({ key: k, label: k }))} value={stageFilter} onChange={setStageFilter} />
             </FilterSection>
-            <FilterSection label="Tags">
-              {tagOptions.length === 0 ? (
-                <p style={{ fontSize: '11px', color: T.ink.quiet }}>No one here is tagged yet — add tags from a person's record.</p>
-              ) : (
-                <>
-                  <input
-                    value={tagSearch}
-                    onChange={e => setTagSearch(e.target.value)}
-                    placeholder="Search tags…"
-                    aria-label="Search tags"
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', marginBottom: '6px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '12px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }}
-                  />
-                  <div data-testid="network-tag-options" style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                    {shownTagSections.map(sec => (
-                      <div key={sec.key} data-section={sec.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
-                        <p style={{ fontSize: '10px', fontWeight: 500, color: T.ink.quiet, letterSpacing: '0.4px', textTransform: 'uppercase', margin: 0 }}>{sec.label}</p>
-                        {sec.rows.map(t => (
-                          <CheckRow key={t.id} label={`${tagText(t)} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
-                        ))}
-                      </div>
-                    ))}
-                    {shownTagOptions.length === 0 && (
-                      <p style={{ fontSize: '11px', color: T.ink.quiet }}>No tag matches “{tagSearch.trim()}”</p>
-                    )}
-                  </div>
-                </>
-              )}
-            </FilterSection>
+            <TagFilterSection tags={tags} rows={scopedPartners} picked={tagFilter} onToggle={toggleTag}
+              emptyNote="No one here is tagged yet — add tags from a person's record." testId="network-tag-options" />
           </FilterPopover>
         </div>
       </div>
@@ -347,13 +314,7 @@ export default function NetworkScreen({
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
           {/* The picked tags, removable — the filter is visible without
               opening the popover. */}
-          {tagFilter.map(id => (
-            <span key={`tag-${id}`} data-active-tag={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 6px 4px 10px', borderRadius: T.radius.pill, background: T.accent.soft, border: `0.5px solid ${T.hairline.strong}`, fontSize: '12px', fontWeight: 500, color: T.accent.deep }}>
-              {tagById.has(id) ? tagText(tagById.get(id)) : 'Tag'}
-              <button aria-label={`Remove tag filter ${tagLabel(id) || ''}`} onClick={() => toggleTag(id)}
-                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px', lineHeight: 1, color: T.ink.quiet, fontFamily: 'inherit', padding: '0 2px' }}>×</button>
-            </span>
-          ))}
+          <TagFilterChips picked={tagFilter} tagById={tagById} onRemove={toggleTag} />
           {savedViewsStore.views.map(v => {
             const active = savedViewsStore.activeViewId === v.id
             return (
