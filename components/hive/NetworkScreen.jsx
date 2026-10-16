@@ -110,6 +110,10 @@ export default function NetworkScreen({
   // True when the SSR network load hit its row ceiling — the list below is
   // incomplete, and this screen says so rather than rendering quietly short.
   truncated = false,
+  // ⌘K's "All N tagged …" line: open with exactly this tag ticked (any
+  // other filter cleared, so the list matches the number the line showed).
+  initialTagId = null,
+  onInitialTagConsumed = () => {},
 }) {
   const nowMs = Date.now()
 
@@ -147,6 +151,11 @@ export default function NetworkScreen({
   const [stageFilter, setStageFilter] = useState(null)
   const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
   const filterCount = (stageFilter ? 1 : 0) + tagFilter.length
+  useEffect(() => {
+    if (!initialTagId) return
+    setTagFilter([initialTagId]); setStageFilter(null); setSearch('')
+    onInitialTagConsumed()
+  }, [initialTagId]) // eslint-disable-line react-hooks/exhaustive-deps
   const clearFilters = () => { setStageFilter(null); setTagFilter([]) }
   const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
   // Tags draw as their own icon + label ("🏠 Realtor", shared/tagText).

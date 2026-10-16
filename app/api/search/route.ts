@@ -31,6 +31,12 @@ export const runtime = 'nodejs'
 
 const LIMIT = 20
 const PARTNER_LIMIT = 10
+// Tag hits have their OWN, larger cap (2026-10-16, Kevin): "Realtor" is 30
+// Network people, and four of them defeats the point. Past this, the panel's
+// "All N tagged …" line opens the full list with the tag already ticked —
+// tagMatches carries those N.
+const TAG_LIMIT = 25
+const TAG_SCAN = 1000
 const MIN_TERM = 2
 
 // PostgREST's `or=(a.ilike.*x*,b.ilike.*y*)` grammar makes `,` `(` `)` `.` and
@@ -138,32 +144,42 @@ export async function GET(req: Request) {
   }
 
   // Tag hits — clients tagged with a matching tag, fenced exactly like the
-  // name search, appended after the name matches up to the same LIMIT.
-  // Non-fatal: a failure here leaves the name results standing.
+  // name search, after the name matches, up to TAG_LIMIT (their own cap).
+  // Every fenced client behind a matching tag is counted per tag, so the
+  // panel can say "All N tagged Realtor". Non-fatal: a failure here leaves
+  // the name results standing.
   const tagHits = await matchingTags(term, scopeUuid)
   const tagByLead = new Map<string, TagHit>()
-  let data: any[] = nameRows || []
-  if (tagHits.length > 0 && data.length < LIMIT) {
+  const clientCountByTag = new Map<string, number>()
+  const networkCountByTag = new Map<string, number>()
+  const data: any[] = [...(nameRows || [])]
+  if (tagHits.length > 0) {
     const { data: links, error: linkErr } = await supabaseService
       .from('lead_tags').select('lead_id, tag_lookup_id')
-      .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(1000)
+      .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(TAG_SCAN)
     if (linkErr) console.error('[search] lead tag links failed:', linkErr.message)
-    const first = firstTagBy(links || [], 'lead_id', tagHits)
-    const have = new Set(data.map((r: any) => r.id))
-    const wanted = Array.from(first.keys()).filter((id) => !have.has(id))
-    if (wanted.length > 0) {
+    const linkedIds = Array.from(new Set((links || []).map((l: any) => l.lead_id)))
+    if (linkedIds.length > 0) {
       let tq = supabaseService
         .from('leads')
         .select('id, name, email, phone, location_uuid, location_id, is_junk')
         .not('is_junk', 'is', true)
-        .in('id', wanted.slice(0, 500))
+        .in('id', linkedIds.slice(0, TAG_SCAN))
         .order('created_at', { ascending: false })
-        .limit(LIMIT - data.length)
+        .limit(TAG_SCAN)
       if (scopeUuid) tq = tq.eq('location_uuid', scopeUuid)
-      const { data: tagged, error: taggedErr } = await tq
-      if (taggedErr) console.error('[search] tagged lead read failed:', taggedErr.message)
-      for (const r of tagged || []) tagByLead.set(r.id, first.get(r.id)!)
-      data = [...data, ...(tagged || [])]
+      const { data: fenced, error: fencedErr } = await tq
+      if (fencedErr) console.error('[search] tagged lead read failed:', fencedErr.message)
+      const inScope = new Set((fenced || []).map((r: any) => r.id))
+      for (const l of links || []) {
+        if (inScope.has(l.lead_id)) clientCountByTag.set(l.tag_lookup_id, (clientCountByTag.get(l.tag_lookup_id) || 0) + 1)
+      }
+      const first = firstTagBy((links || []).filter((l: any) => inScope.has(l.lead_id)), 'lead_id', tagHits)
+      const have = new Set(data.map((r: any) => r.id))
+      for (const r of (fenced || []).filter((r: any) => !have.has(r.id)).slice(0, TAG_LIMIT)) {
+        tagByLead.set(r.id, first.get(r.id)!)
+        data.push(r)
+      }
     }
   }
 
@@ -192,27 +208,43 @@ export async function GET(req: Request) {
     else partnerHits = (partnerRows || []).map(mapPartnerRow)
 
     // Tag hits — Network people tagged with a matching tag, same fence,
-    // after the name matches, up to PARTNER_LIMIT.
-    if (!partnerErr && tagHits.length > 0 && partnerHits.length < PARTNER_LIMIT) {
+    // after the name matches, up to TAG_LIMIT; every fenced one counted per
+    // tag for the "All N tagged …" line.
+    if (!partnerErr && tagHits.length > 0) {
       const { data: links, error: linkErr } = await supabaseService
         .from('partner_tags').select('partner_id, tag_lookup_id')
-        .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(1000)
+        .in('tag_lookup_id', tagHits.map((t) => t.id)).limit(TAG_SCAN)
       if (linkErr) console.error('[search] partner tag links failed:', linkErr.message)
-      const first = firstTagBy(links || [], 'partner_id', tagHits)
-      const have = new Set(partnerHits.map((p: any) => p.id))
-      const wanted = Array.from(first.keys()).filter((id) => !have.has(id))
-      if (wanted.length > 0) {
-        let tpq = supabaseService
+      const linkedIds = Array.from(new Set((links || []).map((l: any) => l.partner_id)))
+      if (linkedIds.length > 0) {
+        // Ids only first — the count needs every fenced one, the panel only
+        // needs TAG_LIMIT full rows.
+        let fq = supabaseService
           .from('partners')
-          .select(PARTNER_COLS)
+          .select('id')
           .is('deleted_at', null)
-          .in('id', wanted.slice(0, 500))
-          .order('name', { ascending: true })
-          .limit(PARTNER_LIMIT - partnerHits.length)
-        if (scopeUuid) tpq = tpq.eq('location_id', scopeUuid)
-        const { data: tagged, error: taggedErr } = await tpq
-        if (taggedErr) console.error('[search] tagged partner read failed:', taggedErr.message)
-        partnerHits = [...partnerHits, ...(tagged || []).map((r: any) => ({ ...mapPartnerRow(r), matchedTag: first.get(r.id) }))]
+          .in('id', linkedIds.slice(0, TAG_SCAN))
+          .limit(TAG_SCAN)
+        if (scopeUuid) fq = fq.eq('location_id', scopeUuid)
+        const { data: fenced, error: fencedErr } = await fq
+        if (fencedErr) console.error('[search] tagged partner fence failed:', fencedErr.message)
+        const inScope = new Set((fenced || []).map((r: any) => r.id))
+        for (const l of links || []) {
+          if (inScope.has(l.partner_id)) networkCountByTag.set(l.tag_lookup_id, (networkCountByTag.get(l.tag_lookup_id) || 0) + 1)
+        }
+        const first = firstTagBy((links || []).filter((l: any) => inScope.has(l.partner_id)), 'partner_id', tagHits)
+        const have = new Set(partnerHits.map((p: any) => p.id))
+        const wanted = Array.from(inScope).filter((id) => !have.has(id))
+        if (wanted.length > 0) {
+          const { data: tagged, error: taggedErr } = await supabaseService
+            .from('partners')
+            .select(PARTNER_COLS)
+            .in('id', wanted)
+            .order('name', { ascending: true })
+            .limit(TAG_LIMIT)
+          if (taggedErr) console.error('[search] tagged partner read failed:', taggedErr.message)
+          partnerHits = [...partnerHits, ...(tagged || []).map((r: any) => ({ ...mapPartnerRow(r), matchedTag: first.get(r.id) }))]
+        }
       }
     }
   }
@@ -233,7 +265,12 @@ export async function GET(req: Request) {
     scope: elevated ? 'all' : scopeUuid,
     // `truncated` is stated rather than implied: a capped result set that looks
     // complete is the same silent-narrowing problem in a smaller box.
-    truncated: (data || []).length >= LIMIT,
+    truncated: (nameRows || []).length >= LIMIT,
+    // One entry per matching tag that anyone in scope carries: how many
+    // clients and Network people, for the panel's "All N tagged …" lines.
+    tagMatches: tagHits
+      .map((t) => ({ ...t, clients: clientCountByTag.get(t.id) || 0, network: networkCountByTag.get(t.id) || 0 }))
+      .filter((t) => t.clients > 0 || t.network > 0),
     // Client-shaped partner hits (see above). Absent from older cached
     // responses/mocks — GlobalSearch falls back to its local scan then.
     partners: partnerHits,

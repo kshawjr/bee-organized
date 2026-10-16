@@ -327,13 +327,17 @@ export const ENGAGEMENT_FILTER_DEFAULTS = {
   repeat: false,
   fresh: false,      // new clients only: first engagement, <30d
   foundedBy: [],     // request | quote | job | manual
+  // The CLIENT's tags (2026-10-16) — any-of, via the shared tag filter.
+  // HiveShell copies each client's tagIds onto their engagements. Saved
+  // filter sets from before carry no tagIds; reads go through `|| []`.
+  tagIds: [],
 }
 
 export function engagementFilterCount(f) {
   return (f.stages.length ? 1 : 0) + (f.statuses.length ? 1 : 0) +
     (f.min ? 1 : 0) + (f.max ? 1 : 0) + (f.age ? 1 : 0) +
     (f.owing ? 1 : 0) + (f.repeat ? 1 : 0) + (f.fresh ? 1 : 0) +
-    (f.foundedBy.length ? 1 : 0)
+    (f.foundedBy.length ? 1 : 0) + ((f.tagIds || []).length ? 1 : 0)
 }
 
 export function passesEngagementFilters(e, f, nowMs = Date.now(), { ignoreStages = false } = {}) {
@@ -350,6 +354,9 @@ export function passesEngagementFilters(e, f, nowMs = Date.now(), { ignoreStages
   if (f.repeat && !(e.repeat_count > 1)) return false
   if (f.fresh && !(e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000)) return false
   if (f.foundedBy.length && !f.foundedBy.includes(e.founded_by)) return false
+  // Any-of over the client's tags — the shared/tagFilter matchesTags rule,
+  // inlined because this module imports nothing.
+  if ((f.tagIds || []).length && !f.tagIds.some((id) => (e.tagIds || []).includes(id))) return false
   return true
 }
 

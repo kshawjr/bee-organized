@@ -41,7 +41,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
@@ -80,12 +80,18 @@ const STATUS_DEFS = {
   no_contact: "No email or phone on file, so there's no way to reach out.",
 }
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [] }) {
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {} }) {
   const [search, setSearch] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
   const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
   const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
+  // ⌘K's "All N clients tagged …" line: open with exactly this tag ticked.
+  useEffect(() => {
+    if (!initialTagId) return
+    setTagFilter([initialTagId]); setSearch('')
+    onInitialTagConsumed()
+  }, [initialTagId]) // eslint-disable-line react-hooks/exhaustive-deps
   const nowMs = Date.now()
 
   // Per-group collapse memory — one keyed store, statusKey → true when
@@ -151,6 +157,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search name, email, phone, tag…"
+          aria-label="Search clients"
           style={{
             flex: 1, boxSizing: 'border-box',
             padding: '9px 14px', borderRadius: T.radius.control,

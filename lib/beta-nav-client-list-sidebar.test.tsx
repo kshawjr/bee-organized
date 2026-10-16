@@ -87,8 +87,10 @@ const tabLabels = (host: Element) =>
 // so it is how "the client list is actually on screen" is asserted rather than
 // "the screen is not blank".
 const clientListShowing = (host: Element) =>
-  // The Everyone search box (its placeholder grew ", tag…" when tags joined the search).
-  !!host.querySelector('input[placeholder^="Search name, email, phone"]')
+  // The Everyone search box, by its own label — the Inbox grew a search box
+  // with the same placeholder text (2026-10-16), so the placeholder no longer
+  // tells the two screens apart.
+  !!host.querySelector('input[aria-label="Search clients"]')
 
 // ═══════════════════════════════════════════════════════════
 // The two renames.

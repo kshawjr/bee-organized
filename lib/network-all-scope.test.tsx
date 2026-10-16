@@ -280,7 +280,11 @@ describe('BeeHub wiring — Network gets the same gate as the record lenses (sou
   })
 
   it('⌘K partner hits come from the server when available — local scan is the fallback', () => {
-    expect(src).toContain('const matchedPartners = (!remote.failed && remote.partners) ? remote.partners.slice(0,4) : localPartnerScan')
+    // Server first, local scan as the fallback. Name hits keep the 4 cap;
+    // tag hits ride their own (2026-10-16).
+    expect(src).toContain('const matchedPartners = (!remote.failed && remote.partners)')
+    expect(src).toContain('? [...remote.partners.filter(p => !p.matchedTag).slice(0,4), ...remote.partners.filter(p => p.matchedTag)]')
+    expect(src).toContain(': localPartnerScan')
   })
 })
 

@@ -16319,7 +16319,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{} }) {
   if (!partners) return null
   // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
   // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
@@ -16361,6 +16361,8 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           locationRequired={locationRequired}
           onOpenLocationPicker={onOpenLocationPicker}
           truncated={networkTruncated}
+          initialTagId={initialTagId}
+          onInitialTagConsumed={onInitialTagConsumed}
         />
       </div>
 
@@ -29858,7 +29860,7 @@ function ScopeSwitchProgress({ active }) {
 }
 
 // ─── Global Search ────────────────────────────────────────────────────────────
-function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose, scopeLabel='all locations', locationsById={} }) {
+function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onOpenTagList=()=>{}, onClose, scopeLabel='all locations', locationsById={} }) {
   const [q, setQ] = useState('')
   // ── Server-backed search (Fix 2, Phase 4) ────────────────────────────────
   // This was an in-memory scan of the loaded people array. Since Phase 1 an
@@ -29867,10 +29869,10 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   // error. Phase 2 labelled the scope as a stopgap; this queries the server,
   // which searches every location for an elevated user and stays fenced for
   // everyone else. Partners remain a local scan: they are a 3-row table.
-  const [remote, setRemote] = useState({ rows: [], partners: null, loading: false, truncated: false, failed: false })
+  const [remote, setRemote] = useState({ rows: [], partners: null, tagMatches: [], loading: false, truncated: false, failed: false })
   React.useEffect(() => {
     const term = q.trim()
-    if (term.length < 2) { setRemote({ rows: [], partners: null, loading: false, truncated: false, failed: false }); return }
+    if (term.length < 2) { setRemote({ rows: [], partners: null, tagMatches: [], loading: false, truncated: false, failed: false }); return }
     let cancelled = false
     setRemote(r => ({ ...r, loading: true, failed: false }))
     // Debounced: a keystroke-per-request would hammer the endpoint and land
@@ -29881,11 +29883,11 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
         if (!res.ok) throw new Error(String(res.status))
         const json = await res.json()
         // partners: null (endpoint predates the field / mock) → local scan.
-        if (!cancelled) setRemote({ rows: json.results || [], partners: Array.isArray(json.partners) ? json.partners : null, loading: false, truncated: !!json.truncated, failed: false })
+        if (!cancelled) setRemote({ rows: json.results || [], partners: Array.isArray(json.partners) ? json.partners : null, tagMatches: Array.isArray(json.tagMatches) ? json.tagMatches : [], loading: false, truncated: !!json.truncated, failed: false })
       } catch (e) {
         // Degrade to the local scan rather than showing nothing — but SAY so,
         // because a silently local result set is the bug being fixed.
-        if (!cancelled) setRemote({ rows: [], partners: null, loading: false, truncated: false, failed: true })
+        if (!cancelled) setRemote({ rows: [], partners: null, tagMatches: [], loading: false, truncated: false, failed: true })
       }
     }, 220)
     return () => { cancelled = true; clearTimeout(t) }
@@ -29909,7 +29911,20 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   // lookup). Local scan remains the fallback: endpoint failed, short query, or
   // an older response with no partners field.
   const localPartnerScan = !query ? [] : partners.filter(p => p.name.toLowerCase().includes(query) || (p.company||'').toLowerCase().includes(query) || (p.title||'').toLowerCase().includes(query)).slice(0,4)
-  const matchedPartners = (!remote.failed && remote.partners) ? remote.partners.slice(0,4) : localPartnerScan
+  // Name hits keep the 4-row cap; people found BY A TAG get their own, larger
+  // one (the server sends up to 25) — "Realtor" is 30 people, and 4 of them
+  // defeated the point. The "All N tagged …" lines below open the rest.
+  const matchedPartners = (!remote.failed && remote.partners)
+    ? [...remote.partners.filter(p => !p.matchedTag).slice(0,4), ...remote.partners.filter(p => p.matchedTag)]
+    : localPartnerScan
+  // One line per matching tag: opens Everyone / Network with that tag ticked.
+  const tagLabel = (t) => `${t.icon ? t.icon + ' ' : ''}${t.label}`
+  const seeAllLine = (key, text, onClick) => (
+    <button key={key} onClick={onClick} data-see-all={key}
+      style={{ width:'100%', padding:'10px 20px', background:'#f7f5f0', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', textAlign:'left', fontSize:'12px', fontWeight:600, color:'#1a7a6e' }}>
+      {text} →
+    </button>
+  )
   const hasResults = matchedPeople.length > 0 || matchedPartners.length > 0
 
   return (
@@ -29981,9 +29996,14 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                 })}
                 {remote.truncated && (
                   <p style={{ padding:'8px 20px', fontSize:'11px', color:'#8a9e9a', background:'#f7f5f0' }}>
-                    Showing the first {matchedPeople.length} matches — refine the search to narrow it.
+                    Showing the first {matchedPeople.filter(p => !p.matchedTag).length} name matches — refine the search to narrow it.
                   </p>
                 )}
+                {!remote.failed && remote.tagMatches.filter(t => t.clients > 0).map(t => seeAllLine(
+                  `clients:${t.id}`,
+                  `All ${t.clients} ${t.clients === 1 ? 'client' : 'clients'} tagged ${tagLabel(t)} in Everyone`,
+                  () => { onOpenTagList('clients', t.id); onClose() }
+                ))}
                 {remote.failed && (
                   <p style={{ padding:'8px 20px', fontSize:'11px', color:'#b45309', background:'rgba(245,158,11,0.08)' }}>
                     Search is offline — showing only {scopeLabel} from this page.
@@ -30014,6 +30034,11 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                     )}
                   </button>
                 )})}
+                {!remote.failed && remote.tagMatches.filter(t => t.network > 0).map(t => seeAllLine(
+                  `network:${t.id}`,
+                  `All ${t.network} tagged ${tagLabel(t)} in Network`,
+                  () => { onOpenTagList('network', t.id); onClose() }
+                ))}
               </>
             )}
             <div style={{ height:'0.5rem' }} />
@@ -37259,6 +37284,8 @@ export default function App({
   // selected person and stays in sync with browser back/forward via popstate.
   const [globalSelectedEngagementId, setGlobalSelectedEngagementId] = useState(initialSelectedEngagementId || null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
+  // ⌘K's "All N tagged …" line → the Network tab opens with that tag ticked.
+  const [networkTagIntent, setNetworkTagIntent] = useState(null)
   // Home "Needs attention" deep-link intent — a one-shot { tab, view?, group?,
   // section? } the Dashboard hands up (onOpenHive) to land the Clients shell on
   // the right tab + filtered/expanded target. Cleared when HiveShell consumes
@@ -38133,7 +38160,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* locationRequired mirrors HiveScreen above: server truth
             (!!initialAllOverview), so Network prompts on 'all' exactly when
             the record lenses do — never for a franchise user. */}
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -38531,6 +38558,20 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             router.push(clientPath(p.id))
           }}
           onSelectPartner={(p)=>{ setActiveNav('partners'); setGlobalSelectedPartner(p); setShowGlobalSearch(false) }}
+          // "All N tagged Realtor in Network / Everyone" — open the full list
+          // with that tag already ticked in its Tags filter.
+          onOpenTagList={(kind, tagId)=>{
+            setShowGlobalSearch(false)
+            if (kind === 'network') { setNetworkTagIntent(tagId); nav('partners') }
+            else {
+              setHiveIntent({ tab: 'clients', tagId })
+              setActiveNav('hive')
+              if (typeof window !== 'undefined') {
+                if (window.location.pathname !== '/clients') window.history.pushState({}, '', '/clients')
+                window.scrollTo(0, 0)
+              }
+            }
+          }}
           onClose={()=>setShowGlobalSearch(false)}
         />
       )}

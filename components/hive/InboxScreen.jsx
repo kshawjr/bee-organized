@@ -74,6 +74,9 @@ import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty, ClearAllButton } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import TagFilterSection from './shared/TagFilterSection'
+import TagFilterChips from './shared/TagFilterChips'
+import { matchesTags, matchesTagSearch } from './shared/tagFilter'
 import useIsMobile from './shared/useIsMobile'
 
 const INBOX_SORTS = [
@@ -82,9 +85,12 @@ const INBOX_SORTS = [
   { key: 'last_touch', label: 'Last touch' },
   { key: 'name', label: 'Name A–Z' },
 ]
-const INBOX_FILTER_DEFAULTS = { sources: [], hasPhone: false, hasEmail: false, touchBand: null, age: null }
+// tagIds (2026-10-16): the shared tag filter, any-of, each picked tag counts
+// once — the same as Network and Everyone. Saved filter sets from before carry
+// no tagIds; every read goes through `|| []`.
+const INBOX_FILTER_DEFAULTS = { sources: [], hasPhone: false, hasEmail: false, touchBand: null, age: null, tagIds: [] }
 const inboxFilterCount = (f) =>
-  (f.sources.length ? 1 : 0) + (f.hasPhone ? 1 : 0) + (f.hasEmail ? 1 : 0) + (f.touchBand ? 1 : 0) + (f.age ? 1 : 0)
+  (f.sources.length ? 1 : 0) + (f.hasPhone ? 1 : 0) + (f.hasEmail ? 1 : 0) + (f.touchBand ? 1 : 0) + (f.age ? 1 : 0) + (f.tagIds || []).length
 
 // Persistent strip that reconciles the Inbox nav badge with the list: when a
 // view filter is holding New/Attempting leads off the list, `count` is exactly
@@ -92,7 +98,10 @@ const inboxFilterCount = (f) =>
 // when the transfer section is on screen — the gap FilteredEmpty (all-empty
 // only) misses. Plain sentence for a 45-65 audience, quiet sunken banner, and
 // the SAME "Clear all" affordance as the popover so the reset reads familiar.
-function HiddenByFiltersStrip({ count, onClear }) {
+function HiddenByFiltersStrip({ count, onClear, searching = false, filtering = true }) {
+  // The search box narrows the same lists as the filters, so it is named
+  // when it is part of why leads are off the list.
+  const why = searching && filtering ? 'your search and filters' : searching ? 'your search' : 'your filters'
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
@@ -100,7 +109,7 @@ function HiddenByFiltersStrip({ count, onClear }) {
       background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset,
     }}>
       <span style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.4 }}>
-        {count === 1 ? '1 lead is hidden by your filters.' : `${count} leads are hidden by your filters.`}
+        {count === 1 ? `1 lead is hidden by ${why}.` : `${count} leads are hidden by ${why}.`}
       </span>
       <ClearAllButton onClick={onClear} />
     </div>
@@ -446,7 +455,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, closeLostReasons = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, closeLostReasons = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {}, tags = [] }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -550,6 +559,19 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // linger in localStorage.
   useEffect(() => { try { localStorage.removeItem('bee_hive_inbox_filters') } catch {} }, [])
   const [fltOpen, setFltOpen] = useState(false)
+  // Search (2026-10-16) — name, email, phone or TAG name ("realtor" finds
+  // leads tagged Realtor). Not persisted: a search is a moment, filters are
+  // a setting. It narrows exactly what the filters narrow (passesInboxFilters).
+  const [search, setSearch] = useState('')
+  const q = search.trim().toLowerCase()
+  const qDigits = q.replace(/\D/g, '')
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
+  const pickedTags = filters.tagIds || []
+  const toggleTag = (id) => setFilters(f => {
+    const cur = f.tagIds || []
+    return { ...f, tagIds: cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id] }
+  })
+  const clearAll = () => { clearFilters(); setSearch('') }
   // Dismissed is a BAND now (Kevin, seen in production 2026-09-10): the chip
   // was too hidden. It sits with New and Attempting under the same heading
   // treatment, so its COUNT is on screen whether or not anyone opens it —
@@ -630,6 +652,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       if (filters.touchBand === '3+' && n < 3) return false
     }
     if (filters.age && (nowMs - (new Date(inboxAgeAnchor(p) || 0).getTime() || 0)) < filters.age * 86400000) return false
+    if (pickedTags.length && !matchesTags(p, pickedTags)) return false
+    if (q && !(
+      (p.name || '').toLowerCase().includes(q)
+      || (p.email || '').toLowerCase().includes(q)
+      || (p.phone || '').toLowerCase().includes(q)
+      || (qDigits.length >= 3 && (p.phone || '').replace(/\D/g, '').includes(qDigits))
+      || !!matchesTagSearch(p, q, tagById)
+    )) return false
     return true
   }
 
@@ -695,7 +725,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     fresh.sort(cmp)
     working.sort(cmp)
     return { transfer, fresh, working }
-  }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, closedLostIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, closedLostIds, filters, inboxSort, q, tagById]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // How many badge-countable leads a VIEW filter is keeping off the list.
   // By construction this equals (nav badge) − (visible fresh + working): same
@@ -707,7 +737,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // reconcile with the badge instead of contradicting it (issue 119). Short-circuit
   // on no active filters so an unfiltered inbox never pays for the scan.
   const hiddenByFilters = useMemo(() => {
-    if (inboxFilterCount(filters) === 0) return 0
+    if (inboxFilterCount(filters) === 0 && !q) return 0
     const sessionSets = { junkedIds, snoozedIds, dismissedIds, transferredIds }
     let n = 0
     for (const p of scoped) {
@@ -716,7 +746,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       if (isInboxCountable(p, openClientIds, wonClientIds, nowMs, sessionSets)) n++
     }
     return n
-  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs, q, tagById]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Tags filter's pool: the people this Inbox could show — countable
+  // New/Attempting leads plus the Dismissed band — BEFORE any view filter,
+  // so the options and counts describe the Inbox, not the whole client list.
+  const tagPool = useMemo(() => {
+    const sessionSets = { junkedIds, snoozedIds, dismissedIds, transferredIds }
+    return scoped.filter(p => !p.atLocOther && (isInboxCountable(p, openClientIds, wonClientIds, nowMs, sessionSets) || !!p.inboxDismissedAt || dismissedIds.has(p.id)))
+  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Dismissed (the VIEW, never a removal) ──────────────────
   // The leads inbox_dismissed_at is hiding, in the current scope. Courtney
@@ -749,7 +787,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // the one that just happened.
     rows.sort((a, b) => new Date(b.inboxDismissedAt || 0).getTime() - new Date(a.inboxDismissedAt || 0).getTime())
     return rows
-  }, [scoped, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs, q, tagById]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // actor id → display name, from the roster this screen ALREADY holds for the
   // assignee stack. Resolving here costs nothing — no fetch, no widened
@@ -1510,7 +1548,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               cursor: selectableIds.size === 0 ? 'not-allowed' : 'pointer',
             }} />
         )}
-        <span style={{ flex: 1 }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, email, phone, tag…"
+          aria-label="Search inbox"
+          style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', padding: '8px 12px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }}
+        />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
@@ -1539,9 +1583,17 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 options={[{ key: 7, label: '>7d' }, { key: 14, label: '>14d' }]}
                 onChange={(v) => setFilters(f => ({ ...f, age: v }))} />
             </FilterSection>
+            <TagFilterSection tags={tags} rows={tagPool} picked={pickedTags} onToggle={toggleTag}
+              emptyNote="No one in your Inbox is tagged yet — add tags from a lead's record." testId="inbox-tag-options" />
           </FilterPopover>
         </div>
       </div>
+
+      {pickedTags.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+          <TagFilterChips picked={pickedTags} tagById={tagById} onRemove={toggleTag} />
+        </div>
+      )}
 
       {/* Bulk action bar — select-all-visible (respects active filters),
           count chip, Remove (N) + Cancel; Remove always swaps in a confirm
@@ -1598,7 +1650,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           list now has a plain, on-screen explanation. Gated on hidden > 0, not
           on the whole list being empty (the case FilteredEmpty missed). */}
       {!locationRequired && hiddenByFilters > 0 && (
-        <HiddenByFiltersStrip count={hiddenByFilters} onClear={clearFilters} />
+        <HiddenByFiltersStrip count={hiddenByFilters} onClear={clearAll} searching={!!q} filtering={inboxFilterCount(filters) > 0} />
       )}
 
       {/* `!locationRequired &&` is load-bearing: on 'All Locations' there are no
@@ -1615,8 +1667,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         // the active filter so a source/age that matches zero leads doesn't
         // read as "no leads exist". The strip owns the badge-reconciling case
         // above; this owns the genuinely-empty-but-filtered one.
-        inboxFilterCount(filters) > 0 ? (
-          <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
+        inboxFilterCount(filters) > 0 || q ? (
+          q && inboxFilterCount(filters) === 0
+            ? (
+              <div style={{ padding: '36px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
+                No inbox leads match “{search.trim()}”
+              </div>
+            )
+            : <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearAll} noun="inbox leads" />
         ) : (
         <div style={{ padding: '36px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
           New inquiries land here

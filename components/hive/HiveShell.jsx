@@ -351,6 +351,8 @@ export default function HiveShell({
   // Inbox deep-link section seed (one-shot) — the Inbox-lens counterpart to
   // listInitialView; consumed by InboxScreen's initialSection.
   const [inboxInitialSection, setInboxInitialSection] = useState(null)
+  // ⌘K's "All N clients tagged …" line → Everyone opens with that tag ticked.
+  const [clientsInitialTag, setClientsInitialTag] = useState(null)
   // Apply a deep-link intent ONCE PER INTENT. Placed AFTER the lens/engView
   // hydration effects above (effects run in definition order), so a real
   // intent wins the initial entry over the remembered pref. A stage `group`
@@ -366,13 +368,14 @@ export default function HiveShell({
   // below returns on null.
   useEffect(() => {
     if (!initialIntent) return
-    const { tab, view, group, section } = initialIntent
+    const { tab, view, group, section, tagId } = initialIntent
     if (tab && ['inbox', 'engagements', 'clients'].includes(tab)) pickLens(tab)
     if (tab === 'engagements') {
       if (group) { pickEngView('list'); setListInitialView(group) }
       else if (view === 'board' || view === 'list') pickEngView(view)
     }
     if (tab === 'inbox' && section) setInboxInitialSection(section)
+    if (tab === 'clients' && tagId) setClientsInitialTag(tagId)
     onIntentConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialIntent])
@@ -608,9 +611,16 @@ export default function HiveShell({
   // Layer: base → server-revalidated truth → local rowPatches (win last).
   const patched = mergeEngagements(allEngagements, serverRevalidated, rowPatches)
 
-  const filtered = locFilter === 'all'
+  // Each engagement carries its CLIENT's tagIds (from people), so the Tags
+  // filter on the Board and List — and the open count above them — filter
+  // by the client's tags through the shared rule (passesEngagementFilters).
+  // (people, not patchedPeople: that is defined further down, and call
+  // patches never touch tags.)
+  const tagIdsByClient = new Map(people.map(p => [p.id, p.tagIds || []]))
+  const filtered = (locFilter === 'all'
     ? patched
     : patched.filter(e => e.location_uuid === locFilter)
+  ).map(e => ({ ...e, tagIds: tagIdsByClient.get(e.client_id) || [] }))
   // Rows closed THIS SESSION (via the panel's close-out) carry a terminal
   // rowPatch — they leave the count and every open-set consumer. The
   // counter reflects the ACTIVE work filters (F: counts reconcile).
@@ -930,6 +940,7 @@ export default function HiveShell({
         // location's own section can't be mistaken for the unrouted queue.
 
         <InboxScreen
+          tags={tags}
           people={patchedPeople}
           transferPeople={transferPeople}
           locationRequired={locationRequired}
@@ -958,9 +969,12 @@ export default function HiveShell({
           locations={locations}
           onOpenClient={openClient}
           tags={tags}
+          initialTagId={clientsInitialTag}
+          onInitialTagConsumed={() => setClientsInitialTag(null)}
         />
       ) : engView === 'list' ? (
         <EngagementGroupedList
+          tags={tags}
           engagements={filtered}
           closedCount={closedCount}
           closedWonCount={closedWonCount}
@@ -975,6 +989,7 @@ export default function HiveShell({
         />
       ) : (
         <EngagementBoard
+          tags={tags}
           engagements={filtered}
           closedCount={closedCount}
           reopenedIds={reopenedIds}

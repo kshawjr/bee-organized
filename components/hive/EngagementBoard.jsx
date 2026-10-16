@@ -123,7 +123,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
   )
 }
 
-export default function EngagementBoard({ engagements = [], closedCount = 0, reopenedIds = [], locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, onChanged = () => {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
+export default function EngagementBoard({ tags = [], engagements = [], closedCount = 0, reopenedIds = [], locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, onChanged = () => {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -452,7 +452,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
     return (
       <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '10px' }}>
-        <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs}
+        <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} tags={tags}
           sortValue={boardSort} sortOptions={BOARD_SORTS} onSortChange={(v) => setBoardSort({ key: v })} />
       </div>
       <div
@@ -488,7 +488,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
 
   const controls = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-      <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs}
+      <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} tags={tags}
         sortValue={boardSort} sortOptions={BOARD_SORTS} onSortChange={(v) => setBoardSort({ key: v })} />
     </div>
   )

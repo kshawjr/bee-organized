@@ -8,6 +8,11 @@
 //   D) Everyone: the Network tag filter (sections, counts, any-of, chips)
 //      and a search box that matches tag names
 //   E) global search (/api/search): tag-name hits, fenced, labelled why
+// Push 2 + the ⌘K cap (2026-10-16):
+//   F) Inbox: a search box (name/email/phone/tag) and the Tags filter
+//   G) Engagements Board + List: the Tags filter over each CLIENT's tags
+//   H) ⌘K: tag hits have their own cap (25) and per-tag totals
+//   I) the "All N tagged …" line opens Network / Everyone with the tag ticked
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -46,6 +51,10 @@ import * as networkGroups from '@/components/hive/shared/networkGroups'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from '@/components/hive/shared/leadPatchMap'
 import ClientGroupedList from '@/components/hive/ClientGroupedList'
+import InboxScreen from '@/components/hive/InboxScreen'
+import NetworkScreen from '@/components/hive/NetworkScreen'
+import EngagementFilters from '@/components/hive/EngagementFilters'
+import { passesEngagementFilters, engagementFilterCount, ENGAGEMENT_FILTER_DEFAULTS } from '@/components/hive/shared/engagementStatus'
 import { GET as searchGET } from '@/app/api/search/route'
 import { readFileSync } from 'node:fs'
 
@@ -224,5 +233,180 @@ describe('E) global search matches tag names and says why', () => {
     const json = await (await searchGET(req('dana'))).json()
     expect(h.state.calls.some((c: any) => c.table === 'lead_tags' || c.table === 'partner_tags')).toBe(false)
     expect(json.results.every((r: any) => !r.matchedTag)).toBe(true)
+  })
+})
+
+// ── F) Inbox ─────────────────────────────────────────────────────────────────
+describe('F) Inbox — search box and Tags filter', () => {
+  const lead = (over: any) => ({ phone: '555-0100', email: '', created: daysAgo(2), source: 'webform', outreachTimeline: [], jobberRef: null, locationId: 'loc-1', paidAmount: 0, tagIds: [], ...over })
+  const LEADS = [
+    lead({ id: 'i1', name: 'Nina Newlead', tagIds: ['t-hot'] }),
+    lead({ id: 'i2', name: 'Karen Pell', email: 'karen@x.com', tagIds: ['t-realtor'] }),
+    lead({ id: 'i3', name: 'Otto Other' }),
+  ]
+  const rows = () => [...host.querySelectorAll('.bee-inbox-row')].map(r => r.textContent || '')
+  const shows = (n: string) => rows().some(t => t.includes(n))
+  const mountInbox = async (props: any = {}) => {
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    await act(async () => { root.render(<InboxScreen people={LEADS as any} engagements={[]} locFilter="loc-1" tags={TAGS} {...props} />) })
+  }
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', lsMock); lsStore.clear()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })))
+  })
+  afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
+
+  it('the search box matches names AND tag names', async () => {
+    await mountInbox()
+    const box = host.querySelector('[aria-label="Search inbox"]') as HTMLInputElement
+    expect(box.placeholder).toContain('tag')
+    await type(box, 'realtor')
+    expect(shows('Karen Pell')).toBe(true)
+    expect(shows('Nina Newlead')).toBe(false)
+    await type(box, 'nina')
+    expect(shows('Nina Newlead')).toBe(true)
+    expect(shows('Karen Pell')).toBe(false)
+  })
+
+  it('the Tags filter: only tags someone here has, with counts; any-of; chips', async () => {
+    await mountInbox()
+    await act(async () => { button('Filter & sort').click() })
+    const opts = [...host.querySelectorAll('[data-testid="inbox-tag-options"] button')]
+    expect(opts.map(b => b.textContent)).toEqual(['🔥 Hot Lead (1)', '🏠 Realtor (1)'])
+    await act(async () => { (opts[0] as HTMLElement).click() })
+    expect(shows('Nina Newlead')).toBe(true)
+    expect(shows('Karen Pell')).toBe(false)
+    expect(host.querySelector('[data-active-tag="t-hot"]')).toBeTruthy()
+  })
+
+  it('the picked tags are saved with the other Inbox filters', async () => {
+    await mountInbox()
+    await act(async () => { button('Filter & sort').click() })
+    await act(async () => { (host.querySelector('[data-testid="inbox-tag-options"] button') as HTMLElement).click() })
+    expect(JSON.parse(lsStore.get('bee_hive_inbox_filters:loc-1')!).tagIds).toEqual(['t-hot'])
+  })
+
+  it('a filter set saved before tags existed still loads (no tagIds key)', async () => {
+    lsStore.set('bee_hive_inbox_filters:loc-1', JSON.stringify({ sources: [], hasPhone: false, hasEmail: false, touchBand: null, age: null }))
+    await mountInbox()
+    expect(shows('Nina Newlead') && shows('Karen Pell') && shows('Otto Other')).toBe(true)
+  })
+})
+
+// ── G) Engagements ───────────────────────────────────────────────────────────
+describe("G) Engagements — the Tags filter over each client's tags", () => {
+  it('the shared rule filters any-of on the tagIds HiveShell copies from the client', () => {
+    const f = { ...ENGAGEMENT_FILTER_DEFAULTS, tagIds: ['t-realtor', 't-vip'] }
+    expect(passesEngagementFilters({ stage: 'Request', tagIds: ['t-vip'] } as any, f)).toBe(true)
+    expect(passesEngagementFilters({ stage: 'Request', tagIds: ['t-hot'] } as any, f)).toBe(false)
+    expect(passesEngagementFilters({ stage: 'Request' } as any, f)).toBe(false)
+    expect(engagementFilterCount(f)).toBe(1)
+    // a saved filter set from before tags existed
+    const { tagIds, ...old } = ENGAGEMENT_FILTER_DEFAULTS as any
+    expect(passesEngagementFilters({ stage: 'Request' } as any, old)).toBe(true)
+    expect(engagementFilterCount(old)).toBe(0)
+  })
+
+  it('HiveShell gives every engagement its client’s tagIds', () => {
+    const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
+    expect(src).toContain('.map(e => ({ ...e, tagIds: tagIdsByClient.get(e.client_id) || [] }))')
+  })
+
+  it('the panel (Board and List share it) has the Tags section; ticking writes workFilters.tagIds', async () => {
+    let filters: any = { ...ENGAGEMENT_FILTER_DEFAULTS }
+    const setFilters = (fn: any) => { filters = typeof fn === 'function' ? fn(filters) : fn }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    await act(async () => {
+      root.render(<EngagementFilters engagements={[{ id: 'e1', stage: 'Request', tagIds: ['t-realtor'] }, { id: 'e2', stage: 'Request', tagIds: ['t-realtor', 't-hot'] }] as any}
+        filters={filters} setFilters={setFilters} onClear={() => {}} tags={TAGS} />)
+    })
+    await act(async () => { button('Filters').click() })
+    const opts = [...host.querySelectorAll('[data-testid="engagement-tag-options"] button')]
+    expect(opts.map(b => b.textContent)).toEqual(['🔥 Hot Lead (1)', '🏠 Realtor (2)'])
+    await act(async () => { (opts[1] as HTMLElement).click() })
+    expect(filters.tagIds).toEqual(['t-realtor'])
+    await act(async () => root.unmount()); host.remove()
+  })
+
+  it('Board and List have no new search box', () => {
+    for (const f of ['components/hive/EngagementBoard.jsx', 'components/hive/EngagementGroupedList.jsx']) {
+      expect(readFileSync(f, 'utf8')).not.toMatch(/placeholder="Search/)
+    }
+  })
+})
+
+// ── H) ⌘K caps + totals ──────────────────────────────────────────────────────
+describe('H) ⌘K — tag hits get their own cap and per-tag totals', () => {
+  const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const req = (q: string) => new Request(`http://t.local/api/search?q=${encodeURIComponent(q)}`)
+  const has = (ctx: any, m: string, col?: string) => ctx.filters.some((f: any[]) => f[0] === m && (!col || f[1] === col))
+  const partnerIds = Array.from({ length: 30 }, (_, i) => `p${i}`)
+  beforeEach(() => {
+    h.state.calls = []
+    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC }
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'lookups') return { data: [{ id: 't-realtor', label: 'Realtor', icon: '🏠' }], error: null }
+      if (ctx.table === 'leads' && has(ctx, 'or')) return { data: [], error: null }
+      if (ctx.table === 'lead_tags') return { data: [{ lead_id: 'l1', tag_lookup_id: 't-realtor' }, { lead_id: 'l-other-loc', tag_lookup_id: 't-realtor' }], error: null }
+      if (ctx.table === 'leads' && has(ctx, 'in', 'id')) return { data: [{ id: 'l1', name: 'Karen Pell', location_uuid: LOC }], error: null }   // fenced: other-loc dropped
+      if (ctx.table === 'partners' && has(ctx, 'or')) return { data: [], error: null }
+      if (ctx.table === 'partner_tags') return { data: partnerIds.map(id => ({ partner_id: id, tag_lookup_id: 't-realtor' })), error: null }
+      if (ctx.table === 'partners' && has(ctx, 'eq', 'location_id')) return { data: partnerIds.map(id => ({ id })), error: null }   // the fenced id read
+      if (ctx.table === 'partners' && has(ctx, 'in', 'id')) return { data: partnerIds.slice(0, 25).map(id => ({ id, name: id, location_id: LOC })), error: null }
+      return { data: [], error: null }
+    }
+  })
+
+  it('returns up to 25 Network people found by tag (not 4) and counts all 30', async () => {
+    const json = await (await searchGET(req('realtor'))).json()
+    expect(json.partners).toHaveLength(25)
+    expect(json.partners.every((p: any) => p.matchedTag?.label === 'Realtor')).toBe(true)
+    expect(json.tagMatches).toEqual([{ id: 't-realtor', label: 'Realtor', icon: '🏠', clients: 1, network: 30 }])
+  })
+
+  it('the totals only count people inside the caller’s fence', async () => {
+    const json = await (await searchGET(req('realtor'))).json()
+    expect(json.tagMatches[0].clients).toBe(1)   // l-other-loc is outside the location
+  })
+
+  it('the panel keeps 4 name hits but shows every tag hit, then the "All N" lines', () => {
+    const src = readFileSync('components/BeeHub.jsx', 'utf8')
+    expect(src).toContain('[...remote.partners.filter(p => !p.matchedTag).slice(0,4), ...remote.partners.filter(p => p.matchedTag)]')
+    expect(src).toContain('`All ${t.network} tagged ${tagLabel(t)} in Network`')
+    expect(src).toContain("() => { onOpenTagList('network', t.id); onClose() }")
+    expect(src).toContain("() => { onOpenTagList('clients', t.id); onClose() }")
+  })
+})
+
+// ── I) the "All N tagged" line lands with the tag ticked ─────────────────────
+describe('I) opening a list with a tag already ticked', () => {
+  beforeEach(() => { vi.stubGlobal('localStorage', lsMock); lsStore.clear(); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) }))) })
+  afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
+
+  it('Everyone: initialTagId ticks the tag once, then hands it back', async () => {
+    const consumed = vi.fn()
+    await mount({ initialTagId: 't-realtor', onInitialTagConsumed: consumed })
+    expect(names()).toEqual(['Karen Pell'])
+    expect(host.querySelector('[data-active-tag="t-realtor"]')).toBeTruthy()
+    expect(consumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('Network: initialTagId ticks the tag, clearing any stage filter', async () => {
+    const consumed = vi.fn()
+    const partners = [
+      { id: 'n1', name: 'Agent Ann', locationId: 'loc-1', tagIds: ['t-realtor'], stage: 'Building', isDeleted: false },
+      { id: 'n2', name: 'Mover Mo', locationId: 'loc-1', tagIds: [], stage: 'Building', isDeleted: false },
+    ]
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    await act(async () => { root.render(<NetworkScreen partners={partners} companies={[]} locFilter="loc-1" tags={TAGS} initialTagId="t-realtor" onInitialTagConsumed={consumed} />) })
+    const listed = [...host.querySelectorAll('[data-testid="network-list"] [data-rowtype]')].map(r => r.querySelector('p')!.textContent)
+    expect(listed).toEqual(['Agent Ann'])
+    expect(consumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('HiveShell routes a clients intent carrying a tag to Everyone', () => {
+    const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
+    expect(src).toContain("if (tab === 'clients' && tagId) setClientsInitialTag(tagId)")
+    expect(src).toContain('initialTagId={clientsInitialTag}')
   })
 })

@@ -10,6 +10,7 @@ import { ENGAGEMENT_STAGES } from './shared/stageConfig'
 import { deriveStatusChip, engagementFilterCount } from './shared/engagementStatus'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows } from './shared/FilterPopover'
 import { T } from './shared/tokens'
+import TagFilterSection from './shared/TagFilterSection'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -22,7 +23,7 @@ export const STATUS_LABELS = {
   owing: 'Owes', never_invoiced: 'Never Invoiced', paid: 'Paid', nurturing: 'Nurturing',
 }
 
-export default function EngagementFilters({ engagements = [], filters, setFilters, onClear, nowMs = Date.now(), sortValue = null, sortOptions = null, onSortChange = null }) {
+export default function EngagementFilters({ engagements = [], filters, setFilters, onClear, nowMs = Date.now(), sortValue = null, sortOptions = null, onSortChange = null, tags = [] }) {
   const [open, setOpen] = useState(false)
   const count = engagementFilterCount(filters)
 
@@ -86,6 +87,12 @@ export default function EngagementFilters({ engagements = [], filters, setFilter
             <CheckRow key={k} label={k} checked={filters.foundedBy.includes(k)} onToggle={() => toggleIn('foundedBy', k)} />
           ))}
         </FilterSection>
+        {/* The CLIENT's tags — the shared filter (one copy with Network,
+            Everyone, Inbox); each engagement carries its client's tagIds,
+            so options and counts are engagements on this board. */}
+        <TagFilterSection tags={tags} rows={engagements} picked={filters.tagIds || []}
+          onToggle={(id) => setFilters(f => { const cur = f.tagIds || []; return { ...f, tagIds: cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id] } })}
+          emptyNote="None of these clients is tagged yet — add tags from a client's record." testId="engagement-tag-options" />
       </FilterPopover>
     </div>
   )

@@ -177,7 +177,7 @@ function StageBand({ stageKey, gid, label, count, expanded, onToggle, note = nul
   )
 }
 
-export default function EngagementGroupedList({
+export default function EngagementGroupedList({ tags = [],
   engagements = [], closedCount = 0, closedWonCount = 0, locFilter = 'all',
   workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {},
   onOpenEngagement = () => {}, setToast = () => {}, initialView = null, onInitialViewConsumed = () => {},
@@ -267,7 +267,7 @@ export default function EngagementGroupedList({
       <style>{`.bee-grp-row:hover { border-color:${T.hairline.strong} }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-        <EngagementFilters engagements={notTerminal} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} />
+        <EngagementFilters engagements={notTerminal} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} tags={tags} />
       </div>
 
       {openRows.length === 0 && filterCount > 0 ? (
