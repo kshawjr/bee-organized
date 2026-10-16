@@ -169,7 +169,7 @@ describe('§2) the toggle preserves shared values', () => {
 })
 
 describe('§4) every inventoried person field round-trips', () => {
-  it('name/title/company/phone/email/website/address/how-met/relationship/tags/tier all land', async () => {
+  it('name/title/company/phone/email/website/address/how-met/tags/tier all land', async () => {
     const onAddPerson = vi.fn(async () => ({ id: 'new-1' }))
     await mount({ onAddPerson })
     await type(input('First name'), 'Karen')
@@ -185,7 +185,6 @@ describe('§4) every inventoried person field round-trips', () => {
     await type(input('City'), 'Kansas City')
     await type(input('State'), 'MO')
     await type(input('Zip'), '64111')
-    await click(btn('Realtor'))
     // Tags: '+ Tag' → the one-list picker (scoped to this location) → pick → Save.
     await click(host.querySelector('[aria-label="Add tag"]')!)
     const dialog = host.querySelector('[role="dialog"]')!
@@ -203,7 +202,7 @@ describe('§4) every inventoried person field round-trips', () => {
     expect(row).toMatchObject({
       name: 'Karen Martinez', title: 'Agent',
       phone: '(816) 555-0916', email: 'karen@meridian.com', website: 'meridian.com',
-      how_we_met: 'Denver Expo', relationship: 'Realtor',
+      how_we_met: 'Denver Expo',
       tier: 'power-partner',
       stage: 'New Contact', is_customer: false,
     })
@@ -211,6 +210,11 @@ describe('§4) every inventoried person field round-trips', () => {
     // goes to the retired specialties column or the dead tags column.
     expect(onAddPerson.mock.calls[0][0].tagIds).toEqual(['t-senior'])
     expect(row).not.toHaveProperty('specialties')
+    // The relationship field is retired into tags (Vendor/Friend/Realtor):
+    // no pills on the sheet, nothing on the row.
+    expect(onAddPerson.mock.calls[0][0]).not.toHaveProperty('relationship')
+    expect(row).not.toHaveProperty('relationship')
+    expect(host.textContent).not.toContain('Relationship')
     expect(row.addresses[0]).toMatchObject({
       value: '123 Main St Suite 4, Kansas City, MO, 64111',
       street: '123 Main St', apt: 'Suite 4', city: 'Kansas City', state: 'MO', zip: '64111',

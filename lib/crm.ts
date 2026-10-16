@@ -16,15 +16,16 @@
 //
 // Tags (tag merge 2026-10-15, lib/tags.ts): a person's tags are the
 // partner_tags links, embedded here as `partner_tags(tag_lookup_id)` and
-// mapped to `tagIds`. partners.specialties (retired) and partners.tags
-// (dead, always empty) are no longer selected or written. partner_tags is
+// mapped to `tagIds`. partners.specialties (retired), partners.tags
+// (dead, always empty) and partners.relationship (retired into tags,
+// migrations/relationship_to_tags.sql) are no longer selected or written. partner_tags is
 // service-role only (RLS, no policies): a read through the USER client
 // gets an empty embed, so `tagIds` is only trustworthy on service reads —
 // which is every read that feeds the Network screen.
 export const PARTNER_COLS =
   'id, location_id, type, name, title, company, company_id, phone, email, website, ' +
   'stage, tier, how_we_met, met_date, last_contact, is_customer, ' +
-  'customer_lead_id, relationship, card_image, addresses, notes, next_steps, referrals, ' +
+  'customer_lead_id, card_image, addresses, notes, next_steps, referrals, ' +
   'activity, last_contacted_at, deleted_at, created_at, updated_at, ' +
   'partner_tags(tag_lookup_id)'
 
@@ -54,7 +55,6 @@ export function mapPartnerRow(row: any) {
     lastContact: row.last_contact || '',
     isCustomer: !!row.is_customer,
     customerLeadId: row.customer_lead_id ?? null,
-    relationship: row.relationship || '',
     cardImage: row.card_image || null,
     addresses: row.addresses || [],
     notes: row.notes || [],
@@ -105,7 +105,6 @@ const PARTNER_FIELD_MAP: Record<string, string> = {
   lastContact: 'last_contact',
   isCustomer: 'is_customer',
   customerLeadId: 'customer_lead_id',
-  relationship: 'relationship',
   cardImage: 'card_image',
   addresses: 'addresses',
   notes: 'notes',

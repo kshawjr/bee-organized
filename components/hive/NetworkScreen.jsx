@@ -421,7 +421,7 @@ export default function NetworkScreen({
                 <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
                   {isCompany
                     ? `${row.peopleCount} ${row.peopleCount === 1 ? 'person' : 'people'}${rec.industry ? ` · ${rec.industry}` : ''}`
-                    : [(rec.tagIds || []).map(id => tagById.get(id)).filter(Boolean).map(tagText).join(', '), rec.title, rec.company].filter(Boolean).join(' · ') || rec.relationship || '—'}
+                    : [(rec.tagIds || []).map(id => tagById.get(id)).filter(Boolean).map(tagText).join(', '), rec.title, rec.company].filter(Boolean).join(' · ') || '—'}
                 </p>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>

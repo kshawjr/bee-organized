@@ -25,7 +25,10 @@
 //       vocabulary that rendered beside an unfilled pipeline rail).
 //
 // The partner/contact TYPE SPLIT stays dead (Phase 2): rows emit
-// type:'partner'; `relationship` survives as an optional person field.
+// type:'partner'. The `relationship` field is retired (2026-10-15):
+// Vendor / Friend / Realtor became tags (migrations/relationship_to_tags.sql),
+// "Other" meant nothing, and Neighbor / Past Client / Family were never
+// picked (a past client is a client record). Tags carry what it did.
 //
 // Tags (tag merge 2026-10-15): the old specialty pills are the shared
 // TagPickField over THE one tag list (lib/tags.ts); picked ids ride the
@@ -60,8 +63,6 @@ const secondaryBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
-const RELATIONSHIPS = ['Neighbor', 'Realtor', 'Past Client', 'Friend', 'Family', 'Vendor', 'Other']
-
 const pillBtn = (on) => ({
   padding: '5px 12px', borderRadius: T.radius.pill,
   border: `0.5px solid ${on ? T.hairline.strong : T.hairline.line}`,
@@ -95,7 +96,7 @@ export default function NetworkAddSheet({
 
   // ── person fields ──
   const [person, setPerson] = useState({
-    firstName: '', lastName: '', title: '', howWeMet: '', relationship: '',
+    firstName: '', lastName: '', title: '', howWeMet: '',
     tags: [], tier: null,
   })
   const setP = (k, v) => setPerson(f => ({ ...f, [k]: v }))
@@ -146,7 +147,6 @@ export default function NetworkAddSheet({
           stage: 'New Contact',
           tagIds: person.tags.map(t => t.id),
           tier: person.tier,
-          relationship: person.relationship,
           howWeMet: person.howWeMet, metDate: 'Just now', lastContact: 'Just now',
           isCustomer: false, customerLeadId: null,
           referrals: [], notes: [],
@@ -331,15 +331,6 @@ export default function NetworkAddSheet({
             {sharedContactBlock}
 
             <div><label style={lbl}>How / where you met · optional</label><input style={inp} placeholder="Denver Business Expo, referral from…" value={person.howWeMet} onChange={e => setP('howWeMet', e.target.value)} aria-label="How met" /></div>
-
-            <div>
-              <label style={lbl}>Relationship · optional</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {RELATIONSHIPS.map(r => (
-                  <button key={r} onClick={() => setP('relationship', person.relationship === r ? '' : r)} style={pillBtn(person.relationship === r)}>{r}</button>
-                ))}
-              </div>
-            </div>
 
             <div>
               <label style={lbl}>Tags · optional, all that apply</label>

@@ -110,8 +110,11 @@ describe('C) the person shape', () => {
     expect((mapPartnerRow({ id: 'p2', name: 'J' }) as any).tagIds).toEqual([])
   })
 
-  it('a save never writes specialties, tags or tagIds to the partners row', () => {
-    expect(partnerPatchToRow({ name: 'K', specialties: ['real-estate'], tags: ['x'], tagIds: ['t1'] })).toEqual({ name: 'K' })
+  it('a save never writes specialties, tags, relationship or tagIds to the partners row', () => {
+    expect(partnerPatchToRow({ name: 'K', specialties: ['real-estate'], tags: ['x'], relationship: 'Vendor', tagIds: ['t1'] })).toEqual({ name: 'K' })
+    expect(PARTNER_COLS).not.toMatch(/\brelationship\b/)
+    expect(mapPartnerRow({ id: 'p3', name: 'V', relationship: 'Vendor' })).not.toHaveProperty('relationship')
+    expect(PARTNER_PATCH_FIELDS).not.toContain('relationship' as any)
     expect(PARTNER_PATCH_FIELDS).not.toContain('tagIds' as any)
     // A tag change on the record is state-only — no PATCH goes out for it.
     expect(computePartnerPatch({ id: 'p1', tagIds: ['t1'] }, { id: 'p1', tagIds: ['t1', 't2'] })).toEqual({})

@@ -31,7 +31,7 @@
 export const PARTNER_PATCH_FIELDS = [
   'type', 'name', 'title', 'company', 'companyId', 'phone', 'email', 'website',
   'stage', 'tier', 'howWeMet', 'metDate', 'lastContact',
-  'isCustomer', 'customerLeadId', 'relationship', 'cardImage', 'addresses',
+  'isCustomer', 'customerLeadId', 'cardImage', 'addresses',
   'notes', 'nextSteps', 'referrals', 'activity',
 ] as const
 
