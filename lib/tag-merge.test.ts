@@ -31,6 +31,7 @@ import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { mapPartnerRow, partnerPatchToRow, PARTNER_COLS } from '@/lib/crm'
 import { PARTNER_PATCH_FIELDS, computePartnerPatch } from '@/lib/partner-writes'
 import { companiesWithMatchingPeople } from '@/components/hive/shared/networkGroups'
+import { tagText } from '@/components/hive/shared/tagText'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -124,5 +125,15 @@ describe('D) companies under a filter are judged by their people', () => {
   })
   it('no matching people → no companies', () => {
     expect(companiesWithMatchingPeople(companies, [])).toEqual([])
+  })
+})
+
+describe("E) a tag reads as its own icon + label", () => {
+  it('icon then label; the bare label when there is no icon', () => {
+    expect(tagText({ label: 'Realtor', icon: '🏠' })).toBe('🏠 Realtor')
+    expect(tagText({ label: 'DO NOT BOOK', icon: null })).toBe('DO NOT BOOK')
+    expect(tagText({ label: 'Partner' })).toBe('Partner')
+    expect(tagText({ label: 'Lead', icon: '  ' })).toBe('Lead')
+    expect(tagText(null)).toBe('')
   })
 })

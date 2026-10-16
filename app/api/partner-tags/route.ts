@@ -112,16 +112,17 @@ export async function GET(req: Request) {
   }
 
   const ids = (junction || []).map(r => r.tag_lookup_id)
-  let tags: { id: string; label: string }[] = []
+  // icon: the tag's own emoji (lookups.icon), null when it has none.
+  let tags: { id: string; label: string; icon: string | null }[] = []
   if (ids.length > 0) {
     const { data: defs } = await supabaseService
       .from('lookups')
-      .select('id, label')
+      .select('id, label, icon')
       .in('id', ids)
     tags = (junction || [])
       .map(r => (defs || []).find(d => d.id === r.tag_lookup_id))
       .filter(Boolean)
-      .map((d: any) => ({ id: d.id, label: d.label }))
+      .map((d: any) => ({ id: d.id, label: d.label, icon: d.icon || null }))
   }
 
   return NextResponse.json({ tags })

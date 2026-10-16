@@ -35,6 +35,9 @@
 //   maxSelected — multi only: cap; the blocked toggle explains itself
 //                 BEFORE save, never a post-save surprise (step 2B, the
 //                 8-specialty cap the conversion route enforces)
+//   showIcons   — draw each option's own icon before its label (tags:
+//                 "🏠 Realtor"). Off by default — tier and stage rows
+//                 carry icons too, and those pickers never showed them.
 //   title, subtitle — header copy
 //   onSave(picked), onClose()
 //
@@ -47,6 +50,7 @@ import React, { useEffect, useMemo, useRef, useState, useId } from 'react'
 import { T } from './tokens'
 import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
+import { tagText } from './tagText'
 
 export default function PickerModal({
   category,
@@ -55,6 +59,7 @@ export default function PickerModal({
   mode = 'multi',
   allowCreate = false,
   maxSelected = null,
+  showIcons = false,
   title = 'Choose',
   subtitle = null,
   onSave = () => {},
@@ -208,7 +213,7 @@ export default function PickerModal({
         <span aria-hidden style={{ width: '16px', display: 'inline-flex', justifyContent: 'center', color: T.accent.deep, flexShrink: 0 }}>
           {on ? <IconCheck size={14} /> : ''}
         </span>
-        {o.label}
+        {showIcons ? tagText(o) : o.label}
       </button>
     )
   }

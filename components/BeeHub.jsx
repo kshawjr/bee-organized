@@ -1213,7 +1213,7 @@ const TAG_CATEGORY_OFFSET = { client_tags: 1000, partner_specialties: 2000, part
 function tagSortKey(row) { return (TAG_CATEGORY_OFFSET[row.category] || 0) + (row.sort_order || 0) }
 function toTagListShape(rows) {
   return rows.slice().sort((a, b) => tagSortKey(a) - tagSortKey(b))
-    .map(r => ({ id: r.id, label: r.label, key: (r.attrs && r.attrs.key) || null }))
+    .map(r => ({ id: r.id, label: r.label, icon: r.icon || null, key: (r.attrs && r.attrs.key) || null }))
 }
 let _tagList = []
 function getTagList() { return _tagList }

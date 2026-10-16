@@ -367,7 +367,9 @@ describe('tags (TagsRow → PickerModal)', () => {
       url: expect.stringContaining('/api/lead-tags'), method: 'POST',
       body: { lead_id: 'lead-9', tag_lookup_id: 'tag-vip' },
     }])
-    expect(next).toEqual([{ id: 'tag-vip', label: 'VIP' }])
+    // The tag rides back with its own icon (null here — the fixture has
+    // none) so the client record can draw it ("⭐ VIP") without a reload.
+    expect(next).toEqual([{ id: 'tag-vip', label: 'VIP', icon: null }])
     expect(host.querySelector('[role="dialog"]')).toBeNull()
     await unmount()
   })

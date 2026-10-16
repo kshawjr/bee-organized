@@ -150,10 +150,22 @@ describe('POST /api/partner-tags — corporate or the partner\'s own location, n
 })
 
 describe('GET /api/partner-tags — the record read', () => {
-  it('returns junction tags with labels resolved', async () => {
+  it('returns junction tags with labels resolved — icon null when the tag has none', async () => {
     const res = await GET(qsReq('?partner_id=p-1'))
     expect(res.status).toBe(200)
-    expect((await res.json()).tags).toEqual([{ id: 'tag-1', label: 'Snowbird' }])
+    expect((await res.json()).tags).toEqual([{ id: 'tag-1', label: 'Snowbird', icon: null }])
+  })
+
+  it("returns the tag's own icon (lookups.icon) alongside its label", async () => {
+    const base = scenario()
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'lookups' && ctx.filters.some((f: any[]) => f[0] === 'in')) {
+        return { data: [{ id: 'tag-1', label: 'Realtor', icon: '🏠' }], error: null }
+      }
+      return base(ctx)
+    }
+    const res = await GET(qsReq('?partner_id=p-1'))
+    expect((await res.json()).tags).toEqual([{ id: 'tag-1', label: 'Realtor', icon: '🏠' }])
   })
 
   it('lite_user may read (the read-only role still sees the record)', async () => {

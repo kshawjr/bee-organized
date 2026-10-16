@@ -9,7 +9,7 @@
 // TagsRow is the same look for a record that already exists (it writes
 // each change straight away); this is its staged twin.
 //
-// value: [{ id, label }]   onChange(next)   §8.5: props only.
+// value: [{ id, label, icon }]   onChange(next)   §8.5: props only.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -17,6 +17,7 @@ import React, { useState } from 'react'
 import { T } from './tokens'
 import { pillStyle } from './cardKit'
 import PickerModal from './PickerModal'
+import { tagText } from './tagText'
 
 export const MAX_CREATE_TAGS = 8   // = lib/tags.ts MAX_TAGS_PER_CREATE
 
@@ -27,7 +28,7 @@ export default function TagPickField({ locationId = null, value = [], onChange =
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
         {value.map(t => (
           <span key={t.id} style={pillStyle()}>
-            {t.label}
+            {tagText(t)}
             <button type="button" className="bee-small-action" aria-label={`Remove tag ${t.label}`}
               onClick={() => onChange(value.filter(x => x.id !== t.id))}
               style={{ border: 'none', background: 'transparent', padding: 0, fontSize: T.badge.actionFont, lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -50,9 +51,10 @@ export default function TagPickField({ locationId = null, value = [], onChange =
           selected={value.map(t => t.id)}
           mode="multi"
           maxSelected={MAX_CREATE_TAGS}
+          showIcons
           title="Tags"
           subtitle="One list for clients and Network people"
-          onSave={picked => onChange(picked.map(p => ({ id: p.id, label: p.label })))}
+          onSave={picked => onChange(picked.map(p => ({ id: p.id, label: p.label, icon: p.icon || null })))}
           onClose={() => setOpen(false)}
         />
       )}

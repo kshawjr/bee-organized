@@ -828,8 +828,8 @@
         "the little chips"
       ],
       "lines": [
-        38,
-        129
+        40,
+        132
       ]
     },
     {
@@ -1405,8 +1405,8 @@
       ],
       "note": "/network is canonical; /contacts is a permanent alias. Both map to the same nav key ('partners') in components/hive/shared/hubUrl.js. The 'What's next' strip was retired 2026-09-30 (Reminders replaced next_steps).",
       "lines": [
-        88,
-        443
+        89,
+        446
       ]
     },
     {

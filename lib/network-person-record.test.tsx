@@ -410,28 +410,32 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
   const TIER_LOOKUPS = {
     lookups: [
       { id: 'uuid-rp', label: 'Referral Partner', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'referral-partner' } },
-      { id: 'uuid-pp', label: 'Power Partner', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'power-partner' } },
+      { id: 'uuid-pp', label: 'Power Partner', icon: '⭐', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'power-partner' } },
     ],
     location: { id: 'loc-1', name: 'Denver' },
   }
   const TAG_LOOKUPS = {
     lookups: [
-      { id: 't-realtor', label: 'Realtor', category: 'tags', location_id: null, is_active: true, attrs: { key: 'real-estate' } },
-      { id: 't-senior', label: 'Senior Living', category: 'tags', location_id: null, is_active: true, attrs: { key: 'senior-living' } },
+      { id: 't-realtor', label: 'Realtor', icon: '🏠', category: 'tags', location_id: null, is_active: true, attrs: { key: 'real-estate' } },
+      { id: 't-senior', label: 'Senior Living', icon: '🏥', category: 'tags', location_id: null, is_active: true, attrs: { key: 'senior-living' } },
+      { id: 't-partner', label: 'Partner', icon: null, category: 'tags', location_id: null, is_active: true, attrs: {} },
     ],
     location: { id: 'loc-1', name: 'Denver' },
   }
 
   it('renders the tier label and the junction tags — no Specialties row, the dead array column never read', async () => {
-    installFetch({ '/api/partner-tags': { tags: [{ id: 't-realtor', label: 'Realtor' }, { id: 'tag-1', label: 'Snowbird' }] } })
+    installFetch({ '/api/partner-tags': { tags: [{ id: 't-realtor', label: 'Realtor', icon: '🏠' }, { id: 't-partner', label: 'Partner', icon: null }] } })
     await mount({
       partner: { ...PARTNER, tier: 'referral-partner', tags: ['stale-array-value'], specialties: ['stale-specialty'] },
       tiers: TIERS,
     })
     const section = host.querySelector('[data-testid="partnership"]')!
     expect(section.textContent).toContain('Referral Partner')  // tier key → label
-    expect(section.textContent).toContain('Realtor')           // a former specialty, now a junction tag
-    expect(section.textContent).toContain('Snowbird')          // junction tag
+    expect(section.textContent).toContain('🏠 Realtor')        // a former specialty, now a junction tag — its own icon
+    expect(section.textContent).toContain('Partner')           // no icon → the bare label
+    // The pill itself: label + its remove ✗, nothing in front of it.
+    const partnerPill = section.querySelector('[aria-label="Remove tag Partner"]')!.parentElement!
+    expect(partnerPill.textContent).toBe('Partner✗')
     expect(section.textContent).not.toContain('Specialties')
     expect(section.textContent).not.toContain('stale-array-value')
     expect(section.textContent).not.toContain('stale-specialty')
@@ -460,7 +464,9 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
       Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, '')
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Senior Living')!
+    // Options draw each tag's own icon; Partner (none) reads bare.
+    expect([...dialog.querySelectorAll('[role="checkbox"]')].map(b => b.textContent!.trim())).toEqual(['🏠 Realtor', '🏥 Senior Living', 'Partner'])
+    const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === '🏥 Senior Living')!
     await act(async () => { row.click() })
     const save = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Save')!
     await act(async () => { save.click() })
@@ -478,6 +484,8 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
     await act(async () => { (host.querySelector('[aria-label="Edit tier"]') as HTMLElement).click() })
     const dialog = host.querySelector('[role="dialog"]')!
     const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.includes('Power Partner'))!
+    // Icons are a TAG thing: the tier picker stays as it always was.
+    expect(dialog.textContent).not.toContain('⭐')
     await act(async () => { row.click() })
     const save = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Save')!
     await act(async () => { save.click() })

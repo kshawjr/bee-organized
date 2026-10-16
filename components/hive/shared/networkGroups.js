@@ -73,13 +73,13 @@ export function companiesWithMatchingPeople(companies = [], people = []) {
 
 // The filter's options: only tags someone in view actually carries, most
 // used first, then by label — the list an owner can act on, with counts.
-// tags: [{ id, label }] (the one list); partners: the in-scope people.
+// tags: [{ id, label, icon }] (the one list); partners: the in-scope people.
 export function tagOptionsInUse(tags = [], partners = []) {
   const counts = new Map()
   for (const p of partners) for (const id of p?.tagIds || []) counts.set(id, (counts.get(id) || 0) + 1)
   return tags
     .filter((t) => counts.has(t.id))
-    .map((t) => ({ id: t.id, label: t.label, count: counts.get(t.id) }))
+    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, count: counts.get(t.id) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
 }
 

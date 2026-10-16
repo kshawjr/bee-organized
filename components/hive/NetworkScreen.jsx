@@ -44,6 +44,7 @@ import {
   buildNetworkRows, networkStats, contactRecency,
   stageFamilyKey, matchesTags, tagOptionsInUse, companiesWithMatchingPeople,
 } from './shared/networkGroups'
+import { tagText } from './shared/tagText'
 import { CHIP_STYLES } from './shared/stageConfig'
 import PickALocation from './shared/PickALocation'
 
@@ -89,7 +90,7 @@ export default function NetworkScreen({
   partners = [],
   companies = [],
   locFilter = 'all',
-  tags = [],                  // THE one tag list [{ id, label, key? }] — labels for tagIds
+  tags = [],                  // THE one tag list [{ id, label, icon, key? }] — what tagIds read as
   readOnly = false,
   onOpenPerson = () => {},
   onOpenCompany = () => {},
@@ -146,7 +147,9 @@ export default function NetworkScreen({
   const filterCount = (stageFilter ? 1 : 0) + tagFilter.length
   const clearFilters = () => { setStageFilter(null); setTagFilter([]) }
   const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
-  const tagLabel = useMemo(() => new Map(tags.map(t => [t.id, t.label])), [tags])
+  // Tags draw as their own icon + label ("🏠 Realtor", shared/tagText).
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
+  const tagLabel = (id) => tagById.get(id)?.label
 
   // Saved views — SAME store the Phase 1 persistence fix established
   // (bee_network_saved_views). Views now carry {stageFilter, tagIds}.
@@ -319,7 +322,7 @@ export default function NetworkScreen({
                   />
                   <div data-testid="network-tag-options" style={{ maxHeight: '220px', overflowY: 'auto' }}>
                     {shownTagOptions.map(t => (
-                      <CheckRow key={t.id} label={`${t.label} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
+                      <CheckRow key={t.id} label={`${tagText(t)} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
                     ))}
                     {shownTagOptions.length === 0 && (
                       <p style={{ fontSize: '11px', color: T.ink.quiet }}>No tag matches “{tagSearch.trim()}”</p>
@@ -338,8 +341,8 @@ export default function NetworkScreen({
               opening the popover. */}
           {tagFilter.map(id => (
             <span key={`tag-${id}`} data-active-tag={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 6px 4px 10px', borderRadius: T.radius.pill, background: T.accent.soft, border: `0.5px solid ${T.hairline.strong}`, fontSize: '12px', fontWeight: 500, color: T.accent.deep }}>
-              {tagLabel.get(id) || 'Tag'}
-              <button aria-label={`Remove tag filter ${tagLabel.get(id) || ''}`} onClick={() => toggleTag(id)}
+              {tagById.has(id) ? tagText(tagById.get(id)) : 'Tag'}
+              <button aria-label={`Remove tag filter ${tagLabel(id) || ''}`} onClick={() => toggleTag(id)}
                 style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px', lineHeight: 1, color: T.ink.quiet, fontFamily: 'inherit', padding: '0 2px' }}>×</button>
             </span>
           ))}
@@ -418,7 +421,7 @@ export default function NetworkScreen({
                 <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
                   {isCompany
                     ? `${row.peopleCount} ${row.peopleCount === 1 ? 'person' : 'people'}${rec.industry ? ` · ${rec.industry}` : ''}`
-                    : [(rec.tagIds || []).map(id => tagLabel.get(id)).filter(Boolean).join(', '), rec.title, rec.company].filter(Boolean).join(' · ') || rec.relationship || '—'}
+                    : [(rec.tagIds || []).map(id => tagById.get(id)).filter(Boolean).map(tagText).join(', '), rec.title, rec.company].filter(Boolean).join(' · ') || rec.relationship || '—'}
                 </p>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>

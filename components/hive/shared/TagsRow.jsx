@@ -19,7 +19,8 @@
 // the error) without lying about the writes that did land.
 //
 // Each pill keeps its quiet × for direct removal outside the modal.
-// Host owns the tags array ([{ id, label }]). §8.5: props only.
+// Host owns the tags array ([{ id, label, icon }]) — a pill reads
+// "🏠 Realtor" (tagText: the tag's own icon, if it has one). §8.5: props only.
 // recordId is the junction's record key; leadId is kept as an alias for
 // the pre-2B client call sites.
 // ─────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ import React, { useState } from 'react'
 import { T } from './tokens'
 import { MicroLabel, pillStyle } from './cardKit'
 import PickerModal from './PickerModal'
+import { tagText } from './tagText'
 
 const KINDS = {
   client: { api: '/api/lead-tags', idParam: 'lead_id' },
@@ -71,7 +73,7 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      current = [...current, { id: p.id, label: p.label }]
+      current = [...current, { id: p.id, label: p.label, icon: p.icon || null }]
       onChange(current)
       changed++
     }
@@ -93,7 +95,7 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
         {tags.map(t => (
           <span key={t.id} style={pillStyle()}>
-            {t.label}
+            {tagText(t)}
             {!readOnly && (
               <button className="bee-small-action" aria-label={`Remove tag ${t.label}`} disabled={busyId === t.id}
                 onClick={() => removeTag(t)}
@@ -117,6 +119,7 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
           locationId={locationId}
           selected={tags.map(t => t.id)}
           mode="multi"
+          showIcons
           title="Tags"
           subtitle="One list for clients and Network people"
           onSave={saveSelection}

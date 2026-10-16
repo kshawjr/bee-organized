@@ -242,18 +242,20 @@ export async function GET(
   const touchpoints = touchRows.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
 
   // Tag labels — junction → lookups.label (display vocabulary; classic's
-  // attrs.key ids stay classic's concern via people-mapper).
+  // attrs.key ids stay classic's concern via people-mapper), plus the
+  // tag's own icon (lookups.icon — the emoji lives there, never in the
+  // label; null for a tag without one).
   const tagLookupIds = Array.from(new Set((tagsRes.data ?? []).map((lt: any) => lt.tag_lookup_id).filter(Boolean)))
-  let tags: { id: string, label: string }[] = []
+  let tags: { id: string, label: string, icon: string | null }[] = []
   if (tagLookupIds.length > 0) {
     const { data: tagRows } = await supabaseService
       .from('lookups')
-      .select('id, label')
+      .select('id, label, icon')
       .in('id', tagLookupIds)
     tags = (tagsRes.data ?? [])
       .map((lt: any) => (tagRows ?? []).find(r => r.id === lt.tag_lookup_id))
       .filter(Boolean)
-      .map((r: any) => ({ id: r.id, label: r.label }))
+      .map((r: any) => ({ id: r.id, label: r.label, icon: r.icon || null }))
   }
 
   // Dangling-referrer detection — referred_by_id may point at a

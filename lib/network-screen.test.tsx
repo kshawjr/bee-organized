@@ -45,9 +45,11 @@ const dateOnly = (offsetDays: number) => new Date(Date.now() + offsetDays * 8640
 
 // THE one tag list (lookups ids; key = the pre-merge specialty slug).
 const TAGS = [
-  { id: 't-realtor', label: 'Realtor', key: 'real-estate' },
-  { id: 't-senior', label: 'Senior Living', key: 'senior-living' },
-  { id: 't-mover', label: 'Mover', key: 'moving-company' },   // nobody carries it
+  // Each tag draws its OWN icon (lookups.icon) — Senior Living has none
+  // here, like DO NOT BOOK / Lead / Partner in production.
+  { id: 't-realtor', label: 'Realtor', icon: '🏠', key: 'real-estate' },
+  { id: 't-senior', label: 'Senior Living', icon: null, key: 'senior-living' },
+  { id: 't-mover', label: 'Mover', icon: '📦', key: 'moving-company' },   // nobody carries it
 ]
 
 const PARTNERS = [
@@ -169,7 +171,8 @@ describe('A) mixed rows — square company, round person, no type labels', () =>
   it("a person's subtitle leads with their tags, by label", async () => {
     await mount()
     const sam = [...list().querySelectorAll('[data-rowtype="person"]')].find(r => r.textContent!.includes('Stale Sam'))!
-    expect(sam.textContent).toContain('Senior Living, Realtor · Broker · Meridian Realty')
+    // Icon + label where the tag has one, the bare label where it doesn't.
+    expect(sam.textContent).toContain('Senior Living, 🏠 Realtor · Broker · Meridian Realty')
   })
 })
 
@@ -196,7 +199,7 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     await mount()
     await openFilters()
     const opts = [...host.querySelectorAll('[data-testid="network-tag-options"] button')].map(b => b.textContent)
-    expect(opts).toEqual(['Realtor (2)', 'Senior Living (1)'])   // Mover: nobody carries it
+    expect(opts).toEqual(['🏠 Realtor (2)', 'Senior Living (1)'])   // Mover: nobody carries it
   })
 
   it('the search box narrows the options', async () => {
@@ -218,7 +221,7 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     expect(rowNames()).toEqual(['Karen Martinez', 'Meridian Realty', 'Stale Sam'])
     expect(host.querySelector('[data-testid="network-companies-hidden"]')!.textContent).toMatch(/^1 company hidden/)
     // The pick shows as a removable chip outside the popover.
-    expect(host.querySelector('[data-active-tag="t-realtor"]')!.textContent).toContain('Realtor')
+    expect(host.querySelector('[data-active-tag="t-realtor"]')!.textContent).toContain('🏠 Realtor')
     expect(button('Filters · 1')).toBeTruthy()
   })
 
