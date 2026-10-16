@@ -78,6 +78,7 @@ import TagFilterSection from './shared/TagFilterSection'
 import TagFilterChips from './shared/TagFilterChips'
 import { matchesTags, matchesTagSearch } from './shared/tagFilter'
 import useIsMobile from './shared/useIsMobile'
+import { telHref } from '@/lib/phone'
 
 const INBOX_SORTS = [
   { key: 'newest', label: 'Newest first' },
@@ -1153,11 +1154,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // belongs to Jobber — excluded from selection, no junk affordance.
     const linked = !!p.jobberRef
     const checked = !linked && selectedIds.has(p.id)
-    // tel: dials on the digits-only key — phone_normalized when the row
-    // carries it, else a client-side strip of the formatted value. The
-    // formatted `phone` stays the visible label.
+    // tel: is the ONE shape from lib/phone.ts telHref (+1 and ten digits
+    // for a US number); the stored phone stays the visible label.
     const phoneLabel = (p.phone || '').trim()
-    const phoneDigits = p.phoneNormalized || phoneLabel.replace(/\D/g, '')
+    const phoneTel = telHref(p.phone)
     // What they want — the webform request snippet (restored 7/24, Kevin). The
     // mapper carries leads.request_details as jobDetail; one muted line under
     // the contact line, truncated. Transfer rows keep their origin line instead.
@@ -1393,8 +1393,8 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                   {transferOriginLine(p)}
                 </span>
               )}
-              {!isTransfer && phoneLabel && phoneDigits && (
-                <a className="bee-inbox-tel" href={`tel:${phoneDigits}`}
+              {!isTransfer && phoneLabel && phoneTel && (
+                <a className="bee-inbox-tel" href={phoneTel}
                   onClick={(ev) => ev.stopPropagation()}
                   style={{
                     color: T.accent.fg, textDecoration: 'none', fontSize: '11px',

@@ -50,6 +50,7 @@ import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
+import { telHref } from '@/lib/phone'
 
 const BOARD_SORTS = [
   { key: 'newest', label: 'Newest activity' },
@@ -102,7 +103,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
             14px + vertical padding gives a real tap target (audience is 45-65
             on phones). Null renders nothing — no layout shift. */}
         {e.client_phone && (
-          <a href={`tel:${e.client_phone}`} title={e.client_phone}
+          <a href={telHref(e.client_phone) || undefined} title={e.client_phone}
             onClick={ev => ev.stopPropagation()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', padding: '3px 0', marginBottom: '3px', fontSize: '14px', color: T.accent.fg, textDecoration: 'none' }}>
             <IconPhone size={13} style={{ flexShrink: 0 }} />

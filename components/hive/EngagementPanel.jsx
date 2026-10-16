@@ -98,6 +98,7 @@ import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoi
 import { recordJobberUrl, jobberClientUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
 import BeeLoader from './shared/BeeLoader'
+import { telHref } from '@/lib/phone'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -862,7 +863,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 <span style={metaIconStyle}><IconPhone size={META_ICON} /></span>
                 {/* title on the anchor: the clipped value reveals in full on
                     hover while the row keeps its rhythm (issue 118). */}
-                <a className="bee-contact-link" href={`tel:${client.phone}`} title={client.phone}
+                <a className="bee-contact-link" href={telHref(client.phone) || undefined} title={client.phone}
                   style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{client.phone}</a>
               </p>
             )}
@@ -956,8 +957,8 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           cardKit ActionRow. */}
       <div data-testid="card-action-bar">
       <ActionRow twoColumn={isMobile} trailing={<ReminderBarButton key="reminder" ctl={reminder} fill={isMobile} />}>
-        {client?.phone && (
-          <a href={`tel:${client.phone}`} style={actionBtn('accent')}>
+        {telHref(client?.phone) && (
+          <a href={telHref(client.phone)} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
           </a>
         )}

@@ -46,13 +46,14 @@ import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 import { normalizePhoneDigits } from '@/lib/jobber-contact-writeback'
+import { telHref } from '@/lib/phone'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const FIELD = {
   phone: {
     Icon: IconPhone, label: 'Phone', empty: 'add phone', type: 'tel',
-    placeholder: '(561) 555-0100', href: (v) => `tel:${v}`,
+    placeholder: '(561) 555-0100', href: (v) => telHref(v),
     invalid: 'Enter a valid phone (7+ digits)',
     ok: (v) => normalizePhoneDigits(v).length >= 7,
   },

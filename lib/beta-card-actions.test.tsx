@@ -308,7 +308,7 @@ describe('contacts CRUD (ContactsBlock)', () => {
     const { host, unmount } = await mount(
       <ContactsBlock leadId="lead-9" contacts={[CONTACT]} onChange={(n: any) => { next = n }} setToast={() => {}} />
     )
-    expect(host.querySelector('a[href="tel:(561) 555-0177"]')).toBeTruthy()
+    expect(host.querySelector('a[href="tel:+15615550177"]')).toBeTruthy()
     expect(host.querySelector('.bee-edit-pencil')).toBeTruthy() // the standard ✎
     await click(host.querySelector('[title="Edit contact"]')!)
     await typeIn(host.querySelector('input[aria-label="Contact phone"]')!, '(704) 555-0142')

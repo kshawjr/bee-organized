@@ -189,7 +189,7 @@ describe('a person with everything set renders the full layout', () => {
   it('email linked, "m:" then the mobile linked, website linked', () => {
     expect(html).toContain('href="mailto:jane@beeorganized.com"')
     expect(html).toContain('>jane@beeorganized.com</a>')
-    expect(html).toContain('m:&nbsp;<a href="tel:3035550147"')
+    expect(html).toContain('m:&nbsp;<a href="tel:+13035550147"')
     expect(html).toContain('>(303) 555-0147</a>')
     expect(html).toContain('href="https://beeorganized.com/boulder"')
     expect(html).toContain('>beeorganized.com/boulder</a>')
@@ -242,7 +242,7 @@ describe('a person with no photo still renders and reads properly', () => {
   })
 
   it('everything else is still there', () => {
-    for (const s of ['Jane Smith', 'Owner &amp; Lead Organizer', 'mailto:jane@beeorganized.com', 'tel:3035550147', 'beeorganized.com/boulder', 'alt="LinkedIn"']) {
+    for (const s of ['Jane Smith', 'Owner &amp; Lead Organizer', 'mailto:jane@beeorganized.com', 'tel:+13035550147', 'beeorganized.com/boulder', 'alt="LinkedIn"']) {
       expect(html).toContain(s)
     }
     assertOnlyLayoutMarkup(html)

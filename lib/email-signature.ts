@@ -44,6 +44,7 @@
 // STILL clickable links. They stay icons because that is the agreed layout,
 // and nothing the client needs lives only in them.
 
+import { telHref as phoneTelHref } from '@/lib/phone'
 import { escHtml, escAttr } from './email-escape'
 
 // The brand's pale green (sage) — the same hex the design tokens call
@@ -148,13 +149,11 @@ export function safeEmail(raw: string | null | undefined): string | null {
   return EMAIL_RE.test(s) ? s : null
 }
 
-// tel: href — digits and a leading + only. The DISPLAYED number stays as the
-// person typed it (escaped). Fewer than 7 digits is not a phone number.
+// tel: href — the ONE shape from lib/phone.ts (US: +1 and ten digits;
+// foreign: its own +digits; fewer than 7 digits: no link). The DISPLAYED
+// number stays as the person typed it (escaped).
 export function telHref(raw: string | null | undefined): string | null {
-  if (typeof raw !== 'string') return null
-  const plus = raw.trim().startsWith('+') ? '+' : ''
-  const digits = raw.replace(/\D/g, '')
-  return digits.length >= 7 ? `tel:${plus}${digits}` : null
+  return phoneTelHref(raw)
 }
 
 // A stored photo path must be exactly "<uuid>/<uuid>.jpg|png" — the shape the

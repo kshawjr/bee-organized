@@ -104,7 +104,7 @@ describe('EngagementPanel — Contact block (phone/email display-only, address e
     const c = await mountPanel()
     const phone = c.querySelector('[data-contact-row="phone"] a') as HTMLAnchorElement
     const email = c.querySelector('[data-contact-row="email"] a') as HTMLAnchorElement
-    expect(phone?.getAttribute('href')).toBe('tel:(561) 555-0100')
+    expect(phone?.getAttribute('href')).toBe('tel:+15615550100')
     expect(email?.getAttribute('href')).toBe('mailto:pat@x.com')
     // Address is the dedup-safe composed string — the stored `address`
     // already carries city/state/zip, so it renders once (no double-append).
@@ -148,7 +148,7 @@ describe('EngagementPanel — Contact block (phone/email display-only, address e
   it('the footer Call button is untouched — still present alongside the new phone row', async () => {
     const c = await mountPanel()
     const call = [...c.querySelectorAll('a')].find(a => (a.textContent || '').includes('Call'))
-    expect(call?.getAttribute('href')).toBe('tel:(561) 555-0100')
+    expect(call?.getAttribute('href')).toBe('tel:+15615550100')
   })
 })
 
@@ -168,7 +168,7 @@ describe('EngagementBoard card — tappable phone under the name', () => {
   it('renders the phone from client_phone (tel: anchor, title set)', () => {
     const { container } = mountBoard()
     const a = telAnchor(container)
-    expect(a?.getAttribute('href')).toBe('tel:(561) 555-0100')
+    expect(a?.getAttribute('href')).toBe('tel:+15615550100')
     expect(a?.getAttribute('title')).toBe('(561) 555-0100')
   })
 
@@ -203,7 +203,7 @@ describe('EngagementGroupedList row — tappable phone under the name (twin lens
     const { container } = mountList()
     await settle()
     const a = telAnchor(container)
-    expect(a?.getAttribute('href')).toBe('tel:(561) 555-0100')
+    expect(a?.getAttribute('href')).toBe('tel:+15615550100')
     expect(a?.getAttribute('title')).toBe('(561) 555-0100')
   })
 

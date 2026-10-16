@@ -121,7 +121,7 @@ describe('ContactField — inline edit save/cancel/validate', () => {
 
   it('display: live tel: anchor + the STANDARD pencil (readable ink, not ghost); row click opens the input pre-filled with the ✓/✗ pair', async () => {
     const { host, unmount } = await mountField()
-    expect(host.querySelector('a[href="tel:(561) 555-0100"]')).toBeTruthy()
+    expect(host.querySelector('a[href="tel:+15615550100"]')).toBeTruthy()
     expect(host.textContent).toContain('✎')
     expect(host.querySelector('.bee-edit-pencil')).toBeTruthy() // shared/inlineEdit standard, no private fork
     expect(input(host)).toBeNull()
@@ -291,7 +291,7 @@ describe('two mounts, one implementation + cross-view propagation', () => {
     expect(onLeadPatched).toHaveBeenCalledWith('lead-9', { phone: '(704) 555-0142' })
     // The new value renders (state merge) and the audit entry landed in
     // the Recent activity stream without a refetch.
-    expect(host.querySelector('a[href="tel:(704) 555-0142"]')).toBeTruthy()
+    expect(host.querySelector('a[href="tel:+17045550142"]')).toBeTruthy()
     expect(host.textContent).toContain('Phone updated → (704) 555-0142')
     await unmount()
   })

@@ -86,6 +86,7 @@ import { upsertContact } from './shared/contactStream'
 import { DISPOSITIONS, DISPOSITION_GROUPS, TRANSFER_MENU, confirmPrompt, CONFIRM_YES, CONFIRM_NO } from './shared/leadDispositions'
 import { canTransferLeads, transferBlockFor, TRANSFER_BLOCK_COPY } from '@/lib/lead-transfer-rule'
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
+import { telHref } from '@/lib/phone'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -867,8 +868,8 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           cardKit ActionRow. */}
       <div data-testid="card-action-bar">
       <ActionRow twoColumn={isMobile} trailing={<ReminderBarButton key="reminder" ctl={reminder} fill={isMobile} />}>
-        {!atLocOther && c.phone && (
-          <a href={`tel:${c.phone}`} style={actionBtn('accent')}>
+        {!atLocOther && telHref(c.phone) && (
+          <a href={telHref(c.phone)} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
           </a>
         )}

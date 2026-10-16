@@ -4155,7 +4155,7 @@ function ContactsTab({ person, onUpdate, onError, allPeople = [] }) {
                   <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px' }}>{c.role}</span>
                 </div>
                 <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-                  {c.phone&&<a href={`tel:${c.phone}`} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>📞 {c.phone}</a>}
+                  {c.phone&&<a href={phoneTelHref(c.phone) || undefined} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>📞 {c.phone}</a>}
                   {c.email&&<a href={`mailto:${c.email}`} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>✉️ {c.email}</a>}
                 </div>
               </div>
@@ -5388,7 +5388,7 @@ function PersonPanel({
                   {
                     key: "phone",
                     onClick: () => {
-                      if (person.phone) window.location.href = `tel:${person.phone}`;
+                      if (phoneTelHref(person.phone)) window.location.href = phoneTelHref(person.phone);
                       else setShowLeadInfoEdit(true);
                     },
                     "aria-label": person.phone ? "Call phone" : "Edit phone",
@@ -5968,7 +5968,7 @@ function PersonPanel({
                       "button",
                       {
                         onClick: () => {
-                          if (person.phone) window.location.href = `tel:${person.phone}`;
+                          if (phoneTelHref(person.phone)) window.location.href = phoneTelHref(person.phone);
                           else setShowLeadInfoEdit(true);
                         },
                         "aria-label": person.phone ? "Call phone" : "Edit phone",
@@ -15789,7 +15789,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                     {partner.isCustomer&&<span style={{ fontSize:'11px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 7px', borderRadius:'20px', flexShrink:0 }}>👤 Also a client</span>}
                   </>
                 )}
-                {partner.phone && <a href={`tel:${partner.phone}`} aria-label="Call phone" style={{ fontSize:'18px', width:'32px', height:'32px', display:'inline-flex', alignItems:'center', justifyContent:'center', textDecoration:'none', flexShrink:0, opacity:0.7 }}>📞</a>}
+                {phoneTelHref(partner.phone) && <a href={phoneTelHref(partner.phone)} aria-label="Call phone" style={{ fontSize:'18px', width:'32px', height:'32px', display:'inline-flex', alignItems:'center', justifyContent:'center', textDecoration:'none', flexShrink:0, opacity:0.7 }}>📞</a>}
                 {partner.email && <a href={`mailto:${partner.email}`} aria-label="Send email" style={{ fontSize:'18px', width:'32px', height:'32px', display:'inline-flex', alignItems:'center', justifyContent:'center', textDecoration:'none', flexShrink:0, opacity:0.7 }}>✉️</a>}
                 <button onClick={()=>onViewCard(partner)} aria-label="View business card" style={{ background:'none', border:'none', cursor:'pointer', fontSize:'18px', width:'32px', height:'32px', padding:0, display:'inline-flex', alignItems:'center', justifyContent:'center', lineHeight:1, fontFamily:'inherit', flexShrink:0, opacity:0.7 }}>📇</button>
               </div>
@@ -18217,6 +18217,7 @@ const CLOSED_JOB_ROWS = [
 // (returning-a..d), exactly as the new-lead sequence does — one shared, pure
 // resolver so Settings shows the same emails the intake enrols.
 import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
+import { telHref as phoneTelHref } from '@/lib/phone'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -24443,7 +24444,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 function PhoneCallButton({ phone, displayPhone, name }) {
   const [hovered, setHovered] = useState(false)
   return (
-    <a href={`tel:+1${phone}`} onClick={e=>e.stopPropagation()}
+    <a href={phoneTelHref(displayPhone) || undefined} onClick={e=>e.stopPropagation()}
       onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
       aria-label={`Call ${name}: ${displayPhone}`}
       style={{ padding:'10px 14px 10px 0', display:'flex', alignItems:'center', gap:'6px', textDecoration:'none', flexShrink:0, position:'relative' }}>

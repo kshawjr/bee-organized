@@ -363,7 +363,7 @@ describe('E) the action bar lays out at every child count, and the other actions
     const { host, onSendToJobber } = await mountCase(CASES[0], 1200)
     const row = layout(host)
     const call = [...row.querySelectorAll('a')].find(a => a.textContent!.includes('Call')) as HTMLAnchorElement
-    expect(call.getAttribute('href')).toBe('tel:555-0100')
+    expect(call.getAttribute('href')).toBe('tel:5550100') // a 7-digit stub dials its digits (lib/phone.ts telHref)
     await click(byText(row, 'Log touchpoint'))
     expect(document.querySelector('[aria-label="Log touchpoint"][role="dialog"], [aria-label="Log touchpoint"]:not(button)')).toBeTruthy()
     await click([...row.querySelectorAll('button')].find(b => b.textContent!.includes('Send to Jobber')))

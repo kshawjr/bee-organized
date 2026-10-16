@@ -156,15 +156,15 @@ describe('ghost icon actions', () => {
 describe('secondary-line phone', () => {
   it('renders a tel: link — digits-only href off phoneNormalized, formatted phone as the label', async () => {
     const m = await mount(inbox([person()]))
-    const tel = m.host.querySelector('a[href="tel:5615550199"]')
-    expect(tel, 'tel: href must be the digits-only phone_normalized value').toBeTruthy()
+    const tel = m.host.querySelector('a[href="tel:+15615550199"]')
+    expect(tel, 'tel: href is the one lib/phone.ts shape: +1 and ten digits').toBeTruthy()
     expect(tel!.textContent).toContain('(561) 555-0199')
     await m.unmount()
   })
 
   it('falls back to a client-side digit strip when phoneNormalized is absent', async () => {
     const m = await mount(inbox([person({ phoneNormalized: null, phone: '(303) 555-0182' })]))
-    expect(m.host.querySelector('a[href="tel:3035550182"]')).toBeTruthy()
+    expect(m.host.querySelector('a[href="tel:+13035550182"]')).toBeTruthy()
     await m.unmount()
   })
 

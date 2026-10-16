@@ -174,7 +174,7 @@ describe('restyle behavior intact', () => {
     const p = person()
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
-    await click(m.host.querySelector('a[href="tel:5615550199"]')!)
+    await click(m.host.querySelector('a[href="tel:+15615550199"]')!)
     expect(onOpenPerson).not.toHaveBeenCalled()
     await click(m.host.querySelector('.bee-inbox-row')!)
     expect(onOpenPerson).toHaveBeenCalledWith(p, [p.id]) // + section siblings (issue 134 follow-up)
