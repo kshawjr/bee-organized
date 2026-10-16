@@ -10,8 +10,9 @@
 //      existed because there was no real filter). No band headings.
 //   C) THE TAG FILTER — searchable, multi-pick, any-of, over the one tag
 //      list; it finds a person by ANY of their tags (the old filter only
-//      saw the first specialty); companies drop out (they carry no tags);
-//      a pre-merge saved view (specFilter slug) still works.
+//      saw the first specialty); a company shows when one of ITS people
+//      matches, the rest are hidden WITH a line saying how many; a
+//      pre-merge saved view (specFilter slug) still works.
 //   D) Stage chips render on person rows; 60d+ last-contact renders in
 //      the danger tone (fresh rows don't; NULL renders quiet "no
 //      touchpoints yet", not red).
@@ -83,6 +84,8 @@ const PARTNERS = [
 
 const COMPANIES = [
   { id: 'co1', name: 'Meridian Realty', industry: 'Real Estate', locationId: 'loc-1', isDeleted: false },
+  // Nobody linked — under any filter it has no one to match through.
+  { id: 'co2', name: 'Oak Movers', industry: 'Moving', locationId: 'loc-1', isDeleted: false },
 ]
 
 const SUMMARY = {
@@ -173,7 +176,8 @@ describe('A) mixed rows — square company, round person, no type labels', () =>
 describe('B) one flat list, sorted by name — no bands', () => {
   it('people and companies together, A→Z, with no group headings', async () => {
     await mount()
-    expect(rowNames()).toEqual(['Just Met Jim', 'Karen Martinez', 'Meridian Realty', 'Stale Sam', 'Warm Wendy'])
+    expect(rowNames()).toEqual(['Just Met Jim', 'Karen Martinez', 'Meridian Realty', 'Oak Movers', 'Stale Sam', 'Warm Wendy'])
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')).toBeNull()
     expect(host.querySelector('[data-band]')).toBeNull()
     expect(host.textContent).not.toContain('Potential customers')
     expect(host.textContent).not.toContain('Just met · no intent yet')
@@ -209,7 +213,10 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     await mount()
     await openFilters()
     await act(async () => { tagOption('Realtor').click() })
-    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])   // companies carry no tags → out
+    // Meridian Realty stays: Karen and Sam work there. Oak Movers has no
+    // one who matches, so it's hidden — and the screen says so.
+    expect(rowNames()).toEqual(['Karen Martinez', 'Meridian Realty', 'Stale Sam'])
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')!.textContent).toMatch(/^1 company hidden/)
     // The pick shows as a removable chip outside the popover.
     expect(host.querySelector('[data-active-tag="t-realtor"]')!.textContent).toContain('Realtor')
     expect(button('Filters · 1')).toBeTruthy()
@@ -219,12 +226,13 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     await mount()
     await openFilters()
     await act(async () => { tagOption('Senior Living').click() })
-    expect(rowNames()).toEqual(['Stale Sam'])
+    expect(rowNames()).toEqual(['Meridian Realty', 'Stale Sam'])
     await act(async () => { tagOption('Realtor').click() })
-    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])
+    expect(rowNames()).toEqual(['Karen Martinez', 'Meridian Realty', 'Stale Sam'])
     await act(async () => { (host.querySelector('[aria-label="Remove tag filter Realtor"]') as HTMLElement).click() })
     await act(async () => { (host.querySelector('[aria-label="Remove tag filter Senior Living"]') as HTMLElement).click() })
-    expect(rowNames()).toHaveLength(5)
+    expect(rowNames()).toHaveLength(6)
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')).toBeNull()
   })
 
   it('a view saved before the merge (specFilter slug) maps onto the tag with that slug', async () => {
@@ -234,7 +242,7 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     }))
     await mount()
     await act(async () => { button('Realtors').click() })
-    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])
+    expect(rowNames()).toEqual(['Karen Martinez', 'Meridian Realty', 'Stale Sam'])
   })
 
   it('a view saved now stores tag ids', async () => {
@@ -247,6 +255,30 @@ describe('C) the tag filter — searchable, any-of, over the one list', () => {
     await act(async () => { button('Save').click() })
     const saved = JSON.parse(lsStore.get('bee_network_saved_views')!)
     expect(saved.views[0].filters).toEqual({ stageFilter: '', tagIds: ['t-senior'] })
+  })
+
+  it('a tag nobody at a company has hides every company, and the count says 2', async () => {
+    await mount({ partners: PARTNERS.map(p => (p.id === 'p3' ? { ...p, tagIds: ['t-mover'] } : p)) })
+    await openFilters()
+    await act(async () => { tagOption('Mover').click() })
+    expect(rowNames()).toEqual(['Warm Wendy'])   // Wendy works for no company
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')!.textContent).toMatch(/^2 companies hidden/)
+  })
+
+  it('the stage filter follows the same people-first rule', async () => {
+    await mount()
+    await openFilters()
+    await act(async () => { button('Building').click() })
+    expect(rowNames()).toEqual(['Meridian Realty', 'Stale Sam'])
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')!.textContent).toMatch(/^1 company hidden/)
+  })
+
+  it('the hidden count only counts companies the search box let through', async () => {
+    await mount()
+    await typeInto(host.querySelector('input[placeholder^="Search people"]') as HTMLInputElement, 'meridian')
+    await openFilters()
+    await act(async () => { tagOption('Realtor').click() })
+    expect(host.querySelector('[data-testid="network-companies-hidden"]')).toBeNull()   // Oak Movers was already searched out
   })
 
   it('nobody tagged → the section says so instead of an empty list', async () => {
@@ -291,7 +323,7 @@ describe('F) honest stats', () => {
   it('renders the real joined numbers once the summary resolves', async () => {
     await mount()
     const stats = host.querySelector('[data-testid="network-stats"]') as HTMLElement
-    expect(stats.textContent).toContain('5')        // in network (4 people + 1 company)
+    expect(stats.textContent).toContain('6')        // in network (4 people + 2 companies)
     expect(stats.textContent).toContain('6')        // leads referred
     expect(stats.textContent).toContain('$6,500')   // revenue — REAL, not $0
     expect(stats.textContent).toContain('Gone cold')

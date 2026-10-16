@@ -42,7 +42,7 @@ import {
 } from './shared/FilterPopover'
 import {
   buildNetworkRows, networkStats, contactRecency,
-  stageFamilyKey, matchesTags, tagOptionsInUse,
+  stageFamilyKey, matchesTags, tagOptionsInUse, companiesWithMatchingPeople,
 } from './shared/networkGroups'
 import { CHIP_STYLES } from './shared/stageConfig'
 import PickALocation from './shared/PickALocation'
@@ -175,23 +175,33 @@ export default function NetworkScreen({
   const [namingView, setNamingView] = useState(false)
   const [viewName, setViewName] = useState('')
 
-  const filteredPartners = useMemo(() => {
+  // People passing the filters, BEFORE the search box — the companies'
+  // filter rule reads this (a company is judged by its people).
+  const peopleInFilter = useMemo(() => {
     let rows = scopedPartners
     if (stageFilter) rows = rows.filter(p => p.stage === stageFilter)
     if (tagFilter.length) rows = rows.filter(p => matchesTags(p, tagFilter))
-    if (!q) return rows
-    const matched = new Set(matchPeople(rows, q).map(m => m.person.id))
-    return rows.filter(p => matched.has(p.id) || (p.company || '').toLowerCase().includes(q))
-  }, [scopedPartners, q, stageFilter, tagFilter])
+    return rows
+  }, [scopedPartners, stageFilter, tagFilter])
 
-  const filteredCompanies = useMemo(() => {
-    // Companies carry no pipeline stage and no tags — either filter
-    // narrows the list to people.
-    if (stageFilter || tagFilter.length) return []
-    if (!q) return scopedCompanies
-    return scopedCompanies.filter(c =>
+  const filteredPartners = useMemo(() => {
+    if (!q) return peopleInFilter
+    const matched = new Set(matchPeople(peopleInFilter, q).map(m => m.person.id))
+    return peopleInFilter.filter(p => matched.has(p.id) || (p.company || '').toLowerCase().includes(q))
+  }, [peopleInFilter, q])
+
+  // Companies carry no tags and no stage. Under a filter a company shows
+  // when one of ITS people passes it (shared/networkGroups); the rest are
+  // hidden, and the list says how many — a company silently vanishing
+  // reads as a bug.
+  const searchedCompanies = useMemo(() => (
+    !q ? scopedCompanies : scopedCompanies.filter(c =>
       (c.name || '').toLowerCase().includes(q) || (c.industry || '').toLowerCase().includes(q))
-  }, [scopedCompanies, q, stageFilter, tagFilter])
+  ), [scopedCompanies, q])
+  const filteredCompanies = useMemo(() => (
+    filterCount > 0 ? companiesWithMatchingPeople(searchedCompanies, peopleInFilter) : searchedCompanies
+  ), [searchedCompanies, peopleInFilter, filterCount])
+  const hiddenCompanies = searchedCompanies.length - filteredCompanies.length
 
   // ── the one list ──
   const rows = useMemo(
@@ -378,6 +388,11 @@ export default function NetworkScreen({
           )
       )}
 
+      {hiddenCompanies > 0 && (
+        <p data-testid="network-companies-hidden" style={{ fontSize: '11px', color: T.ink.quiet, margin: '0 2px 8px' }}>
+          {hiddenCompanies} {hiddenCompanies === 1 ? 'company' : 'companies'} hidden — companies don’t have tags or a stage of their own, so one shows only when someone who works there matches.
+        </p>
+      )}
       <div data-testid="network-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {rows.map(row => {
           const rec = row.record

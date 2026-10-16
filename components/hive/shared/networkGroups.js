@@ -60,6 +60,17 @@ export function matchesTags(partner, picked = []) {
   return picked.some((id) => mine.includes(id))
 }
 
+// A company carries no tags and no stage of its own, so under a filter it
+// is judged by its PEOPLE: it shows when any person linked to it
+// (companyId) passes the filter. Filtering "Realtor" shows Meridian
+// Realty because Karen is a realtor there — the same people-first rule
+// the retired bands used to place a company. people: the in-scope people
+// ALREADY narrowed by the filter (not by the search box).
+export function companiesWithMatchingPeople(companies = [], people = []) {
+  const ids = new Set(people.map((p) => p?.companyId).filter(Boolean))
+  return companies.filter((c) => ids.has(c.id))
+}
+
 // The filter's options: only tags someone in view actually carries, most
 // used first, then by label — the list an owner can act on, with counts.
 // tags: [{ id, label }] (the one list); partners: the in-scope people.

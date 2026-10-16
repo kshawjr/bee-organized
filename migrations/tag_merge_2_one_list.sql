@@ -7,8 +7,11 @@
 --     client_tags          7 corporate + 2 location-owned rows
 --     partner_specialties  35 corporate rows
 --     partner_tags         1 corporate row ('Partner')
---   = 45 rows, none switched off, no two sharing a name in the same scope
---   (checked against lookups_scope_label_uniq on production 2026-10-15).
+--   = 45 rows, no two sharing a name in the same scope (checked against
+--   lookups_scope_label_uniq on production 2026-10-15). 17 of them were
+--   switched off the same day (14 unused specialties, 3 unused client
+--   tags — Kevin's call); they move too and stay off, so the picker shows
+--   26 corporate tags (+1 at Southeast Nashville and at Portland).
 --
 -- RUN ONLY AFTER the merged code is live (lib/tags.ts run order, step 4).
 -- The OLD code asks for the three old category names and would find

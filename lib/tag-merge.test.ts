@@ -30,6 +30,7 @@ import { TAG_CATEGORIES, isTagCategory, tagApplyError, cleanTagIds, MAX_TAGS_PER
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { mapPartnerRow, partnerPatchToRow, PARTNER_COLS } from '@/lib/crm'
 import { PARTNER_PATCH_FIELDS, computePartnerPatch } from '@/lib/partner-writes'
+import { companiesWithMatchingPeople } from '@/components/hive/shared/networkGroups'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -113,5 +114,15 @@ describe('C) the person shape', () => {
     expect(PARTNER_PATCH_FIELDS).not.toContain('tagIds' as any)
     // A tag change on the record is state-only — no PATCH goes out for it.
     expect(computePartnerPatch({ id: 'p1', tagIds: ['t1'] }, { id: 'p1', tagIds: ['t1', 't2'] })).toEqual({})
+  })
+})
+
+describe('D) companies under a filter are judged by their people', () => {
+  const companies = [{ id: 'co1', name: 'Meridian' }, { id: 'co2', name: 'Oak' }, { id: 'co3', name: 'Empty' }]
+  it('a company shows when any of its people passed the filter', () => {
+    expect(companiesWithMatchingPeople(companies, [{ companyId: 'co1' }, { companyId: 'co1' }, { companyId: null }]).map(c => c.id)).toEqual(['co1'])
+  })
+  it('no matching people → no companies', () => {
+    expect(companiesWithMatchingPeople(companies, [])).toEqual([])
   })
 })
