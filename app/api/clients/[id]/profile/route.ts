@@ -252,6 +252,9 @@ export async function GET(
       .from('lookups')
       .select('id, label, icon')
       .in('id', tagLookupIds)
+      // A switched-off tag is hidden on the record too (2026-10-16); the link
+      // is kept, so a restore brings it back.
+      .eq('is_active', true)
     tags = (tagsRes.data ?? [])
       .map((lt: any) => (tagRows ?? []).find(r => r.id === lt.tag_lookup_id))
       .filter(Boolean)

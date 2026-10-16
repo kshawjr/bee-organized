@@ -39,6 +39,14 @@
 //                 and Trade (A–Z) by each row's attrs.section (lib/tags.ts)
 //                 instead of corporate / location's own. A row with no
 //                 section shows under Trade — never dropped.
+//                 With allowCreate, the tag create flow (2026-10-16): as the
+//                 owner types, a near-match (lib/tags.ts tagKey — case,
+//                 spacing, punctuation, plurals) replaces "Create" with
+//                 "Use <tag>" (an active tag) or "Restore <tag>" (their own
+//                 switched-off one). A switched-off CORPORATE match says
+//                 "Corporate retired <tag>" and still offers Create — the
+//                 server files the request to bring it back. A new tag
+//                 belongs to this location alone ("<Location>'s own").
 //   showIcons   — draw each option's own icon before its label (tags:
 //                 "🏠 Realtor"). Off by default — tier and stage rows
 //                 carry icons too, and those pickers never showed them.
@@ -55,7 +63,7 @@ import { T } from './tokens'
 import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
 import { tagText } from './tagText'
-import { sectionTags } from '@/lib/tags'
+import { sectionTags, nearTagVerdict } from '@/lib/tags'
 
 export default function PickerModal({
   category,
@@ -72,11 +80,15 @@ export default function PickerModal({
   onClose = () => {},
 }) {
   const [options, setOptions] = useState(null)     // null = loading
+  // Tags only: switched-off rows (corporate retired + this location's own
+  // removed) — never options, only for the near-match warnings.
+  const [inactive, setInactive] = useState([])
   const [locationName, setLocationName] = useState(null)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(() => new Set(selected))
   const [busy, setBusy] = useState(null)           // 'create' | 'save' | null
   const [error, setError] = useState(null)
+  const [notice, setNotice] = useState(null)       // a quiet success note (tag create)
   const searchRef = useRef(null)
   const titleId = useId()
 
@@ -85,12 +97,14 @@ export default function PickerModal({
     let dead = false
     const params = new URLSearchParams({ category })
     if (locationId) params.set('location_id', locationId)
+    if (sections) params.set('include_inactive', '1')
     fetch(`/api/lookups?${params.toString()}`)
       .then(r => r.json())
       .then(j => {
         if (dead) return
         const rows = (j.lookups || []).filter(l => l.is_active !== false)
         setOptions(rows)
+        setInactive((j.lookups || []).filter(l => l.is_active === false))
         if (j.location?.name) setLocationName(j.location.name)
         // Normalize incoming selected values: hosts may hand attrs.key
         // slugs (partners.tier / .specialties storage) instead of ids.
@@ -137,17 +151,29 @@ export default function PickerModal({
   // Tags: Relationship / Trade instead of corporate / own (both kinds of
   // row go into whichever section they belong to).
   const sectioned = useMemo(
-    () => (sections ? sectionTags([...corporate, ...own]) : null),
-    [sections, corporate, own]
+    () => (sections ? sectionTags([...corporate, ...own], locationName ? `${locationName}'s own` : null) : null),
+    [sections, corporate, own, locationName]
   )
 
   // The create row shows only when the trimmed text matches NO existing
   // label exactly (case-insensitive) — search-narrowing alone must not
   // offer to duplicate a hidden option.
   const createLabel = q.trim()
+  // Tags: what the typed name collides with (any option, plus switched-off
+  // ones). 'use' / 'restore' replace the create row; 'retired' warns but
+  // still lets them create. serverVerdict: the server's own 409 (a race,
+  // or a tag this list didn't have) — it wins.
+  const [serverVerdict, setServerVerdict] = useState(null)
+  useEffect(() => { setServerVerdict(null) }, [createLabel])
+  const verdict = useMemo(() => {
+    if (!sections || !createLabel || options == null) return { kind: 'none' }
+    if (serverVerdict) return serverVerdict
+    return nearTagVerdict(createLabel, [...options, ...inactive])
+  }, [sections, createLabel, options, inactive, serverVerdict])
   const showCreate = allowCreate && !!locationId && !!createLabel && !busy &&
     options != null &&
-    !options.some(o => o.label.toLowerCase() === createLabel.toLowerCase())
+    !options.some(o => o.label.toLowerCase() === createLabel.toLowerCase()) &&
+    verdict.kind !== 'use' && verdict.kind !== 'restore'
 
   function toggle(id) {
     setError(null)
@@ -172,8 +198,16 @@ export default function PickerModal({
         body: JSON.stringify({ category, label: createLabel, location_id: locationId }),
       })
       const j = await res.json().catch(() => ({}))
+      // The server's near-match guard (a race, or a tag this list didn't
+      // load): offer what it found instead of failing.
+      if (res.status === 409 && j?.error === 'near_match' && j.tag) {
+        setServerVerdict({ kind: j.verdict, tag: j.tag })
+        return
+      }
       if (!res.ok || !j.lookup) throw new Error(j?.error || `HTTP ${res.status}`)
       setOptions(prev => [...(prev || []), j.lookup])
+      announceTag(j.lookup)
+      if (j.retired) setNotice(`Created. Corporate has been told you needed “${j.retired.label}”.`)
       setSel(prev => {
         // A created option lands selected — unless that would breach the
         // cap, in which case it lands unchecked (the cap message stands).
@@ -189,6 +223,45 @@ export default function PickerModal({
     } finally { setBusy(null) }
   }
 
+  // A tag created (or restored) here joins the app's loaded tag list at once
+  // (BeeHub listens), so filters and row labels show it without a reload.
+  function announceTag(row) {
+    if (!sections || typeof window === 'undefined') return
+    try { window.dispatchEvent(new CustomEvent('bee:tag-added', { detail: { ...row, ownerName: locationName } })) } catch {}
+  }
+
+  // Tags: pick the existing near-match instead of creating a near-duplicate.
+  function useExisting(tag) {
+    setError(null)
+    setSel(prev => {
+      if (prev.has(tag.id)) return prev
+      if (mode === 'multi' && maxSelected != null && prev.size >= maxSelected) { setError(`Up to ${maxSelected} can be selected`); return prev }
+      const next = new Set(mode === 'single' ? [] : prev); next.add(tag.id); return next
+    })
+    setQ(''); searchRef.current?.focus()
+  }
+
+  // Tags: switch the location's own removed tag back on and pick it.
+  async function restoreOwn(tag) {
+    setBusy('create'); setError(null)
+    try {
+      const res = await fetch(`/api/lookups/${tag.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: true }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || !j.lookup) throw new Error(j?.error || `HTTP ${res.status}`)
+      const row = { ...tag, ...j.lookup, location_id: tag.location_id ?? j.lookup.location_id, is_active: true }
+      setInactive(prev => prev.filter(o => o.id !== tag.id))
+      setOptions(prev => [...(prev || []), row])
+      announceTag(row)
+      setServerVerdict(null)
+      useExisting(row)
+    } catch (e) {
+      setError(`Restore failed: ${e.message}`)
+    } finally { setBusy(null) }
+  }
+
   async function save() {
     if (busy) return
     setBusy('save'); setError(null)
@@ -201,6 +274,14 @@ export default function PickerModal({
       setBusy(null)
     }
   }
+
+  const nearRowStyle = {
+    display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+    padding: '7px 8px', borderRadius: T.radius.control, border: 'none',
+    background: 'transparent', textAlign: 'left', color: T.accent.deep,
+    fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+  }
+  const nearIconStyle = { width: '16px', display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }
 
   const groupHeader = (text, corp = false) => (
     <p style={{
@@ -249,7 +330,7 @@ export default function PickerModal({
         <h2 id={titleId} style={{ fontSize: '17px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, margin: 0 }}>{title}</h2>
         {subtitle && <p style={{ fontSize: '12px', color: T.ink.muted, margin: '4px 0 0' }}>{subtitle}</p>}
 
-        <input ref={searchRef} type="text" value={q} placeholder="Search or add"
+        <input ref={searchRef} type="text" value={q} placeholder={allowCreate ? 'Search or add' : 'Search'}
           aria-label="Search options"
           onChange={e => { setQ(e.target.value); setError(null) }}
           onKeyDown={e => { if (e.key === 'Enter' && showCreate) { e.preventDefault(); createOption() } }}
@@ -268,7 +349,37 @@ export default function PickerModal({
                   {sec.rows.map(optionRow)}
                 </div>
               ))}
-              {sectioned.length === 0 && (
+              {/* ── the tag create flow (allowCreate) ── */}
+              {verdict.kind === 'use' && !matches(verdict.tag) && (
+                <button type="button" data-near="use" onClick={() => useExisting(verdict.tag)} style={nearRowStyle}>
+                  <span aria-hidden style={nearIconStyle}><IconCheck size={14} /></span>
+                  <span>Use {showIcons ? tagText(verdict.tag) : verdict.tag.label} — it’s already a tag</span>
+                </button>
+              )}
+              {verdict.kind === 'restore' && allowCreate && (
+                <button type="button" data-near="restore" onClick={() => restoreOwn(verdict.tag)} disabled={!!busy} style={nearRowStyle}>
+                  <span aria-hidden style={nearIconStyle}><IconPlus size={14} /></span>
+                  <span>You removed “{verdict.tag.label}” — restore it</span>
+                </button>
+              )}
+              {verdict.kind === 'retired' && allowCreate && (
+                <p data-near="retired" style={{ fontSize: '12px', color: T.ink.muted, margin: '2px 0 6px', lineHeight: 1.4 }}>
+                  Corporate retired “{verdict.tag.label}”. Creating your own lets corporate know you need it.
+                </p>
+              )}
+              {showCreate && (
+                <button type="button" data-create onClick={createOption} disabled={busy === 'create'} style={nearRowStyle}>
+                  <span aria-hidden style={nearIconStyle}><IconPlus size={14} /></span>
+                  <span>
+                    {busy === 'create' ? 'Creating…' : `Create "${createLabel}"`}
+                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, color: T.ink.quiet }}>
+                      Only {locationName || 'your location'} will see it
+                    </span>
+                  </span>
+                </button>
+              )}
+              {notice && <p style={{ fontSize: '12px', color: T.ink.muted, margin: '4px 0' }}>{notice}</p>}
+              {sectioned.length === 0 && !showCreate && verdict.kind === 'none' && (
                 <p style={{ fontSize: '12px', color: T.ink.quiet, padding: '8px 0' }}>
                   {needle ? 'No matches' : 'No options yet'}
                 </p>

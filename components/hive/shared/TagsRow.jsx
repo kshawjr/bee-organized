@@ -8,7 +8,9 @@
 // the shared PickerModal. Since the tag merge (2026-10-15, lib/tags.ts)
 // both kinds pick from THE one tag list (category 'tags' — corporate +
 // the location's own, searchable) and nobody creates from here: tags are
-// corporate-only, added on the Configure tab. The modal only PICKS;
+// corporate-only, added on the Configure tab — until 2026-10-16, when a
+// location may add its OWN again (allowCreate, behind the near-match guard;
+// read-only staff can't). The modal only PICKS (or creates a definition);
 // every junction write goes through the kind's route:
 //   kind 'client'  → /api/lead-tags     (lead_id,    lead_tags)
 //   kind 'partner' → /api/partner-tags  (partner_id, partner_tags)
@@ -121,8 +123,9 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
           mode="multi"
           showIcons
           sections
+          allowCreate={!readOnly}
           title="Tags"
-          subtitle="One list for clients and Network people"
+          subtitle="Corporate's list, plus your location's own"
           onSave={saveSelection}
           onClose={() => setOpen(false)}
         />

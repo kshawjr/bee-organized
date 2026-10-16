@@ -53,8 +53,9 @@ export default function TagPickField({ locationId = null, value = [], onChange =
           maxSelected={MAX_CREATE_TAGS}
           showIcons
           sections
+          allowCreate
           title="Tags"
-          subtitle="One list for clients and Network people"
+          subtitle="Corporate's list, plus your location's own"
           onSave={picked => onChange(picked.map(p => ({ id: p.id, label: p.label, icon: p.icon || null })))}
           onClose={() => setOpen(false)}
         />

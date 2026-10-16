@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { isTagCategory } from '@/lib/tags'
+import { canManageLocationTag, checkNearTag, nearMatchBody } from '@/lib/tag-guard'
 
 // PATCH /api/lookups/[id]
 // Body: any subset of { label, color, bg_color, icon, description, attrs, sort_order, is_active }
@@ -10,8 +13,10 @@ import { supabaseService } from '@/lib/supabase-service'
 // to a deprecated tag/specialty/stage via label match — keeping the row
 // inactive preserves historical readability without polluting active lists.
 //
-// Write permission: super_admin or admin (corporate) only. Same shape as
-// POST /api/lookups.
+// Write permission: super_admin or admin (corporate) — anything. Since
+// 2026-10-16 an owner or manager may also rename or switch off/on their OWN
+// location's tags (label + is_active only). Every tag rename passes the
+// near-match guard (lib/tag-guard), excluding the tag itself.
 
 export async function PATCH(
   req: NextRequest,
@@ -23,18 +28,42 @@ export async function PATCH(
     if (!hubUser) {
       return NextResponse.json({ error: 'No hub user profile' }, { status: 403 })
     }
-    if (hubUser.role !== 'super_admin' && hubUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
-    }
-
     const id = params?.id
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+    const { data: row } = await supabaseService
+      .from('lookups').select('id, category, label, location_id').eq('id', id).maybeSingle()
+    if (!row) return NextResponse.json({ error: 'Lookup not found' }, { status: 404 })
+
+    const corporate = hubUser.role === 'super_admin' || hubUser.role === 'admin'
+    const locationTagEditor = !corporate && canManageLocationTag(hubUser as any, row as any)
+    if (!corporate && !locationTagEditor) {
+      return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
+    }
+    if (locationTagEditor) {
+      const roBlock = await readOnlyWriteBlock(hubUser as any, (row as any).location_id)
+      if (roBlock) return roBlock
+    }
 
     const body = await req.json().catch(() => ({}))
     const update: Record<string, any> = {}
 
     if (typeof body.label === 'string' && body.label.trim()) {
       update.label = body.label.trim()
+    }
+    // A location editor may change the name and switch it off/on — nothing
+    // else (colour, icon, section and order stay corporate's call).
+    if (locationTagEditor) {
+      for (const k of Object.keys(body || {})) {
+        if (k !== 'label' && k !== 'is_active') return NextResponse.json({ error: 'field_not_editable', field: k }, { status: 403 })
+      }
+    }
+    // Every tag rename passes the near-match guard (not against itself).
+    if (update.label && isTagCategory((row as any).category) && update.label !== (row as any).label) {
+      const v = await checkNearTag(update.label, (row as any).location_id || null, id)
+      const corp = !(row as any).location_id && v.kind === 'retired' ? { kind: 'restore' as const, tag: v.tag } : v
+      const blocked = nearMatchBody(corp)
+      if (blocked) return NextResponse.json(blocked, { status: 409 })
     }
     if (typeof body.color === 'string') {
       update.color = body.color.trim() || null
@@ -101,12 +130,18 @@ export async function DELETE(
     if (!hubUser) {
       return NextResponse.json({ error: 'No hub user profile' }, { status: 403 })
     }
-    if (hubUser.role !== 'super_admin' && hubUser.role !== 'admin') {
-      return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
-    }
-
     const id = params?.id
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    if (hubUser.role !== 'super_admin' && hubUser.role !== 'admin') {
+      // Same rule as PATCH: a location editor may switch off its own tag.
+      const { data: row } = await supabaseService
+        .from('lookups').select('id, category, location_id').eq('id', id).maybeSingle()
+      if (!row || !canManageLocationTag(hubUser as any, row as any)) {
+        return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
+      }
+      const roBlock = await readOnlyWriteBlock(hubUser as any, (row as any).location_id)
+      if (roBlock) return roBlock
+    }
 
     const { data, error } = await supabaseService
       .from('lookups')

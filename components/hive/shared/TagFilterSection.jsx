@@ -34,7 +34,9 @@ export default function TagFilterSection({
     () => options.filter(t => !needle || t.label.toLowerCase().includes(needle) || picked.includes(t.id)),
     [options, needle, picked]
   )
-  const sections = useMemo(() => sectionTags(shown), [shown])
+  // A location's own tags head their section with its name, when known.
+  const ownerName = useMemo(() => options.find(t => t.location_id && t.ownerName)?.ownerName || null, [options])
+  const sections = useMemo(() => sectionTags(shown, ownerName ? `${ownerName}'s own` : null), [shown, ownerName])
 
   return (
     <FilterSection label="Tags">

@@ -190,7 +190,7 @@ describe('§4) every inventoried person field round-trips', () => {
     const dialog = host.querySelector('[role="dialog"]')!
     expect(dialog).toBeTruthy()
     expect(String((fetch as any).mock.calls.find((c: any[]) => String(c[0]).startsWith('/api/lookups'))[0]))
-      .toBe('/api/lookups?category=tags&location_id=loc-uuid-1')
+      .toBe('/api/lookups?category=tags&location_id=loc-uuid-1&include_inactive=1')   // switched-off rows feed the near-match warnings
     await click(btn('Senior Living', dialog))
     await click(btn('Save', dialog))
     expect(host.querySelector('[role="dialog"]')).toBeNull()

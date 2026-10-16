@@ -443,7 +443,7 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
     expect(host.querySelector('[aria-label="Edit specialties"]')).toBeNull()
   })
 
-  it('the tag picker is the one list (category tags), offers no create, and a pick lands in the list row', async () => {
+  it('the tag picker is the one list (category tags), a missing tag can be created, and a pick lands in the list row', async () => {
     const onUpdate = vi.fn()
     installFetch({
       '/api/lookups': TAG_LOOKUPS,
@@ -452,15 +452,16 @@ describe('F) partnership — tier and tags (specialties are tags now)', () => {
     await mount({ onUpdate, tiers: TIERS })
     await act(async () => { (host.querySelector('[aria-label="Add tag"]') as HTMLElement).click() })
     const dialog = host.querySelector('[role="dialog"]')!
-    expect(fetchCalls.find(c => c.url.startsWith('/api/lookups'))!.url).toBe('/api/lookups?category=tags&location_id=loc-1')
-    // Corporate-only: a search for a missing tag offers nothing to create.
+    expect(fetchCalls.find(c => c.url.startsWith('/api/lookups'))!.url).toBe('/api/lookups?category=tags&location_id=loc-1&include_inactive=1')
+    // Since 2026-10-16 a location may add its own: a missing tag offers Create
+    // (it would belong to this location alone).
     const search = dialog.querySelector('[aria-label="Search options"]') as HTMLInputElement
     await act(async () => {
       Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'Piano tuner')
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    expect(dialog.textContent).toContain('No matches')
-    expect([...dialog.querySelectorAll('button')].some(b => /create|add “/i.test(b.textContent || ''))).toBe(false)
+    expect(dialog.querySelector('[data-create]')!.textContent).toContain('Create "Piano tuner"')
+    expect(dialog.querySelector('[data-create]')!.textContent).toContain('Only Denver will see it')
     await act(async () => {
       Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, '')
       search.dispatchEvent(new Event('input', { bubbles: true }))

@@ -62,6 +62,8 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
+import OwnTagsSettings from "@/components/hive/OwnTagsSettings"
+import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
 // Reminders (2026-09-30) — the page and the Home block. Props-only leaves
 // like NetworkScreen, imported statically for the same reason.
 import RemindersScreen, { HomeReminders } from "@/components/hive/RemindersScreen"
@@ -1214,8 +1216,10 @@ function tagSortKey(row) { return (TAG_CATEGORY_OFFSET[row.category] || 0) + (ro
 function toTagListShape(rows) {
   return rows.slice().sort((a, b) => tagSortKey(a) - tagSortKey(b))
     .map(r => ({ id: r.id, label: r.label, icon: r.icon || null, key: (r.attrs && r.attrs.key) || null,
-      // Relationship / Trade (lib/tags.ts) — read straight off the row's data.
-      section: (r.attrs && r.attrs.section) || null, sort_order: tagSortKey(r) }))
+      // Relationship / Trade (lib/tags.ts) — read straight off the row's data;
+      // a location's own tag goes to its own section, headed by its name.
+      section: (r.attrs && r.attrs.section) || null, sort_order: tagSortKey(r),
+      location_id: r.location_id || null, ownerName: (r.location && r.location.name) || null }))
 }
 let _tagList = []
 function getTagList() { return _tagList }
@@ -23305,6 +23309,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // lite_user saw My Location/Communication/Templates/Automation/Alerts. An
   // unknown or future franchiseRole now fails CLOSED to Profile-only.
   const ownerConfig = franchiseRole === 'owner'
+  const canManageOwnTags = franchiseRole === 'owner' || franchiseRole === 'manager'
   // ─── issue 240 step 4 — one template renderer, two tabs ───
   //
   // The old Templates tab rendered three collapsible type sections from one
@@ -23525,6 +23530,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // depending on the width of your screen.
       ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
       ...(canManageTeam ? [{ key:'team',     label:'Team and seats', icon:'👥' }] : []),
+      // A location's own tags (2026-10-16): owner AND manager — the same
+      // people who may create them. Allowlist, like ownerConfig.
+      ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
     ]},
     { title:'Client messages', items: ownerConfig ? [
       { key:'emails', label:'Emails',            icon:'📧' },
@@ -23714,6 +23722,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         )}
 
         {/* ── My Location ── */}
+        {activeSection==='tags'&&(
+          <OwnTagsSettings locationId={realLocId} locationName={settings.location.name || ''} />
+        )}
         {activeSection==='location'&&(
           <>
             <div style={{ padding:'16px 16px 8px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -31083,6 +31094,8 @@ function ConfigureTab() {
           </div>
         </div>
       ))}
+      {/* Corporate's view of every location's own tags (2026-10-16). */}
+      <LocationTagsPanel />
     </div>
   )
 }
@@ -36891,6 +36904,19 @@ export default function App({
     }
     return null
   })
+  // A location's new (or restored) tag, from any tag picker (PickerModal
+  // 'bee:tag-added'): join the loaded list now — the next render (the tag
+  // being applied re-renders the screen) reads it, so filters and row
+  // labels show it without a reload.
+  useEffect(() => {
+    const onAdded = (ev) => {
+      const r = ev && ev.detail
+      if (!r || !r.id || getTagList().some(t => t.id === r.id)) return
+      setAdminTagList([...getTagList(), ...toTagListShape([{ ...r, location: r.ownerName ? { name: r.ownerName } : null }])])
+    }
+    window.addEventListener('bee:tag-added', onAdded)
+    return () => window.removeEventListener('bee:tag-added', onAdded)
+  }, [])
   useEffect(() => {
     if (!initialLookups || typeof initialLookups !== 'object') return
 

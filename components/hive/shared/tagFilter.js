@@ -27,7 +27,7 @@ export function tagOptionsInUse(tags = [], rows = []) {
   for (const r of rows) for (const id of r?.tagIds || []) counts.set(id, (counts.get(id) || 0) + 1)
   return tags
     .filter((t) => counts.has(t.id))
-    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, section: t.section ?? null, sort_order: t.sort_order ?? 0, count: counts.get(t.id) }))
+    .map((t) => ({ id: t.id, label: t.label, icon: t.icon || null, section: t.section ?? null, sort_order: t.sort_order ?? 0, location_id: t.location_id ?? null, ownerName: t.ownerName ?? null, count: counts.get(t.id) }))
 }
 
 // The main search box, tag half: does any of this row's tags have a name

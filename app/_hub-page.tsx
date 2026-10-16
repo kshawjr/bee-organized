@@ -1843,7 +1843,9 @@ export default async function HubPage({
     // vocabularies can never carry another location's rows.
     let lookupsQuery = supabaseService
       .from('lookups')
-      .select('id, category, label, location_id, sort_order, color, bg_color, icon, description, attrs, is_active')
+      // location(name): a location's own tags head their section with the
+      // location's name ("Southeast Nashville's own", lib/tags.ts).
+      .select('id, category, label, location_id, sort_order, color, bg_color, icon, description, attrs, is_active, location:locations(name)')
       .eq('is_active', true)
       .order('category', { ascending: true })
       .order('sort_order', { ascending: true })
