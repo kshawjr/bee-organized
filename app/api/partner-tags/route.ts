@@ -7,8 +7,10 @@
 // Tag system step 2B — the partner mirror of /api/lead-tags. Tags are a
 // junction table (partner_tags, composite PK partner_id + tag_lookup_id;
 // RLS enabled with no policies — service-role only, like lead_tags).
-// Definitions live in `lookups` category='partner_tags', corporate
-// (location_id null) or location-owned. This route only manages the LINK
+// Definitions live in `lookups` — THE one tag list shared with clients
+// (lib/tags.ts), corporate (location_id null) or, for the few that predate
+// the merge, location-owned. Since the tag merge this table also holds
+// what used to be partners.specialties. This route only manages the LINK
 // — it never creates/deletes definitions, and it NEVER touches the dead
 // partners.tags text[] column.
 //
@@ -22,6 +24,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { isTagCategory } from '@/lib/tags'
 
 async function authorize({ write }: { write: boolean }) {
   const supabase = await createServerSupabaseClient()
@@ -149,7 +152,7 @@ export async function POST(req: Request) {
   const locCheck = await checkLocationAccess(auth.hubUser, partner_id, { write: true })
   if (locCheck.error) return locCheck.error
 
-  // Verify the tag_lookup_id points to a valid partner_tags lookup
+  // Verify the tag_lookup_id points to a tag in the one list
   const { data: tagDef, error: tagDefError } = await supabaseService
     .from('lookups')
     .select('id, category, location_id')
@@ -159,9 +162,11 @@ export async function POST(req: Request) {
   if (tagDefError || !tagDef) {
     return NextResponse.json({ error: 'tag_lookup_not_found' }, { status: 404 })
   }
-  if (tagDef.category !== 'partner_tags') {
+  // Any tag from THE one list (lib/tags.ts) — clients and Network people
+  // share it since the tag merge.
+  if (!isTagCategory(tagDef.category)) {
     return NextResponse.json(
-      { error: 'tag_lookup_wrong_category', got: tagDef.category, expected: 'partner_tags' },
+      { error: 'tag_lookup_wrong_category', got: tagDef.category, expected: 'tags' },
       { status: 400 }
     )
   }

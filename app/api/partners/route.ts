@@ -20,6 +20,7 @@ import {
   canReadLocation,
   canWriteLocation,
 } from '@/lib/crm'
+import { attachPartnerTags } from '@/lib/partner-tag-writes'
 
 export const runtime = 'nodejs'
 
@@ -167,5 +168,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json(mapPartnerRow(data), { status: 201 })
+  // Tags picked on the create form (body.tagIds — lookups ids from the one
+  // list, lib/tags.ts). The person is already saved; a tag failure is
+  // reported on the response, never turned into a failed create.
+  let tagError: string | null = null
+  let created: any = data
+  if (Array.isArray(body?.tagIds) && body.tagIds.length > 0) {
+    try {
+      const r = await attachPartnerTags((data as any).id, locationId, body.tagIds, caller.userId)
+      if (r.rejected.length) tagError = `${r.rejected.length} tag(s) not applied: ${r.rejected.map((x) => x.error).join(', ')}`
+      const { data: reread } = await supabaseService
+        .from('partners').select(PARTNER_COLS).eq('id', (data as any).id).single()
+      if (reread) created = reread
+    } catch (e: any) {
+      tagError = String(e?.message || e)
+      console.error('[partners POST] tags', tagError)
+    }
+  }
+
+  const out: any = mapPartnerRow(created)
+  if (tagError) out.tagError = tagError
+  return NextResponse.json(out, { status: 201 })
 }

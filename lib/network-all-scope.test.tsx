@@ -47,13 +47,13 @@ Object.defineProperty(globalThis, 'localStorage', { value: lsMock, configurable:
 
 const KC = 'dca50888-949f-436d-b24e-b6c8a4984905'
 
-const SPECIALTIES = [{ id: 'real-estate', label: '🏠 Realtor' }]
+const TAGS = [{ id: 't-realtor', label: 'Realtor', key: 'real-estate' }]
 
 const PARTNERS = [
   {
     id: 'p1', name: 'Karen Martinez', type: 'partner', locationId: KC,
     title: 'Agent', company: 'Meridian Realty', companyId: 'co1',
-    specialties: ['real-estate'], stage: 'Active Partner', tags: [],
+    tagIds: ['t-realtor'], stage: 'Active Partner',
     lastContactedAt: null, isDeleted: false, nextSteps: [],
   },
 ]
@@ -94,7 +94,7 @@ async function mount(el: React.ReactElement) {
 }
 
 const netProps = (over: any = {}) => ({
-  partners: PARTNERS, companies: COMPANIES, specialties: SPECIALTIES,
+  partners: PARTNERS, companies: COMPANIES, tags: TAGS,
   locFilter: 'all', ...over,
 })
 
@@ -168,13 +168,13 @@ describe("NetworkScreen on 'All Locations' — the record list prompts", () => {
 })
 
 describe('NetworkScreen SCOPED — unchanged (franchise + elevated alike)', () => {
-  it('renders the bands and never the prompt (locationRequired defaults false)', async () => {
+  it('renders the list and never the prompt (locationRequired defaults false)', async () => {
     const host = await mount(React.createElement(NetworkScreen as any, netProps({ locFilter: KC })))
-    // Bands render collapsed by default — the band header (with its referred
-    // rollup) is the proof the list rendered; the prompt must be absent.
-    const band = host.querySelector('[data-band]') as HTMLElement
-    expect(band).toBeTruthy()
-    expect(band.textContent).toContain('Realtor')
+    // The one flat list (tag merge — no bands) is the proof the records
+    // rendered; the prompt must be absent.
+    const list = host.querySelector('[data-testid="network-list"]') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.querySelector('[data-rowtype="person"]')!.textContent).toContain('Realtor')
     expect(host.textContent).not.toContain('one location at a time')
     // Full stats strip, including the row-derived tiles.
     const stats = host.querySelector('[data-testid="network-stats"]') as HTMLElement

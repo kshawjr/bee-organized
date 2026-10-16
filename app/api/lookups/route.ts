@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { TAG_CATEGORY, TAG_CATEGORIES } from '@/lib/tags'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -22,6 +23,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 //                  bg_color, icon, description, attrs, is_active, ... }],
 //     location: { id, name } | null }   ← the resolved own-location, so
 //                  pickers can title their "<Location name>'s own" group.
+//
+// ?category=tags is THE one tag list (lib/tags.ts): it matches the merged
+// 'tags' rows AND the three pre-merge categories, so the picker shows the
+// whole list on either side of migrations/tag_merge_2_one_list.sql.
 //
 // Callers typically group client-side by category.
 
@@ -56,7 +61,8 @@ export async function GET(req: NextRequest) {
       ? query.or(`location_id.is.null,location_id.eq.${ownLocation}`)
       : query.is('location_id', null)
 
-    if (category) query = query.eq('category', category)
+    if (category === TAG_CATEGORY) query = query.in('category', TAG_CATEGORIES)
+    else if (category) query = query.eq('category', category)
 
     const { data, error } = await query
 
@@ -102,23 +108,28 @@ export async function GET(req: NextRequest) {
 // to the end of their list naturally. Admins can drag-reorder via the
 // /reorder endpoint afterward.
 
+// The three pre-merge tag categories (client_tags, partner_specialties,
+// partner_tags) are NOT creatable any more — a new tag goes to the one
+// list, 'tags' (lib/tags.ts).
 const ALLOWED_CATEGORIES = new Set([
   'closed_lost_reasons',
-  'client_tags',
   'project_types',
-  'partner_specialties',
   'partner_tiers',
   'client_stages',
   'partner_stages',
   'lead_sources',
   'touchpoint_types',
-  'partner_tags',
+  TAG_CATEGORY,
 ])
 
-// The categories a LOCATION may own rows in (step 2A: tags only — widen
-// deliberately in 2B, not by default: the project_types readers resolve
-// by bare label and must never collide with a location's homonym).
-const LOCATION_SCOPED_CATEGORIES = new Set(['client_tags', 'partner_tags'])
+// The categories a LOCATION may own rows in. EMPTY since the tag merge
+// (2026-10-15, Kevin): tags are corporate-only — owners pick from the
+// list, they never add to it. Owner-created tags produced 2 tags and 16
+// tagged clients in total; the corporate specialty list produced 86
+// tagged people, and fifty-four owners typing freely would give Realtor,
+// realtor and RE Agent within a month. The location-owned tags that
+// already exist (DO NOT BOOK, Lead) keep working; none can be added.
+const LOCATION_SCOPED_CATEGORIES = new Set<string>([])
 
 export async function POST(req: NextRequest) {
   try {
@@ -172,20 +183,42 @@ export async function POST(req: NextRequest) {
     } else if (hubUser.role !== 'super_admin' && hubUser.role !== 'admin') {
       // ── corporate create — unchanged: admins only ─────────────────
       return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
+    } else if (category === TAG_CATEGORY) {
+      // One tag list — a corporate tag must not repeat a name already in
+      // it, wherever that row sits (pre-merge category or 'tags'). The
+      // unique index only sees one category, so it can't catch this
+      // before tag_merge_2_one_list.sql has run.
+      const escaped = label.trim().replace(/[\\%_]/g, (m: string) => `\\${m}`)
+      const { data: dup } = await supabaseService
+        .from('lookups')
+        .select('id')
+        .in('category', TAG_CATEGORIES)
+        .is('location_id', null)
+        .ilike('label', escaped)
+        .limit(1)
+        .maybeSingle()
+      if (dup) {
+        return NextResponse.json({ error: 'label_already_exists' }, { status: 409 })
+      }
     }
 
     // Compute sort_order if not provided: max existing in this category + 10.
     let nextSortOrder = typeof sort_order === 'number' ? sort_order : 0
     if (typeof sort_order !== 'number') {
-      const { data: maxRow } = await supabaseService
+      let maxQuery = supabaseService
         .from('lookups')
         .select('sort_order')
-        .eq('category', category)
         .eq('is_active', true)
+      // The one tag list spans the pre-merge categories until step 2 runs;
+      // a new tag sorts after all of them, and after the 1000/2000/3000
+      // bands tag_merge_2_one_list.sql re-bases them into.
+      maxQuery = category === TAG_CATEGORY ? maxQuery.in('category', TAG_CATEGORIES) : maxQuery.eq('category', category)
+      const { data: maxRow } = await maxQuery
         .order('sort_order', { ascending: false })
         .limit(1)
         .maybeSingle()
-      nextSortOrder = ((maxRow?.sort_order as number) ?? 0) + 10
+      const floor = category === TAG_CATEGORY ? 3990 : 0
+      nextSortOrder = Math.max((maxRow?.sort_order as number) ?? 0, floor) + 10
     }
 
     const insert: Record<string, any> = {

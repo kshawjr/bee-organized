@@ -4,8 +4,9 @@
 // DELETE /api/lead-tags?lead_id=...&tag_lookup_id=... — remove a tag from a lead
 //
 // Tags are managed as a junction table (lead_tags) with composite PK
-// (lead_id, tag_lookup_id). Tag definitions live in `lookups` rows where
-// category='client_tags' — those are admin-managed and global. This route
+// (lead_id, tag_lookup_id). Tag definitions live in `lookups` — THE one
+// tag list shared with Network people (lib/tags.ts), corporate-managed.
+// This route
 // only manages the LINK between leads and existing tags. It never creates
 // or deletes tag definitions themselves.
 //
@@ -18,6 +19,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { isTagCategory } from '@/lib/tags'
 
 async function authorize() {
   const supabase = await createServerSupabaseClient()
@@ -100,7 +102,7 @@ export async function POST(req: Request) {
   const locCheck = await checkLocationAccess(auth.hubUser, lead_id)
   if (locCheck.error) return locCheck.error
 
-  // Verify the tag_lookup_id points to a valid client_tags lookup
+  // Verify the tag_lookup_id points to a tag in the one list
   const { data: tagDef, error: tagDefError } = await supabaseService
     .from('lookups')
     .select('id, category, location_id')
@@ -110,9 +112,11 @@ export async function POST(req: Request) {
   if (tagDefError || !tagDef) {
     return NextResponse.json({ error: 'tag_lookup_not_found' }, { status: 404 })
   }
-  if (tagDef.category !== 'client_tags') {
+  // Any tag from THE one list (lib/tags.ts) — clients and Network people
+  // share it since the tag merge.
+  if (!isTagCategory(tagDef.category)) {
     return NextResponse.json(
-      { error: 'tag_lookup_wrong_category', got: tagDef.category, expected: 'client_tags' },
+      { error: 'tag_lookup_wrong_category', got: tagDef.category, expected: 'tags' },
       { status: 400 }
     )
   }

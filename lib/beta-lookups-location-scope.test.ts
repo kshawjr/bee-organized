@@ -5,9 +5,9 @@
 // pinned to their hub_users location (the location_id param is ignored
 // for them); admins scope via the param (no param → corporate only).
 //
-// /api/lookups POST grows a location-owned create path (PickerModal
-// allowCreate): owner for own location only, location-scoped categories
-// only, duplicate labels rejected against corporate + that location.
+// /api/lookups POST: since the tag merge (2026-10-15) tags are
+// corporate-only — the location-owned create path is closed, and a new
+// tag goes to the one list ('tags').
 //
 // /api/lead-tags POST rejects a lookup owned by a DIFFERENT location
 // than the lead's — corporate or the lead's own, nothing else.
@@ -115,8 +115,13 @@ describe('/api/lookups GET — corporate + the caller\'s own location only', () 
   })
 })
 
-// ─── POST location-owned create ──────────────────────────────────
-describe('/api/lookups POST — location-owned create (PickerModal allowCreate)', () => {
+// ─── POST — tags are corporate-only (tag merge 2026-10-15) ───────
+// Before the merge an owner could mint a location-owned tag from the
+// picker. Kevin's ruling: one list, corporate adds, owners pick. The
+// location-owned create path is closed for every category; the three
+// pre-merge tag categories can't be created at all — a new tag goes to
+// 'tags'.
+describe('/api/lookups POST — the one tag list is corporate-only', () => {
   const respondNoDup = (ctx: any) => {
     if (ctx.table === 'lookups' && ctx.op === 'select') return { data: null, error: null } // dup guard + sort_order max
     if (ctx.table === 'lookups' && ctx.op === 'insert') {
@@ -125,26 +130,27 @@ describe('/api/lookups POST — location-owned create (PickerModal allowCreate)'
     return { data: null, error: null }
   }
 
-  it('owner creates for their OWN location — row inserts with that location_id', async () => {
+  it('owner cannot create a tag for their own location — 400, nothing inserted', async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
     h.state.respond = respondNoDup
-    const res = await lookupsPOST(postReq('/api/lookups', { category: 'client_tags', label: 'Snowbird', location_id: LOC_A }))
-    expect(res.status).toBe(200)
-    const insert = h.state.calls.find((c: any) => c.table === 'lookups' && c.op === 'insert')
-    expect(insert.payload.location_id).toBe(LOC_A)
-    expect(insert.payload.label).toBe('Snowbird')
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Snowbird', location_id: LOC_A }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('category_not_location_scoped')
+    expect(h.state.calls.find((c: any) => c.op === 'insert')).toBeUndefined()
   })
 
-  it("owner creating for ANOTHER location is 403", async () => {
+  it('owner corporate tag create (no location_id) is 403 — admins only', async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
-    const res = await lookupsPOST(postReq('/api/lookups', { category: 'client_tags', label: 'Snowbird', location_id: LOC_B }))
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Snowbird' }))
     expect(res.status).toBe(403)
   })
 
-  it('owner corporate create (no location_id) stays 403 — admins only', async () => {
-    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
-    const res = await lookupsPOST(postReq('/api/lookups', { category: 'client_tags', label: 'Snowbird' }))
-    expect(res.status).toBe(403)
+  it('admin cannot create a location-owned tag either — tags are corporate', async () => {
+    h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
+    h.state.respond = respondNoDup
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Snowbird', location_id: LOC_B }))
+    expect(res.status).toBe(400)
+    expect(h.state.calls.find((c: any) => c.op === 'insert')).toBeUndefined()
   })
 
   it('a non-location-scoped category (project_types) cannot be location-created', async () => {
@@ -153,26 +159,56 @@ describe('/api/lookups POST — location-owned create (PickerModal allowCreate)'
     expect(res.status).toBe(400)
   })
 
-  it('duplicate label against corporate + that location is 409', async () => {
-    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
+  it.each(['client_tags', 'partner_tags', 'partner_specialties'])(
+    'the pre-merge category %s is no longer creatable, even by an admin',
+    async (category) => {
+      h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
+      h.state.respond = respondNoDup
+      const res = await lookupsPOST(postReq('/api/lookups', { category, label: 'Snowbird' }))
+      expect(res.status).toBe(400)
+      expect(h.state.calls.find((c: any) => c.op === 'insert')).toBeUndefined()
+    }
+  )
+
+  it("admin corporate create lands in 'tags', after every existing tag", async () => {
+    h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
+    h.state.respond = (ctx: any) => {
+      // the max-sort read: a pre-merge row at 350 — the floor still wins
+      if (ctx.table === 'lookups' && ctx.op === 'select' && !f(ctx, 'ilike')) return { data: { sort_order: 350 }, error: null }
+      if (ctx.table === 'lookups' && ctx.op === 'insert') return { data: { id: 'new-1', ...ctx.payload }, error: null }
+      return { data: null, error: null }
+    }
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Snowbird' }))
+    expect(res.status).toBe(200)
+    const insert = h.state.calls.find((c: any) => c.table === 'lookups' && c.op === 'insert')
+    expect(insert.payload.category).toBe('tags')
+    expect(insert.payload.location_id).toBeUndefined()
+    expect(insert.payload.sort_order).toBe(4000)
+  })
+
+  it('a corporate tag whose name is already in the one list (any pre-merge category) is 409', async () => {
+    h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
     h.state.respond = (ctx: any) => {
       if (ctx.table === 'lookups' && ctx.op === 'select' && f(ctx, 'ilike')) {
-        return { data: { id: 'corp-vip' }, error: null }
+        return { data: { id: 'spec-realtor' }, error: null }
       }
       return { data: null, error: null }
     }
-    const res = await lookupsPOST(postReq('/api/lookups', { category: 'client_tags', label: 'VIP', location_id: LOC_A }))
+    const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'realtor' }))
     expect(res.status).toBe(409)
+    const dup = h.state.calls.find((c: any) => c.table === 'lookups' && f(c, 'ilike'))
+    expect(f(dup, 'in')).toEqual(['in', 'category', ['tags', 'client_tags', 'partner_tags', 'partner_specialties']])
     expect(h.state.calls.find((c: any) => c.op === 'insert')).toBeUndefined()
   })
+})
 
-  it('admin may create for any location (the super_admin-viewing-a-location path)', async () => {
-    h.state.hubUser = { id: 'u1', role: 'super_admin', location_id: null }
-    h.state.respond = respondNoDup
-    const res = await lookupsPOST(postReq('/api/lookups', { category: 'partner_tags', label: 'Snowbird', location_id: LOC_B }))
-    expect(res.status).toBe(200)
-    const insert = h.state.calls.find((c: any) => c.table === 'lookups' && c.op === 'insert')
-    expect(insert.payload.location_id).toBe(LOC_B)
+// ─── GET ?category=tags — the one list ───────────────────────────
+describe('/api/lookups GET ?category=tags', () => {
+  it('matches the merged rows AND the three pre-merge categories', async () => {
+    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
+    await lookupsGET(getReq('?category=tags'))
+    expect(f(lookupsCtx(), 'in')).toEqual(['in', 'category', ['tags', 'client_tags', 'partner_tags', 'partner_specialties']])
+    expect(f(lookupsCtx(), 'eq')?.[1]).not.toBe('category')
   })
 })
 
@@ -202,6 +238,18 @@ describe('/api/lead-tags POST — corporate or the lead\'s own location, nothing
 
   it("the lead's own location's tag applies", async () => {
     h.state.respond = scenario(LOC_A)
+    const res = await leadTagsPOST(postReq('/api/lead-tags', { lead_id: 'lead-1', tag_lookup_id: 'tag-1' }))
+    expect(res.status).toBe(201)
+  })
+
+  it('a tag merged into the one list (category tags) applies to a client', async () => {
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'hub_users') return { data: { id: 'u1', role: 'owner', location_id: LOC_A }, error: null }
+      if (ctx.table === 'leads') return { data: { id: 'lead-1', location_uuid: LOC_A }, error: null }
+      if (ctx.table === 'lookups') return { data: { id: 'tag-1', category: 'tags', location_id: null }, error: null }
+      if (ctx.table === 'lead_tags') return { data: { lead_id: 'lead-1', tag_lookup_id: 'tag-1' }, error: null }
+      return { data: null, error: null }
+    }
     const res = await leadTagsPOST(postReq('/api/lead-tags', { lead_id: 'lead-1', tag_lookup_id: 'tag-1' }))
     expect(res.status).toBe(201)
   })

@@ -114,11 +114,24 @@ describe('POST /api/partner-tags — corporate or the partner\'s own location, n
     expect(h.state.calls.find((c: any) => c.table === 'partner_tags')).toBeUndefined()
   })
 
-  it('a non-partner_tags lookup (client_tags) is 400 wrong category', async () => {
-    h.state.respond = scenario({ category: 'client_tags' })
+  // Tag merge (2026-10-15): ONE list shared with clients. Any tag in it
+  // applies — merged ('tags') or still in a pre-merge category — and
+  // only a lookup that isn't a tag at all is refused.
+  it.each(['tags', 'client_tags', 'partner_specialties', 'partner_tags'])(
+    'a tag from the one list (category %s) applies',
+    async (category) => {
+      h.state.respond = scenario({ category })
+      const res = await POST(postReq({ partner_id: 'p-1', tag_lookup_id: 'tag-1' }))
+      expect(res.status).toBe(201)
+    }
+  )
+
+  it('a lookup that is not a tag (project_types) is 400 wrong category', async () => {
+    h.state.respond = scenario({ category: 'project_types' })
     const res = await POST(postReq({ partner_id: 'p-1', tag_lookup_id: 'tag-1' }))
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('tag_lookup_wrong_category')
+    expect(h.state.calls.find((c: any) => c.table === 'partner_tags')).toBeUndefined()
   })
 
   it("an owner from another location can't write this partner", async () => {

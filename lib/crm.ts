@@ -13,11 +13,20 @@
 // applied 2026-07-23) — a timestamptz cache maintained ONLY by
 // lib/touchpoints.ts on partner reach_out inserts. Read-only here: it is
 // deliberately absent from PARTNER_FIELD_MAP so no PATCH can hand-write it.
+//
+// Tags (tag merge 2026-10-15, lib/tags.ts): a person's tags are the
+// partner_tags links, embedded here as `partner_tags(tag_lookup_id)` and
+// mapped to `tagIds`. partners.specialties (retired) and partners.tags
+// (dead, always empty) are no longer selected or written. partner_tags is
+// service-role only (RLS, no policies): a read through the USER client
+// gets an empty embed, so `tagIds` is only trustworthy on service reads —
+// which is every read that feeds the Network screen.
 export const PARTNER_COLS =
   'id, location_id, type, name, title, company, company_id, phone, email, website, ' +
-  'stage, specialties, tier, tags, how_we_met, met_date, last_contact, is_customer, ' +
+  'stage, tier, how_we_met, met_date, last_contact, is_customer, ' +
   'customer_lead_id, relationship, card_image, addresses, notes, next_steps, referrals, ' +
-  'activity, last_contacted_at, deleted_at, created_at, updated_at'
+  'activity, last_contacted_at, deleted_at, created_at, updated_at, ' +
+  'partner_tags(tag_lookup_id)'
 
 export const COMPANY_COLS =
   'id, location_id, name, industry, phone, email, website, addresses, members, ' +
@@ -38,9 +47,8 @@ export function mapPartnerRow(row: any) {
     email: row.email || '',
     website: row.website || '',
     stage: row.stage || '',
-    specialties: row.specialties || [],
     tier: row.tier ?? null,
-    tags: row.tags || [],
+    tagIds: (row.partner_tags || []).map((t: any) => t.tag_lookup_id),
     howWeMet: row.how_we_met || '',
     metDate: row.met_date || '',
     lastContact: row.last_contact || '',
@@ -91,9 +99,7 @@ const PARTNER_FIELD_MAP: Record<string, string> = {
   email: 'email',
   website: 'website',
   stage: 'stage',
-  specialties: 'specialties',
   tier: 'tier',
-  tags: 'tags',
   howWeMet: 'how_we_met',
   metDate: 'met_date',
   lastContact: 'last_contact',

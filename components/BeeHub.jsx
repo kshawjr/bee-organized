@@ -1203,7 +1203,23 @@ let _closeLostReasons = DEFAULT_CLOSE_REASONS.slice()
 function getCloseLostReasons() { return Array.isArray(_closeLostReasons) ? _closeLostReasons : DEFAULT_CLOSE_REASONS }
 function setCloseLostReasons(list) { if(Array.isArray(list)) _closeLostReasons = list }
 
-// Admin-managed specialties
+// THE one tag list (tag merge 2026-10-15, lib/tags.ts) — clients and
+// Network people share it. Rows can sit in 'tags' or, until
+// migrations/tag_merge_2_one_list.sql has run, in the three pre-merge
+// categories; TAG_LOOKUP_CATEGORIES covers both. The +1000/+2000/+3000
+// offsets order a pre-merge list exactly as the migration will.
+const TAG_LOOKUP_CATEGORIES = ['tags', 'client_tags', 'partner_specialties', 'partner_tags']
+const TAG_CATEGORY_OFFSET = { client_tags: 1000, partner_specialties: 2000, partner_tags: 3000 }
+function tagSortKey(row) { return (TAG_CATEGORY_OFFSET[row.category] || 0) + (row.sort_order || 0) }
+function toTagListShape(rows) {
+  return rows.slice().sort((a, b) => tagSortKey(a) - tagSortKey(b))
+    .map(r => ({ id: r.id, label: r.label, key: (r.attrs && r.attrs.key) || null }))
+}
+let _tagList = []
+function getTagList() { return _tagList }
+function setAdminTagList(list) { if (Array.isArray(list)) _tagList = list }
+
+// Admin-managed specialties — PRE-MERGE, read only by retired Classic code.
 let _specialties = null
 function getSpecialties() { return _specialties || SPECIALTIES }
 function setAdminSpecialties(list) { _specialties = list }
@@ -10075,10 +10091,6 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // merge it into the same partners state PartnersScreen reads so it
           // shows in Classic's Partners/Contacts tabs without a reload.
           onPartnerCreated={(row)=>{ hivePartnersCtx?.mergePartner?.(row) }}
-          // Partner-specialty vocabulary for the lead→Network conversion
-          // sheet. Same getSpecialties() the Network screen + Add sheet read,
-          // so the sheet can only offer bands the Network actually groups by.
-          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           // URL id the beta board's open client should reflect. HiveShell
@@ -16338,7 +16350,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           partners={partners}
           companies={companies}
           locFilter={locFilter}
-          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
+          tags={getTagList()}
           readOnly={readOnly}
           onOpenPerson={(p)=>setSelected(p)}
           onOpenCompany={(c)=>setSelectedCompany(c)}
@@ -16358,7 +16370,6 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           partner={selected}
           companies={allCompanies}
           people={people}
-          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
           tiers={getPartnerTiers().map(t=>({ id:t.id, label:t.label }))}
           // The hydrated lookups list is active-only ('Customer' retired to
           // is_active=false), so the filter only bites on the pre-hydration
@@ -16400,7 +16411,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onUpdatePartner={updatePartner}
           partners={allPartners}
           companies={allCompanies}
-          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
+          locationId={locFilter!=='all'?locFilter:null}
           tiers={getPartnerTiers().map(t=>({ id:t.id, label:t.label }))}
           defaultCompany={addCompanyPreset}
         />
@@ -30393,13 +30404,13 @@ const LOOKUP_CATEGORIES_CONFIG = {
     defaultColor: '#8a9e9a',
     syncGetter: 'closed_lost',
   },
-  client_tags: {
-    label: 'Client Tags',
-    desc: 'Used to label and filter clients',
-    section: 'CLIENTS',
+  tags: {
+    label: 'Tags',
+    desc: 'One list for clients and Network people. Owners pick from it; only corporate adds to it',
+    section: 'TAGS',
     fields: ['label', 'color', 'icon'],
     defaultColor: '#6366f1',
-    syncGetter: 'client_tags',
+    syncGetter: 'tags',
   },
   project_types: {
     label: 'Project Types',
@@ -30416,14 +30427,6 @@ const LOOKUP_CATEGORIES_CONFIG = {
     fields: ['label'],
     defaultColor: '#8a9e9a',
     syncGetter: 'lead_sources',
-  },
-  partner_specialties: {
-    label: 'Partner Specialties',
-    desc: 'What partners do — shown in the Partners module',
-    section: 'PARTNERS',
-    fields: ['label', 'color', 'icon'],
-    defaultColor: '#6366f1',
-    syncGetter: 'partner_specialties',
   },
   partner_tiers: {
     label: 'Partner Tiers',
@@ -30484,8 +30487,7 @@ function pushLookupsToGetters(category, rows) {
 
   switch (category) {
     case 'partner_stages':      setAdminPartnerStages(toStageShape()); break
-    case 'client_tags':         setAdminClientTags(toTagShape()); setAdminClientTagsRaw(rows); break
-    case 'partner_specialties': setAdminSpecialties(toTagShape()); break
+    case 'tags':                setAdminTagList(toTagListShape(rows)); break
     case 'partner_tiers':       setAdminPartnerTiers(toTierShape()); break
     case 'touchpoint_types':    setAdminTouchpointTypes(toTouchpointShape()); break
     case 'lead_sources':        setAdminLeadSources(rows.map(r => r.label)); break
@@ -30901,12 +30903,14 @@ function ConfigureTab() {
       const json = await res.json()
       const grouped = {}
       for (const row of (json.lookups || [])) {
-        if (!grouped[row.category]) grouped[row.category] = []
-        grouped[row.category].push(row)
+        // The one tag list: pre-merge tag categories fold into 'tags'.
+        const cat = TAG_LOOKUP_CATEGORIES.includes(row.category) ? 'tags' : row.category
+        if (!grouped[cat]) grouped[cat] = []
+        grouped[cat].push(row)
       }
       // Sort each category by sort_order (API already does this, but defensive)
       for (const cat of Object.keys(grouped)) {
-        grouped[cat].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        grouped[cat].sort((a, b) => cat === 'tags' ? tagSortKey(a) - tagSortKey(b) : (a.sort_order || 0) - (b.sort_order || 0))
         // Push into in-memory getters so other screens see edits
         pushLookupsToGetters(cat, grouped[cat])
       }
@@ -30955,8 +30959,9 @@ function ConfigureTab() {
 
   // Overview view: tiles grouped by section
   const sections = [
-    { key: 'CLIENTS',  cats: ['closed_lost_reasons', 'client_tags', 'project_types', 'lead_sources'] },
-    { key: 'PARTNERS', cats: ['partner_specialties', 'partner_tiers', 'partner_stages', 'touchpoint_types'] },
+    { key: 'TAGS',     cats: ['tags'] },
+    { key: 'CLIENTS',  cats: ['closed_lost_reasons', 'project_types', 'lead_sources'] },
+    { key: 'PARTNERS', cats: ['partner_tiers', 'partner_stages', 'touchpoint_types'] },
   ]
 
   return (
@@ -36804,6 +36809,18 @@ export default function App({
   // getters so UI call sites (getSpecialties, getPartnerTiers, etc.) keep
   // working without changes. ConfigureTab edits remain in-memory in 1A —
   // Sitting 1B wires the writes through to the lookups API.
+  // The one tag list is seeded SYNCHRONOUSLY, on the first render, not in
+  // the effect below: the Network screen reads getTagList() during render
+  // and nothing re-renders it after a mount effect, so an effect-seeded list
+  // would leave the tag filter empty and the rows unlabelled until some
+  // unrelated state change. A useState initializer runs once, before any
+  // child renders. (The effect re-sets it — same value, harmless.)
+  useState(() => {
+    if (initialLookups && typeof initialLookups === 'object') {
+      setAdminTagList(toTagListShape(TAG_LOOKUP_CATEGORIES.flatMap(c => initialLookups[c] || [])))
+    }
+    return null
+  })
   useEffect(() => {
     if (!initialLookups || typeof initialLookups !== 'object') return
 
@@ -36846,6 +36863,7 @@ export default function App({
       setAdminClientTagsRaw(initialLookups.client_tags)
     }
     if (Array.isArray(initialLookups.partner_specialties)) setAdminSpecialties(toSpecialtyShape(initialLookups.partner_specialties))
+    setAdminTagList(toTagListShape(TAG_LOOKUP_CATEGORIES.flatMap(c => initialLookups[c] || [])))
     if (Array.isArray(initialLookups.partner_tiers))       setAdminPartnerTiers(toTierShape(initialLookups.partner_tiers))
     if (Array.isArray(initialLookups.touchpoint_types))    setAdminTouchpointTypes(toTouchpointShape(initialLookups.touchpoint_types))
 
@@ -37408,7 +37426,13 @@ if (Array.isArray(initialPeople)) return
     try {
       const res = await fetch('/api/partners', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...obj, location_id }) })
       const json = await res.json().catch(() => ({}))
-      if (res.ok && json?.id) { setPartners(prev => [json, ...prev]); return json }
+      if (res.ok && json?.id) {
+        setPartners(prev => [json, ...prev])
+        // Person saved, tags (some or all) not — say so; the record's Tags
+        // row is where to fix it.
+        if (json.tagError) setToast({ kind:'error', msg:`${json.name} was added, but their tags didn't save — add them from the record. (${json.tagError})` })
+        return json
+      }
       console.error('[partners] create failed:', json?.error || res.status)
     } catch (e) { console.error('[partners] create error:', e) }
     const local = { ...obj, locationId: location_id || obj?.locationId }

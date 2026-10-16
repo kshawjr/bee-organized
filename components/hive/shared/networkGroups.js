@@ -1,29 +1,19 @@
 // components/hive/shared/networkGroups.js
 // ─────────────────────────────────────────────────────────────
 // PURE module (§8.5 — zero imports) — the Network screen's brains:
-// band resolution, mixed-row assembly, the what's-next digest, and the
-// staleness rule. NetworkScreen renders what THIS computes, so every
-// grouping/counting decision is unit-testable without a mount.
+// mixed-row assembly, the tag filter, and the staleness rule.
+// NetworkScreen renders what THIS computes, so every counting/filtering
+// decision is unit-testable without a mount.
 //
-// BANDS (approved Option C — mixed person+company rows per band):
-//   · one band per SPECIALTY actually present, in the admin specialty
-//     list's order (partners.specialties[] — a person's band is their
-//     FIRST/primary specialty; no migration, no new field)
-//   · a COMPANY's band: majority primary-specialty of its linked people,
-//     else its industry slug-matched against the specialty ids, else the
-//     just-met band
-//   · "Potential customers" (purple) — people who may HIRE us, not refer
-//     us: stage 'Customer', isCustomer, or the 'warm' (Warm Client) tag.
-//     NARROWED (lead→Network conversion): this signal only claims someone
-//     with NO specialty. It used to win outright, which meant the moment a
-//     realtor was ALSO marked a client she left her trade band — exactly
-//     the Karen Pell case the conversion door exists for (she buys from us
-//     AND refers us). A stated specialty IS a stated referral direction;
-//     the customer half is carried by the gold Client badge instead. The
-//     purple band keeps its literal meaning: may hire us, direction unknown.
-//   · "Just met · no intent yet" (gray) — no customer signal, no
-//     specialty. Collected, not yet directed.
-//   Special bands sit at the BOTTOM, in that order.
+// ONE FLAT LIST (tag merge, 2026-10-15 — Kevin's ruling). The specialty
+// bands are gone: a person's band was their FIRST specialty, and
+// specialties are now unordered tags (one list, lib/tags.ts). An owner
+// sees a handful of Network people, so band headings were noise that only
+// existed because there was no real filter. Now: people and companies
+// together, sorted by name; the tag filter does the sorting-into-kinds,
+// and matches on ANY of a person's tags (the old filter only saw the
+// first specialty, so 13 multi-specialty people were invisible under
+// their others).
 //
 // STALE: 60 days without a logged partner touchpoint
 // (partners.last_contacted_at — the Phase 1 stored cache). A NULL is
@@ -32,13 +22,9 @@
 // whole screen red on day one and mean nothing.
 // ─────────────────────────────────────────────────────────────
 
-export const POTENTIAL_BAND = '__potential_customers'
-export const JUST_MET_BAND = '__just_met'
 export const STALE_DAYS = 60
 
 const DAY_MS = 86400000
-
-export const slugify = (s) => (s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 // ── staleness ────────────────────────────────────────────────
 // → 'stale' | 'fresh' | 'unknown' (never contacted — see header)
@@ -64,53 +50,37 @@ export function stageFamilyKey(stage) {
   }
 }
 
-// ── band resolution ──────────────────────────────────────────
-export function personBand(partner) {
-  const stage = partner?.stage || ''
-  const tags = partner?.tags || []
-  // Specialty FIRST (see header): a stated trade is a stated referral
-  // direction, and it survives being marked a customer.
-  const primary = (partner?.specialties || [])[0]
-  if (primary) return primary
-  if (stage === 'Customer' || partner?.isCustomer || tags.includes('warm')) return POTENTIAL_BAND
-  return JUST_MET_BAND
+// ── tag filter ───────────────────────────────────────────────
+// partner.tagIds: lookups ids from partner_tags (lib/crm mapPartnerRow).
+// picked: the filter's tag ids. ANY-of: picking Realtor and Senior Living
+// shows people who are either. Empty pick → everyone passes.
+export function matchesTags(partner, picked = []) {
+  if (!picked.length) return true
+  const mine = partner?.tagIds || []
+  return picked.some((id) => mine.includes(id))
 }
 
-export function companyBand(company, linkedPeople = [], specialtyIds = []) {
-  // Majority primary specialty of its people…
-  const tally = {}
-  for (const p of linkedPeople) {
-    const b = personBand(p)
-    if (b !== POTENTIAL_BAND && b !== JUST_MET_BAND) tally[b] = (tally[b] || 0) + 1
-  }
-  const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]
-  if (top) return top[0]
-  // …else the industry string slug-matched against the specialty ids
-  // ('Real Estate' → 'real-estate')…
-  const slug = slugify(company?.industry)
-  if (slug && specialtyIds.includes(slug)) return slug
-  // …else it's a collected org with no direction yet.
-  return JUST_MET_BAND
+// The filter's options: only tags someone in view actually carries, most
+// used first, then by label — the list an owner can act on, with counts.
+// tags: [{ id, label }] (the one list); partners: the in-scope people.
+export function tagOptionsInUse(tags = [], partners = []) {
+  const counts = new Map()
+  for (const p of partners) for (const id of p?.tagIds || []) counts.set(id, (counts.get(id) || 0) + 1)
+  return tags
+    .filter((t) => counts.has(t.id))
+    .map((t) => ({ id: t.id, label: t.label, count: counts.get(t.id) }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
 }
 
-// ── mixed-row + band assembly ────────────────────────────────
+// ── mixed-row assembly ───────────────────────────────────────
 // partners/companies: live (non-deleted) mapPartnerRow/mapCompanyRow
-// shapes. specialties: the admin list [{ id, label }] (order = band
-// order). rollups: Map('kind:id' → { count, converted, revenue }) from
+// shapes. rollups: Map('kind:id' → { count, converted, revenue }) from
 // /api/network/summary — null while loading (rows then carry rollup:null,
 // which the UI renders as "—", NEVER as zero).
 //
-// Returns ordered bands: { key, label, tone, rows, referred, revenue }.
-// Band headers count LEADS REFERRED + revenue — not rows.
-// Rows: { rowType:'person'|'company', record, rollup, lastContactedAt,
-//         peopleCount? } sorted most-referred first, then name.
-export function buildNetworkBands({ partners = [], companies = [], specialties = [], rollups = null }) {
-  const specialtyIds = specialties.map((s) => s.id)
-  const byBand = new Map()
-  const push = (band, row) => {
-    if (!byBand.has(band)) byBand.set(band, [])
-    byBand.get(band).push(row)
-  }
+// Returns ONE list sorted by name: { rowType:'person'|'company', record,
+// rollup, lastContactedAt, peopleCount? }.
+export function buildNetworkRows({ partners = [], companies = [], rollups = null }) {
   const rollupFor = (kind, id) => (rollups ? rollups.get(`${kind}:${id}`) || { count: 0, converted: 0, revenue: 0 } : null)
 
   const peopleByCompany = new Map()
@@ -121,8 +91,9 @@ export function buildNetworkBands({ partners = [], companies = [], specialties =
     }
   }
 
+  const rows = []
   for (const p of partners) {
-    push(personBand(p), {
+    rows.push({
       rowType: 'person',
       record: p,
       rollup: rollupFor('partner', p.id),
@@ -139,7 +110,7 @@ export function buildNetworkBands({ partners = [], companies = [], specialties =
       .filter(Boolean)
       .sort()
       .pop() || null
-    push(companyBand(c, linked, specialtyIds), {
+    rows.push({
       rowType: 'company',
       record: c,
       rollup: rollupFor('company', c.id),
@@ -147,36 +118,7 @@ export function buildNetworkBands({ partners = [], companies = [], specialties =
       peopleCount: linked.length,
     })
   }
-
-  const bandTotal = (rows, field) =>
-    rollups ? rows.reduce((s, r) => s + (r.rollup?.[field] ?? 0), 0) : null
-
-  const sortRows = (rows) => rows.sort((a, b) =>
-    (b.rollup?.count ?? 0) - (a.rollup?.count ?? 0)
-    || ((a.record.name || '').localeCompare(b.record.name || '')))
-
-  const bands = []
-  for (const s of specialties) {
-    const rows = byBand.get(s.id)
-    if (!rows?.length) continue
-    bands.push({ key: s.id, label: s.label, tone: 'specialty', rows: sortRows(rows), referred: bandTotal(rows, 'count'), revenue: bandTotal(rows, 'revenue') })
-  }
-  // Specialty values not in the admin list (edited-away ids) still render
-  // rather than silently vanishing rows.
-  for (const [key, rows] of byBand) {
-    if (key === POTENTIAL_BAND || key === JUST_MET_BAND) continue
-    if (specialtyIds.includes(key)) continue
-    bands.push({ key, label: key, tone: 'specialty', rows: sortRows(rows), referred: bandTotal(rows, 'count'), revenue: bandTotal(rows, 'revenue') })
-  }
-  const potential = byBand.get(POTENTIAL_BAND)
-  if (potential?.length) {
-    bands.push({ key: POTENTIAL_BAND, label: 'Potential customers', tone: 'potential', rows: sortRows(potential), referred: bandTotal(potential, 'count'), revenue: bandTotal(potential, 'revenue') })
-  }
-  const justMet = byBand.get(JUST_MET_BAND)
-  if (justMet?.length) {
-    bands.push({ key: JUST_MET_BAND, label: 'Just met · no intent yet', tone: 'justmet', rows: sortRows(justMet), referred: bandTotal(justMet, 'count'), revenue: bandTotal(justMet, 'revenue') })
-  }
-  return bands
+  return rows.sort((a, b) => (a.record.name || '').localeCompare(b.record.name || '', undefined, { sensitivity: 'base' }))
 }
 
 // ── stats ────────────────────────────────────────────────────

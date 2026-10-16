@@ -70,7 +70,6 @@ export default function NetworkPersonRecord({
   partner,
   companies = [],
   people = [],              // loaded leads — the client-match universe
-  specialties = [],         // admin list [{ id: key, label }] — display mapping only
   tiers = [],               // admin list [{ id: key, label }] — display mapping only
   stages = [],              // active partner_stages [{ key, label }] — the rail's segments
   onClose = () => {},
@@ -114,7 +113,11 @@ export default function NetworkPersonRecord({
   // ── partnership vocabulary (tag system 2B) ──
   // Junction tags live in partner_tags via /api/partner-tags — the dead
   // partners.tags text[] is NEVER read or written here. Fetched per
-  // record open (no partner profile payload exists to ride).
+  // record open for the labels; the list row already carries the ids
+  // (partner.tagIds), and every change here is pushed back into it so the
+  // Network tab's tag filter agrees with the record without a reload.
+  // Since the tag merge this row is ALSO where specialties live — they
+  // are tags now (one list, lib/tags.ts).
   const [junctionTags, setJunctionTags] = useState([])
   useEffect(() => {
     let dead = false
@@ -125,13 +128,11 @@ export default function NetworkPersonRecord({
       .catch(() => {})
     return () => { dead = true }
   }, [partner.id])
-  // Tier + specialties store attrs.key slugs (NetworkAddSheet convention);
+  // Tier stores attrs.key slugs (NetworkAddSheet convention);
   // PickerModal normalizes those against its fetched options, and saves
   // write the same key-or-id shape back through the PATCH path.
   const [pickTier, setPickTier] = useState(false)
-  const [pickSpecs, setPickSpecs] = useState(false)
   const tierLabel = partner.tier ? (tiers.find(t => t.id === partner.tier)?.label || partner.tier) : null
-  const specialtyLabel = (key) => specialties.find(s => s.id === key)?.label || key
 
   // ── touchpoints ──
   const [logging, setLogging] = useState(false)
@@ -359,10 +360,10 @@ export default function NetworkPersonRecord({
           </div>
         </div>
 
-        {/* ── partnership vocabulary (tag system 2B) — tier + specialties
-            were create-only in NetworkAddSheet; now editable here via the
-            shared PickerModal. Tags ride the SAME TagsRow pairing
-            ClientProfile uses (kind 'partner' → the junction routes). ── */}
+        {/* ── partnership vocabulary (tag system 2B) — tier via the shared
+            PickerModal. Tags ride the SAME TagsRow pairing ClientProfile
+            uses (kind 'partner' → the junction routes); what used to be a
+            separate Specialties row is in there now (tag merge). ── */}
         <div data-testid="partnership">
           <SectionLabel>Partnership</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -378,25 +379,17 @@ export default function NetworkPersonRecord({
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>Specialties</span>
-              {(partner.specialties || []).map(key => (
-                <span key={key} style={pillStyle()}>{specialtyLabel(key)}</span>
-              ))}
-              {(partner.specialties || []).length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>None</span>}
-              {!readOnly && (
-                <button className="bee-small-action" onClick={() => setPickSpecs(true)} aria-label="Edit specialties"
-                  style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
-                  Edit
-                </button>
-              )}
-            </div>
             <TagsRow
               kind="partner"
               recordId={partner.id}
               locationId={partner.locationId || null}
               tags={junctionTags}
-              onChange={setJunctionTags}
+              onChange={next => {
+                setJunctionTags(next)
+                // State-only: tagIds is not a PATCH field (lib/partner-writes),
+                // the junction route already wrote it.
+                patch({ tagIds: next.map(t => t.id) })
+              }}
               setToast={setToast}
               readOnly={readOnly}
             />
@@ -482,19 +475,6 @@ export default function NetworkPersonRecord({
           subtitle="How this relationship is classified"
           onSave={opt => patch({ tier: opt ? (opt.attrs?.key || opt.id) : null })}
           onClose={() => setPickTier(false)}
-        />
-      )}
-      {pickSpecs && (
-        <PickerModal
-          category="partner_specialties"
-          locationId={partner.locationId || null}
-          selected={partner.specialties || []}
-          mode="multi"
-          maxSelected={8}
-          title="Specialties"
-          subtitle="What they do — up to 8"
-          onSave={picked => patch({ specialties: picked.map(o => o.attrs?.key || o.id) })}
-          onClose={() => setPickSpecs(false)}
         />
       )}
     </OverlayShell>

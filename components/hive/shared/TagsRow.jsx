@@ -5,10 +5,12 @@
 // build).
 //
 // Tag system step 2A: the old inline checklist popover is replaced by
-// the shared PickerModal (multi, allowCreate — corporate options + the
-// location's own, searchable, owner-creatable). The modal only PICKS;
+// the shared PickerModal. Since the tag merge (2026-10-15, lib/tags.ts)
+// both kinds pick from THE one tag list (category 'tags' — corporate +
+// the location's own, searchable) and nobody creates from here: tags are
+// corporate-only, added on the Configure tab. The modal only PICKS;
 // every junction write goes through the kind's route:
-//   kind 'client'  → /api/lead-tags     (lead_id,    client_tags)
+//   kind 'client'  → /api/lead-tags     (lead_id,    lead_tags)
 //   kind 'partner' → /api/partner-tags  (partner_id, partner_tags)
 // Save diffs the picked set against the current tags and applies each
 // change with the same honest semantics the per-toggle popover had:
@@ -29,8 +31,8 @@ import { MicroLabel, pillStyle } from './cardKit'
 import PickerModal from './PickerModal'
 
 const KINDS = {
-  client: { api: '/api/lead-tags', idParam: 'lead_id', category: 'client_tags' },
-  partner: { api: '/api/partner-tags', idParam: 'partner_id', category: 'partner_tags' },
+  client: { api: '/api/lead-tags', idParam: 'lead_id' },
+  partner: { api: '/api/partner-tags', idParam: 'partner_id' },
 }
 
 export default function TagsRow({ leadId = null, recordId = null, kind = 'client', locationId = null, tags = [], onChange = () => {}, setToast = () => {}, readOnly = false }) {
@@ -111,13 +113,12 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
       </div>
       {open && (
         <PickerModal
-          category={k.category}
+          category="tags"
           locationId={locationId}
           selected={tags.map(t => t.id)}
           mode="multi"
-          allowCreate
           title="Tags"
-          subtitle="Corporate standard tags, plus this location's own"
+          subtitle="One list for clients and Network people"
           onSave={saveSelection}
           onClose={() => setOpen(false)}
         />

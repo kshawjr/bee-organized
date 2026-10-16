@@ -55,7 +55,7 @@ const PARTNER = {
   id: 'p1', name: 'Karen Martinez', type: 'partner', locationId: 'loc-1',
   title: 'Agent', company: 'Meridian Realty', companyId: 'co1',
   phone: '(816) 555-0916', email: 'karen@meridian.com', website: '',
-  specialties: ['real-estate'], stage: 'Building', tags: [],
+  tagIds: ['t-realtor'], stage: 'Building',
   lastContactedAt: daysAgo(5), isCustomer: false, customerLeadId: null,
   howWeMet: 'Denver Expo', metDate: 'Nov 2024',
   addresses: [], notes: [], nextSteps: [
@@ -401,12 +401,12 @@ describe('F) matchPartnerToClients — the pure rule', () => {
 })
 
 // ═══ partnership vocabulary (tag system 2B) ═══════════════════
-// Tier + specialties become editable after creation via the shared
-// PickerModal; tags ride the SAME TagsRow pairing ClientProfile uses,
-// against the partner_tags junction — never the dead partners.tags column.
-describe('F) partnership — tier, specialties, tags', () => {
+// Tier is editable via the shared PickerModal; tags ride the SAME TagsRow
+// pairing ClientProfile uses, against the partner_tags junction — never
+// the dead partners.tags column. Since the tag merge (2026-10-15) there
+// is no separate Specialties row: specialties ARE tags (one list).
+describe('F) partnership — tier and tags (specialties are tags now)', () => {
   const TIERS = [{ id: 'referral-partner', label: 'Referral Partner' }, { id: 'power-partner', label: 'Power Partner' }]
-  const SPECS = [{ id: 'real-estate', label: 'Realtor' }, { id: 'senior-living', label: 'Senior Living' }]
   const TIER_LOOKUPS = {
     lookups: [
       { id: 'uuid-rp', label: 'Referral Partner', category: 'partner_tiers', location_id: null, is_active: true, attrs: { key: 'referral-partner' } },
@@ -414,24 +414,67 @@ describe('F) partnership — tier, specialties, tags', () => {
     ],
     location: { id: 'loc-1', name: 'Denver' },
   }
+  const TAG_LOOKUPS = {
+    lookups: [
+      { id: 't-realtor', label: 'Realtor', category: 'tags', location_id: null, is_active: true, attrs: { key: 'real-estate' } },
+      { id: 't-senior', label: 'Senior Living', category: 'tags', location_id: null, is_active: true, attrs: { key: 'senior-living' } },
+    ],
+    location: { id: 'loc-1', name: 'Denver' },
+  }
 
-  it('renders stored keys as labels (tier + specialties) and junction tags from /api/partner-tags — the dead array column is never read', async () => {
-    installFetch({ '/api/partner-tags': { tags: [{ id: 'tag-1', label: 'Snowbird' }] } })
+  it('renders the tier label and the junction tags — no Specialties row, the dead array column never read', async () => {
+    installFetch({ '/api/partner-tags': { tags: [{ id: 't-realtor', label: 'Realtor' }, { id: 'tag-1', label: 'Snowbird' }] } })
     await mount({
-      partner: { ...PARTNER, tier: 'referral-partner', tags: ['stale-array-value'] },
-      tiers: TIERS, specialties: SPECS,
+      partner: { ...PARTNER, tier: 'referral-partner', tags: ['stale-array-value'], specialties: ['stale-specialty'] },
+      tiers: TIERS,
     })
     const section = host.querySelector('[data-testid="partnership"]')!
     expect(section.textContent).toContain('Referral Partner')  // tier key → label
-    expect(section.textContent).toContain('Realtor')           // specialty key → label
+    expect(section.textContent).toContain('Realtor')           // a former specialty, now a junction tag
     expect(section.textContent).toContain('Snowbird')          // junction tag
+    expect(section.textContent).not.toContain('Specialties')
     expect(section.textContent).not.toContain('stale-array-value')
+    expect(section.textContent).not.toContain('stale-specialty')
+    expect(host.querySelector('[aria-label="Edit specialties"]')).toBeNull()
+  })
+
+  it('the tag picker is the one list (category tags), offers no create, and a pick lands in the list row', async () => {
+    const onUpdate = vi.fn()
+    installFetch({
+      '/api/lookups': TAG_LOOKUPS,
+      '/api/partner-tags': (u: string, init: any) => (init?.method === 'POST' ? { partner_tag: { partner_id: 'p1' } } : { tags: [{ id: 't-realtor', label: 'Realtor' }] }),
+    })
+    await mount({ onUpdate, tiers: TIERS })
+    await act(async () => { (host.querySelector('[aria-label="Add tag"]') as HTMLElement).click() })
+    const dialog = host.querySelector('[role="dialog"]')!
+    expect(fetchCalls.find(c => c.url.startsWith('/api/lookups'))!.url).toBe('/api/lookups?category=tags&location_id=loc-1')
+    // Corporate-only: a search for a missing tag offers nothing to create.
+    const search = dialog.querySelector('[aria-label="Search options"]') as HTMLInputElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'Piano tuner')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(dialog.textContent).toContain('No matches')
+    expect([...dialog.querySelectorAll('button')].some(b => /create|add “/i.test(b.textContent || ''))).toBe(false)
+    await act(async () => {
+      Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(search, '')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Senior Living')!
+    await act(async () => { row.click() })
+    const save = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Save')!
+    await act(async () => { save.click() })
+    const post = fetchCalls.find(c => c.url === '/api/partner-tags' && c.init?.method === 'POST')!
+    expect(JSON.parse(post.init.body)).toEqual({ partner_id: 'p1', tag_lookup_id: 't-senior' })
+    // The list row learns the new tag (state-only — tagIds is not a PATCH
+    // field), so the Network tab's filter agrees without a reload.
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'p1', tagIds: ['t-realtor', 't-senior'] }))
   })
 
   it('tier PickerModal (single) saves the attrs.key through the PATCH path', async () => {
     const onUpdate = vi.fn()
     installFetch({ '/api/lookups': TIER_LOOKUPS, '/api/partner-tags': { tags: [] } })
-    await mount({ onUpdate, tiers: TIERS, specialties: SPECS })
+    await mount({ onUpdate, tiers: TIERS })
     await act(async () => { (host.querySelector('[aria-label="Edit tier"]') as HTMLElement).click() })
     const dialog = host.querySelector('[role="dialog"]')!
     const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.includes('Power Partner'))!
@@ -442,28 +485,9 @@ describe('F) partnership — tier, specialties, tags', () => {
     expect(host.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('specialties PickerModal carries the 8 cap (maxSelected) so the user is told before saving', async () => {
-    installFetch({
-      '/api/lookups': {
-        lookups: Array.from({ length: 10 }, (_, i) => ({ id: `u${i}`, label: `Spec ${i}`, category: 'partner_specialties', location_id: null, is_active: true, attrs: { key: `spec-${i}` } })),
-        location: { id: 'loc-1', name: 'Denver' },
-      },
-      '/api/partner-tags': { tags: [] },
-    })
-    await mount({ partner: { ...PARTNER, specialties: [] }, tiers: TIERS, specialties: SPECS })
-    await act(async () => { (host.querySelector('[aria-label="Edit specialties"]') as HTMLElement).click() })
-    const dialog = host.querySelector('[role="dialog"]')!
-    for (let i = 0; i < 9; i++) {
-      const row = [...dialog.querySelectorAll('button')].find(b => b.textContent!.trim() === `Spec ${i}`)!
-      await act(async () => { row.click() })
-    }
-    expect(dialog.textContent).toContain('Up to 8 can be selected')
-    expect(dialog.querySelectorAll('[aria-checked="true"]')).toHaveLength(8)
-  })
-
   it('read-only hides every partnership edit affordance', async () => {
     installFetch({ '/api/partner-tags': { tags: [] } })
-    await mount({ readOnly: true, tiers: TIERS, specialties: SPECS })
+    await mount({ readOnly: true, tiers: TIERS })
     expect(host.querySelector('[aria-label="Edit tier"]')).toBeNull()
     expect(host.querySelector('[aria-label="Edit specialties"]')).toBeNull()
     expect(host.querySelector('[aria-label="Add tag"]')).toBeNull()

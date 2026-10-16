@@ -25,10 +25,12 @@
 
 // The API-known camelCase fields (mirror of lib/crm.ts PARTNER_FIELD_MAP —
 // partnerPatchToRow only copies these, so diffing anything else would send
-// keys the API drops anyway).
+// keys the API drops anyway). `tagIds` is deliberately absent: tags are
+// partner_tags links written through /api/partner-tags, so a local tagIds
+// update is applied to state with no PATCH.
 export const PARTNER_PATCH_FIELDS = [
   'type', 'name', 'title', 'company', 'companyId', 'phone', 'email', 'website',
-  'stage', 'specialties', 'tier', 'tags', 'howWeMet', 'metDate', 'lastContact',
+  'stage', 'tier', 'howWeMet', 'metDate', 'lastContact',
   'isCustomer', 'customerLeadId', 'relationship', 'cardImage', 'addresses',
   'notes', 'nextSteps', 'referrals', 'activity',
 ] as const

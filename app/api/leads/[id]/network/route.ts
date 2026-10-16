@@ -13,7 +13,8 @@
 //          leaves the Inbox via inbox_dismissed_at (+ paused, see below).
 //
 // GET  — the PREVIEW the sheet opens on: would this create, or link?
-// POST — the conversion. Body: { mode, specialties?, partner_id? }
+// POST — the conversion. Body: { mode, tagIds?, partner_id? } — tagIds are
+//        lookups ids from the one tag list (lib/tags.ts)
 //
 // WHY THE LEAD IS SOFT-HIDDEN AND NOT JUNKED (move):
 //   inbox_dismissed_at is the purpose-built Inbox soft-removal — the record
@@ -45,8 +46,11 @@ import {
   findPartnerForLead,
   leadToPartnerRow,
   fillEmptyPartnerPatch,
+  partnerHasTags,
   NEW_PARTNER_STAGE,
 } from '@/lib/lead-to-network'
+import { cleanTagIds } from '@/lib/tags'
+import { attachPartnerTags } from '@/lib/partner-tag-writes'
 
 export const runtime = 'nodejs'
 
@@ -76,7 +80,7 @@ const previewPartner = (p: any) =>
         id: p.id,
         name: p.name,
         stage: p.stage || '',
-        specialties: p.specialties || [],
+        tagCount: Array.isArray(p.partner_tags) ? p.partner_tags.length : 0,
         isCustomer: !!p.is_customer,
         customerLeadId: p.customer_lead_id ?? null,
       }
@@ -154,9 +158,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (mode !== 'add' && mode !== 'move') {
     return NextResponse.json({ error: 'invalid_mode', allowed: ['add', 'move'] }, { status: 400 })
   }
-  const specialties: string[] = Array.isArray(body?.specialties)
-    ? body.specialties.filter((s: any) => typeof s === 'string' && s.trim()).slice(0, 8)
-    : []
+  const tagIds = cleanTagIds(body?.tagIds)
 
   const lead = await loadLead(id)
   if (!lead) return NextResponse.json({ error: 'lead_not_found' }, { status: 404 })
@@ -228,7 +230,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   let partnerRow: any
   if (target) {
     const patch: Record<string, any> = {
-      ...fillEmptyPartnerPatch(target, lead, specialties),
+      ...fillEmptyPartnerPatch(target, lead),
       customer_lead_id: id,
       is_customer: claimCustomer || !!target.is_customer,
       updated_at: new Date().toISOString(),
@@ -246,7 +248,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     partnerRow = data
   } else {
     const insert = {
-      ...leadToPartnerRow(lead, { specialties, stage: NEW_PARTNER_STAGE }),
+      ...leadToPartnerRow(lead, { stage: NEW_PARTNER_STAGE }),
       customer_lead_id: id,
       is_customer: claimCustomer,
       created_by: caller.userId,
@@ -261,6 +263,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
     partnerRow = data
+  }
+
+  // ── tags: a new person gets the picked tags; a matched person only when
+  // they have none (the same fill-empty rule as the fields above). A tag
+  // failure never undoes the conversion — it rides back as tagError.
+  let tagError: string | null = null
+  if (tagIds.length > 0 && !(target && partnerHasTags(target))) {
+    try {
+      const r = await attachPartnerTags(partnerRow.id, lead.location_uuid, tagIds, caller.userId)
+      if (r.rejected.length) tagError = `${r.rejected.length} tag(s) not applied: ${r.rejected.map((x) => x.error).join(', ')}`
+      const { data: reread } = await supabaseService
+        .from('partners').select(PARTNER_COLS).eq('id', partnerRow.id).single()
+      if (reread) partnerRow = reread
+    } catch (e: any) {
+      tagError = String(e?.message || e)
+      console.error('[leads/network POST] tags', tagError)
+    }
   }
 
   // ── seed last_contacted_at from the carried history ───────────────────────
@@ -322,6 +341,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           lead_patch: {},
           warning: 'partner_created_lead_not_updated',
           error: String(e?.message || e),
+          ...(tagError ? { tagError } : {}),
         },
         { status: 207 }
       )
@@ -353,5 +373,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // The Person-shaped columns the client folds into people state so the
     // Inbox row drops and the record reflects it without a reload.
     lead_patch: leadPatch,
+    ...(tagError ? { tagError } : {}),
   })
 }

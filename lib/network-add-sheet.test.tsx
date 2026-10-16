@@ -27,9 +27,11 @@ import { partnerPatchToRow, companyPatchToRow } from '@/lib/crm'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
 
-const SPECIALTIES = [
-  { id: 'real-estate', label: '🏠 Realtor' },
-  { id: 'senior-living', label: '🏥 Senior Living' },
+// THE one tag list (tag merge) — what /api/lookups?category=tags returns;
+// the sheet's TagPickField fetches it through the shared PickerModal.
+const TAG_ROWS = [
+  { id: 't-realtor', category: 'tags', label: 'Realtor', location_id: null, is_active: true, attrs: { key: 'real-estate' } },
+  { id: 't-senior', category: 'tags', label: 'Senior Living', location_id: null, is_active: true, attrs: { key: 'senior-living' } },
 ]
 const TIERS = [
   { id: 'referral-partner', label: 'Referral Partner' },
@@ -48,7 +50,11 @@ let root: Root
 
 const mount = async (props: any = {}) => {
   // AddressAutofill debounces fetches; a resolved stub keeps it quiet.
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ predictions: [] }) })))
+  // The tag picker reads /api/lookups; everything else gets the quiet stub.
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+    ok: true, status: 200,
+    json: async () => (String(url).startsWith('/api/lookups') ? { lookups: TAG_ROWS, location: null } : { predictions: [] }),
+  })))
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -57,7 +63,7 @@ const mount = async (props: any = {}) => {
       <NetworkAddSheet
         partners={PARTNERS}
         companies={COMPANIES}
-        specialties={SPECIALTIES}
+        locationId="loc-uuid-1"
         tiers={TIERS}
         {...props}
       />
@@ -163,7 +169,7 @@ describe('§2) the toggle preserves shared values', () => {
 })
 
 describe('§4) every inventoried person field round-trips', () => {
-  it('name/title/company/phone/email/website/address/how-met/relationship/specialties/tier all land', async () => {
+  it('name/title/company/phone/email/website/address/how-met/relationship/tags/tier all land', async () => {
     const onAddPerson = vi.fn(async () => ({ id: 'new-1' }))
     await mount({ onAddPerson })
     await type(input('First name'), 'Karen')
@@ -180,7 +186,16 @@ describe('§4) every inventoried person field round-trips', () => {
     await type(input('State'), 'MO')
     await type(input('Zip'), '64111')
     await click(btn('Realtor'))
-    await click(host.querySelector('[data-spec="real-estate"]')!)
+    // Tags: '+ Tag' → the one-list picker (scoped to this location) → pick → Save.
+    await click(host.querySelector('[aria-label="Add tag"]')!)
+    const dialog = host.querySelector('[role="dialog"]')!
+    expect(dialog).toBeTruthy()
+    expect(String((fetch as any).mock.calls.find((c: any[]) => String(c[0]).startsWith('/api/lookups'))[0]))
+      .toBe('/api/lookups?category=tags&location_id=loc-uuid-1')
+    await click(btn('Senior Living', dialog))
+    await click(btn('Save', dialog))
+    expect(host.querySelector('[role="dialog"]')).toBeNull()
+    expect(host.textContent).toContain('Senior Living')
     await click(host.querySelector('[data-tier="power-partner"]')!)
     await click(btn('Add person'))
 
@@ -189,14 +204,18 @@ describe('§4) every inventoried person field round-trips', () => {
       name: 'Karen Martinez', title: 'Agent',
       phone: '(816) 555-0916', email: 'karen@meridian.com', website: 'meridian.com',
       how_we_met: 'Denver Expo', relationship: 'Realtor',
-      specialties: ['real-estate'], tier: 'power-partner',
+      tier: 'power-partner',
       stage: 'New Contact', is_customer: false,
     })
+    // Tags ride the create as lookup ids; the server links them. Nothing
+    // goes to the retired specialties column or the dead tags column.
+    expect(onAddPerson.mock.calls[0][0].tagIds).toEqual(['t-senior'])
+    expect(row).not.toHaveProperty('specialties')
     expect(row.addresses[0]).toMatchObject({
       value: '123 Main St Suite 4, Kansas City, MO, 64111',
       street: '123 Main St', apt: 'Suite 4', city: 'Kansas City', state: 'MO', zip: '64111',
     })
-    expect(row.tags).toEqual([])
+    expect(row).not.toHaveProperty('tags')
     expect(row.notes).toEqual([])
   })
 })

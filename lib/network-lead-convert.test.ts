@@ -3,9 +3,8 @@
 // lead → Network conversion. The pins here are the decisions that would be
 // expensive to get wrong and cheap to regress:
 //
-//   A) BAND — personBand narrowed: a specialty beats the customer signal, so
-//      the realtor who also hires us stays in Real estate. "Potential
-//      customers" keeps meaning "may hire us, direction unknown".
+//   A) TAG FILTER — the specialty bands are retired (tag merge 2026-10-15);
+//      a person is found under ANY of their tags, not only the first one.
 //   B) DEDUP GATE — exact email/phone, email outranks phone, name is NEVER a
 //      key, no keys → no match (never a scan-and-guess).
 //   C) FIELD MAPPING — stage seeded 'New Contact' (door #4), what carries,
@@ -22,42 +21,42 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { personBand, POTENTIAL_BAND, JUST_MET_BAND } from '@/components/hive/shared/networkGroups'
+import { matchesTags } from '@/components/hive/shared/networkGroups'
 import {
   findPartnerForLead,
   leadToPartnerRow,
   fillEmptyPartnerPatch,
+  partnerHasTags,
   NEW_PARTNER_STAGE,
 } from '@/lib/lead-to-network'
 import { leadColsToPersonFields } from '@/components/hive/shared/leadPatchMap'
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8')
 
-// ── A) the band rule ────────────────────────────────────────────────────────
-describe('A) personBand — specialty beats the customer signal', () => {
-  const P = (over: any) => ({ stage: '', tags: [], specialties: [], isCustomer: false, ...over })
+// ── A) the tag filter (was: the band rule) ─────────────────────────────────
+// The Karen Pell case the band rule existed for — a realtor who is ALSO a
+// client — no longer needs a precedence rule: there are no bands, she is
+// one row, and the Realtor filter finds her whether or not she's a client.
+describe('A) matchesTags — any of a person\'s tags, not just the first', () => {
+  const P = (tagIds: string[], over: any = {}) => ({ tagIds, isCustomer: false, ...over })
 
-  it('the Karen Pell case: a realtor who is ALSO a client bands as a realtor', () => {
-    expect(personBand(P({ specialties: ['real-estate'], isCustomer: true }))).toBe('real-estate')
+  it('the Karen Pell case: a realtor who is ALSO a client is found under Realtor', () => {
+    expect(matchesTags(P(['t-realtor'], { isCustomer: true }), ['t-realtor'])).toBe(true)
   })
 
-  it('stage Customer and the warm tag lose to a specialty too', () => {
-    expect(personBand(P({ specialties: ['contractor'], stage: 'Customer' }))).toBe('contractor')
-    expect(personBand(P({ specialties: ['contractor'], tags: ['warm'] }))).toBe('contractor')
+  it('a SECOND tag matches too (the old filter only saw the first specialty)', () => {
+    expect(matchesTags(P(['t-stager', 't-realtor']), ['t-realtor'])).toBe(true)
   })
 
-  it('the customer signal still claims someone with NO specialty', () => {
-    expect(personBand(P({ isCustomer: true }))).toBe(POTENTIAL_BAND)
-    expect(personBand(P({ stage: 'Customer' }))).toBe(POTENTIAL_BAND)
-    expect(personBand(P({ tags: ['warm'] }))).toBe(POTENTIAL_BAND)
+  it('picking two tags shows people with either (any-of)', () => {
+    expect(matchesTags(P(['t-senior']), ['t-realtor', 't-senior'])).toBe(true)
+    expect(matchesTags(P(['t-mover']), ['t-realtor', 't-senior'])).toBe(false)
   })
 
-  it('no signal at all is still Just met', () => {
-    expect(personBand(P({}))).toBe(JUST_MET_BAND)
-  })
-
-  it('the primary (FIRST) specialty is the band, not any later one', () => {
-    expect(personBand(P({ specialties: ['stager', 'real-estate'], isCustomer: true }))).toBe('stager')
+  it('no pick passes everyone, an untagged person included', () => {
+    expect(matchesTags(P([]), [])).toBe(true)
+    expect(matchesTags({}, [])).toBe(true)
+    expect(matchesTags({}, ['t-realtor'])).toBe(false)
   })
 })
 
@@ -153,12 +152,15 @@ describe('C) leadToPartnerRow', () => {
   })
 
   it('carries identity, location, address, provenance and the ask', () => {
-    const row: any = leadToPartnerRow(LEAD, { specialties: ['real-estate'] })
+    const row: any = leadToPartnerRow(LEAD)
     expect(row.name).toBe('Karen Pell')
     expect(row.email).toBe('karen@meridian.com')
     expect(row.phone).toBe('(561) 555-0199')
     expect(row.location_id).toBe('loc-uuid-1')   // location_uuid → location_id
-    expect(row.specialties).toEqual(['real-estate'])
+    // Tags are partner_tags links the route writes — never columns on the
+    // row; the retired specialties and dead tags columns are not written.
+    expect(row).not.toHaveProperty('specialties')
+    expect(row).not.toHaveProperty('tags')
     expect(row.how_we_met).toBe('Referral')       // source → how_we_met
     expect(row.met_date).toBe('Nov 2025')         // free text, never a date
     expect(row.addresses[0]).toMatchObject({ type: 'Business', value: '12 Oak St, Boca, FL 33432', city: 'Boca' })
@@ -197,25 +199,33 @@ describe('C) leadToPartnerRow', () => {
 describe('D) fillEmptyPartnerPatch — the Network keeps what it knows', () => {
   it('never overwrites a curated value', () => {
     const patch = fillEmptyPartnerPatch(
-      { email: 'k@work.com', phone: '5610000000', stage: 'Active Partner', specialties: ['stager'] },
+      { email: 'k@work.com', phone: '5610000000', stage: 'Active Partner' },
       { email: 'karen@home.com', phone: '5615550199' },
-      ['real-estate']
     )
     expect(patch).toEqual({})
   })
 
   it('fills only the blanks', () => {
     const patch = fillEmptyPartnerPatch(
-      { email: '', phone: null, stage: 'Building', specialties: ['stager'] },
+      { email: '', phone: null, stage: 'Building' },
       { email: 'karen@home.com', phone: '5615550199' },
-      ['real-estate']
     )
     expect(patch).toEqual({ email: 'karen@home.com', phone: '5615550199' })
   })
 
   it('rescues a legacy stage-less partner back into the pipeline', () => {
-    expect(fillEmptyPartnerPatch({ stage: '', email: 'a@b.c', phone: '1' }, {}, []).stage)
+    expect(fillEmptyPartnerPatch({ stage: '', email: 'a@b.c', phone: '1' }, {}).stage)
       .toBe(NEW_PARTNER_STAGE)
+  })
+
+  it('tags follow the same fill-empty rule: a tagged match keeps exactly its tags', () => {
+    expect(partnerHasTags({ partner_tags: [{ tag_lookup_id: 't-stager' }] })).toBe(true)
+    expect(partnerHasTags({ partner_tags: [] })).toBe(false)
+    expect(partnerHasTags({})).toBe(false)
+    const route = src('app/api/leads/[id]/network/route.ts')
+    expect(route).toMatch(/if \(tagIds\.length > 0 && !\(target && partnerHasTags\(target\)\)\)/)
+    // The matcher selects the links, or partnerHasTags would always say no.
+    expect(src('lib/lead-to-network.ts')).toContain('partner_tags(tag_lookup_id)')
   })
 })
 
@@ -284,11 +294,13 @@ describe('G) the door is wired where it was specified', () => {
 
   it('the sheet asks both questions and posts one call', () => {
     const sheet = src('components/hive/NetworkConvertSheet.jsx')
-    // Two mode cards, one specialty picker, one POST.
+    // Two mode cards, one tag picker (the one list), one POST.
     expect(sheet).toMatch(/key: 'add'/)
     expect(sheet).toMatch(/key: 'move'/)
     expect(sheet).toContain('data-mode={m.key}')
-    expect(sheet).toContain('specialties.map')
+    expect(sheet).toContain('<TagPickField')
+    expect(sheet).toContain('tagIds: picked.map(t => t.id)')
+    expect(sheet).not.toMatch(/specialties(\.map|=|:)/)
     expect((sheet.match(/method: 'POST'/g) || []).length).toBe(1)
   })
 

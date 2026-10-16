@@ -104,7 +104,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, onEngagementFounded = () => {}, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
+export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, onEngagementFounded = () => {}, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -635,8 +635,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
       />
 
       {/* Tags — PickerModal (tag system 2A): lead_tags junction writes
-          over corporate + this location's client_tags lookups; the modal
-          fetches its own scoped vocabulary, so no options threading. */}
+          over THE one tag list shared with Network people (lib/tags.ts);
+          the modal fetches its own scoped vocabulary, so no options
+          threading. */}
       <TagsRow
         leadId={c.id}
         locationId={c.location_uuid || null}
@@ -959,7 +960,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
       {convertOpen && !readOnly && c && (
         <NetworkConvertSheet
           person={{ id: c.id, name: c.name }}
-          specialties={specialties}
+          locationId={c.location_uuid || null}
           onClose={() => setConvertOpen(false)}
           setToast={setToast}
           onConverted={(res) => {

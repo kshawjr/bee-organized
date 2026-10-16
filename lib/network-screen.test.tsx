@@ -5,10 +5,13 @@
 //
 //   A) MIXED ROWS (Option C): a company renders SQUARE (radius.control,
 //      not 50%) with "N people"; a person renders ROUND. No type labels.
-//   B) BANDS group by primary specialty; headers count LEADS REFERRED +
-//      revenue — never row count.
-//   C) The two special bands render separately, at the bottom, in order:
-//      Potential customers then Just met · no intent yet.
+//   B) ONE FLAT LIST sorted by name (tag merge 2026-10-15 — Kevin: the
+//      specialty bands were noise on a list of four or five, and only
+//      existed because there was no real filter). No band headings.
+//   C) THE TAG FILTER — searchable, multi-pick, any-of, over the one tag
+//      list; it finds a person by ANY of their tags (the old filter only
+//      saw the first specialty); companies drop out (they carry no tags);
+//      a pre-merge saved view (specFilter slug) still works.
 //   D) Stage chips render on person rows; 60d+ last-contact renders in
 //      the danger tone (fresh rows don't; NULL renders quiet "no
 //      touchpoints yet", not red).
@@ -24,7 +27,6 @@ import { act } from 'react-dom/test-utils'
 import NetworkScreen from '@/components/hive/NetworkScreen'
 import { T } from '@/components/hive/shared/tokens'
 import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl } from '@/components/hive/shared/hubUrl'
-import { POTENTIAL_BAND, JUST_MET_BAND } from '@/components/hive/shared/networkGroups'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -40,16 +42,18 @@ const lsMock = {
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
 const dateOnly = (offsetDays: number) => new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10)
 
-const SPECIALTIES = [
-  { id: 'real-estate', label: '🏠 Realtor' },
-  { id: 'senior-living', label: '🏥 Senior Living' },
+// THE one tag list (lookups ids; key = the pre-merge specialty slug).
+const TAGS = [
+  { id: 't-realtor', label: 'Realtor', key: 'real-estate' },
+  { id: 't-senior', label: 'Senior Living', key: 'senior-living' },
+  { id: 't-mover', label: 'Mover', key: 'moving-company' },   // nobody carries it
 ]
 
 const PARTNERS = [
   {
     id: 'p1', name: 'Karen Martinez', type: 'partner', locationId: 'loc-1',
     title: 'Agent', company: 'Meridian Realty', companyId: 'co1',
-    specialties: ['real-estate'], stage: 'Active Partner', tags: [],
+    tagIds: ['t-realtor'], stage: 'Active Partner',
     lastContactedAt: daysAgo(10), isDeleted: false,
     nextSteps: [
       { id: 'ns1', text: 'Send referral gift', date: dateOnly(-2), done: false },
@@ -58,23 +62,21 @@ const PARTNERS = [
     ],
   },
   {
+    // Realtor is their SECOND tag — the pre-merge filter (first specialty
+    // only) could never find them under it.
     id: 'p2', name: 'Stale Sam', type: 'contact', locationId: 'loc-1',
     title: 'Broker', company: 'Meridian Realty', companyId: 'co1',
-    specialties: ['real-estate'], stage: 'Building', tags: [],
+    tagIds: ['t-senior', 't-realtor'], stage: 'Building',
     lastContactedAt: daysAgo(90), isDeleted: false, nextSteps: [],
   },
   {
-    // No specialty ON PURPOSE: since the band rule was narrowed (the
-    // lead→Network conversion), the customer signal only claims someone with
-    // no stated referral direction. A warm realtor now bands as a realtor —
-    // that case is pinned in network-lead-convert.test.ts.
     id: 'p3', name: 'Warm Wendy', type: 'partner', locationId: 'loc-1',
-    specialties: [], stage: 'Reaching Out', tags: ['warm'],
+    tagIds: [], stage: 'Reaching Out',
     lastContactedAt: null, isDeleted: false, nextSteps: [],
   },
   {
     id: 'p4', name: 'Just Met Jim', type: 'contact', locationId: 'loc-1',
-    specialties: [], stage: '', tags: [],
+    tagIds: [], stage: '',
     lastContactedAt: null, isDeleted: false, nextSteps: [],
   },
 ]
@@ -106,7 +108,7 @@ const mount = async (props: any = {}, fetchImpl?: any) => {
         partners={PARTNERS}
         companies={COMPANIES}
         locFilter="all"
-        specialties={SPECIALTIES}
+        tags={TAGS}
         {...props}
       />
     )
@@ -114,17 +116,20 @@ const mount = async (props: any = {}, fetchImpl?: any) => {
   await act(async () => {}) // flush the summary fetch
 }
 
-const band = (key: string) => host.querySelector(`[data-band="${key}"]`) as HTMLElement | null
-const expandAll = () => {
-  lsStore.set('bee_network_bands_collapsed', JSON.stringify({
-    'real-estate': true, [POTENTIAL_BAND]: true, [JUST_MET_BAND]: true,
-  }))
-}
+const list = () => host.querySelector('[data-testid="network-list"]') as HTMLElement
+const rowNames = () => [...list().querySelectorAll('[data-rowtype]')].map(r => r.querySelector('p')!.textContent)
+const button = (text: string) => [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text) as HTMLElement
+const openFilters = async () => { await act(async () => { button('Filters').click() }) }
+const tagOption = (labelStart: string) =>
+  [...host.querySelectorAll('[data-testid="network-tag-options"] button')].find(b => (b.textContent || '').includes(labelStart)) as HTMLElement
+const typeInto = async (el: HTMLInputElement, value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLInputElement.prototype, 'value')!.set!.call(el, value)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+})
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', lsMock)
   lsStore.clear()
-  expandAll()
 })
 afterEach(async () => {
   if (root) await act(async () => root.unmount())
@@ -135,70 +140,126 @@ afterEach(async () => {
 describe('A) mixed rows — square company, round person, no type labels', () => {
   it('a company is ONE row: square avatar + "N people"; a person is round', async () => {
     await mount()
-    const re = band('real-estate')!
-    const companyRow = re.querySelector('[data-rowtype="company"]') as HTMLElement
+    const companyRow = list().querySelector('[data-rowtype="company"]') as HTMLElement
     expect(companyRow).toBeTruthy()
     expect(companyRow.textContent).toContain('Meridian Realty')
     expect(companyRow.textContent).toContain('2 people')
     const sq = companyRow.querySelector('[data-avatar="company"]') as HTMLElement
     expect(sq.style.borderRadius).toBe(T.radius.control)   // SQUARE-ish, never a circle
 
-    const personRow = re.querySelector('[data-rowtype="person"]') as HTMLElement
+    const personRow = list().querySelector('[data-rowtype="person"]') as HTMLElement
     expect(personRow).toBeTruthy()
     const round = personRow.querySelector('div') as HTMLElement
     expect(round.style.borderRadius).toBe(T.radius.round)  // 50%
 
     // The shape IS the affordance — no "Partner"/"Contact"/"Company" labels.
-    expect(re.textContent).not.toContain('👤 Contact')
-    expect(re.textContent).not.toMatch(/\bCompany\b/)
+    expect(list().textContent).not.toContain('👤 Contact')
+    expect(list().textContent).not.toMatch(/\bCompany\b/)
   })
 
   it('company subtitle counts its linked people', async () => {
     await mount()
-    const companyRow = band('real-estate')!.querySelector('[data-rowtype="company"]') as HTMLElement
+    const companyRow = list().querySelector('[data-rowtype="company"]') as HTMLElement
     expect(companyRow.textContent).toContain('2 people · Real Estate')
+  })
+
+  it("a person's subtitle leads with their tags, by label", async () => {
+    await mount()
+    const sam = [...list().querySelectorAll('[data-rowtype="person"]')].find(r => r.textContent!.includes('Stale Sam'))!
+    expect(sam.textContent).toContain('Senior Living, Realtor · Broker · Meridian Realty')
   })
 })
 
-describe('B) bands by specialty — headers count leads referred, not rows', () => {
-  it('groups by primary specialty and headers carry leads + revenue', async () => {
+describe('B) one flat list, sorted by name — no bands', () => {
+  it('people and companies together, A→Z, with no group headings', async () => {
     await mount()
-    const re = band('real-estate')!
-    expect(re).toBeTruthy()
-    // 3 rows in the band (Karen, Sam, Meridian) but the header counts the
-    // 6 leads its members REFERRED — and the summed real revenue.
-    const header = re.querySelector('[role="button"]') as HTMLElement
-    expect(header.textContent).toContain('6 leads referred')
-    expect(header.textContent).toContain('$6,500')
-    expect(header.textContent).not.toContain('· 3') // never a row count
-    expect(re.querySelectorAll('[data-rowtype]')).toHaveLength(3)
+    expect(rowNames()).toEqual(['Just Met Jim', 'Karen Martinez', 'Meridian Realty', 'Stale Sam', 'Warm Wendy'])
+    expect(host.querySelector('[data-band]')).toBeNull()
+    expect(host.textContent).not.toContain('Potential customers')
+    expect(host.textContent).not.toContain('Just met · no intent yet')
   })
 
   it('per-row numbers are the rollup joins, not jsonb zeros', async () => {
     await mount()
-    const rows = [...band('real-estate')!.querySelectorAll('[data-rowtype]')] as HTMLElement[]
-    const karen = rows.find(r => r.textContent!.includes('Karen'))!
+    const karen = [...list().querySelectorAll('[data-rowtype]')].find(r => r.textContent!.includes('Karen'))!
     expect(karen.textContent).toContain('3 referred')
     expect(karen.textContent).toContain('$4,500')
   })
 })
 
-describe('C) the two special bands', () => {
-  it('Potential customers and Just met render separately, in that order, at the bottom', async () => {
+describe('C) the tag filter — searchable, any-of, over the one list', () => {
+  it('offers only tags someone here carries, most-used first, with counts', async () => {
     await mount()
-    const keys = [...host.querySelectorAll('[data-band]')].map(el => el.getAttribute('data-band'))
-    expect(keys).toEqual(['real-estate', POTENTIAL_BAND, JUST_MET_BAND])
-    expect(band(POTENTIAL_BAND)!.textContent).toContain('Potential customers')
-    expect(band(POTENTIAL_BAND)!.textContent).toContain('Warm Wendy')
-    expect(band(JUST_MET_BAND)!.textContent).toContain('Just met · no intent yet')
-    expect(band(JUST_MET_BAND)!.textContent).toContain('Just Met Jim')
+    await openFilters()
+    const opts = [...host.querySelectorAll('[data-testid="network-tag-options"] button')].map(b => b.textContent)
+    expect(opts).toEqual(['Realtor (2)', 'Senior Living (1)'])   // Mover: nobody carries it
+  })
+
+  it('the search box narrows the options', async () => {
+    await mount()
+    await openFilters()
+    await typeInto(host.querySelector('[aria-label="Search tags"]') as HTMLInputElement, 'sen')
+    const opts = [...host.querySelectorAll('[data-testid="network-tag-options"] button')].map(b => b.textContent)
+    expect(opts).toEqual(['Senior Living (1)'])
+    await typeInto(host.querySelector('[aria-label="Search tags"]') as HTMLInputElement, 'zzz')
+    expect(host.querySelector('[data-testid="network-tag-options"]')!.textContent).toContain('No tag matches')
+  })
+
+  it('one click on Realtor shows both realtors — including the one whose Realtor tag is SECOND', async () => {
+    await mount()
+    await openFilters()
+    await act(async () => { tagOption('Realtor').click() })
+    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])   // companies carry no tags → out
+    // The pick shows as a removable chip outside the popover.
+    expect(host.querySelector('[data-active-tag="t-realtor"]')!.textContent).toContain('Realtor')
+    expect(button('Filters · 1')).toBeTruthy()
+  })
+
+  it('two picks are any-of, and removing the chip restores the full list', async () => {
+    await mount()
+    await openFilters()
+    await act(async () => { tagOption('Senior Living').click() })
+    expect(rowNames()).toEqual(['Stale Sam'])
+    await act(async () => { tagOption('Realtor').click() })
+    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])
+    await act(async () => { (host.querySelector('[aria-label="Remove tag filter Realtor"]') as HTMLElement).click() })
+    await act(async () => { (host.querySelector('[aria-label="Remove tag filter Senior Living"]') as HTMLElement).click() })
+    expect(rowNames()).toHaveLength(5)
+  })
+
+  it('a view saved before the merge (specFilter slug) maps onto the tag with that slug', async () => {
+    lsStore.set('bee_network_saved_views', JSON.stringify({
+      views: [{ id: 'v1', name: 'Realtors', filters: { stageFilter: '', specFilter: 'real-estate' } }],
+      activeViewId: null,
+    }))
+    await mount()
+    await act(async () => { button('Realtors').click() })
+    expect(rowNames()).toEqual(['Karen Martinez', 'Stale Sam'])
+  })
+
+  it('a view saved now stores tag ids', async () => {
+    await mount()
+    await openFilters()
+    await act(async () => { tagOption('Senior Living').click() })
+    await act(async () => { button('+ Save view').click() })
+    const nameBox = host.querySelector('[placeholder="View name"]') as HTMLInputElement
+    await typeInto(nameBox, 'Senior')
+    await act(async () => { button('Save').click() })
+    const saved = JSON.parse(lsStore.get('bee_network_saved_views')!)
+    expect(saved.views[0].filters).toEqual({ stageFilter: '', tagIds: ['t-senior'] })
+  })
+
+  it('nobody tagged → the section says so instead of an empty list', async () => {
+    await mount({ partners: PARTNERS.map(p => ({ ...p, tagIds: [] })) })
+    await openFilters()
+    expect(host.textContent).toContain('No one here is tagged yet')
   })
 })
 
 describe('D) stage chips + staleness', () => {
   it('person rows carry their pipeline stage chip', async () => {
     await mount()
-    const chips = [...band('real-estate')!.querySelectorAll('[data-stage-chip]')].map(c => c.textContent)
+    const chips = [...list().querySelectorAll('[data-stage-chip]')].map(c => c.textContent)
     expect(chips).toContain('Active Partner')
     expect(chips).toContain('Building')
   })
@@ -257,7 +318,7 @@ describe('F) honest stats', () => {
   it('clicking a company row opens the company record', async () => {
     const onOpenCompany = vi.fn()
     await mount({ onOpenCompany })
-    const companyRow = band('real-estate')!.querySelector('[data-rowtype="company"]') as HTMLElement
+    const companyRow = list().querySelector('[data-rowtype="company"]') as HTMLElement
     await act(async () => { companyRow.click() })
     expect(onOpenCompany).toHaveBeenCalledTimes(1)
     expect(onOpenCompany.mock.calls[0][0].id).toBe('co1')

@@ -27,7 +27,11 @@
 // The partner/contact TYPE SPLIT stays dead (Phase 2): rows emit
 // type:'partner'; `relationship` survives as an optional person field.
 //
-// §8.5: props only — the picklists (admin specialties/tiers) and the
+// Tags (tag merge 2026-10-15): the old specialty pills are the shared
+// TagPickField over THE one tag list (lib/tags.ts); picked ids ride the
+// create as tagIds and the server links them.
+//
+// §8.5: props only — the picklists (admin tiers) and the
 // live partner/company pools come from the host; creates go UP through
 // onAddPerson/onAddCompany (the context's server-first creators).
 // ─────────────────────────────────────────────────────────────
@@ -38,6 +42,7 @@ import OverlayShell from './OverlayShell'
 import useIsMobile from './shared/useIsMobile'
 import AddressAutofill from './shared/AddressAutofill'
 import { T } from './shared/tokens'
+import TagPickField from './shared/TagPickField'
 import { inp, lbl } from './shared/formKit'
 
 const primaryBtn = (enabled) => ({
@@ -73,7 +78,7 @@ export default function NetworkAddSheet({
   onUpdatePartner = () => {},         // link-people writes (companyId + company string per person)
   partners = [],                      // live pool — link-people
   companies = [],                     // live pool — the person branch's company typeahead
-  specialties = [],                   // admin list [{ id, label }]
+  locationId = null,                  // location uuid — scopes the tag list
   tiers = [],                         // admin list [{ id, label, desc? }]
   defaultCompany = null,              // { id, name } — company record's "+ Add person"; FORCES the Person position
 }) {
@@ -91,10 +96,9 @@ export default function NetworkAddSheet({
   // ── person fields ──
   const [person, setPerson] = useState({
     firstName: '', lastName: '', title: '', howWeMet: '', relationship: '',
-    specialties: [], tier: null,
+    tags: [], tier: null,
   })
   const setP = (k, v) => setPerson(f => ({ ...f, [k]: v }))
-  const toggleSpec = (id) => setPerson(f => ({ ...f, specialties: f.specialties.includes(id) ? f.specialties.filter(x => x !== id) : [...f.specialties, id] }))
 
   // Company link (person branch): picked id + display name, or free text.
   const [companyPick, setCompanyPick] = useState(defaultCompany ? { id: defaultCompany.id, name: defaultCompany.name } : null)
@@ -140,12 +144,12 @@ export default function NetworkAddSheet({
           phone: shared.phone, email: shared.email, website: shared.website,
           addresses: composeAddresses(),
           stage: 'New Contact',
-          specialties: person.specialties,
+          tagIds: person.tags.map(t => t.id),
           tier: person.tier,
           relationship: person.relationship,
           howWeMet: person.howWeMet, metDate: 'Just now', lastContact: 'Just now',
           isCustomer: false, customerLeadId: null,
-          tags: [], referrals: [], notes: [],
+          referrals: [], notes: [],
           activity: [{ type: 'event', label: `Added to Network${person.howWeMet ? ' - ' + person.howWeMet : ''}`, ts: 'Just now' }],
         })
       } else {
@@ -338,12 +342,8 @@ export default function NetworkAddSheet({
             </div>
 
             <div>
-              <label style={lbl}>Specialty · optional, all that apply</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '150px', overflowY: 'auto', padding: '2px' }}>
-                {specialties.map(s => (
-                  <button key={s.id} data-spec={s.id} onClick={() => toggleSpec(s.id)} style={pillBtn(person.specialties.includes(s.id))}>{s.label}</button>
-                ))}
-              </div>
+              <label style={lbl}>Tags · optional, all that apply</label>
+              <TagPickField locationId={locationId} value={person.tags} onChange={v => setP('tags', v)} />
             </div>
 
             <div>

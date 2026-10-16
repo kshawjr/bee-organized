@@ -12,16 +12,14 @@
 //     · gone cold 60d+. Referral numbers come from /api/network/summary
 //     (REAL joins, Phase 1); until it resolves they render "—", NEVER a
 //     fake zero (the Home-redesign honesty rule)
-//   · bands by SPECIALTY (shared/networkGroups) with MIXED rows — Option
-//     C: a company is ONE row (square avatar, "N people"), a person is a
-//     row (round avatar, company as subtitle). Square vs round is the
-//     whole affordance — no type labels.
-//   · two special bands at the bottom: Potential customers (purple),
-//     Just met · no intent yet (gray)
-//
-// The grouped-band chrome is the ClientGroupedList idiom (collapse
-// memory under its OWN key, search force-expands, InitialsAvatar, tinted
-// band + white rows) — shared pieces reused, not forked.
+//   · ONE flat list sorted by name (tag merge 2026-10-15 — the specialty
+//     bands are retired, see shared/networkGroups) with MIXED rows: a
+//     company is ONE row (square avatar, "N people"), a person is a row
+//     (round avatar, their tags + company as subtitle). Square vs round
+//     is the whole affordance — no type labels.
+//   · the Tags filter — searchable, multi-pick, any-of — over THE one tag
+//     list (lib/tags.ts), showing only tags someone here carries, with
+//     counts. It is what the bands used to do, without the headings.
 //
 // DATA: partners/companies arrive as props (the SSR-loaded App state the
 // Classic screen already read — location-scoped by UUID upstream, the
@@ -37,15 +35,14 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { T } from './shared/tokens'
 import { useStoredState } from './shared/useStoredControls'
 import InitialsAvatar from './shared/InitialsAvatar'
-import { IconChevronRight } from '@/components/ui/icons'
 import { HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { matchPeople } from './shared/clientMatch'
 import {
-  FilterButton, FilterPopover, FilterSection, TogglePills, FilteredEmpty,
+  FilterButton, FilterPopover, FilterSection, TogglePills, CheckRow, FilteredEmpty,
 } from './shared/FilterPopover'
 import {
-  buildNetworkBands, networkStats, contactRecency,
-  stageFamilyKey, POTENTIAL_BAND, JUST_MET_BAND,
+  buildNetworkRows, networkStats, contactRecency,
+  stageFamilyKey, matchesTags, tagOptionsInUse,
 } from './shared/networkGroups'
 import { CHIP_STYLES } from './shared/stageConfig'
 import PickALocation from './shared/PickALocation'
@@ -92,7 +89,7 @@ export default function NetworkScreen({
   partners = [],
   companies = [],
   locFilter = 'all',
-  specialties = [],           // admin list [{ id, label }] — band vocabulary + order
+  tags = [],                  // THE one tag list [{ id, label, key? }] — labels for tagIds
   readOnly = false,
   onOpenPerson = () => {},
   onOpenCompany = () => {},
@@ -144,17 +141,27 @@ export default function NetworkScreen({
   const q = search.trim().toLowerCase()
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [stageFilter, setStageFilter] = useState(null)
-  const [specFilter, setSpecFilter] = useState(null)
-  const filterCount = [stageFilter, specFilter].filter(Boolean).length
+  const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
+  const [tagSearch, setTagSearch] = useState('')
+  const filterCount = (stageFilter ? 1 : 0) + tagFilter.length
+  const clearFilters = () => { setStageFilter(null); setTagFilter([]) }
+  const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
+  const tagLabel = useMemo(() => new Map(tags.map(t => [t.id, t.label])), [tags])
 
   // Saved views — SAME store the Phase 1 persistence fix established
-  // (bee_network_saved_views). Legacy Classic views carried
-  // {stageFilter, tierFilter, specFilter, tagFilter}; stage + specialty
-  // still apply, the two retired filters are ignored.
+  // (bee_network_saved_views). Views now carry {stageFilter, tagIds}.
+  // A view saved before the tag merge carried specFilter (a specialty
+  // slug) — it maps onto the tag with that slug (the merge keeps slugs as
+  // attrs.key), so an owner's old "Realtors" view still works.
   const [savedViewsStore, setSavedViewsStore] = useStoredState('bee_network_saved_views', { views: [], activeViewId: null })
   const applyView = (v) => {
     setStageFilter(v.filters?.stageFilter || null)
-    setSpecFilter(v.filters?.specFilter || null)
+    let ids = Array.isArray(v.filters?.tagIds) ? v.filters.tagIds : []
+    if (!ids.length && v.filters?.specFilter) {
+      const hit = tags.find(t => t.key === v.filters.specFilter)
+      if (hit) ids = [hit.id]
+    }
+    setTagFilter(ids)
     setSavedViewsStore(s => ({ ...s, activeViewId: v.id }))
   }
   const deleteView = (id) => setSavedViewsStore(s => ({
@@ -163,7 +170,7 @@ export default function NetworkScreen({
   }))
   const saveView = (name) => {
     const id = `v${Date.now()}`
-    setSavedViewsStore(s => ({ views: [...s.views, { id, name, filters: { stageFilter: stageFilter || '', specFilter: specFilter || '' } }], activeViewId: id }))
+    setSavedViewsStore(s => ({ views: [...s.views, { id, name, filters: { stageFilter: stageFilter || '', tagIds: tagFilter } }], activeViewId: id }))
   }
   const [namingView, setNamingView] = useState(false)
   const [viewName, setViewName] = useState('')
@@ -171,38 +178,38 @@ export default function NetworkScreen({
   const filteredPartners = useMemo(() => {
     let rows = scopedPartners
     if (stageFilter) rows = rows.filter(p => p.stage === stageFilter)
-    if (specFilter) rows = rows.filter(p => (p.specialties || [])[0] === specFilter)
+    if (tagFilter.length) rows = rows.filter(p => matchesTags(p, tagFilter))
     if (!q) return rows
     const matched = new Set(matchPeople(rows, q).map(m => m.person.id))
     return rows.filter(p => matched.has(p.id) || (p.company || '').toLowerCase().includes(q))
-  }, [scopedPartners, q, stageFilter, specFilter])
+  }, [scopedPartners, q, stageFilter, tagFilter])
 
   const filteredCompanies = useMemo(() => {
-    let rows = scopedCompanies
-    if (stageFilter) return []  // companies carry no pipeline stage
-    if (specFilter) rows = rows  // spec filter resolves at band level below
-    if (!q) return rows
-    return rows.filter(c =>
+    // Companies carry no pipeline stage and no tags — either filter
+    // narrows the list to people.
+    if (stageFilter || tagFilter.length) return []
+    if (!q) return scopedCompanies
+    return scopedCompanies.filter(c =>
       (c.name || '').toLowerCase().includes(q) || (c.industry || '').toLowerCase().includes(q))
-  }, [scopedCompanies, q, stageFilter])
+  }, [scopedCompanies, q, stageFilter, tagFilter])
 
-  // ── bands ──
-  const bands = useMemo(() => {
-    const all = buildNetworkBands({ partners: filteredPartners, companies: filteredCompanies, specialties, rollups })
-    return specFilter ? all.filter(b => b.key === specFilter) : all
-  }, [filteredPartners, filteredCompanies, specialties, rollups, specFilter])
+  // ── the one list ──
+  const rows = useMemo(
+    () => buildNetworkRows({ partners: filteredPartners, companies: filteredCompanies, rollups }),
+    [filteredPartners, filteredCompanies, rollups]
+  )
 
-  // Collapse memory — its OWN key; a search force-expands (the
-  // ClientGroupedList contract).
-  const [expandedMap, setExpandedMap] = useStoredState('bee_network_bands_collapsed', {})
-  const toggleBand = (key) => setExpandedMap(prev => ({ ...prev, [key]: !prev[key] }))
-  const isExpanded = (key) => (q || filterCount > 0 ? true : expandedMap[key] === true)
+  // The filter's options: tags someone here carries, with counts; the
+  // search box narrows them. A picked tag stays listed even if a search
+  // hides it, so it can always be unticked.
+  const tagOptions = useMemo(() => tagOptionsInUse(tags, scopedPartners), [tags, scopedPartners])
+  const tagNeedle = tagSearch.trim().toLowerCase()
+  const shownTagOptions = tagOptions.filter(t => !tagNeedle || t.label.toLowerCase().includes(tagNeedle) || tagFilter.includes(t.id))
 
   // ── stats ──
   const stats = useMemo(() => networkStats({ partners: scopedPartners, companies: scopedCompanies, totals: summary?.totals ?? null, nowMs }), [scopedPartners, scopedCompanies, summary]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const bandTone = (band) =>
-    band.tone === 'potential' ? fam('purple') : band.tone === 'justmet' ? fam('quiet') : fam('teal')
+  const rowTone = fam('teal')
 
   return (
     <div style={{ maxWidth: '860px', margin: '0 auto', padding: '16px 16px 80px', fontFamily: 'inherit' }}>
@@ -284,12 +291,32 @@ export default function NetworkScreen({
         />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={filterCount} open={filtersOpen} onToggle={() => setFiltersOpen(o => !o)} />
-          <FilterPopover open={filtersOpen} count={filterCount} onClear={() => { setStageFilter(null); setSpecFilter(null) }}>
+          <FilterPopover open={filtersOpen} count={filterCount} onClear={clearFilters}>
             <FilterSection label="Stage">
               <TogglePills options={PARTNER_STAGE_KEYS.map(k => ({ key: k, label: k }))} value={stageFilter} onChange={setStageFilter} />
             </FilterSection>
-            <FilterSection label="Specialty">
-              <TogglePills options={specialties.map(s => ({ key: s.id, label: s.label }))} value={specFilter} onChange={setSpecFilter} />
+            <FilterSection label="Tags">
+              {tagOptions.length === 0 ? (
+                <p style={{ fontSize: '11px', color: T.ink.quiet }}>No one here is tagged yet — add tags from a person's record.</p>
+              ) : (
+                <>
+                  <input
+                    value={tagSearch}
+                    onChange={e => setTagSearch(e.target.value)}
+                    placeholder="Search tags…"
+                    aria-label="Search tags"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', marginBottom: '6px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '12px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none' }}
+                  />
+                  <div data-testid="network-tag-options" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                    {shownTagOptions.map(t => (
+                      <CheckRow key={t.id} label={`${t.label} (${t.count})`} checked={tagFilter.includes(t.id)} onToggle={() => toggleTag(t.id)} />
+                    ))}
+                    {shownTagOptions.length === 0 && (
+                      <p style={{ fontSize: '11px', color: T.ink.quiet }}>No tag matches “{tagSearch.trim()}”</p>
+                    )}
+                  </div>
+                </>
+              )}
             </FilterSection>
           </FilterPopover>
         </div>
@@ -297,6 +324,15 @@ export default function NetworkScreen({
 
       {(savedViewsStore.views.length > 0 || filterCount > 0) && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+          {/* The picked tags, removable — the filter is visible without
+              opening the popover. */}
+          {tagFilter.map(id => (
+            <span key={`tag-${id}`} data-active-tag={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 6px 4px 10px', borderRadius: T.radius.pill, background: T.accent.soft, border: `0.5px solid ${T.hairline.strong}`, fontSize: '12px', fontWeight: 500, color: T.accent.deep }}>
+              {tagLabel.get(id) || 'Tag'}
+              <button aria-label={`Remove tag filter ${tagLabel.get(id) || ''}`} onClick={() => toggleTag(id)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px', lineHeight: 1, color: T.ink.quiet, fontFamily: 'inherit', padding: '0 2px' }}>×</button>
+            </span>
+          ))}
           {savedViewsStore.views.map(v => {
             const active = savedViewsStore.activeViewId === v.id
             return (
@@ -326,10 +362,10 @@ export default function NetworkScreen({
         </div>
       )}
 
-      {/* ── the bands ── */}
-      {bands.length === 0 && (
+      {/* ── the one list ── */}
+      {rows.length === 0 && (
         filterCount > 0
-          ? <FilteredEmpty count={filterCount} onClear={() => { setStageFilter(null); setSpecFilter(null) }} noun="network records" />
+          ? <FilteredEmpty count={filterCount} onClear={clearFilters} noun="network records" />
           : (
             <div style={{ padding: '40px 20px', textAlign: 'center', background: T.surface.raised, border: T.border.card, borderRadius: T.radius.card }}>
               <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, marginBottom: '4px' }}>
@@ -342,73 +378,48 @@ export default function NetworkScreen({
           )
       )}
 
-      {bands.map(band => {
-        const tone = bandTone(band)
-        const expanded = isExpanded(band.key)
-        return (
-          <div key={band.key} data-band={band.key} style={{ background: tone.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px' }}>
-            <div
-              role="button" tabIndex={0} aria-expanded={expanded} aria-label={`${band.label} group`}
-              onClick={() => toggleBand(band.key)}
-              onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleBand(band.key) } }}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px', cursor: 'pointer' }}>
-              <span aria-hidden style={{ width: '9px', height: '9px', borderRadius: T.radius.round, background: tone.text, display: 'inline-block', flexShrink: 0 }} />
-              <span style={{ fontSize: '13px', fontWeight: 600, color: tone.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{band.label}</span>
-              {/* Header counts LEADS REFERRED + revenue — not rows (2b). */}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: tone.text, opacity: 0.75, whiteSpace: 'nowrap', fontVariantNumeric: T.type.tabular }}>
-                {band.referred == null ? '· —' : `· ${band.referred} lead${band.referred === 1 ? '' : 's'} referred${band.revenue > 0 ? ` · ${money(band.revenue)}` : ''}`}
-              </span>
-              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color: tone.text }}>
-                <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-              </span>
-            </div>
-            {expanded && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {band.rows.map(row => {
-                  const rec = row.record
-                  const isCompany = row.rowType === 'company'
-                  const recency = contactRecency(row.lastContactedAt, nowMs)
-                  const talk = fmtLastTalk(row.lastContactedAt, nowMs)
-                  const stage = !isCompany && rec.stage ? rec.stage : null
-                  const stageFam = stage ? fam(stageFamilyKey(stage)) : null
-                  return (
-                    <div key={`${row.rowType}-${rec.id}`} className="bee-net-row" data-rowtype={row.rowType}
-                      onClick={() => (isCompany ? onOpenCompany(rec) : onOpenPerson(rec))}
-                      style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
-                      {isCompany
-                        ? <CompanyAvatar name={rec.name} />
-                        : <InitialsAvatar name={rec.name} bg={tone.bg} text={tone.text} />}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                          <p title={rec.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.name}</p>
-                          {stage && (
-                            <span data-stage-chip style={{ fontSize: T.badge.font, fontWeight: T.badge.weight, color: stageFam.text, background: stageFam.bg, borderRadius: T.radius.chip, padding: '2px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}>{stage}</span>
-                          )}
-                        </div>
-                        <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
-                          {isCompany
-                            ? `${row.peopleCount} ${row.peopleCount === 1 ? 'person' : 'people'}${rec.industry ? ` · ${rec.industry}` : ''}`
-                            : [rec.title, rec.company].filter(Boolean).join(' · ') || rec.relationship || '—'}
-                        </p>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <p style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>
-                          {row.rollup == null
-                            ? '—'
-                            : `${row.rollup.count} referred${row.rollup.revenue > 0 ? ` · ${money(row.rollup.revenue)}` : ''}`}
-                        </p>
-                        <p data-recency={recency} style={{ fontSize: '11px', marginTop: '1px', color: recency === 'stale' ? T.state.danger.fg : T.ink.quiet, fontWeight: recency === 'stale' ? 500 : 400 }}>
-                          {talk ? `talked ${talk}` : 'no touchpoints yet'}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
+      <div data-testid="network-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {rows.map(row => {
+          const rec = row.record
+          const isCompany = row.rowType === 'company'
+          const recency = contactRecency(row.lastContactedAt, nowMs)
+          const talk = fmtLastTalk(row.lastContactedAt, nowMs)
+          const stage = !isCompany && rec.stage ? rec.stage : null
+          const stageFam = stage ? fam(stageFamilyKey(stage)) : null
+          return (
+            <div key={`${row.rowType}-${rec.id}`} className="bee-net-row" data-rowtype={row.rowType}
+              onClick={() => (isCompany ? onOpenCompany(rec) : onOpenPerson(rec))}
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
+              {isCompany
+                ? <CompanyAvatar name={rec.name} />
+                : <InitialsAvatar name={rec.name} bg={rowTone.bg} text={rowTone.text} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <p title={rec.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.name}</p>
+                  {stage && (
+                    <span data-stage-chip style={{ fontSize: T.badge.font, fontWeight: T.badge.weight, color: stageFam.text, background: stageFam.bg, borderRadius: T.radius.chip, padding: '2px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}>{stage}</span>
+                  )}
+                </div>
+                <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
+                  {isCompany
+                    ? `${row.peopleCount} ${row.peopleCount === 1 ? 'person' : 'people'}${rec.industry ? ` · ${rec.industry}` : ''}`
+                    : [(rec.tagIds || []).map(id => tagLabel.get(id)).filter(Boolean).join(', '), rec.title, rec.company].filter(Boolean).join(' · ') || rec.relationship || '—'}
+                </p>
               </div>
-            )}
-          </div>
-        )
-      })}
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>
+                  {row.rollup == null
+                    ? '—'
+                    : `${row.rollup.count} referred${row.rollup.revenue > 0 ? ` · ${money(row.rollup.revenue)}` : ''}`}
+                </p>
+                <p data-recency={recency} style={{ fontSize: '11px', marginTop: '1px', color: recency === 'stale' ? T.state.danger.fg : T.ink.quiet, fontWeight: recency === 'stale' ? 500 : 400 }}>
+                  {talk ? `talked ${talk}` : 'no touchpoints yet'}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
       </>
       )}
     </div>

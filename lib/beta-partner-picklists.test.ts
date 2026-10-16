@@ -39,9 +39,13 @@ describe('A) Partner Specialties read the admin getter, not the const', () => {
   it('the specialtyConf helper resolves through getSpecialties()', () => {
     expect(SRC).toMatch(/function specialtyConf\(id\)\s*\{\s*return getSpecialties\(\)\.find/)
   })
-  it('all three specialty render sites (two picklists + filter chips) call getSpecialties()', () => {
-    // AddPartnerModal grid, SpecialtyPopup grid, filter-drawer chips.
-    expect((UI.match(/getSpecialties\(\)\.map/g) || []).length).toBeGreaterThanOrEqual(3)
+  // Tag merge (2026-10-15): specialties are tags now. Only the retired
+  // Classic pickers (AddPartnerModal, the specialty popup — both
+  // unreachable) still read getSpecialties(); the live Network surfaces
+  // get THE one tag list through getTagList() and never a specialty list.
+  it('the live Network mounts read the one tag list, not specialties', () => {
+    expect(SRC).toMatch(/<NetworkScreen[\s\S]{0,200}tags=\{getTagList\(\)\}/)
+    expect(SRC).not.toMatch(/specialties=\{getSpecialties\(\)/)
   })
 })
 
@@ -84,6 +88,11 @@ describe('D) getters fall back to their const for fresh/unmigrated envs', () => 
 })
 
 describe('E) admin edits flow to the getters, shape preserved (color/bg/icon)', () => {
+  it('the one tag list is seeded on the FIRST render, from every tag category', () => {
+    // A mount effect would leave the Network screen's tag filter empty
+    // until some unrelated re-render; a useState initializer runs first.
+    expect(SRC).toMatch(/useState\(\(\) => \{\s*if \(initialLookups[^\n]*\)\s*\{\s*setAdminTagList\(toTagListShape\(TAG_LOOKUP_CATEGORIES\.flatMap/)
+  })
   it('App() server-side hydration feeds the three categories to their setAdmin* setters', () => {
     expect(SRC).toMatch(/initialLookups\.partner_specialties\)\)\s*setAdminSpecialties\(toSpecialtyShape/)
     expect(SRC).toMatch(/initialLookups\.partner_stages\)\)\s*setAdminPartnerStages\(toStageShape/)
@@ -91,7 +100,8 @@ describe('E) admin edits flow to the getters, shape preserved (color/bg/icon)', 
   })
   it('the live ConfigureTab write path (pushLookupsToGetters) routes each category to its setter', () => {
     const push = SRC.slice(SRC.indexOf('function pushLookupsToGetters'), SRC.indexOf('function pushLookupsToGetters') + 2000)
-    expect(push).toMatch(/case 'partner_specialties':\s*setAdminSpecialties\(/)
+    // The pre-merge tag categories fold into 'tags' before this runs.
+    expect(push).toMatch(/case 'tags':\s*setAdminTagList\(/)
     expect(push).toMatch(/case 'partner_stages':\s*setAdminPartnerStages\(/)
     expect(push).toMatch(/case 'touchpoint_types':\s*setAdminTouchpointTypes\(/)
   })

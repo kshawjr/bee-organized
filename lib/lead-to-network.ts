@@ -65,7 +65,7 @@ export async function findPartnerForLead(
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     const { data, error } = await supabaseService
       .from('partners')
-      .select('id, name, email, phone, stage, specialties, is_customer, customer_lead_id, location_id')
+      .select('id, name, email, phone, stage, is_customer, customer_lead_id, location_id, partner_tags(tag_lookup_id)')
       .eq('location_id', locationId)
       .is('deleted_at', null)
       .range(from, from + PAGE - 1)
@@ -110,13 +110,16 @@ export async function findPartnerForLead(
 // is_junk, snoozed_*, marketing_opt_out, paused, jobber_client_id and every
 // Jobber child (quotes/jobs/invoices/assessments/service_requests),
 // engagements, paid_amount, closed_lost_*, assigned_to, inbox_dismissed_at,
-// and lead tags (a lead_tags junction against a tag_lookups vocabulary; the
-// partner `tags` text[] is a different vocabulary — mapping them would invent
-// meaning). referred_by_kind/referred_by_id is NOT the link: it records who
+// and lead tags. Since the tag merge (lib/tags.ts) clients and Network
+// people share ONE tag list, so carrying them would no longer invent a
+// vocabulary — but nobody asked for it, and "Hot Lead" on a realtor is not
+// obviously right; the sheet's tag picker is the door. Tags are links, not a
+// column, so the route writes them (attachPartnerTags), not this row.
+// referred_by_kind/referred_by_id is NOT the link: it records who
 // referred THIS LEAD, a different fact entirely.
 export function leadToPartnerRow(
   lead: any,
-  { specialties = [], stage = NEW_PARTNER_STAGE }: { specialties?: string[]; stage?: string } = {}
+  { stage = NEW_PARTNER_STAGE }: { stage?: string } = {}
 ) {
   const name =
     (lead?.name || '').trim() ||
@@ -129,7 +132,6 @@ export function leadToPartnerRow(
     phone: lead?.phone || null,
     location_id: lead?.location_uuid,
     stage,
-    specialties,
     addresses: leadAddresses(lead),
     how_we_met: lead?.source || '',
     met_date: fmtMetDate(lead?.created_at),
@@ -144,7 +146,6 @@ export function leadToPartnerRow(
         ]
       : [],
     activity: [{ type: 'event', label: 'Added to Network from a client record', ts: 'Just now' }],
-    tags: [],
     referrals: [],
     next_steps: [],
   }
@@ -190,11 +191,19 @@ function fmtMetDate(iso: string | null | undefined): string {
 // stage rescue, because a pre-existing stage-less partner (created before the
 // three doors were fixed) is invisible to every stage filter and this is a
 // free chance to put it back in the pipeline.
-export function fillEmptyPartnerPatch(partner: any, lead: any, specialties: string[] = []) {
+// (Tags follow the same fill-empty rule, but they are links — the route
+// applies them; see partnerHasTags.)
+export function fillEmptyPartnerPatch(partner: any, lead: any) {
   const patch: Record<string, any> = {}
   if (!partner?.email && lead?.email) patch.email = lead.email
   if (!partner?.phone && lead?.phone) patch.phone = lead.phone
   if (!partner?.stage) patch.stage = NEW_PARTNER_STAGE
-  if (!(partner?.specialties || []).length && specialties.length) patch.specialties = specialties
   return patch
+}
+
+// Does this raw partners row (selected with `partner_tags(tag_lookup_id)`)
+// already carry any tag? A matched person who does keeps exactly what they
+// have — the conversion only tags a person with none.
+export function partnerHasTags(partner: any): boolean {
+  return Array.isArray(partner?.partner_tags) && partner.partner_tags.length > 0
 }

@@ -446,7 +446,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], closeLostReasons = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, closeLostReasons = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -1803,7 +1803,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       {convertFor && !readOnly && (
         <NetworkConvertSheet
           person={{ id: convertFor.id, name: convertFor.name }}
-          specialties={specialties}
+          locationId={convertFor.locationId || null}
           onClose={() => setConvertFor(null)}
           setToast={setToast}
           onConverted={(res) => {

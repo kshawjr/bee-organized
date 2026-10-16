@@ -13,9 +13,11 @@
 // belongs next to its explanation, not in a menu label. It still reads
 // as a quick action — one screen, two taps, no wizard.
 //
-// The SPECIALTY question is here for a reason: nothing on a lead can
-// supply it, and a specialty-less partner falls into "Just met · no
-// intent yet". Optional, but the hint says what skipping costs.
+// The TAGS question is here for a reason: nothing on a lead can supply
+// what this person does, and an untagged person can't be found by the
+// Network tab's tag filter. Optional, but the hint says what skipping
+// costs. (Was the specialty question before the tag merge — specialties
+// ARE tags now, one list, lib/tags.ts.)
 //
 // DEDUP is server-side (GET on open → preview, POST re-checks before it
 // writes). The other Network create doors match against the loaded
@@ -34,6 +36,7 @@ import OverlayShell from './OverlayShell'
 import useIsMobile from './shared/useIsMobile'
 import { T } from './shared/tokens'
 import { lbl } from './shared/formKit'
+import TagPickField from './shared/TagPickField'
 
 const MODES = [
   {
@@ -64,17 +67,6 @@ const secondaryBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
-// Same pill vocabulary NetworkAddSheet uses for its specialty picker —
-// one look for one question, wherever it's asked.
-const pillBtn = (on) => ({
-  padding: '5px 12px', borderRadius: T.radius.pill,
-  border: `0.5px solid ${on ? T.hairline.strong : T.hairline.line}`,
-  background: on ? T.accent.soft : T.surface.raised,
-  fontSize: '12px', fontWeight: on ? 500 : 400,
-  color: on ? T.accent.deep : T.ink.muted,
-  cursor: 'pointer', fontFamily: 'inherit',
-})
-
 const modeCard = (on) => ({
   width: '100%', textAlign: 'left', display: 'block',
   padding: '11px 13px', borderRadius: T.radius.control,
@@ -85,7 +77,7 @@ const modeCard = (on) => ({
 
 export default function NetworkConvertSheet({
   person,                       // the lead/person row — id + name are all this needs
-  specialties = [],             // admin list [{ id, label }]
+  locationId = null,            // the lead's location uuid — scopes the tag list
   onClose = () => {},
   onConverted = () => {},       // ({ partner, mode, linked, lead_patch }) — CONFIRMED rows
   setToast = () => {},
@@ -118,7 +110,6 @@ export default function NetworkConvertSheet({
 
   const existing = preview?.existing || null
   const alreadyLinked = !!preview?.alreadyLinked
-  const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
 
   async function submit() {
     if (busy || alreadyLinked) return
@@ -129,7 +120,7 @@ export default function NetworkConvertSheet({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode,
-          specialties: picked,
+          tagIds: picked.map(t => t.id),
           // Confirmed link: the user saw "already in your Network" and
           // pressed anyway. Without it the server matches on its own —
           // this only pins WHICH row when the preview already found one.
@@ -152,6 +143,11 @@ export default function NetworkConvertSheet({
             ? `${json.partner?.name || person.name} moved to your Network — drips paused`
             : `${where} ${json.partner?.name || person.name}`,
         })
+      }
+      // The person landed; the tags didn't (all or some). Say so rather
+      // than let a success toast imply they're tagged.
+      if (json.tagError) {
+        setToast({ kind: 'error', msg: `${json.partner?.name || person.name} is in your Network, but their tags didn't save — add them from the record. (${json.tagError})` })
       }
       onConverted(json)
       onClose()
@@ -235,26 +231,20 @@ export default function NetworkConvertSheet({
           </div>
         )}
 
-        {/* ── specialty ──
-            Not required, because forcing a taxonomy choice would make a
-            two-tap action a decision. But an empty one has a cost and the
-            hint names it, so skipping is informed rather than accidental. */}
-        {!alreadyLinked && specialties.length > 0 && (
+        {/* ── tags ──
+            Not required, because forcing a choice would make a two-tap
+            action a decision. But an empty one has a cost and the hint
+            names it, so skipping is informed rather than accidental. A
+            matched person who already has tags keeps exactly those. */}
+        {!alreadyLinked && (
           <div>
             <span style={lbl}>What do they do? <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(optional)</span></span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {specialties.map(s => (
-                <button key={s.id} type="button" aria-pressed={picked.includes(s.id)}
-                  onClick={() => toggle(s.id)} style={pillBtn(picked.includes(s.id))}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            {picked.length === 0 && (
-              <p style={{ fontSize: '11px', color: T.ink.quiet, marginTop: '6px' }}>
-                Without one they'll sit under “Just met · no intent yet” until you pick.
-              </p>
-            )}
+            <TagPickField
+              locationId={locationId}
+              value={picked}
+              onChange={setPicked}
+              emptyHint="Without a tag they won't show up when you filter the Network by tag."
+            />
           </div>
         )}
 
