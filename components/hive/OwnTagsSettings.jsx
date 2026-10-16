@@ -90,10 +90,10 @@ export default function OwnTagsSettings({ locationId = null, locationName = '' }
           <p style={{ fontSize: '13px', fontWeight: 600, color: T.ink.primary, margin: 0 }}>{tagText(t)}</p>
         )}
         <p style={{ fontSize: '11px', color: T.ink.quiet, margin: '2px 0 0' }}>
-          {people(t.people)}{isRemoved ? ' · removed — hidden everywhere' : ''}
+          {people(t.people)}{t.promoted ? ' · made corporate — it’s in the shared list now' : isRemoved ? ' · removed — hidden everywhere' : ''}
         </p>
       </div>
-      {isRemoved ? (
+      {t.promoted ? null : isRemoved ? (
         <button style={btn()} disabled={busy === t.id} onClick={() => patch(t, { is_active: true })}>Restore</button>
       ) : renaming?.id === t.id ? (
         <>

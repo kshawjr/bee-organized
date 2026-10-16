@@ -287,6 +287,16 @@ describe('/api/lookups/[id] — an owner renames or switches off their own tag',
     expect(updateCall().payload.is_active).toBe(false)
   })
 
+  it("an owner can't switch back on a copy that was made corporate (only Undo can)", async () => {
+    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
+    const base = scenario(OWN)
+    h.state.respond = (ctx: any) => (ctx.table === 'tag_promotion_copies' ? { data: [{ tag_id: 'o-org' }], error: null } : base(ctx))
+    const res = await lookupPATCH(patchReq({ is_active: true }), { params: { id: 'o-org' } } as any)
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('promoted_to_corporate')
+    expect(updateCall()).toBeUndefined()
+  })
+
   it('an owner may change nothing but the name and on/off', async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
     h.state.respond = scenario(OWN)

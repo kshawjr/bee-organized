@@ -317,6 +317,14 @@ describe('E) Settings › Tags', () => {
     expect(host.querySelector('[role="alert"]')!.textContent).toContain('“Realtor” is already a tag')
   })
 
+  it('a copy made corporate says so and has no Restore', async () => {
+    installFetch({ '/api/tags/own': () => ({ body: { tags: [{ id: 'o-dnb', label: 'DO NOT BOOK', icon: null, is_active: false, people: 1, promoted: true }] } }) })
+    await mountSettings()
+    const row = host.querySelector('[data-own-tag="o-dnb"]')!
+    expect(row.textContent).toContain('made corporate — it’s in the shared list now')
+    expect([...row.querySelectorAll('button')].map(b => b.textContent)).toEqual([])
+  })
+
   it('Restore switches a removed tag back on', async () => {
     installFetch({
       '/api/tags/own': () => ({ body: { tags: OWN } }),
@@ -350,6 +358,19 @@ describe('F) /api/tags/own and /api/tags/locations', () => {
     const json = await (await ownGET(req(`/api/tags/own?location_id=${LOC}`))).json()
     expect(json.tags).toEqual([{ id: 'o-org', label: 'Organizer', is_active: true, people: 3 }])
     expect(h.state.calls.find((c: any) => c.table === 'lookups').filters).toContainEqual(['eq', 'location_id', LOC])
+  })
+
+  it('own: a copy collapsed into a corporate tag is marked promoted', async () => {
+    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC }
+    h.state.respond = (ctx: any) => {
+      if (ctx.table === 'lookups') return { data: [{ id: 'o-dnb', label: 'DO NOT BOOK', is_active: false }], error: null }
+      if (ctx.table === 'tag_promotion_copies') return { data: [{ tag_id: 'o-dnb' }], error: null }
+      return { data: [], error: null }
+    }
+    const json = await (await ownGET(req(`/api/tags/own?location_id=${LOC}`))).json()
+    expect(json.tags[0]).toMatchObject({ id: 'o-dnb', promoted: true })
+    const promoRead = h.state.calls.find((c: any) => c.table === 'tag_promotion_copies')
+    expect(promoRead.filters).toContainEqual(['is', 'tag_promotions.undone_at', null])
   })
 
   it("own: another location's, or read-only staff → 403", async () => {

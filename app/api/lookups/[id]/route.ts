@@ -58,6 +58,14 @@ export async function PATCH(
         if (k !== 'label' && k !== 'is_active') return NextResponse.json({ error: 'field_not_editable', field: k }, { status: 403 })
       }
     }
+    // A copy collapsed into a corporate tag stays off until the promotion is
+    // undone — switching it back on would duplicate the corporate tag.
+    if (locationTagEditor && body?.is_active === true) {
+      const { data: promo } = await supabaseService
+        .from('tag_promotion_copies').select('tag_id, tag_promotions!inner(undone_at)')
+        .eq('tag_id', id).is('tag_promotions.undone_at', null).limit(1)
+      if ((promo || []).length) return NextResponse.json({ error: 'promoted_to_corporate' }, { status: 409 })
+    }
     // Every tag rename passes the near-match guard (not against itself).
     if (update.label && isTagCategory((row as any).category) && update.label !== (row as any).label) {
       const v = await checkNearTag(update.label, (row as any).location_id || null, id)

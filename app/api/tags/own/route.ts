@@ -49,8 +49,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Copies collapsed into a corporate tag ("Make corporate", not undone)
+    // are switched off but are NOT the location's to restore — restoring one
+    // would put a duplicate next to the corporate tag. Best effort: before
+    // migrations/tag_make_corporate.sql runs the table doesn't exist.
+    const promoted = new Set<string>()
+    if (ids.length) {
+      const { data: copies } = await supabaseService
+        .from('tag_promotion_copies').select('tag_id, tag_promotions!inner(undone_at)')
+        .in('tag_id', ids).is('tag_promotions.undone_at', null)
+      for (const c of (copies || []) as any[]) promoted.add(c.tag_id)
+    }
+
     return NextResponse.json({
-      tags: (tags || []).map((t: any) => ({ ...t, people: count.get(t.id) || 0 })),
+      tags: (tags || []).map((t: any) => ({ ...t, people: count.get(t.id) || 0, ...(promoted.has(t.id) ? { promoted: true } : {}) })),
     })
   } catch (err: any) {
     console.error('[/api/tags/own GET] error:', err?.message || err)
