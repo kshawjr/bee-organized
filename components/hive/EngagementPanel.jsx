@@ -98,7 +98,7 @@ import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoi
 import { recordJobberUrl, jobberClientUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
 import BeeLoader from './shared/BeeLoader'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -863,8 +863,8 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 <span style={metaIconStyle}><IconPhone size={META_ICON} /></span>
                 {/* title on the anchor: the clipped value reveals in full on
                     hover while the row keeps its rhythm (issue 118). */}
-                <a className="bee-contact-link" href={telHref(client.phone) || undefined} title={client.phone}
-                  style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{client.phone}</a>
+                <a className="bee-contact-link" href={telHref(client.phone) || undefined} title={displayPhone(client.phone)}
+                  style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{displayPhone(client.phone)}</a>
               </p>
             )}
             {client.email && (

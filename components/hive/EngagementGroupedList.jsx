@@ -46,7 +46,7 @@ import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -119,11 +119,11 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
             anywhere else on the row still opens the panel; 14px + vertical
             padding for a real tap target. Null renders nothing — no shift. */}
         {e.client_phone && (
-          <a href={telHref(e.client_phone) || undefined} title={e.client_phone}
+          <a href={telHref(e.client_phone) || undefined} title={displayPhone(e.client_phone)}
             onClick={ev => ev.stopPropagation()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', padding: '3px 0', marginTop: '2px', fontSize: '14px', color: T.accent.fg, textDecoration: 'none' }}>
             <IconPhone size={13} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_phone}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayPhone(e.client_phone)}</span>
           </a>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', minWidth: 0 }}>

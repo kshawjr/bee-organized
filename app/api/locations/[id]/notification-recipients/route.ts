@@ -30,6 +30,7 @@ import {
   getNotificationConfig,
   DEFAULT_CATEGORY,
 } from '@/lib/notification-recipients'
+import { formatPhone } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -208,7 +209,7 @@ export async function POST(
     first_name: typeof body.first_name === 'string' ? body.first_name.trim() || null : null,
     last_name: typeof body.last_name === 'string' ? body.last_name.trim() || null : null,
     email,
-    phone: typeof body.phone === 'string' ? body.phone.trim() || null : null,
+    phone: typeof body.phone === 'string' ? formatPhone(body.phone) : null,
     category: body.category !== undefined ? body.category : DEFAULT_CATEGORY,
     // issue 246 step 2. This object is an explicit allowlist: a `subscribed`
     // in the body that is not named here is dropped with a 200 OK and no

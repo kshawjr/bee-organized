@@ -1976,7 +1976,7 @@ function CloseOutFlow({ person, onComplete, onClose, onAddFollowUp }) {
                     <span style={{ fontSize:'18px' }}>💬</span>
                     <div style={{ flex:1, textAlign:'left' }}>
                       <p style={{ fontSize:'13px', fontWeight:500, color:'#1a2e2b' }}>Send via SMS</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{person.phone||'—'}</p>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{phoneDisplay(person.phone)||'—'}</p>
                     </div>
                   </button>
                   <button onClick={()=>setStep(3)} style={{ fontSize:'12px', color:'#8a9e9a', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', textDecoration:'underline', textAlign:'center', padding:'4px' }}>Skip review for now</button>
@@ -4155,7 +4155,7 @@ function ContactsTab({ person, onUpdate, onError, allPeople = [] }) {
                   <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px' }}>{c.role}</span>
                 </div>
                 <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-                  {c.phone&&<a href={phoneTelHref(c.phone) || undefined} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>📞 {c.phone}</a>}
+                  {c.phone&&<a href={phoneTelHref(c.phone) || undefined} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>📞 {phoneDisplay(c.phone)}</a>}
                   {c.email&&<a href={`mailto:${c.email}`} style={{ fontSize:'11px', color:'#4a5e5a', textDecoration:'none' }}>✉️ {c.email}</a>}
                 </div>
               </div>
@@ -5993,7 +5993,7 @@ function PersonPanel({
                     React.createElement(
                       "div",
                       { className: "bee-tip" },
-                      person.phone || "No phone — click to add",
+                      phoneDisplay(person.phone) || "No phone — click to add",
                     ),
                   ),
                   React.createElement(
@@ -9227,7 +9227,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
     setEditingField(null)
   }
 
-  const EditableField = ({icon, label, fieldKey, val}) => (
+  const EditableField = ({icon, label, fieldKey, val, show}) => (
     <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
       <span style={{ fontSize:'16px', width:'20px', textAlign:'center', flexShrink:0 }}>{icon}</span>
       <div style={{ flex:1, minWidth:0 }}>
@@ -9239,7 +9239,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
               <button onClick={()=>saveField(fieldKey)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'12px', color:'white', cursor:'pointer', fontFamily:'inherit' }}>Save</button>
               <button onClick={()=>setEditingField(null)} style={{ padding:'5px 8px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>✕</button>
             </div>
-          : <p style={{ fontSize:'13px', color:val?'#1a2e2b':'#c8d8d4', fontStyle:val?'normal':'italic' }} onClick={()=>startEdit(fieldKey,val)}>{val||'Tap to add'}</p>
+          : <p style={{ fontSize:'13px', color:val?'#1a2e2b':'#c8d8d4', fontStyle:val?'normal':'italic' }} onClick={()=>startEdit(fieldKey,val)}>{(show ? show(val) : val)||'Tap to add'}</p>
         }
       </div>
       {editingField!==fieldKey&&<button onClick={()=>startEdit(fieldKey,val)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Edit</button>}
@@ -9453,7 +9453,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
             {/* Client Details - editable */}
             <Section title="Client Details">
               <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', padding:'0 14px' }}>
-                <EditableField icon="📞" label="Phone"   fieldKey="phone"   val={person.phone} />
+                <EditableField icon="📞" label="Phone"   fieldKey="phone"   val={person.phone} show={phoneDisplay} />
                 <EditableField icon="✉️" label="Email"   fieldKey="email"   val={person.email} />
                 {/* Project and Path live on the record overview, not here */}
                 {(person.addresses||[]).filter(a=>a.value).map((addr,i)=>(
@@ -9614,7 +9614,7 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
             {person.finalProcessed&&<span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.1)', padding:'2px 6px', borderRadius:'20px' }}>✅</span>}
           </div>
           <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center' }}>
-            <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{person.phone}</span>
+            <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{phoneDisplay(person.phone)}</span>
             <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{person.project}</span>
             {(person.stage==='Closed Lost'||person.isJunk)&&person.junkReason
               ? <span style={{ fontSize:'11px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px' }}>🔒 {person.junkReason}</span>
@@ -15390,7 +15390,7 @@ function EntityInfoCard({ phone, email, website, onEdit }) {
   return (
     <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px' }}>
       <div style={{ display:'grid', gap:'6px', flex:1 }}>
-        {phone&&<span style={{ fontSize:'11px', color:'#4a5e5a' }}>📞 {phone}</span>}
+        {phone&&<span style={{ fontSize:'11px', color:'#4a5e5a' }}>📞 {phoneDisplay(phone)}</span>}
         {email&&<span style={{ fontSize:'11px', color:'#4a5e5a' }}>✉️ {email}</span>}
         {website&&<span style={{ fontSize:'11px', color:'#a8c9c4' }}>🌐 {website}</span>}
         {!hasInfo&&<span style={{ fontSize:'11px', color:'#c8d8d4', fontStyle:'italic' }}>No contact info yet</span>}
@@ -18217,7 +18217,7 @@ const CLOSED_JOB_ROWS = [
 // (returning-a..d), exactly as the new-lead sequence does — one shared, pure
 // resolver so Settings shows the same emails the intake enrols.
 import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
-import { telHref as phoneTelHref } from '@/lib/phone'
+import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -20155,7 +20155,7 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
                   <div style={{ flex:1, minWidth:0, opacity: e.subscribed ? 1 : 0.55 }}>
                     {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
                     <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
-                    {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
+                    {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{phoneDisplay(e.phone)}</p>}
                   </div>
                   {readOnly ? (
                     <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{e.subscribed ? 'On' : 'Off'}</span>
@@ -24446,13 +24446,13 @@ function PhoneCallButton({ phone, displayPhone, name }) {
   return (
     <a href={phoneTelHref(displayPhone) || undefined} onClick={e=>e.stopPropagation()}
       onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
-      aria-label={`Call ${name}: ${displayPhone}`}
+      aria-label={`Call ${name}: ${phoneDisplay(displayPhone)}`}
       style={{ padding:'10px 14px 10px 0', display:'flex', alignItems:'center', gap:'6px', textDecoration:'none', flexShrink:0, position:'relative' }}>
       <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:hovered?'rgba(34,197,94,0.2)':'rgba(34,197,94,0.12)', display:'flex', alignItems:'center', justifyContent:'center', transition:'background 0.15s' }}>
         <span style={{ fontSize:'14px' }}>📞</span>
       </div>
       {hovered&&(
-        <span style={{ fontSize:'11px', fontWeight:600, color:'#22c55e', whiteSpace:'nowrap' }}>{displayPhone}</span>
+        <span style={{ fontSize:'11px', fontWeight:600, color:'#22c55e', whiteSpace:'nowrap' }}>{phoneDisplay(displayPhone)}</span>
       )}
     </a>
   )
@@ -28040,7 +28040,7 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
           {/* Quick info */}
           <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'10px 12px', display:'grid', gap:'5px' }}>
             {[
-              ['📞', currentLoc.phone||'—'],
+              ['📞', phoneDisplay(currentLoc.phone)||'—'],
               ['📍', currentLoc.address||'—'],
               ['⚡', currentLoc.jobberConnected ? `Jobber connected · ${currentLoc.jobberAccountId||''}` : 'Jobber not connected'],
               ['👥', `${currentLoc.leads||0} clients · ${realLocUserCount} user${realLocUserCount!==1?'s':''}`],
@@ -29988,7 +29988,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onOpe
                   // A hit found BY A TAG says so ("tagged 🏠 Realtor") — the name
                   // may not contain the search at all (/api/search matchedTag).
                   const tagWhy = p.matchedTag ? `tagged ${p.matchedTag.icon ? p.matchedTag.icon + ' ' : ''}${p.matchedTag.label}` : null
-                  const sub = [tagWhy, p.project, locName, p.phone || p.email].filter(Boolean).join(' · ')
+                  const sub = [tagWhy, p.project, locName, phoneDisplay(p.phone) || p.email].filter(Boolean).join(' · ')
                   return (
                     <button key={p.id} onClick={()=>{ onSelectPerson(p); onClose() }} style={{ width:'100%', padding:'14px 20px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                       <div style={{ width:'42px', height:'42px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:700, color:'white', flexShrink:0 }}>
@@ -31931,7 +31931,7 @@ export function LocationDrilldown({ loc, people, users, partners, onClose }) {
               {[
                 {l:'Location ID',    v:loc.id},
                 {l:'Address',        v:loc.address||'—'},
-                {l:'Phone',          v:loc.phone||'—'},
+                {l:'Phone',          v:phoneDisplay(loc.phone)||'—'},
                 {l:'Service Radius', v:loc.serviceRadius||'—'},
                 {l:'Jobber',         v:loc.jobberConnected?'⚡ Connected':'Not connected'},
               ].map(({l,v})=>(

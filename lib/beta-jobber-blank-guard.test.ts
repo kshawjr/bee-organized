@@ -138,8 +138,29 @@ describe('upsertLead on an EXISTING lead', () => {
     const [patch] = leadWrites('update')
     for (const col of ['address', 'city', 'state', 'zip']) expect(patch, col).not.toHaveProperty(col)
     // Real values still flow.
-    expect(patch).toMatchObject({ name: 'Kim Terry', first_name: 'Kim', last_name: 'Terry', email: 'kim@email.com', phone: '5125550100' })
+    expect(patch).toMatchObject({ name: 'Kim Terry', first_name: 'Kim', last_name: 'Terry', email: 'kim@email.com', phone: '(512) 555-0100' }) // universal shape, lib/phone.ts
     expect(patch.jobber_client_id).toBe('155042576')
+  })
+
+  // ── Phone: universal shape, and a two-number field noted ONCE ────────
+  const TWO_NUMBERS = { ...SENT_ZIP_ONLY, phones: [{ number: '407-393-5901 & 407-392-1931', primary: true }] }
+  const touchpointInserts = () =>
+    h.state.calls.filter(c => c.table === 'touchpoints').map(c => c.ops.find(([m]) => m === 'insert')?.[1][0]).filter(Boolean)
+
+  it('a two-number Jobber phone: the first is the phone, the original is noted on the lead', async () => {
+    h.enqueue('leads', { id: 'kim', stage: 'Request', phone: '5125550100' })
+    h.enqueue('touchpoints', { id: 'tp-1' })
+    await upsertLead(TWO_NUMBERS, 'loc_swaustin', 'sw-uuid')
+    expect(leadWrites('update')[0]).toMatchObject({ phone: '(407) 393-5901' })
+    const [note] = touchpointInserts()
+    expect(note).toMatchObject({ lead_id: 'kim', kind: 'note', location_uuid: 'sw-uuid' })
+    expect(note.notes).toContain('407-393-5901 & 407-392-1931')
+  })
+
+  it('the same two-number field on the next Jobber event is NOT noted again', async () => {
+    h.enqueue('leads', { id: 'kim', stage: 'Request', phone: '(407) 393-5901' })
+    await upsertLead(TWO_NUMBERS, 'loc_swaustin', 'sw-uuid')
+    expect(touchpointInserts()).toHaveLength(0)
   })
 
   it('a client Jobber holds with NO email, phone, name or company leaves ours standing', async () => {

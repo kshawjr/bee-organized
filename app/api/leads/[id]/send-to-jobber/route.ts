@@ -63,6 +63,7 @@ import {
   isFormerChoiceKey,
   type AddressChoice,
 } from '@/lib/address-choice'
+import { formatPhone } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -644,7 +645,8 @@ export async function POST(
   const firstName = (lead.first_name || lead.name?.split(' ')[0] || '').trim()
   const lastName  = (lead.last_name  || lead.name?.split(' ').slice(1).join(' ') || '').trim()
   const email     = (lead.email || '').trim()
-  const phone     = (lead.phone || '').trim()
+  // Jobber gets the universal shape, (123) 456-7890 (lib/phone.ts).
+  const phone     = formatPhone(lead.phone) || ''
 
   // ─────────────────────────────────────────────────────────────────
   // 1. FIND the Jobber client — the stored link first, email second

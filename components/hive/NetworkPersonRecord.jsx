@@ -54,7 +54,7 @@ import {
   InlineText, fmtLastTalk,
 } from './shared/networkKit'
 import { contactRecency } from './shared/networkGroups'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const money = (n) => `$${Math.round(n).toLocaleString()}`
 const REFERRED_SHOWN = 8
@@ -351,7 +351,7 @@ export default function NetworkPersonRecord({
         <div>
           <SectionLabel>Contact</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <InlineText label="Phone" value={partner.phone} href={telHref(partner.phone)} placeholder="add phone" readOnly={readOnly} onSave={v => patch({ phone: v })} />
+            <InlineText label="Phone" value={partner.phone} href={telHref(partner.phone)} display={displayPhone} placeholder="add phone" readOnly={readOnly} onSave={v => patch({ phone: v })} />
             <InlineText label="Email" value={partner.email} href={partner.email ? `mailto:${partner.email}` : null} placeholder="add email" readOnly={readOnly} onSave={v => patch({ email: v })} />
             <InlineText label="Website" value={partner.website} placeholder="add website" readOnly={readOnly} onSave={v => patch({ website: v })} />
             <InlineText label="Address" value={firstAddress} placeholder="add address" readOnly={readOnly}

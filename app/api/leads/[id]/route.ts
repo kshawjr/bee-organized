@@ -35,6 +35,8 @@ import { diffNamePatch, normalizeNamePatch, touchesName, composeLeadName, nameVa
 import { syncLeadNameToJobber } from '@/lib/jobber-name-sync'
 import type { AddressWriteback } from '@/lib/jobber-address-writeback'
 import { normalizeLeadSource } from '@/lib/lead-source'
+import { phoneForWrite } from '@/lib/phone'
+import { recordPhoneNote } from '@/lib/phone-note'
 
 const VALID_STAGES = [
   'New',
@@ -262,6 +264,17 @@ export async function PATCH(
   // the owner typed it, and clearing it stays cleared.
   if ('source' in patch) patch.source = normalizeLeadSource(patch.source)
 
+  // Phone in the universal shape (lib/phone.ts). A second number or words
+  // in the field are kept as a note on the lead once the write lands.
+  let phoneNote: { original: string; kept: string } | null = null
+  if ('phone' in patch) {
+    const w = phoneForWrite(patch.phone)
+    // A cleared field stays the empty string it always was: the contact
+    // audit below reads a string patch as "the owner touched the phone".
+    patch.phone = typeof patch.phone === 'string' ? (w.value ?? '') : w.value
+    if (w.note && w.value) phoneNote = { original: w.note, kept: w.value }
+  }
+
   // Stage validation
   if ('stage' in patch) {
     if (typeof patch.stage !== 'string' || !VALID_STAGES.includes(patch.stage as typeof VALID_STAGES[number])) {
@@ -414,6 +427,10 @@ export async function PATCH(
     console.error('PATCH /api/leads/[id] failed:', e)
     const message = e instanceof Error ? e.message : 'update_failed'
     return NextResponse.json({ error: message }, { status: 500 })
+  }
+
+  if (phoneNote) {
+    await recordPhoneNote({ leadId: id, locationUuid: existing.location_uuid, original: phoneNote.original, kept: phoneNote.kept })
   }
 
   // ─── Touchpoint on stage change ───────────────────────────────

@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
+import { formatPhone } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest) {
     insertRow.state = state.trim().toUpperCase()
   const zipVal = optionalText(zip)
   if (zipVal) insertRow.zip = zipVal
-  const phoneVal = optionalText(phone)
+  const phoneVal = formatPhone(optionalText(phone))
   if (phoneVal) insertRow.phone = phoneVal
   const emailVal = optionalText(email)
   if (emailVal) insertRow.email = emailVal.toLowerCase()

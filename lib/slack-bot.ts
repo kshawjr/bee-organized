@@ -26,7 +26,7 @@ import { supabaseService } from './supabase-service'
 import { resolveNotificationsLive } from './notifications-live'
 import { disconnectSlackFromLocation } from './slack-disconnect'
 import { formatLeadAddressLabeled } from './lead-address'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const supabase = supabaseService
 
@@ -136,13 +136,14 @@ function escapeMrkdwn(s: string): string {
 const dash = (v: string | null | undefined): string =>
   v && v.trim() ? escapeMrkdwn(v.trim()) : '—'
 
-// Phone → tappable tel: mrkdwn link `<tel:+1XXXXXXXXXX|as stored>`. The
-// target is lib/phone.ts telHref — the one tel: shape. No dialable target →
-// the label alone. Blank → em-dash, matching dash().
+// Phone → tappable tel: mrkdwn link `<tel:+1XXXXXXXXXX|(123) 456-7890>`.
+// Target and label both come from lib/phone.ts — the one tel: shape and the
+// one display shape. No dialable target → the label alone. Blank → em-dash,
+// matching dash().
 const telLink = (phone: string | null | undefined): string => {
   if (!phone || !phone.trim()) return '—'
   const href = telHref(phone)
-  const label = escapeMrkdwn(phone.trim())
+  const label = escapeMrkdwn(displayPhone(phone))
   return href ? `<${href}|${label}>` : label
 }
 

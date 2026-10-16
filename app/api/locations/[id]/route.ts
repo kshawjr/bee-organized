@@ -5,6 +5,7 @@ import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones
 import { safeHttpUrl } from '@/lib/email-signature'
 import { senderAddressProblem, replyToSaveProblem } from '@/lib/sender-domain'
 import { getSendableDomains } from '@/lib/sendable-domains'
+import { formatPhone } from '@/lib/phone'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
@@ -93,6 +94,8 @@ export async function PATCH(
         patch[field] = v.trim() || null
       }
     }
+    // Universal phone shape (lib/phone.ts).
+    if ('phone' in patch) patch.phone = formatPhone(patch.phone)
 
     for (const field of SIGNATURE_LINK_FIELDS) {
       const v = body?.[field]

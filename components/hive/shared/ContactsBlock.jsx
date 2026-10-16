@@ -25,7 +25,7 @@ import { IconPhone, IconMail } from '@/components/ui/icons'
 import { T } from './tokens'
 import { MicroLabel, pillStyle } from './cardKit'
 import { EditPencil, InlineEditControls } from './inlineEdit'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const ROLE_PRESETS = ['Spouse', 'Partner', 'Family member', 'Assistant', 'Property manager', 'Tenant', 'Other']
 
@@ -129,7 +129,7 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
               {ct.phone && (
                 <a className="bee-contact-link" href={telHref(ct.phone) || undefined} onClick={e => e.stopPropagation()}
                   style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                  <IconPhone size={11} /> {ct.phone}
+                  <IconPhone size={11} /> {displayPhone(ct.phone)}
                 </a>
               )}
               {ct.email && (

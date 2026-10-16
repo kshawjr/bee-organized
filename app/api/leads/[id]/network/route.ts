@@ -51,6 +51,7 @@ import {
 } from '@/lib/lead-to-network'
 import { cleanTagIds } from '@/lib/tags'
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
+import { formatPhone } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -129,7 +130,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     match = await findPartnerForLead(supabaseService, {
       locationId: lead.location_uuid,
       email: lead.email,
-      phone: lead.phone,
+      phone: formatPhone(lead.phone),
     })
   } catch (e: any) {
     // A failed preview must not block the door — POST runs the authoritative
@@ -206,7 +207,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const match = await findPartnerForLead(supabaseService, {
         locationId: lead.location_uuid,
         email: lead.email,
-        phone: lead.phone,
+        phone: formatPhone(lead.phone),
       })
       if (match) {
         target = match.partner

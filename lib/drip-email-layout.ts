@@ -33,6 +33,7 @@
 // escHtml / escAttr moved to lib/email-escape.ts (so lib/email-signature.ts
 // can share them without a circular import) and are re-exported here.
 import { escHtml, escAttr } from './email-escape'
+import { displayPhone } from './phone'
 import { htmlWithSignature, textWithSignature, type EmailSignature } from './email-signature'
 export { escHtml, escAttr }
 
@@ -159,7 +160,7 @@ function footerSegments(ctx: BrandedEmailContext): {
   const name = ctx.location_name?.trim()
   return {
     brand: name ? `Bee Organized ${name}` : 'Bee Organized',
-    phone: ctx.location_phone?.trim() || null,
+    phone: displayPhone(ctx.location_phone) || null,
   }
 }
 

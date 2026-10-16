@@ -192,7 +192,7 @@ describe('PATCH /api/leads/[id] — contact write-back trigger', () => {
     expect(jobberMutation).toHaveBeenCalledTimes(1)
     const [, mutation, mvars] = (jobberMutation as any).mock.calls[0]
     expect(mutation).toContain('clientEdit')
-    expect(mvars.input.phonesToEdit).toEqual([{ id: 'ph-1', number: '4132978444' }])
+    expect(mvars.input.phonesToEdit).toEqual([{ id: 'ph-1', number: '(413) 297-8444' }])
     expect(mvars.input.emailsToEdit).toBeUndefined()
     expect(mvars.input.emailsToAdd).toBeUndefined()
     expect(Object.keys(mvars.input)).not.toContain('phonesToDelete')

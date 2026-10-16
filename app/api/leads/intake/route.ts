@@ -49,6 +49,8 @@ import {
 import { findOpenEngagementForClient, foundManualEngagement } from '@/lib/engagements'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
 import { routeByZip, zipDecides, routeLogToken, type ZipRouteDecision } from '@/lib/zip-routing'
+import { phoneForWrite } from '@/lib/phone'
+import { recordPhoneNote } from '@/lib/phone-note'
 
 export const runtime = 'nodejs'
 
@@ -124,7 +126,7 @@ export async function POST(req: NextRequest) {
     location_slug,
     full_name,
     email,
-    phone,
+    phone: rawPhone,
     address,
     city,
     state,
@@ -135,6 +137,12 @@ export async function POST(req: NextRequest) {
     source,
     metadata,
   } = body || {}
+
+  // Phone in the universal shape, (123) 456-7890 (lib/phone.ts). A field that
+  // also held a second number or words keeps the first number here and the
+  // whole original as a note on the lead (recordPhoneNote, below).
+  const phoneW = phoneForWrite(rawPhone)
+  const phone = phoneW.value
 
   // `message` is the project-details free-text the form collects ("I have a
   // medically complex condition…"). It is the CLIENT-level request record →
@@ -352,6 +360,7 @@ export async function POST(req: NextRequest) {
         // Zip routing — how this location was decided, when the form sent none.
         zipRouteLogToken,
         zipRoute,
+        phoneNote: phoneW.note,
       })
     }
 
@@ -453,6 +462,13 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('[intake] touchpoint insert failed', err)
     warnings.push(`touchpoint_insert_failed: ${err?.message || String(err)}`)
+  }
+
+  // The phone field held more than one number (or words): the first number
+  // is the phone; the whole original is kept as a note on the lead.
+  if (phoneW.note && phone) {
+    const noted = await recordPhoneNote({ leadId: lead.id, locationUuid: location.id, original: phoneW.note, kept: phone })
+    if (!noted.ok) warnings.push(`phone_note_failed: ${noted.error}`)
   }
 
   // IN QUESTION tier: the lead row is flagged via possible_duplicate_of;
@@ -790,6 +806,9 @@ async function mergeResubmission(args: {
   unknownKeysToken: string
   zipRouteLogToken: string
   zipRoute: ZipRouteDecision | null
+  // The original phone field when phoneForWrite kept only its first number
+  // (see POST). Noted on the lead only if this merge fills its phone.
+  phoneNote: string | null
 }): Promise<NextResponse> {
   const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin, unknownKeysToken, zipRouteLogToken, zipRoute } = args
   const warnings: string[] = [...args.baseWarnings]
@@ -825,6 +844,9 @@ async function mergeResubmission(args: {
       console.error('[intake] merge fill update failed', updErr)
       warnings.push(`merge_update_failed: ${updErr.message}`)
       fillUpdateFailed = true
+    } else if (fills.phone && args.phoneNote) {
+      const noted = await recordPhoneNote({ leadId: matched.id, locationUuid: location.id, original: args.phoneNote, kept: String(fills.phone) })
+      if (!noted.ok) warnings.push(`phone_note_failed: ${noted.error}`)
     }
   }
 

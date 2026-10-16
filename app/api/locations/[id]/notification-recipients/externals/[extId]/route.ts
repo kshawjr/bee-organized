@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
+import { formatPhone } from '@/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -109,7 +110,7 @@ export async function PATCH(
     patch.last_name = typeof body.last_name === 'string' ? body.last_name.trim() || null : null
   }
   if (body.phone !== undefined) {
-    patch.phone = typeof body.phone === 'string' ? body.phone.trim() || null : null
+    patch.phone = typeof body.phone === 'string' ? formatPhone(body.phone) : null
   }
   // issue 246 step 2 — THE MUTE. This route is the ONLY way an outside address
   // can be turned off; before the column existed the UI's only option was

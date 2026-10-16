@@ -16,6 +16,7 @@ import { supabaseService } from './supabase-service'
 import { logNotificationFanout, type NotificationContext } from './notification-log'
 import { resolveHandlerForRawType } from './project-type-handlers'
 import { SIGNATURE_MARKER, SIGNATURE_TAG_RE } from './email-signature'
+import { displayPhone } from './phone'
 import {
   SENDER_DOMAIN_UNVERIFIED,
   isSenderDomainRejection,
@@ -137,6 +138,9 @@ function applyVars(input: string | null | undefined, ctx: RenderContext): string
   return input.replace(VAR_RE, (_match, key: string) => {
     const v = (ctx as Record<string, unknown>)[key]
     if (v === null || v === undefined) return ''
+    // {{phone}} / {{location_phone}} read in the universal shape,
+    // (123) 456-7890 (lib/phone.ts), whatever is stored.
+    if (key === 'phone' || key === 'location_phone') return displayPhone(v)
     return String(v)
   })
 }

@@ -56,7 +56,7 @@ describe('buildContactEditFields — phone', () => {
       { phone: '4132978444', email: '' },
       clientWith(),
     )
-    expect(fields.phonesToEdit).toEqual([{ id: 'ph-primary', number: '4132978444' }])
+    expect(fields.phonesToEdit).toEqual([{ id: 'ph-primary', number: '(413) 297-8444' }])
     expect(fields.phonesToAdd).toBeUndefined()
     expect(plan.phone).toBe('edit')
   })
@@ -71,7 +71,7 @@ describe('buildContactEditFields — phone', () => {
         ],
       }),
     )
-    expect(fields.phonesToEdit).toEqual([{ id: 'ph-primary', number: '4132978444' }])
+    expect(fields.phonesToEdit).toEqual([{ id: 'ph-primary', number: '(413) 297-8444' }])
   })
 
   it('no primary flagged → falls back to the first entry', () => {
@@ -79,7 +79,7 @@ describe('buildContactEditFields — phone', () => {
       { phone: '4132978444', email: '' },
       clientWith({ phones: [{ id: 'ph-first', number: '555-000-0000', primary: false }] }),
     )
-    expect(fields.phonesToEdit).toEqual([{ id: 'ph-first', number: '4132978444' }])
+    expect(fields.phonesToEdit).toEqual([{ id: 'ph-first', number: '(413) 297-8444' }])
   })
 
   it('client has no phones → phonesToAdd as primary', () => {
@@ -87,7 +87,7 @@ describe('buildContactEditFields — phone', () => {
       { phone: '4132978444', email: '' },
       clientWith({ phones: [] }),
     )
-    expect(fields.phonesToAdd).toEqual([{ number: '4132978444', primary: true }])
+    expect(fields.phonesToAdd).toEqual([{ number: '(413) 297-8444', primary: true }])
     expect(fields.phonesToEdit).toBeUndefined()
     expect(plan.phone).toBe('add')
   })
@@ -325,7 +325,7 @@ describe('send-to-jobber route — contact write-back wiring', () => {
       (c: any[]) => c[1].includes('clientEdit'),
     )
     expect(editCall).toBeDefined()
-    expect(editCall[2].input.phonesToEdit).toEqual([{ id: 'ph-1', number: '4132978444' }])
+    expect(editCall[2].input.phonesToEdit).toEqual([{ id: 'ph-1', number: '(413) 297-8444' }])
     // matched by this exact email → no email churn
     expect(editCall[2].input.emailsToEdit).toBeUndefined()
     expect(editCall[2].input.emailsToAdd).toBeUndefined()

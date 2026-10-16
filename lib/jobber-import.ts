@@ -24,6 +24,8 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { getLeadAssigneeIds } from './lead-assignment'
 import { writeSyncLog } from './sync-log'
 import { leadSourceFromJobber } from './lead-source'
+import { phoneForWrite } from './phone'
+import { recordPhoneNote } from './phone-note'
 import { mapQuoteStatus, quoteStatusStampsApproval } from './quote-status-map'
 import {
   queryLeadMatches,
@@ -932,7 +934,22 @@ export async function upsertLead(
 ) {
   const importSource = opts.importSource || 'jobber_webhook'
   const email = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
-  const phone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
+  const jobberPhone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
+  // Universal shape, (123) 456-7890 (lib/phone.ts) — Jobber hands back
+  // exactly what was typed into it. A field with a second number or words
+  // keeps the first number; the original is noted on the lead, but ONLY
+  // when this write changes the stored phone — Jobber re-sends the client on
+  // every event, and the same field must not note itself twice.
+  const phoneW = phoneForWrite(jobberPhone)
+  const phone = phoneW.value
+  const notePhoneIfChanged = async (leadId: string, storedPhone: string | null | undefined) => {
+    if (!phoneW.note || !phone || storedPhone === phone) return
+    try {
+      await recordPhoneNote({ leadId, locationUuid: location_uuid, original: phoneW.note, kept: phone })
+    } catch (err) {
+      console.error('[jobber-import] phone note failed (non-fatal)', err)
+    }
+  }
   const addr  = client.billingAddress
     ? [
         client.billingAddress.street,
@@ -962,7 +979,7 @@ export async function upsertLead(
 
   const { data: existing } = await supabaseService
     .from('leads')
-    .select('id, stage')
+    .select('id, stage, phone')
     .eq('jobber_client_id', jobberClientId)
     .eq('location_id', location_id)
     .maybeSingle()
@@ -970,6 +987,7 @@ export async function upsertLead(
   if (existing) {
     // Jobber may CHANGE the person's details here, never BLANK them.
     await supabaseService.from('leads').update(withoutBlankPersonFields(payload)).eq('id', existing.id)
+    await notePhoneIfChanged(existing.id, existing.phone)
     return { id: existing.id, created: false, stage: existing.stage as string | null }
   }
 
@@ -1060,6 +1078,7 @@ export async function upsertLead(
   // reached on a genuine insert (created===true); the dup-recovery branch above
   // returns the winner as created:false and never lands here.
   await stampOwnerToLeadJunctionIfEmpty(data.id, primaryOwner?.id)
+  await notePhoneIfChanged(data.id, null)
   return { id: data.id, created: true, stage: data.stage as string | null }
 }
 

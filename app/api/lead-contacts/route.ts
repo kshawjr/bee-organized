@@ -12,6 +12,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { formatPhone } from '@/lib/phone'
 
 export async function POST(req: Request) {
   // Auth
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
       location_uuid: lead.location_uuid,
       name: name.trim(),
       role: role?.trim() || null,
-      phone: phone?.trim() || null,
+      phone: formatPhone(phone),
       email: email?.trim() || null,
     })
     .select('*')

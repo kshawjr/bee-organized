@@ -31,6 +31,8 @@ import { logSlackNotification } from '@/lib/notification-log'
 import { writeLeadAssignment } from '@/lib/lead-assignment'
 import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
 import { normalizeLeadSource } from '@/lib/lead-source'
+import { phoneForWrite } from '@/lib/phone'
+import { recordPhoneNote } from '@/lib/phone-note'
 
 export const runtime = 'nodejs'
 
@@ -185,6 +187,9 @@ export async function POST(req: NextRequest) {
 
   // ─── Insert ──────────────────────────────────────────────────
   const now = new Date().toISOString()
+  // Universal phone shape (lib/phone.ts); a second number or words go to a
+  // note on the lead, written after the insert.
+  const phoneW = phoneForWrite(body.phone)
   const insertPayload: Record<string, any> = {
     location_id:   location.location_id,
     location_uuid: location.id,
@@ -193,7 +198,7 @@ export async function POST(req: NextRequest) {
     first_name:    firstName || null,
     last_name:     lastName  || null,
     email:         (body.email || '').trim() || null,
-    phone:         (body.phone || '').trim() || null,
+    phone:         phoneW.value,
     // Same tidy-up as the website door: google → Google, ig → Instagram;
     // anything else stays as typed.
     source:        normalizeLeadSource(body.source),
@@ -273,6 +278,10 @@ export async function POST(req: NextRequest) {
     occurred_at:   now,
     user_id:       null,
   })
+
+  if (phoneW.note && phoneW.value) {
+    await recordPhoneNote({ leadId: lead.id, locationUuid: location.id, original: phoneW.note, kept: phoneW.value })
+  }
 
   // ─── Opt-in notifications (manual create only) ────────────────
   // The create form offers three INDEPENDENT, default-OFF actions. Each

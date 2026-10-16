@@ -50,7 +50,7 @@ import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const BOARD_SORTS = [
   { key: 'newest', label: 'Newest activity' },
@@ -103,11 +103,11 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
             14px + vertical padding gives a real tap target (audience is 45-65
             on phones). Null renders nothing — no layout shift. */}
         {e.client_phone && (
-          <a href={telHref(e.client_phone) || undefined} title={e.client_phone}
+          <a href={telHref(e.client_phone) || undefined} title={displayPhone(e.client_phone)}
             onClick={ev => ev.stopPropagation()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', padding: '3px 0', marginBottom: '3px', fontSize: '14px', color: T.accent.fg, textDecoration: 'none' }}>
             <IconPhone size={13} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_phone}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayPhone(e.client_phone)}</span>
           </a>
         )}
         <p title={displayTitle(e)} style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>

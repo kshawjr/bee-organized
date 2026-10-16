@@ -19,7 +19,7 @@
 //   - NEVER *ToDelete. Never touch non-primary entries.
 //   - lead value empty → field omitted (we never erase Jobber-side data).
 
-import { phoneKey } from '@/lib/phone'
+import { phoneKey, formatPhone } from '@/lib/phone'
 
 export type ContactFieldOutcome = 'updated' | 'added' | 'unchanged' | 'failed'
 
@@ -94,7 +94,8 @@ export function buildContactEditFields(
   const fields: Record<string, any> = {}
   const plan: ContactEditPlan = { phone: 'none', email: 'none' }
 
-  const leadPhone = String(lead.phone ?? '').trim()
+  // Pushed in the universal shape, (123) 456-7890 (lib/phone.ts).
+  const leadPhone = formatPhone(lead.phone) || ''
   const leadPhoneKey = normalizePhoneDigits(leadPhone)
   const phones = (client.phones ?? []).filter(p => p && String(p.number ?? '').trim())
   if (leadPhone && leadPhoneKey) {

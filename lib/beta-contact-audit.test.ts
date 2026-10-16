@@ -150,7 +150,7 @@ describe('contact-change audit touchpoint', () => {
   it('both fields in one PATCH → two entries', async () => {
     await patchLead({ phone: '7045550142', email: 'new@example.com' })
     expect(touchpointInserts.map(t => t.label)).toEqual([
-      'Phone updated → 7045550142',
+      'Phone updated → (704) 555-0142',
       'Email updated → new@example.com',
     ])
   })

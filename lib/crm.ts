@@ -22,6 +22,7 @@
 // service-role only (RLS, no policies): a read through the USER client
 // gets an empty embed, so `tagIds` is only trustworthy on service reads —
 // which is every read that feeds the Network screen.
+import { formatPhone } from '@/lib/phone'
 export const PARTNER_COLS =
   'id, location_id, type, name, title, company, company_id, phone, email, website, ' +
   'stage, tier, how_we_met, met_date, last_contact, is_customer, ' +
@@ -130,6 +131,10 @@ function mapPatch(patch: Record<string, any>, fieldMap: Record<string, string>) 
   for (const [clientKey, dbKey] of Object.entries(fieldMap)) {
     if (clientKey in patch) row[dbKey] = patch[clientKey]
   }
+  // Universal phone shape (lib/phone.ts). formatPhone never reduces a field
+  // holding a second number or words — Network writes have nowhere to keep
+  // the rest, so such a field is saved whole.
+  if ('phone' in row) row.phone = formatPhone(row.phone)
   return row
 }
 

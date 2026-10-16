@@ -130,7 +130,10 @@ export function StageRail({ stage, stages = null, onChange = () => {}, readOnly 
 
 // ── inline-editable text row (the shared inline-edit standard:
 // always-visible ✎, green-✓/✗ pair, Esc cancels) ─────────────
-export function InlineText({ label, value, onSave, href = null, placeholder = 'add', readOnly = false, multiline = false }) {
+export function InlineText({ label, value, onSave, href = null, placeholder = 'add', readOnly = false, multiline = false, display = null }) {
+  // display: how the saved value READS (e.g. displayPhone); editing always
+  // starts from the stored value.
+  const shown = value && display ? display(value) : value
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -160,8 +163,8 @@ export function InlineText({ label, value, onSave, href = null, placeholder = 'a
       <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>{label}</span>
       {value
         ? (href
-          ? <a href={href} onClick={e => e.stopPropagation()} title={value} style={{ fontSize: '12px', color: T.ink.primary, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
-          : <span title={value} style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>)
+          ? <a href={href} onClick={e => e.stopPropagation()} title={shown} style={{ fontSize: '12px', color: T.ink.primary, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shown}</a>
+          : <span title={shown} style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shown}</span>)
         : <span style={{ fontSize: '12px', color: T.ink.faint }}>{placeholder}</span>}
       {!readOnly && <EditPencil />}
     </div>

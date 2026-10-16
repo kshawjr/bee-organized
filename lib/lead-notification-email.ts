@@ -58,6 +58,7 @@ import {
   type EffectiveRecipient,
 } from './notification-recipients'
 import { logNotification } from './notification-log'
+import { displayPhone } from './phone'
 import { resolveNotificationsLive } from './notifications-live'
 import { formatLeadAddressLabeled } from './lead-address'
 import { buildBrandedShellHtml } from './drip-email-layout'
@@ -222,7 +223,7 @@ function buildLeadNotificationEmail(args: {
   const rows: [string, string][] = [
     ['Name', dash(lead.name)],
     ['Email', dash(lead.email)],
-    ['Phone', dash(lead.phone)],
+    ['Phone', dash(displayPhone(lead.phone))],
     ...(addr ? [[addr.label, addr.value] as [string, string]] : []),
     ['Project type', dash(lead.project_type)],
     ['Preferred contact', dash(lead.preferred_contact)],

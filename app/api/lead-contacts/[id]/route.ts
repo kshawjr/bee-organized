@@ -8,6 +8,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { formatPhone } from '@/lib/phone'
 
 const PATCHABLE_FIELDS = new Set(['name', 'role', 'phone', 'email'])
 
@@ -89,6 +90,8 @@ export async function PATCH(
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'no_valid_fields_in_body' }, { status: 400 })
   }
+  // Universal phone shape (lib/phone.ts).
+  if ('phone' in patch) patch.phone = formatPhone(patch.phone)
 
   // Block setting name to empty
   if ('name' in patch && (patch.name === null || patch.name === '')) {

@@ -78,7 +78,7 @@ import TagFilterSection from './shared/TagFilterSection'
 import TagFilterChips from './shared/TagFilterChips'
 import { matchesTags, matchesTagSearch } from './shared/tagFilter'
 import useIsMobile from './shared/useIsMobile'
-import { telHref } from '@/lib/phone'
+import { telHref, displayPhone } from '@/lib/phone'
 
 const INBOX_SORTS = [
   { key: 'newest', label: 'Newest first' },
@@ -1155,8 +1155,8 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     const linked = !!p.jobberRef
     const checked = !linked && selectedIds.has(p.id)
     // tel: is the ONE shape from lib/phone.ts telHref (+1 and ten digits
-    // for a US number); the stored phone stays the visible label.
-    const phoneLabel = (p.phone || '').trim()
+    // for a US number); the visible label is displayPhone, (123) 456-7890.
+    const phoneLabel = displayPhone(p.phone)
     const phoneTel = telHref(p.phone)
     // What they want — the webform request snippet (restored 7/24, Kevin). The
     // mapper carries leads.request_details as jobDetail; one muted line under

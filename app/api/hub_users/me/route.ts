@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
+import { formatPhone } from '@/lib/phone'
 
 // PATCH /api/hub_users/me
 // Body: { first_name?, last_name?, phone?, booking_link? }
@@ -47,7 +48,7 @@ export async function PATCH(req: NextRequest) {
     const patch: Record<string, any> = { updated_at: new Date().toISOString() }
     if (typeof first_name === 'string') patch.first_name = first_name.trim() || null
     if (typeof last_name  === 'string') patch.last_name  = last_name.trim()  || null
-    if (typeof phone      === 'string') patch.phone      = phone.trim()      || null
+    if (typeof phone      === 'string') patch.phone      = formatPhone(phone)
     // Blank clears it to null, which means "fall back to the location owner's
     // link, then locations.calendar_link" — never "no link".
     if (typeof booking_link === 'string') patch.booking_link = booking_link.trim() || null
