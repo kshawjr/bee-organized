@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
-import { TAG_CATEGORIES } from '@/lib/tags'
+import { TAG_CATEGORIES, describeTagBlockers } from '@/lib/tags'
 import { LOCATION_TAG_ROLES } from '@/lib/tag-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -61,8 +61,19 @@ export async function GET(req: NextRequest) {
       for (const c of (copies || []) as any[]) promoted.add(c.tag_id)
     }
 
+    // Why each can't be deleted (none = it can) — the same check the delete
+    // itself runs (tag_delete_blockers, migrations/tag_delete.sql).
+    const blockersOf = new Map<string, string[]>()
+    await Promise.all(ids.map(async (id: string) => {
+      const { data: b } = await supabaseService.rpc('tag_delete_blockers', { p_id: id })
+      blockersOf.set(id, Array.isArray(b) ? b : ['unknown'])
+    }))
+
     return NextResponse.json({
-      tags: (tags || []).map((t: any) => ({ ...t, people: count.get(t.id) || 0, ...(promoted.has(t.id) ? { promoted: true } : {}) })),
+      tags: (tags || []).map((t: any) => {
+        const blockers = blockersOf.get(t.id) || ['unknown']
+        return { ...t, people: count.get(t.id) || 0, ...(promoted.has(t.id) ? { promoted: true } : {}), deleteBlockers: blockers, deleteReason: describeTagBlockers(blockers) }
+      }),
     })
   } catch (err: any) {
     console.error('[/api/tags/own GET] error:', err?.message || err)

@@ -64,6 +64,7 @@ import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
 import OwnTagsSettings from "@/components/hive/OwnTagsSettings"
 import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
+import RetiredTagsPanel from "@/components/hive/RetiredTagsPanel"
 // Reminders (2026-09-30) — the page and the Home block. Props-only leaves
 // like NetworkScreen, imported statically for the same reason.
 import RemindersScreen, { HomeReminders } from "@/components/hive/RemindersScreen"
@@ -31096,6 +31097,8 @@ function ConfigureTab() {
       ))}
       {/* Corporate's view of every location's own tags (2026-10-16). */}
       <LocationTagsPanel />
+      {/* Switched-off corporate tags: Restore, or Delete when nothing needs it. */}
+      <RetiredTagsPanel onChanged={refresh} />
     </div>
   )
 }

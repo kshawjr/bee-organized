@@ -297,12 +297,24 @@ describe('/api/lookups/[id] — an owner renames or switches off their own tag',
     expect(updateCall()).toBeUndefined()
   })
 
-  it('an owner may change nothing but the name and on/off', async () => {
+  it('an owner may change nothing but the name, on/off and the icon', async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
     h.state.respond = scenario(OWN)
-    const res = await lookupPATCH(patchReq({ icon: '🌟' }), { params: { id: 'o-org' } } as any)
+    const res = await lookupPATCH(patchReq({ color: '#ff0000' }), { params: { id: 'o-org' } } as any)
     expect(res.status).toBe(403)
     expect(updateCall()).toBeUndefined()
+  })
+
+  it("an owner's icon must come from the curated grid (or none)", async () => {
+    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
+    h.state.respond = scenario(OWN)
+    const bad = await lookupPATCH(patchReq({ icon: '🍆' }), { params: { id: 'o-org' } } as any)
+    expect(bad.status).toBe(400)
+    expect((await bad.json()).error).toBe('icon_not_allowed')
+    expect(updateCall()).toBeUndefined()
+    expect((await lookupPATCH(patchReq({ icon: '🐾' }), { params: { id: 'o-org' } } as any)).status).toBe(200)
+    h.state.calls = []
+    expect((await lookupPATCH(patchReq({ icon: '' }), { params: { id: 'o-org' } } as any)).status).toBe(200)
   })
 
   it("an owner can't touch a corporate tag or another location's", async () => {

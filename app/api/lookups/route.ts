@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS } from '@/lib/tags'
+import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, isAllowedTagIcon } from '@/lib/tags'
 import { checkNearTag, nearMatchBody, fileRetiredTagRequest, LOCATION_TAG_ROLES } from '@/lib/tag-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -170,6 +170,11 @@ export async function POST(req: NextRequest) {
       // Read-only staff apply nothing and create nothing.
       if (!isAdmin(hubUser.role) && !LOCATION_TAG_ROLES.has(String(hubUser.role))) {
         return NextResponse.json({ error: 'forbidden_role' }, { status: 403 })
+      }
+      // A location's own tag takes its icon from the curated grid only
+      // (lib/tags.ts TAG_ICON_CHOICES), or none.
+      if (!isAllowedTagIcon(icon)) {
+        return NextResponse.json({ error: 'icon_not_allowed' }, { status: 400 })
       }
       const roBlock = await readOnlyWriteBlock(hubUser, location_id)
       if (roBlock) return roBlock

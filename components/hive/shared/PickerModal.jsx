@@ -47,6 +47,10 @@
 //                 "Corporate retired <tag>" and still offers Create — the
 //                 server files the request to bring it back. A new tag
 //                 belongs to this location alone ("<Location>'s own").
+//                 Create is never one keystroke away: the Create row (or
+//                 Enter) opens a confirm card that names the tag, says only
+//                 this location will see it, and offers the curated icon
+//                 grid; only its Create button creates.
 //   showIcons   — draw each option's own icon before its label (tags:
 //                 "🏠 Realtor"). Off by default — tier and stage rows
 //                 carry icons too, and those pickers never showed them.
@@ -64,6 +68,7 @@ import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
 import { tagText } from './tagText'
 import { sectionTags, nearTagVerdict } from '@/lib/tags'
+import TagIconGrid from './TagIconGrid'
 
 export default function PickerModal({
   category,
@@ -89,6 +94,9 @@ export default function PickerModal({
   const [busy, setBusy] = useState(null)           // 'create' | 'save' | null
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)       // a quiet success note (tag create)
+  // Tags: the create confirm card + its icon (curated grid, '' = none).
+  const [confirmCreate, setConfirmCreate] = useState(false)
+  const [newIcon, setNewIcon] = useState('')
   const searchRef = useRef(null)
   const titleId = useId()
 
@@ -164,7 +172,7 @@ export default function PickerModal({
   // still lets them create. serverVerdict: the server's own 409 (a race,
   // or a tag this list didn't have) — it wins.
   const [serverVerdict, setServerVerdict] = useState(null)
-  useEffect(() => { setServerVerdict(null) }, [createLabel])
+  useEffect(() => { setServerVerdict(null); setConfirmCreate(false) }, [createLabel])
   const verdict = useMemo(() => {
     if (!sections || !createLabel || options == null) return { kind: 'none' }
     if (serverVerdict) return serverVerdict
@@ -195,7 +203,7 @@ export default function PickerModal({
     try {
       const res = await fetch('/api/lookups', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, label: createLabel, location_id: locationId }),
+        body: JSON.stringify({ category, label: createLabel, location_id: locationId, ...(sections && newIcon ? { icon: newIcon } : {}) }),
       })
       const j = await res.json().catch(() => ({}))
       // The server's near-match guard (a race, or a tag this list didn't
@@ -207,6 +215,7 @@ export default function PickerModal({
       if (!res.ok || !j.lookup) throw new Error(j?.error || `HTTP ${res.status}`)
       setOptions(prev => [...(prev || []), j.lookup])
       announceTag(j.lookup)
+      setConfirmCreate(false); setNewIcon('')
       if (j.retired) setNotice(`Created. Corporate has been told you needed “${j.retired.label}”.`)
       setSel(prev => {
         // A created option lands selected — unless that would breach the
@@ -333,7 +342,8 @@ export default function PickerModal({
         <input ref={searchRef} type="text" value={q} placeholder={allowCreate ? 'Search or add' : 'Search'}
           aria-label="Search options"
           onChange={e => { setQ(e.target.value); setError(null) }}
-          onKeyDown={e => { if (e.key === 'Enter' && showCreate) { e.preventDefault(); createOption() } }}
+          // Tags: Enter only OPENS the confirm card — it never creates.
+          onKeyDown={e => { if (e.key === 'Enter' && showCreate) { e.preventDefault(); if (sections) setConfirmCreate(true); else createOption() } }}
           style={{ ...wizInput(), marginTop: '12px' }}
         />
 
@@ -367,16 +377,31 @@ export default function PickerModal({
                   Corporate retired “{verdict.tag.label}”. Creating your own lets corporate know you need it.
                 </p>
               )}
-              {showCreate && (
-                <button type="button" data-create onClick={createOption} disabled={busy === 'create'} style={nearRowStyle}>
+              {showCreate && !confirmCreate && (
+                <button type="button" data-create onClick={() => setConfirmCreate(true)} style={nearRowStyle}>
                   <span aria-hidden style={nearIconStyle}><IconPlus size={14} /></span>
                   <span>
-                    {busy === 'create' ? 'Creating…' : `Create "${createLabel}"`}
+                    {`Create "${createLabel}"`}
                     <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, color: T.ink.quiet }}>
                       Only {locationName || 'your location'} will see it
                     </span>
                   </span>
                 </button>
+              )}
+              {showCreate && confirmCreate && (
+                <div data-create-confirm role="group" aria-label={`Create ${createLabel}`}
+                  style={{ padding: '10px', borderRadius: T.radius.inset, border: T.border.thin, background: T.surface.sunken, display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0' }}>
+                  <p style={{ fontSize: '13px', color: T.ink.primary, margin: 0 }}>
+                    Create {newIcon ? `${newIcon} ` : ''}<strong>“{createLabel}”</strong>? Only {locationName || 'your location'} will see it.
+                  </p>
+                  <TagIconGrid value={newIcon} onChange={setNewIcon} label="Icon for the new tag" />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="button" data-create-go onClick={createOption} disabled={busy === 'create'} style={wizAccentBtn(busy === 'create')}>
+                      {busy === 'create' ? 'Creating…' : 'Create'}
+                    </button>
+                    <button type="button" onClick={() => setConfirmCreate(false)} style={wizQuietBtn()}>Cancel</button>
+                  </div>
+                </div>
               )}
               {notice && <p style={{ fontSize: '12px', color: T.ink.muted, margin: '4px 0' }}>{notice}</p>}
               {sectioned.length === 0 && !showCreate && verdict.kind === 'none' && (

@@ -134,7 +134,7 @@ export function tagKey(label: string | null | undefined): string {
   return words.join('')
 }
 
-export type NearTagCandidate = { id: string; label: string; icon?: string | null; location_id?: string | null; is_active?: boolean }
+export type NearTagCandidate = { id: string; label: string; icon?: string | null; location_id?: string | null; is_active?: boolean; key?: string | null; attrs?: any }
 export type NearTagVerdict =
   | { kind: 'none' }
   | { kind: 'use'; tag: NearTagCandidate }            // an active tag they can apply instead → no create
@@ -145,10 +145,15 @@ export type NearTagVerdict =
 // corporate tags (any state) + that location's own tags (any state).
 // ignoreId: the tag being renamed. An active match always wins over a
 // retired one.
+// A tag matches on its NAME or on its stored CODE (attrs.key — every
+// former specialty has one): "real estate" is nowhere near the name
+// "Realtor", but Realtor's code is real-estate (Kevin's own test tag got
+// through on name-only matching, 2026-10-16).
 export function nearTagVerdict(label: string, candidates: NearTagCandidate[], ignoreId: string | null = null): NearTagVerdict {
   const key = tagKey(label)
   if (!key) return { kind: 'none' }
-  const hits = candidates.filter((c) => c.id !== ignoreId && tagKey(c.label) === key)
+  const codeOf = (c: NearTagCandidate) => c.key ?? c.attrs?.key ?? null
+  const hits = candidates.filter((c) => c.id !== ignoreId && (tagKey(c.label) === key || (!!codeOf(c) && tagKey(codeOf(c)) === key)))
   const active = hits.find((c) => c.is_active !== false)
   if (active) return { kind: 'use', tag: active }
   const ownOff = hits.find((c) => c.location_id && c.is_active === false)
@@ -156,4 +161,40 @@ export function nearTagVerdict(label: string, candidates: NearTagCandidate[], ig
   const corpOff = hits.find((c) => !c.location_id && c.is_active === false)
   if (corpOff) return { kind: 'retired', tag: corpOff }
   return { kind: 'none' }
+}
+
+// ── The icons a location may give its own tags (2026-10-16, Kevin) ───────────
+// A curated grid, not a free emoji field — 54 locations with an open field
+// would put things on client records nobody wants there. None of these is an
+// icon a live corporate tag uses, so a location's tag never passes for a
+// corporate one. Enforced by the server on create and on change; corporate
+// keeps its free icon field on the Configure tab.
+export const TAG_ICON_CHOICES = [
+  '✅', '❗', '❓', '⏳', '🔔', '📅',   // flags
+  '👪', '🐾', '♿', '🎓', '🧓', '🌎',   // people and needs
+  '🛠️', '🪴', '🚗', '🧺', '🗄️', '📚', // work
+  '💰', '🎁', '💬', '📞', '📍', '🌱',  // business
+] as const
+// '' / null = no icon. Anything else must be on the grid.
+export function isAllowedTagIcon(icon: unknown): boolean {
+  if (icon == null || icon === '') return true
+  return typeof icon === 'string' && (TAG_ICON_CHOICES as readonly string[]).includes(icon.trim())
+}
+
+// ── Why a tag can't be deleted, in plain words (2026-10-16) ─────────────────
+// blockers: what tag_delete_blockers() returns (migrations/tag_delete.sql).
+export function describeTagBlockers(blockers: string[] | null | undefined): string | null {
+  if (!blockers || blockers.length === 0) return null
+  const people = (k: string) => Number((blockers.find(b => b.startsWith(k + ':')) || '').split(':')[1] || 0)
+  const clients = people('clients'), network = people('network')
+  if (clients || network) {
+    const n = clients + network
+    return `${n} ${n === 1 ? 'person carries' : 'people carry'} it — take it off them first, or Remove it to hide it.`
+  }
+  if (blockers.includes('corporate_merged')) return 'Kept on purpose: it’s how owners are told corporate retired it, and how their requests reach you.'
+  if (blockers.includes('corporate_active')) return 'Switch it off first.'
+  if (blockers.includes('tag_merge_log') || blockers.includes('relationship_tag_log') || blockers.includes('promotion')) {
+    return 'A past change to the tag list can still be undone, and that undo needs this tag.'
+  }
+  return 'It can’t be deleted.'
 }

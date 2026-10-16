@@ -10,6 +10,10 @@
 //   · Remove — a switch-off, not a delete: it leaves the pickers, filters
 //     and people's records, but every link is kept, so Restore brings it all
 //     back exactly. The confirm says how many people carry it first.
+//   · Icon — from the curated grid only (TagIconGrid), or none
+//   · Delete — PERMANENT, only when nothing carries it and no undo log names
+//     it. Never hidden: when it can't, the button is greyed and says why
+//     (migrations/tag_delete.sql decides). The confirm says it can't be undone.
 // New tags are created where tags are picked (the Tags row's "+ Tag").
 // §8.5: props only; owns its own fetches.
 // ─────────────────────────────────────────────────────────────
@@ -18,6 +22,7 @@
 import React, { useEffect, useState } from 'react'
 import { T } from './shared/tokens'
 import { tagText } from './shared/tagText'
+import TagIconGrid from './shared/TagIconGrid'
 
 const btn = (tone = 'quiet') => ({
   padding: '5px 10px', borderRadius: T.radius.control, border: T.border.thin,
@@ -33,6 +38,8 @@ export default function OwnTagsSettings({ locationId = null, locationName = '' }
   const [error, setError] = useState(null)
   const [renaming, setRenaming] = useState(null)   // { id, value }
   const [confirming, setConfirming] = useState(null) // tag being removed
+  const [deleting, setDeleting] = useState(null)     // tag being deleted for good
+  const [iconFor, setIconFor] = useState(null)       // tag whose icon grid is open
   const [busy, setBusy] = useState(null)
 
   async function load() {
@@ -70,6 +77,24 @@ export default function OwnTagsSettings({ locationId = null, locationName = '' }
     } finally { setBusy(null) }
   }
 
+  async function hardDelete(tag) {
+    setBusy(tag.id); setError(null)
+    try {
+      const res = await fetch('/api/tags/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: tag.id }) })
+      const j = await res.json().catch(() => ({}))
+      if (res.status === 409) {   // something changed since the list loaded
+        setTags(prev => prev.map(t => (t.id === tag.id ? { ...t, deleteBlockers: j.blockers, deleteReason: j.reason } : t)))
+        setError(`Couldn't delete “${tag.label}”: ${j.reason}`)
+        return
+      }
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setTags(prev => prev.filter(t => t.id !== tag.id))
+      setDeleting(null)
+    } catch (e) {
+      setError(`Couldn't delete: ${e.message}`)
+    } finally { setBusy(null) }
+  }
+
   const active = (tags || []).filter(t => t.is_active !== false)
   const removed = (tags || []).filter(t => t.is_active === false)
 
@@ -92,7 +117,25 @@ export default function OwnTagsSettings({ locationId = null, locationName = '' }
         <p style={{ fontSize: '11px', color: T.ink.quiet, margin: '2px 0 0' }}>
           {people(t.people)}{t.promoted ? ' · made corporate — it’s in the shared list now' : isRemoved ? ' · removed — hidden everywhere' : ''}
         </p>
+        {/* Delete is never hidden: when it can't, say why. */}
+        {t.deleteReason && (
+          <p data-delete-blocked style={{ fontSize: '11px', color: T.ink.muted, margin: '2px 0 0' }}>Can’t delete: {t.deleteReason}</p>
+        )}
+        {iconFor === t.id && (
+          <div style={{ marginTop: '6px' }}>
+            <TagIconGrid label={`Icon for ${t.label}`} value={t.icon || ''}
+              onChange={async (icon) => { if (await patch(t, { icon })) setIconFor(null) }} />
+          </div>
+        )}
       </div>
+      {!t.promoted && renaming?.id !== t.id && (
+        <button style={btn()} disabled={!!busy} onClick={() => setIconFor(iconFor === t.id ? null : t.id)}>Icon</button>
+      )}
+      {renaming?.id !== t.id && (
+        <button style={{ ...btn('danger'), opacity: t.deleteReason ? 0.45 : 1, cursor: t.deleteReason ? 'not-allowed' : 'pointer' }}
+          disabled={!!busy || !!t.deleteReason} aria-disabled={!!t.deleteReason}
+          title={t.deleteReason || undefined} onClick={() => setDeleting(t)}>Delete</button>
+      )}
       {t.promoted ? null : isRemoved ? (
         <button style={btn()} disabled={busy === t.id} onClick={() => patch(t, { is_active: true })}>Restore</button>
       ) : renaming?.id === t.id ? (
@@ -135,6 +178,18 @@ export default function OwnTagsSettings({ locationId = null, locationName = '' }
             <button style={btn('danger')} disabled={busy === confirming.id}
               onClick={async () => { if (await patch(confirming, { is_active: false })) setConfirming(null) }}>Remove</button>
             <button style={btn()} onClick={() => setConfirming(null)}>Keep it</button>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div role="dialog" aria-label={`Delete ${deleting.label}`} style={{ padding: '12px', margin: '0 0 12px', borderRadius: T.radius.inset, border: `1px solid ${T.state.danger.fg}`, background: T.state.danger.soft }}>
+          <p style={{ fontSize: '13px', color: T.ink.primary, margin: '0 0 8px' }}>
+            Delete “{deleting.label}” permanently? Nobody carries it. <strong>This can’t be undone</strong> — to hide a tag you might want back, use Remove instead.
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={btn('danger')} disabled={busy === deleting.id} onClick={() => hardDelete(deleting)}>Delete permanently</button>
+            <button style={btn()} onClick={() => setDeleting(null)}>Keep it</button>
           </div>
         </div>
       )}

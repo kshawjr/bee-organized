@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { isTagCategory } from '@/lib/tags'
+import { isTagCategory, isAllowedTagIcon } from '@/lib/tags'
 import { canManageLocationTag, checkNearTag, nearMatchBody } from '@/lib/tag-guard'
 
 // PATCH /api/lookups/[id]
@@ -15,7 +15,7 @@ import { canManageLocationTag, checkNearTag, nearMatchBody } from '@/lib/tag-gua
 //
 // Write permission: super_admin or admin (corporate) — anything. Since
 // 2026-10-16 an owner or manager may also rename or switch off/on their OWN
-// location's tags (label + is_active only). Every tag rename passes the
+// location's tags (name, on/off, and an icon from the curated grid). Every tag rename passes the
 // near-match guard (lib/tag-guard), excluding the tag itself.
 
 export async function PATCH(
@@ -51,11 +51,15 @@ export async function PATCH(
     if (typeof body.label === 'string' && body.label.trim()) {
       update.label = body.label.trim()
     }
-    // A location editor may change the name and switch it off/on — nothing
-    // else (colour, icon, section and order stay corporate's call).
+    // A location editor may change the name, switch it off/on, and pick its
+    // icon from the curated grid — nothing else (colour, section and order
+    // stay corporate's call).
     if (locationTagEditor) {
       for (const k of Object.keys(body || {})) {
-        if (k !== 'label' && k !== 'is_active') return NextResponse.json({ error: 'field_not_editable', field: k }, { status: 403 })
+        if (k !== 'label' && k !== 'is_active' && k !== 'icon') return NextResponse.json({ error: 'field_not_editable', field: k }, { status: 403 })
+      }
+      if ('icon' in (body || {}) && !isAllowedTagIcon(body.icon)) {
+        return NextResponse.json({ error: 'icon_not_allowed' }, { status: 400 })
       }
     }
     // A copy collapsed into a corporate tag stays off until the promotion is

@@ -33,7 +33,11 @@ const h = vi.hoisted(() => {
   }
   return { state, makeBuilder }
 })
-vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.makeBuilder(t) } }))
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: {
+  from: (t: string) => h.makeBuilder(t),
+  // tag_delete_blockers — nothing blocks unless a test says so
+  rpc: async (fn: string, args: any) => ({ data: (h.state.blockers || {})[args?.p_id] ?? [], error: null }),
+} }))
 vi.mock('@/lib/auth', () => ({
   requireAuth: vi.fn(async () => {}),
   getHubUser: vi.fn(async () => h.state.hubUser),
@@ -225,6 +229,7 @@ describe("D) the picker: search, then Use / Restore / Create", () => {
     await type(search(), 'House Keeper')
     expect(host.querySelector('[data-near="retired"]')!.textContent).toContain('Corporate retired “Housekeeper”')
     await click(host.querySelector('[data-create]')!)
+    await click(host.querySelector('[data-create-go]')!)
     expect(posted).toEqual({ category: 'tags', label: 'House Keeper', location_id: LOC })
     expect(host.textContent).toContain('Corporate has been told you needed “Housekeeper”')
     expect(checked()).toEqual(['House Keeper'])
@@ -242,6 +247,7 @@ describe("D) the picker: search, then Use / Restore / Create", () => {
     await type(search(), 'Piano tuner')
     expect(host.querySelector('[data-create]')!.textContent).toContain('Only Denver will see it')
     await click(host.querySelector('[data-create]')!)
+    await click(host.querySelector('[data-create-go]')!)
     expect(host.querySelector('[data-section="own"]')!.textContent).toContain('Piano tuner')
     expect(checked()).toEqual(['Piano tuner'])
     expect(announced).toEqual([expect.objectContaining({ id: 'new-pt', ownerName: 'Denver' })])
@@ -256,6 +262,7 @@ describe("D) the picker: search, then Use / Restore / Create", () => {
     await mountPicker()
     await type(search(), 'Very Important')
     await click(host.querySelector('[data-create]')!)
+    await click(host.querySelector('[data-create-go]')!)
     expect(host.querySelector('[data-near="use"]')!.textContent).toContain('Use ⭐ VIP')
     expect(host.querySelector('[data-create]')).toBeNull()
   })
@@ -318,11 +325,12 @@ describe('E) Settings › Tags', () => {
   })
 
   it('a copy made corporate says so and has no Restore', async () => {
-    installFetch({ '/api/tags/own': () => ({ body: { tags: [{ id: 'o-dnb', label: 'DO NOT BOOK', icon: null, is_active: false, people: 1, promoted: true }] } }) })
+    installFetch({ '/api/tags/own': () => ({ body: { tags: [{ id: 'o-dnb', label: 'DO NOT BOOK', icon: null, is_active: false, people: 1, promoted: true, deleteBlockers: ['clients:1', 'promotion'], deleteReason: '1 person carries it — take it off them first, or Remove it to hide it.' }] } }) })
     await mountSettings()
     const row = host.querySelector('[data-own-tag="o-dnb"]')!
     expect(row.textContent).toContain('made corporate — it’s in the shared list now')
-    expect([...row.querySelectorAll('button')].map(b => b.textContent)).toEqual([])
+    // No Restore, no Icon — only Delete, greyed, saying why (never hidden).
+    expect([...row.querySelectorAll('button')].map(b => [b.textContent, (b as HTMLButtonElement).disabled])).toEqual([['Delete', true]])
   })
 
   it('Restore switches a removed tag back on', async () => {
@@ -356,7 +364,7 @@ describe('F) /api/tags/own and /api/tags/locations', () => {
       return { data: null, error: null }
     }
     const json = await (await ownGET(req(`/api/tags/own?location_id=${LOC}`))).json()
-    expect(json.tags).toEqual([{ id: 'o-org', label: 'Organizer', is_active: true, people: 3 }])
+    expect(json.tags).toEqual([{ id: 'o-org', label: 'Organizer', is_active: true, people: 3, deleteBlockers: [], deleteReason: null }])
     expect(h.state.calls.find((c: any) => c.table === 'lookups').filters).toContainEqual(['eq', 'location_id', LOC])
   })
 

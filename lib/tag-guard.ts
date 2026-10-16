@@ -18,7 +18,8 @@ export const LOCATION_TAG_ROLES = new Set(['owner', 'manager'])
 export async function loadTagCandidates(locationId: string | null): Promise<NearTagCandidate[]> {
   let q = supabaseService
     .from('lookups')
-    .select('id, label, icon, location_id, is_active')
+    // attrs carries the stored code (attrs.key) the near-match also checks.
+    .select('id, label, icon, location_id, is_active, attrs')
     .in('category', TAG_CATEGORIES)
   q = locationId ? q.or(`location_id.is.null,location_id.eq.${locationId}`) : q.is('location_id', null)
   const { data, error } = await q
