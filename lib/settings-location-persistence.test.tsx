@@ -197,17 +197,53 @@ describe('Settings — Location fields persist to their own column (#93)', () =>
   }
 })
 
-describe('Settings — Assessment Default is disabled, not silently-lost (#93)', () => {
-  it('renders an explanation and NO interactive option buttons', async () => {
+// The Assessment Default card was switched off under #93 (no column to save
+// to). migrations/assessment_type.sql adds locations.default_assessment_type;
+// the card now saves through persistLocationField like every other row.
+describe('Settings — Assessment Default saves to locations.default_assessment_type', () => {
+  const option = (v: string) =>
+    container.querySelector(`button[data-assessment-default="${v}"]`) as HTMLButtonElement
+
+  it('starts on the saved default', async () => {
+    await mount(selectedLoc({ assessmentType: 'virtual' }))
+    expect(option('virtual').getAttribute('aria-checked')).toBe('true')
+    expect(option('in-person').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('clicking Virtual PATCHes default_assessment_type and paints only after it lands', async () => {
     await mount(selectedLoc())
-    expect(container.textContent).toContain('Assessment Default')
-    // The old bug: clickable buttons that wrote session-only state. They must
-    // no longer be buttons, and the row must say saving isn't available yet.
-    expect(container.textContent).toContain('isn’t available yet')
-    const inPerson = Array.from(container.querySelectorAll('button')).find(
-      b => b.textContent?.includes('In-Person'),
-    )
-    expect(inPerson, 'In-Person must not be a clickable button').toBeUndefined()
+    expect(container.textContent).not.toContain('isn’t available yet')
+    await act(async () => { option('virtual').click() })
+    await act(async () => {})
+    const call = patchTo(LOC_UUID)
+    expect(call, 'PATCH fired').toBeTruthy()
+    expect(JSON.parse((call as any)[1].body)).toEqual({ default_assessment_type: 'virtual' })
+    expect(option('virtual').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('server error → alert, the old choice stays selected', async () => {
+    okFetch.mockImplementation(async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }) as any)
+    await mount(selectedLoc())
+    await act(async () => { option('virtual').click() })
+    await act(async () => {})
+    expect(alertMock).toHaveBeenCalledTimes(1)
+    expect(option('in-person').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('view-as (non-UUID location) → alert, no PATCH, nothing paints', async () => {
+    await mount(selectedLoc({ id: 'loc_seattle' }))
+    await act(async () => { option('virtual').click() })
+    await act(async () => {})
+    expect(anyLocationPatch()).toBeUndefined()
+    expect(alertMock).toHaveBeenCalledTimes(1)
+    expect(option('in-person').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('clicking the option already chosen writes nothing', async () => {
+    await mount(selectedLoc())
+    await act(async () => { option('in-person').click() })
+    await act(async () => {})
+    expect(anyLocationPatch()).toBeUndefined()
   })
 })
 

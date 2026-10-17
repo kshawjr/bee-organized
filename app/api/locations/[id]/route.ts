@@ -6,12 +6,14 @@ import { safeHttpUrl } from '@/lib/email-signature'
 import { senderAddressProblem, replyToSaveProblem } from '@/lib/sender-domain'
 import { getSendableDomains } from '@/lib/sendable-domains'
 import { formatPhone } from '@/lib/phone'
+import { isAssessmentType } from '@/lib/assessment-type'
 
 // PATCH /api/locations/[id]
 // Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
 //         sender_name?, send_from_email?, reply_to_email?,
 //         reviews_link?, calendar_link?,
-//         website_url?, facebook_url?, instagram_url?, linkedin_url? }
+//         website_url?, facebook_url?, instagram_url?, linkedin_url?,
+//         default_assessment_type? }
 //
 // Updates the location row. Authorization:
 //   - super_admin: can edit any location
@@ -158,6 +160,20 @@ export async function PATCH(
       }
     }
 
+    // The location's default for the Send to Jobber screen: exactly
+    // 'in-person' or 'virtual', never blank (the column is NOT NULL and the
+    // screen always needs a starting choice). migrations/assessment_type.sql.
+    if ('default_assessment_type' in (body || {})) {
+      const v = body.default_assessment_type
+      if (!isAssessmentType(v)) {
+        return NextResponse.json(
+          { error: 'Assessment default must be In-Person or Virtual.' },
+          { status: 400 },
+        )
+      }
+      patch.default_assessment_type = v
+    }
+
     if (Object.keys(patch).length === 1) {
       // Only updated_at — nothing to write
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
@@ -177,6 +193,12 @@ export async function PATCH(
       if (/(website|facebook|instagram|linkedin)_url/.test(error.message) && /does not exist/i.test(error.message)) {
         return NextResponse.json(
           { error: 'Signature links storage is not enabled yet — migrations/email_signatures.sql has not been run.' },
+          { status: 503 },
+        )
+      }
+      if (/default_assessment_type/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+        return NextResponse.json(
+          { error: 'Saving the assessment default is not enabled yet — migrations/assessment_type.sql has not been run.' },
           { status: 503 },
         )
       }

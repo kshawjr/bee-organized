@@ -151,8 +151,9 @@ describe('send-to-jobber route wiring (issue 144)', () => {
     expect(route).toContain('diffAssessmentAssignment')
     expect(route).toContain('const schedule = applyTeamToSchedule(')
     expect(route).toContain('allAssigneeJobberIds,')
-    // the create input is fed the schedule that (conditionally) carries the team
-    expect(route).toContain('input: { schedule },')
+    // the create input is fed the schedule that (conditionally) carries the
+    // team — beside the optional virtual-assessment note (lib/assessment-type.ts)
+    expect(route).toMatch(/input: \{\s*schedule,\s*\.\.\.\(assessmentInstructions\(assessment_type\)/)
   })
 
   it('the returned assignedUsers are diffed against the requested set and a mismatch is SURFACED', () => {

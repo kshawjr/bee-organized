@@ -36,8 +36,12 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { isAssessmentType } from '@/lib/assessment-type'
 import { buildAddressChoices, CURRENT_CHOICE_KEY } from '@/lib/address-choice'
+import { composeLeadAddress, deriveStreet } from '@/lib/lead-address'
+import { personVisitAddress, missingVisitAddressParts, isVisitAddressComplete, describeMissing } from '@/lib/visit-address'
+import AddressAutofill from './shared/AddressAutofill'
 import OverlayShell from './OverlayShell'
 import useIsMobile from './shared/useIsMobile'
 import { inp, lbl } from './shared/formKit'
@@ -115,6 +119,24 @@ function Tile({ Icon, label, sub, selected, onSelect, ariaLabel }) {
   )
 }
 
+// The person-shape patch for an address saved from the review screen —
+// mirrors how lib/people-mapper.ts builds a person from the lead row, and how
+// PATCH /api/leads/:id keeps an address list's first entry in step.
+function addressPatch(person, cols, street) {
+  const parts = { street: cols.address, city: cols.city, state: cols.state, zip: cols.zip || '' }
+  const list = Array.isArray(person.addresses) ? person.addresses : []
+  const addresses = list.length
+    ? list.map((a, i) => (i === 0 ? { ...a, value: cols.address, ...parts, street: street.trim() } : a))
+    : [{ type: 'Service', value: cols.address, ...parts }]
+  return {
+    address: cols.address,
+    addresses,
+    originCity: cols.city,
+    originState: cols.state,
+    originZip: cols.zip || null,
+  }
+}
+
 export default function SendToJobberModal({ person, engagementId = null, addressKey: presetAddressKey = null, onDone, onClose }) {
   const isMobile = useIsMobile()
 
@@ -130,7 +152,27 @@ export default function SendToJobberModal({ person, engagementId = null, address
   const alreadyLinked = !!(person.jobberClient || person.jobberRef)
   const [action, setAction] = useState(null)
   const [includeAssessment, setIncludeAssessment] = useState(!!person.assessment)
-  const [assessmentType, setAssessmentType] = useState(person.assessmentType || 'in-person')
+  // Starting in-person/virtual choice: the client's own type, else the
+  // location default, else in-person (lib/assessment-type.ts). A type already
+  // on the person (set by a send earlier this session) is the client's own and
+  // wins outright. Otherwise start on in-person and ask the server for the
+  // client's last recorded type + their location's default — unless the owner
+  // has already picked one, which is never overwritten.
+  const knownType = isAssessmentType(person.assessmentType) ? person.assessmentType : null
+  const [assessmentType, setAssessmentTypeState] = useState(knownType || 'in-person')
+  const typePicked = useRef(false)
+  const setAssessmentType = (v) => { typePicked.current = true; setAssessmentTypeState(v) }
+  useEffect(() => {
+    if (knownType || !person.id) return
+    let live = true
+    fetch(`/api/leads/${person.id}/assessment-type`, { credentials: 'include' })
+      .then(r => (r && r.ok ? r.json() : null))
+      .then(j => {
+        if (live && !typePicked.current && isAssessmentType(j?.resolved)) setAssessmentTypeState(j.resolved)
+      })
+      .catch(() => {})
+    return () => { live = false }
+  }, [person.id, knownType])
   // Pre-fill from an existing assessment on record ("YYYY-MM-DD at h:mm AM/PM").
   const [date, setDate] = useState(() => {
     if (person.assessment) return person.assessment.split(' at ')[0] || ''
@@ -190,24 +232,38 @@ export default function SendToJobberModal({ person, engagementId = null, address
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Address is required server-side for in-person assessments (matches the
-  // route's validation). request_only and virtual assessments proceed with
-  // no address — property creation is skipped there.
-  function leadHasUsableAddress(p) {
-    const arr = Array.isArray(p?.addresses) ? p.addresses : []
-    for (const a of arr) {
-      if (a && (a.street || a.value)) return true
-    }
-    if (p?.address && String(p.address).trim()) return true
-    return false
-  }
-  const hasAddress = leadHasUsableAddress(person)
   const wantsAssessment = action === 'request' && includeAssessment && !!date
   // Address is required for an in-person assessment AND for any job (a job
   // needs a property, a property needs an address — server-mandated too).
   const addressRequired =
     (wantsAssessment && assessmentType === 'in-person') || action === 'job'
-  const blockSendForAddress = addressRequired && !hasAddress
+  // A virtual assessment visits no address: the route keeps the property off
+  // the request, so "which address?" is never asked and no choice is sent.
+  // On the Request path the question therefore comes AFTER the details (where
+  // the type is picked); the Job path asks it before, as it always has.
+  const virtualSend = wantsAssessment && assessmentType === 'virtual'
+  const askAddressHere = askAddress && !virtualSend
+
+  // "Required" means street, city AND state (lib/visit-address.ts — our rule;
+  // Jobber would take a lone zip). The address checked is the one this send
+  // will use: a former address when the owner picked one, else the primary.
+  const usingFormerChoice = multiAddress && !!chosenAddress && addressKey !== CURRENT_CHOICE_KEY
+  const currentVisit = personVisitAddress(person)
+  const visitAddress = usingFormerChoice ? chosenAddress : currentVisit
+  const needsAddress = addressRequired && !isVisitAddressComplete(visitAddress)
+  // The primary address can be completed right here on the review screen
+  // and is saved to the client record (PATCH /api/leads/:id — the same save
+  // the profile's address editor uses). A former address is fixed from the
+  // record's address list instead; that path keeps the plain refusal.
+  const fixAddressHere = needsAddress && !usingFormerChoice
+  const [addrStreet, setAddrStreet] = useState(() =>
+    currentVisit ? deriveStreet(currentVisit.street, currentVisit) : '')
+  const [addrCity, setAddrCity]   = useState(currentVisit?.city  || '')
+  const [addrState, setAddrState] = useState(currentVisit?.state || '')
+  const [addrZip, setAddrZip]     = useState(currentVisit?.zip   || '')
+  const typedAddress = { street: addrStreet, city: addrCity, state: addrState, zip: addrZip }
+  const typedMissing = missingVisitAddressParts(typedAddress)
+  const blockSendForAddress = needsAddress && (!fixAddressHere || typedMissing.length > 0)
 
   // Job line-item completeness — a real price, greater than zero. Gates both
   // the job-details "Review →" and the confirm "Send".
@@ -272,9 +328,37 @@ export default function SendToJobberModal({ person, engagementId = null, address
     if (engagementId) body.engagement_id = engagementId
     // Only when there was a question to answer. A one-address client sends
     // the same body it always did — no key, no new server branch.
-    if (multiAddress && addressKey) body.property_choice = addressKey
+    if (multiAddress && addressKey && !virtualSend) body.property_choice = addressKey
 
     setSubmitting(true)
+
+    // Completing the address on this screen: save it to the client record
+    // FIRST, so the send reads it from the lead like any other address and
+    // it is still there next time. A failed save stops here, on this screen.
+    let savedAddress = null
+    if (fixAddressHere) {
+      const cols = {
+        address: composeLeadAddress(typedAddress),
+        city:  addrCity.trim(),
+        state: addrState.trim(),
+        zip:   addrZip.trim() || null,
+      }
+      try {
+        const res = await fetch(`/api/leads/${person.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cols),
+        })
+        const j = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        savedAddress = cols
+      } catch (e) {
+        setErrorMsg(`Couldn't save the address to the client: ${e?.message || e}`)
+        setSubmitting(false)
+        return
+      }
+    }
+
     let json
     try {
       const res = await fetch(`/api/leads/${person.id}/send-to-jobber`, {
@@ -309,7 +393,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
     // The choice itself is deliberately NOT stored on the lead — Jobber's
     // property holds it. This line is how "which house was that job at?"
     // stays answerable inside Bee Hub, without a column to keep true.
-    if (multiAddress && chosenAddress) {
+    if (multiAddress && chosenAddress && !virtualSend) {
       entries.push({ id: `o${stamp + 5}`, type: 'system', method: 'system', label: `Sent to ${chosenAddress.display}`, ts: 'Just now', status: 'done' })
     }
     if (json.jobber_request_id) {
@@ -339,6 +423,9 @@ export default function SendToJobberModal({ person, engagementId = null, address
         assessment: hasAssessment ? `${date} at ${time}` : person.assessment,
         assessmentType: isReq ? assessmentType : person.assessmentType,
         outreachTimeline: [...person.outreachTimeline, ...entries],
+        // The address completed on this screen, in the person's own shape
+        // (lib/people-mapper.ts), so the record shows it without a reload.
+        ...(savedAddress ? addressPatch(person, savedAddress, addrStreet) : {}),
       },
       {
         jobber_client_id: json.jobber_client_id || null,
@@ -355,14 +442,15 @@ export default function SendToJobberModal({ person, engagementId = null, address
   // action — Job routes through 'job-details', everything else through
   // 'request-details'.
   const detailStep = action === 'job' ? 'job-details' : 'request-details'
-  // 'address' sits between the action and its details, so it is asked once
-  // for both paths. It exists ONLY when the client holds more than one
-  // address — with one, the step list is identical to before.
+  // 'address' exists ONLY when the client holds more than one address —
+  // with one, the step list is identical to before. Job: before the details.
+  // Request: after them, and never for a virtual assessment.
   const steps = [
     ...(person.jobberClient ? ['history'] : []),
     'action',
-    ...(askAddress ? ['address'] : []),
+    ...(action === 'job' && askAddress ? ['address'] : []),
     detailStep,
+    ...(action !== 'job' && askAddressHere ? ['address'] : []),
     'confirm',
   ]
   const stepIdx = steps.indexOf(step)
@@ -425,7 +513,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button type="button" onClick={onClose} style={ghostBtn}>Cancel</button>
-              <button type="button" disabled={!action} onClick={() => action && setStep(askAddress ? 'address' : (action === 'job' ? 'job-details' : 'request-details'))} style={primaryBtn(!!action)}>Continue →</button>
+              <button type="button" disabled={!action} onClick={() => action && setStep(action === 'job' ? (askAddress ? 'address' : 'job-details') : 'request-details')} style={primaryBtn(!!action)}>Continue →</button>
             </div>
           </>
         )}
@@ -466,8 +554,8 @@ export default function SendToJobberModal({ person, engagementId = null, address
               ))}
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
-              <button type="button" onClick={() => setStep(action === 'job' ? 'job-details' : 'request-details')} style={primaryBtn(true)}>Continue →</button>
+              <button type="button" onClick={() => setStep(action === 'job' ? 'action' : 'request-details')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(action === 'job' ? 'job-details' : 'confirm')} style={primaryBtn(true)}>Continue →</button>
             </div>
           </>
         )}
@@ -530,8 +618,8 @@ export default function SendToJobberModal({ person, engagementId = null, address
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setStep(askAddress ? 'address' : 'action')} style={ghostBtn}>Back</button>
-              <button type="button" onClick={() => setStep('confirm')} style={primaryBtn(true)}>Review →</button>
+              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
+              <button type="button" onClick={() => setStep(askAddressHere ? 'address' : 'confirm')} style={primaryBtn(true)}>Review →</button>
             </div>
           </>
         )}
@@ -594,11 +682,12 @@ export default function SendToJobberModal({ person, engagementId = null, address
               </p>
             </div>
 
-            {blockSendForAddress && (
-              <div style={{ padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
-                <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg, marginBottom: '2px' }}>Address required</p>
-                <p style={{ fontSize: '12px', color: T.state.warning.deep, wordBreak: 'break-word' }}>A job needs a client address for its property. Add one before sending.</p>
-              </div>
+            {needsAddress && (
+              <p data-address-hint="1" style={{ fontSize: '12px', color: T.ink.muted }}>
+                {fixAddressHere
+                  ? 'A job needs a full client address — you can add it on the next screen.'
+                  : 'A job needs a full client address. This address has no ' + describeMissing(missingVisitAddressParts(visitAddress)) + ' — fix it on the client record, or send to another address.'}
+              </p>
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -643,7 +732,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
                   </>
                 ) : (
                   <>
-                    {multiAddress && chosenAddress && (
+                    {multiAddress && chosenAddress && !virtualSend && (
                       <CreateRow title="Address" detail={chosenAddress.display} Glyph={IconMapPin} />
                     )}
                     <CreateRow title="Request" detail="Moves this deal to the Request stage" />
@@ -664,13 +753,39 @@ export default function SendToJobberModal({ person, engagementId = null, address
               <p style={{ fontSize: '12px', color: T.state.warning.deep, lineHeight: 1.4 }}>This creates records in your live Jobber account.</p>
             </div>
 
+            {fixAddressHere && (
+              <div data-address-form="1" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={lbl}>Client address</label>
+                <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '-4px' }}>
+                  {action === 'job' ? 'A job' : 'An in-person assessment'} needs a street, city and state. It&apos;s saved to the client too.
+                </p>
+                <AddressAutofill
+                  value={addrStreet}
+                  onChange={setAddrStreet}
+                  onParsed={p => {
+                    // Same fill as the profile's editor: street (+ unit), city, state, zip.
+                    setAddrStreet([p.street, p.apt].filter(Boolean).join(' ') || addrStreet)
+                    if (p.city)  setAddrCity(p.city)
+                    if (p.state) setAddrState(p.state)
+                    if (p.zip)   setAddrZip(p.zip)
+                  }}
+                  placeholder="Street address"
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px' }}>
+                  <input aria-label="City"  placeholder="City"  value={addrCity}  onChange={e => setAddrCity(e.target.value)}  style={inp} />
+                  <input aria-label="State" placeholder="State" value={addrState} onChange={e => setAddrState(e.target.value)} style={inp} />
+                  <input aria-label="Zip"   placeholder="Zip"   value={addrZip}   onChange={e => setAddrZip(e.target.value)}   style={inp} />
+                </div>
+              </div>
+            )}
+
             {blockSendForAddress && (
               <div style={{ padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg, marginBottom: '2px' }}>Address required</p>
                 <p style={{ fontSize: '12px', color: T.state.warning.deep, wordBreak: 'break-word' }}>
-                  {action === 'job'
-                    ? 'A job needs a client address for its property. Add one before sending.'
-                    : 'An in-person assessment needs a client address. Add one before sending.'}
+                  {fixAddressHere
+                    ? `Add the ${describeMissing(typedMissing)} to send.`
+                    : `${action === 'job' ? 'A job' : 'An in-person assessment'} needs a street, city and state, and this address has no ${describeMissing(missingVisitAddressParts(visitAddress))}. Fix it on the client record, or go back and send to another address.`}
                 </p>
               </div>
             )}
@@ -683,7 +798,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" disabled={submitting} onClick={() => { if (!submitting) { setErrorMsg(null); setStep(action === 'job' ? 'job-details' : action === 'request' ? 'request-details' : 'action') } }} style={{ ...ghostBtn, cursor: submitting ? 'not-allowed' : 'pointer' }}>Back</button>
+              <button type="button" disabled={submitting} onClick={() => { if (!submitting) { setErrorMsg(null); setStep(action === 'job' ? 'job-details' : action === 'request' ? (askAddressHere ? 'address' : 'request-details') : 'action') } }} style={{ ...ghostBtn, cursor: submitting ? 'not-allowed' : 'pointer' }}>Back</button>
               <button type="button" disabled={submitting || blockSendForAddress || blockSendForJob} onClick={confirm} style={primaryBtn(!(submitting || blockSendForAddress || blockSendForJob))}>
                 {submitting
                   ? <><IconClock size={16} /> Sending…</>

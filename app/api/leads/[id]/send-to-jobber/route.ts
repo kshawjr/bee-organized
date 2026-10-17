@@ -64,6 +64,9 @@ import {
   type AddressChoice,
 } from '@/lib/address-choice'
 import { formatPhone } from '@/lib/phone'
+import { assessmentInstructions } from '@/lib/assessment-type'
+import { missingVisitAddressParts, describeMissing } from '@/lib/visit-address'
+import { recordSentAssessmentType } from '@/lib/assessment-type-record'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -612,16 +615,23 @@ export async function POST(
   // current address and `address` is pickPrimaryAddress(lead) exactly as
   // before, including the jsonb-first / legacy-column fallback that
   // formatLeadAddress does not replicate.
+  // A VIRTUAL assessment visits no address: the property is created/reused
+  // on the CLIENT (primary address) but never attached to the request (see
+  // requestInput below), so "which address?" has no meaning there and any
+  // property_choice sent is ignored.
+  const isVirtualAssessment =
+    creation_type === 'request_with_assessment' && assessment_type === 'virtual'
+  const effectiveChoice = isVirtualAssessment ? undefined : property_choice
   const addressChoices = buildAddressChoices(
     { address: lead.address, city: lead.city, state: lead.state, zip: lead.zip },
     lead.jobber_property_id,
     lead.former_addresses,
   )
-  const sendChoice: AddressChoice | null = resolveAddressChoice(addressChoices, property_choice)
+  const sendChoice: AddressChoice | null = resolveAddressChoice(addressChoices, effectiveChoice)
   // A key naming an address this lead does not hold is a hard stop, not a
   // silent fall back to the current address: the owner asked for a specific
   // house and sending to the other one is the exact mistake being fixed.
-  if (isFormerChoiceKey(property_choice) && !sendChoice) {
+  if (isFormerChoiceKey(effectiveChoice) && !sendChoice) {
     return fail(
       'validation',
       'Cannot send to Jobber: that address is no longer on this client. ' +
@@ -633,13 +643,20 @@ export async function POST(
   const address = usingFormerAddress
     ? { street: sendChoice!.street, city: sendChoice!.city, state: sendChoice!.state, zip: sendChoice!.zip }
     : pickPrimaryAddress(lead)
-  if (!address && addressRequired) {
-    return fail(
-      'validation',
-      'Cannot send to Jobber: lead has no street address. ' +
-      'Add an address to the lead before sending.',
-      400,
-    )
+  // OUR rule, not Jobber's (lib/visit-address.ts): Jobber accepts a property
+  // with no street at all, so a lone zip would book a visit nobody can
+  // attend. An in-person assessment or a job needs street, city AND state.
+  if (addressRequired) {
+    const missing = missingVisitAddressParts(address)
+    if (missing.length) {
+      return fail(
+        'validation',
+        `Cannot send to Jobber: the client's address has no ${describeMissing(missing)}. ` +
+        'An in-person visit needs a street, city and state.',
+        400,
+        { missing_address_parts: missing },
+      )
+    }
   }
 
   const firstName = (lead.first_name || lead.name?.split(' ')[0] || '').trim()
@@ -904,7 +921,13 @@ export async function POST(
     // Only include propertyId when we actually have one — Deluge mirrored
     // this with two requestCreate variants. Omitting the key lets Jobber
     // accept the request without a property attached.
-    if (jobberPropertyGlobalId) requestInput.propertyId = jobberPropertyGlobalId
+    //
+    // VIRTUAL: the property stays on the client (created/reused above, so the
+    // address is in Jobber for the job that follows) but is NOT attached to
+    // the request. The assessment takes the request's property, and attached
+    // it put a "site visit" address on the calendar and route map for a
+    // video call. Converting to a quote/job, Jobber asks which property.
+    if (jobberPropertyGlobalId && !isVirtualAssessment) requestInput.propertyId = jobberPropertyGlobalId
     // Owner assignment at CREATION (card-restore build 3): introspection
     // 2026-07-11 confirmed RequestCreateInput.salespersonId: EncodedId —
     // the same stored jobber_user_id the assessment assignment uses.
@@ -983,6 +1006,10 @@ export async function POST(
       return fail('request_create', 'request_create_returned_no_id')
     }
 
+    // The founded-engagement SR row below, when written — reused by the
+    // assessment-type record so it never re-upserts that row.
+    let preWrittenSrId: string | null = null
+
     // Founded-engagement link: pre-write the local SR row for the new
     // Jobber request and attach it to the founded engagement NOW, so the
     // REQUEST_CREATE webhook (which upserts by jobber_request_id and only
@@ -999,6 +1026,7 @@ export async function POST(
           locationSlug,
           { promoteLead: false },
         )
+        preWrittenSrId = sr.id
         await attachToEngagement('service_requests', sr.id, engagementId)
       } catch (err: any) {
         console.error('[send-to-jobber] founded-engagement SR link failed', {
@@ -1050,7 +1078,15 @@ export async function POST(
         ASSESSMENT_CREATE_MUTATION,
         {
           requestId: jobberRequestGlobalId,
-          input: { schedule },
+          // Virtual → the field team's note in Jobber (the only place they
+          // see the type). In-person → no instructions key at all, so the
+          // input is exactly what it was before (lib/assessment-type.ts).
+          input: {
+            schedule,
+            ...(assessmentInstructions(assessment_type)
+              ? { instructions: assessmentInstructions(assessment_type) }
+              : {}),
+          },
         },
       )
       if (assessCreate.userErrors?.length) {
@@ -1099,6 +1135,37 @@ export async function POST(
           assessmentTeamShortfall =
             `assessment team incomplete — missing=[${diff.missing.join(',')}]` +
             (diff.unexpected.length ? ` unexpected=[${diff.unexpected.join(',')}]` : '')
+        }
+      }
+
+      // Keep the in-person/virtual choice on our assessments row
+      // (lib/assessment-type-record.ts). Non-fatal: the request and
+      // assessment are real in Jobber; a failed local record is logged and
+      // the send still reports what it did.
+      if (assessment_type && jobberAssessmentGlobalId) {
+        const rec = await recordSentAssessmentType({
+          assessmentType: assessment_type,
+          requestRec,
+          jobberAssessmentGlobalId,
+          startAtIso: new Date(startMs).toISOString(),
+          leadId,
+          locationSlug,
+          serviceRequestId: preWrittenSrId,
+        })
+        if (!rec.ok) {
+          console.error('[send-to-jobber] assessment type not recorded', {
+            leadId, engagementId, assessmentId: jobberAssessmentGlobalId,
+            assessment_type, reason: rec.reason,
+          })
+          await writeSyncLog({
+            location_id: locationSlug,
+            entity_id: leadId,
+            entity_type: 'client',
+            status: 'error',
+            message:
+              `[send-to-jobber] topic=ASSESSMENT_TYPE_NOT_RECORDED ` +
+              `assessment=${jobberAssessmentGlobalId} type=${assessment_type} reason=${rec.reason}`,
+          })
         }
       }
     }

@@ -46,7 +46,7 @@ const person = (over: any = {}) => ({
   outreachTimeline: [],
   assessment: null,
   assessmentType: 'in-person',
-  addresses: [{ street: '123 Main St' }],
+  addresses: [{ street: '123 Main St', city: 'Denver', state: 'CO' }],
   jobberClient: null,
   locationName: 'Denver',
   ...over,
@@ -162,7 +162,7 @@ describe('SendToJobberModal — the 4-step wizard, reskinned', () => {
   // what leadHasUsableAddress keys on. So an in-person assessment sends
   // with no "Address required" wall.
   it('in-person assessment WITH an address (addresses[].street) → no "Address required" block, Send enabled', async () => {
-    await mount() // person() carries addresses:[{ street: '123 Main St' }]
+    await mount() // person() carries addresses:[{ street: '123 Main St', city: 'Denver', state: 'CO' }]
     await toDetails()
     await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="Include assessment"]')!.click() })
     await setInput(host.querySelector('input[aria-label="Assessment date"]') as HTMLInputElement, '2026-08-01')
@@ -434,7 +434,9 @@ describe('SendToJobberModal — the Job path (Path 2)', () => {
     const send = contains('Send to Jobber') as HTMLButtonElement
     expect(send.disabled, 'send blocked with no property address').toBe(true)
     expect(host.textContent).toContain('Address required')
-    expect(host.textContent).toContain('before sending')
+    // No longer a dead end: the address box is right here on the review screen.
+    expect(host.textContent).toContain('Add the street, city and state to send.')
+    expect(host.querySelector('[data-address-form]'), 'address box on the review screen').toBeTruthy()
   })
 
   it('confirm itemizes a JOB (never a Request/estimate) and states the Job in Progress stage', async () => {

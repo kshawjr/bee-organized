@@ -733,6 +733,21 @@ export default async function HubPage({
       }
     }
 
+    // default_assessment_type (migrations/assessment_type.sql) — same
+    // error-tolerant shape: a missing column reads as 'in-person', what the
+    // Send to Jobber screen started on before the default existed.
+    let currentAssessmentDefault = 'in-person'
+    {
+      const { data: aRow, error: aErr } = await supabase
+        .from('locations')
+        .select('default_assessment_type')
+        .eq('id', hubUser.location_id)
+        .maybeSingle()
+      if (!aErr && (aRow as any)?.default_assessment_type) {
+        currentAssessmentDefault = (aRow as any).default_assessment_type
+      }
+    }
+
     if (locRow) {
       currentSubscription = {
         subscription_status: locRow.subscription_status || 'deferred',
@@ -758,6 +773,7 @@ export default async function HubPage({
         slack_team_name: locRow.slack_team_name || null,
         slack_channel_name: locRow.slack_channel_name || null,
         slack_invite_url: currentSlackInviteUrl,
+        default_assessment_type: currentAssessmentDefault,
         // Mailchimp display fields (token + server prefix never leave the
         // server; sync_live is never surfaced to an owner).
         mailchimp_connected: !!locRow.mailchimp_connected,
@@ -884,6 +900,20 @@ export default async function HubPage({
       if (!inviteErr && Array.isArray(inviteRows)) {
         for (const r of inviteRows as any[]) {
           if (r?.slack_invite_url) slackInviteById[r.id] = r.slack_invite_url
+        }
+      }
+    }
+
+    // default_assessment_type — error-tolerant like slack_invite_url above;
+    // a location missing from the map reads as 'in-person'.
+    const assessmentDefaultById: Record<string, string> = {}
+    {
+      const { data: aRows, error: aErr } = await supabaseService
+        .from('locations')
+        .select('id, default_assessment_type')
+      if (!aErr && Array.isArray(aRows)) {
+        for (const r of aRows as any[]) {
+          if (r?.default_assessment_type) assessmentDefaultById[r.id] = r.default_assessment_type
         }
       }
     }
@@ -1047,6 +1077,7 @@ export default async function HubPage({
         slackTeamName: row.slack_team_name || null,
         slackChannelName: row.slack_channel_name || null,
         slackInviteUrl: slackInviteById[row.id] || null,
+        assessmentType: assessmentDefaultById[row.id] || 'in-person',
         // Mailchimp display fields (token never leaves the server).
         mailchimpConnected: !!row.mailchimp_connected,
         mailchimpAccountName: row.mailchimp_account_name || null,

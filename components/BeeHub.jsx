@@ -22008,6 +22008,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       reviewsLink:     currentLocationCtx.reviews_link || '',
       bookingLink:     currentLocationCtx.calendar_link || '',
       ratePerHour:     currentLocationCtx.rate_per_hour || '',
+      assessmentType:  currentLocationCtx.default_assessment_type || 'in-person',
       jobberStatus:    deriveJobberStatus({
                          connected:      currentLocationCtx.jobber_connected,
                          tokenExpiry:    currentLocationCtx.token_expiry,
@@ -23803,22 +23804,25 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              {/* DISABLED (#93): locations has no assessment_type column, so this
-                  control could only ever write to session state and vanish on
-                  reload — the exact bug #93 fixes. Rather than ship a lie, the
-                  buttons are non-interactive and a note explains it. Persisting
-                  this needs a migration (see the PR notes); tracked separately. */}
+              {/* Saves to locations.default_assessment_type through the same
+                  PATCH every Location row uses (persistLocationField: paints only
+                  after the write lands, view-as refused). Send to Jobber starts on
+                  it unless the client has a type of their own. */}
               <div style={{ padding:'12px 16px', background:'white' }}>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', opacity:0.5 }}>
-                  {[['in-person','🏠','In-Person'],['virtual','💻','Virtual']].map(([v,icon,label])=>(
-                    <div key={v} aria-disabled="true" style={{ padding:'12px', borderRadius:'10px', cursor:'not-allowed', border:'2px solid', borderColor:settings.location.assessmentType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:settings.location.assessmentType===v?'rgba(168,201,196,0.12)':'#f7f5f0', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', justifyContent:'center' }}>
+                <div role="radiogroup" aria-label="Assessment default" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+                  {[['in-person','🏠','In-Person'],['virtual','💻','Virtual']].map(([v,icon,label])=>{
+                    const on = (settings.location.assessmentType||'in-person')===v
+                    return (
+                    <button key={v} type="button" role="radio" aria-checked={on} data-assessment-default={v}
+                      onClick={()=>{ if (!on) persistLocationField('assessmentType','default_assessment_type',v,'assessment default') }}
+                      style={{ padding:'12px', borderRadius:'10px', cursor:'pointer', border:'2px solid', borderColor:on?'#a8c9c4':'rgba(0,0,0,0.08)', background:on?'rgba(168,201,196,0.12)':'#f7f5f0', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', justifyContent:'center' }}>
                       <span style={{ fontSize:'20px' }}>{icon}</span>
-                      <span style={{ fontSize:'13px', fontWeight:settings.location.assessmentType===v?600:400, color:'#1a2e2b' }}>{label}</span>
-                      {settings.location.assessmentType===v&&<span style={{ color:'#a8c9c4' }}>✓</span>}
-                    </div>
-                  ))}
+                      <span style={{ fontSize:'13px', fontWeight:on?600:400, color:'#1a2e2b' }}>{label}</span>
+                      {on&&<span style={{ color:'#a8c9c4' }}>✓</span>}
+                    </button>
+                    )
+                  })}
                 </div>
-                <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'8px' }}>Saving a location-wide default isn’t available yet. For now, set the assessment type per client when scheduling.</p>
               </div>
             </div>
 

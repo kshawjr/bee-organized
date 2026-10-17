@@ -208,9 +208,20 @@ describe('the Send-to-Jobber wizard — the picker', () => {
   })
 
   // ── two addresses: the question ─────────────────────────────
-  it('TWO addresses — the picker appears between action and details, and defaults to current', async () => {
+  // Request path: the question comes AFTER the details, because that is
+  // where the assessment type is picked — and a virtual assessment never
+  // asks it (the route keeps the property off the request).
+  const toPicker = async () => {
+    await pickRequest()
+    await act(async () => { contains('Review')!.click() })
+  }
+
+  it('TWO addresses — on a Request the picker comes after the details, and defaults to current', async () => {
     await mount({ person: { formerAddresses: [FORMER] } })
     await pickRequest()
+    expect(picker(), 'details first').toBeNull()
+    expect(host.querySelector('button[aria-label="Include assessment"]'), 'on request-details').toBeTruthy()
+    await act(async () => { contains('Review')!.click() })
     expect(picker(), 'the picker step').toBeTruthy()
     expect(host.textContent).toContain('Which address is this for?')
     expect(choice('current')!.getAttribute('aria-checked')).toBe('true')
@@ -228,21 +239,19 @@ describe('the Send-to-Jobber wizard — the picker', () => {
 
   it('TWO addresses — accepting the default sends property_choice "current"', async () => {
     await mount({ person: { formerAddresses: [FORMER] } })
-    await pickRequest()
+    await toPicker()
     await act(async () => { contains('Continue')!.click() })
-    await act(async () => { contains('Review')!.click() })
     await act(async () => { contains('Send to Jobber')!.click() })
     expect(posts[0].property_choice).toBe('current')
   })
 
   it('TWO addresses — picking the second address sends its key, and the confirm names it', async () => {
     await mount({ person: { formerAddresses: [FORMER] } })
-    await pickRequest()
+    await toPicker()
     await act(async () => { choice('former:0')!.click() })
     expect(choice('former:0')!.getAttribute('aria-checked')).toBe('true')
     expect(choice('current')!.getAttribute('aria-checked')).toBe('false')
     await act(async () => { contains('Continue')!.click() })
-    await act(async () => { contains('Review')!.click() })
     // the confirm must name the house it is about to send to — the last
     // place a wrong address could hide before real records are created
     expect(host.textContent).toContain('118 Elmhurst Rd, Pittsburgh, PA 15237')
@@ -251,14 +260,32 @@ describe('the Send-to-Jobber wizard — the picker', () => {
     expect(posts[0].creation_type).toBe('request_only')
   })
 
-  it('TWO addresses — Back from the details step returns to the picker, keeping the pick', async () => {
+  it('TWO addresses — Back from the confirm returns to the picker, keeping the pick; Back again reaches the details', async () => {
     await mount({ person: { formerAddresses: [FORMER] } })
-    await pickRequest()
+    await toPicker()
     await act(async () => { choice('former:0')!.click() })
     await act(async () => { contains('Continue')!.click() })
     await act(async () => { byText('Back')!.click() })
-    expect(picker(), 'back on the picker, not the action step').toBeTruthy()
+    expect(picker(), 'back on the picker').toBeTruthy()
     expect(choice('former:0')!.getAttribute('aria-checked')).toBe('true')
+    await act(async () => { byText('Back')!.click() })
+    expect(host.querySelector('button[aria-label="Include assessment"]'), 'back on request-details').toBeTruthy()
+  })
+
+  it('TWO addresses — a VIRTUAL assessment never asks, and sends no property_choice', async () => {
+    await mount({ person: { formerAddresses: [FORMER] } })
+    await pickRequest()
+    await act(async () => { aria('Include assessment')!.click() })
+    await act(async () => { aria('Virtual')!.click() })
+    const date = host.querySelector('input[aria-label="Assessment date"]') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => { setter.call(date, '2026-08-01'); date.dispatchEvent(new Event('input', { bubbles: true })) })
+    await act(async () => { contains('Review')!.click() })
+    expect(picker(), 'straight to the confirm').toBeNull()
+    expect(host.textContent).not.toContain('118 Elmhurst Rd')
+    await act(async () => { contains('Send to Jobber')!.click() })
+    expect(posts[0].assessment_type).toBe('virtual')
+    expect('property_choice' in posts[0]).toBe(false)
   })
 
   it('TWO addresses — the picker sits on the JOB path too, and the job confirm names the property', async () => {
@@ -284,14 +311,16 @@ describe('the Send-to-Jobber wizard — the picker', () => {
 describe('the send route — resolving the chosen property', () => {
   it('resolves the choice against the LEAD ROW, not against the string the client sent', () => {
     expect(routeSrc).toContain('buildAddressChoices(')
-    expect(routeSrc).toContain('resolveAddressChoice(addressChoices, property_choice)')
+    expect(routeSrc).toContain('resolveAddressChoice(addressChoices, effectiveChoice)')
+    // property_choice reaches it unchanged except on a virtual assessment
+    expect(routeSrc).toContain('const effectiveChoice = isVirtualAssessment ? undefined : property_choice')
     // built from the lead's own columns + former_addresses
     expect(routeSrc).toMatch(/buildAddressChoices\(\s*\{ address: lead\.address/)
     expect(routeSrc).toContain('lead.former_addresses')
   })
 
   it('a key the lead does not hold is a hard 400 — never a silent fall back to the other house', () => {
-    expect(routeSrc).toMatch(/isFormerChoiceKey\(property_choice\) && !sendChoice/)
+    expect(routeSrc).toMatch(/isFormerChoiceKey\(effectiveChoice\) && !sendChoice/)
     expect(routeSrc).toContain('that address is no longer on this client')
   })
 

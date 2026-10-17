@@ -217,7 +217,8 @@ describe('send-to-jobber route wiring', () => {
   it('the rest of the request payload is byte-for-byte unchanged', () => {
     expect(route).toContain('clientId: jobberClientGlobalId')
     expect(route).toContain('title:    requestTitle')
-    expect(route).toContain('if (jobberPropertyGlobalId) requestInput.propertyId = jobberPropertyGlobalId')
+    // unchanged except a virtual assessment keeps the property off the request
+    expect(route).toContain('if (jobberPropertyGlobalId && !isVirtualAssessment) requestInput.propertyId = jobberPropertyGlobalId')
     expect(route).toContain('if (salesPersonJobberId) requestInput.salespersonId = salesPersonJobberId')
     expect(route).toContain('mutation RequestCreate($input: RequestCreateInput!)')
   })

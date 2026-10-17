@@ -426,6 +426,9 @@ describe('a client with more than one address is asked which', () => {
     await mount(<SendToJobberModal person={twoHousePerson} engagementId="eng-NEW" addressKey="former:7" onDone={() => {}} onClose={() => {}} />)
     await click(q('button[aria-label="Create a Request"]')!)
     await click(btn('Continue')!)
+    // Request path: the question comes after the details (where a virtual
+    // assessment would skip it entirely)
+    await click(btn('Review')!)
     expect(q('[data-address-picker]')).toBeTruthy()
   })
 })

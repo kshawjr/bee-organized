@@ -645,7 +645,8 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     const [, applied] = (updateLead as any).mock.calls[0]
     expect(applied.addresses).toEqual([
       { type: 'Billing', value: 'PO Box 12' },
-      { type: 'Service', value: '500 Oak Ave, Austin, TX, 78701' },
+      // the parts move with the value — Send to Jobber reads them first
+      { type: 'Service', value: '500 Oak Ave, Austin, TX, 78701', street: '500 Oak Ave', city: 'Austin', state: 'TX', zip: '78701' },
     ])
   })
 

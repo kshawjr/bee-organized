@@ -378,13 +378,19 @@ export async function PATCH(
   // itself (the classic popup does), rewrite the first Service-type
   // entry's value in step — other entries (Billing, Moving From…) are
   // untouched. On a full clear the matched entry is dropped.
+  // The entry's street/city/state/zip move with it: Send to Jobber reads
+  // those parts FIRST (pickPrimaryAddress), so rewriting only `value` left a
+  // corrected address sending the OLD street and a blank city (5 of the 100
+  // list-addressed leads already disagreed, 2026-10-16).
   const addrDiff = diffAddressPatch(patch, existing as any)
   if (addrDiff.changed && !('addresses' in patch) && Array.isArray((existing as any).addresses) && (existing as any).addresses.length > 0) {
     const arr: any[] = (existing as any).addresses
     const idx = Math.max(0, arr.findIndex(a => a && a.type === 'Service'))
     patch.addresses = addrDiff.cleared
       ? arr.filter((_, i) => i !== idx)
-      : arr.map((a, i) => (i === idx ? { ...a, value: addrDiff.display } : a))
+      : arr.map((a, i) => (i === idx
+          ? { ...a, value: addrDiff.display, street: addrDiff.street, city: addrDiff.city, state: addrDiff.state, zip: addrDiff.zip }
+          : a))
   }
 
   // ─── THE PENCIL IS ALWAYS A CORRECTION ────────────────────────
