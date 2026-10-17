@@ -14,6 +14,11 @@
 // ENGINE, not here — so no future caller of syncWebsiteLeadsToMailchimp can
 // forget it. A gated-off location gets { pushed: 0, reason } and zero requests
 // are sent to Mailchimp.
+//
+// The FIRST sync for a location also needs `confirm: { count, list_id }` in the
+// body, matching what the engine is about to send. Without it the engine
+// answers reason 'needs_confirmation' with the count and audience name, and
+// sends nothing — that check is in the engine too, so this route only relays.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -45,7 +50,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const report = await syncWebsiteLeadsToMailchimp(target.locationUuid)
+    const c = body?.confirm
+    const confirm = c && Number.isInteger(c.count) && typeof c.list_id === 'string'
+      ? { count: c.count as number, listId: c.list_id as string }
+      : null
+    const report = await syncWebsiteLeadsToMailchimp(target.locationUuid, { confirm })
     if (report.errors.length) {
       console.error('[mailchimp-sync]', target.locationUuid, '—', report.failed, 'failed:',
         JSON.stringify(report.errors.slice(0, 10)))
@@ -61,6 +70,9 @@ export async function POST(request: NextRequest) {
       pushed: report.pushed,
       skipped: report.skipped,
       failed: report.failed,
+      confirm: report.confirm
+        ? { count: report.confirm.count, list_id: report.confirm.listId, list_name: report.confirm.listName }
+        : null,
     })
   } catch (err: any) {
     console.error('[mailchimp-sync] run failed:', err)

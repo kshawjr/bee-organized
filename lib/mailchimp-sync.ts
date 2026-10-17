@@ -12,6 +12,18 @@
 // connection or a missing audience: no half-configured location ever emits a
 // network request from here.
 //
+// ── THE FIRST SYNC IS CONFIRMED, NUMBER AND LIST, BEFORE ANYTHING SENDS ─────
+// Flipping mailchimp_sync_live used to mean the first press of Sync now
+// subscribed every eligible person at once, with no warning (19 real people
+// for Chattanooga). So for a location that has never had a lead synced, this
+// function sends NOTHING unless the caller passes a `confirm` naming the exact
+// count and audience it is about to send. Anything else — no confirm, a stale
+// count (a lead arrived since the owner looked), a different audience — gets
+// reason 'needs_confirmation' with the CURRENT count and list name, and zero
+// requests. The check lives here, not in the card or the route, for the same
+// reason the sync_live gate does: a bare POST to the route must not get round
+// it. "First" = no lead at this location has mailchimp_synced_at set.
+//
 // ── ELIGIBILITY IS THE CONSENT BASIS ────────────────────────────────────────
 // source = 'Website' is the ONLY qualifying source: those people filled in the
 // location's own form. Imported Jobber clients, manual entries, referrals —
@@ -101,7 +113,10 @@ export function buildMemberTags(args: {
 export type SyncReport = {
   ran: boolean
   // ran:false reasons — every one of them means ZERO requests were sent.
-  reason?: 'sync_not_enabled' | 'not_connected' | 'no_audience' | 'location_not_found'
+  reason?: 'sync_not_enabled' | 'not_connected' | 'no_audience' | 'location_not_found' | 'needs_confirmation'
+  // Present only with reason 'needs_confirmation': what the first sync WOULD
+  // send, for the owner to confirm. Echo count + listId back as `confirm`.
+  confirm?: { count: number; listId: string; listName: string | null }
   pushed: number
   skipped: number
   failed: number
@@ -120,11 +135,16 @@ async function readJson(res: Response): Promise<any> {
   try { return JSON.parse(text) } catch { return { detail: text.slice(0, 200) } }
 }
 
-export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise<SyncReport> {
+export type SyncConfirm = { count: number; listId: string }
+
+export async function syncWebsiteLeadsToMailchimp(
+  locationUuid: string,
+  opts: { confirm?: SyncConfirm | null } = {},
+): Promise<SyncReport> {
   // ── 1. The gate ─────────────────────────────────────────────
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, mailchimp_connected, mailchimp_access_token, mailchimp_server_prefix, mailchimp_list_id, mailchimp_sync_live')
+    .select('id, mailchimp_connected, mailchimp_access_token, mailchimp_server_prefix, mailchimp_list_id, mailchimp_list_name, mailchimp_sync_live')
     .eq('id', locationUuid)
     .maybeSingle()
   if (locErr || !loc) return zeroReport('location_not_found')
@@ -184,6 +204,28 @@ export async function syncWebsiteLeadsToMailchimp(locationUuid: string): Promise
 
   if (eligible.length === 0) {
     return { ran: true, pushed: 0, skipped, failed: 0, errors: [] }
+  }
+
+  // ── 2b. The first-sync confirmation (see header) ────────────
+  // A failed count throws rather than guessing "not first" — guessing wrong
+  // is exactly the unconfirmed mass subscribe this exists to stop.
+  const { count: syncedBefore, error: syncedErr } = await supabaseService
+    .from('leads')
+    .select('id', { count: 'exact', head: true })
+    .eq('location_uuid', locationUuid)
+    .not('mailchimp_synced_at', 'is', null)
+  if (syncedErr || syncedBefore == null) {
+    throw new Error(`synced-before count failed: ${syncedErr?.message || 'no count'}`)
+  }
+  if (syncedBefore === 0) {
+    const c = opts.confirm
+    const confirmed = !!c && c.count === eligible.length && c.listId === listId
+    if (!confirmed) {
+      return {
+        ran: false, reason: 'needs_confirmation', pushed: 0, skipped, failed: 0, errors: [],
+        confirm: { count: eligible.length, listId, listName: (loc.mailchimp_list_name as string) || null },
+      }
+    }
   }
 
   // ── 3. Derivation inputs (the hub-all-overview recipe) ──────

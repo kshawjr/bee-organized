@@ -111,6 +111,13 @@ const lead = (over: any = {}) => ({
 function standardResolver(leads: any[], totalWebsite: number, opts: any = {}) {
   return (q: any): Resolved => {
     if (q.table === 'locations') return { data: { ...liveLocation, ...(opts.location || {}) }, error: null }
+    // The "synced before?" count behind the first-sync confirmation. These
+    // push tests are about the push, so they default to a location that has
+    // synced before (no confirm needed); the confirmation has its own suite,
+    // lib/beta-mailchimp-first-sync-confirm.test.tsx.
+    if (q.table === 'leads' && q.head && q.calls.some((c: any[]) => c[0] === 'not' && c[1] === 'mailchimp_synced_at')) {
+      return { data: null, error: null, count: opts.syncedBefore ?? 1 }
+    }
     if (q.table === 'leads' && q.head) return { data: null, error: null, count: totalWebsite }
     if (q.table === 'leads') return { data: leads, error: null }
     if (q.table === 'engagements') return { data: opts.engagements || [], error: null }

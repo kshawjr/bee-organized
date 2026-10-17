@@ -22,6 +22,12 @@
 // owner cannot see and did not set. "ready" here means "set up", never
 // "sending".
 //
+// The card DOES now say, as a separate line under it, when sending is not
+// switched on yet (NOT_LIVE_COPY) — an owner who connected and heard nothing
+// for six weeks was looking at a dead end. That line comes from a read-only
+// status route, never from this derivation: the three states above still mean
+// "set up", and nothing an owner can do changes the switch.
+//
 // The COPY lives here rather than in the component so the words are assertable
 // without mounting anything, and so the three states cannot each grow their own
 // tone in a JSX branch. Sentence case throughout, owner language: no "OAuth",
@@ -93,3 +99,16 @@ export function mailchimpCopy(state: MailchimpState, accountName?: string | null
 // this screen is not broken.
 export const NO_AUDIENCES_COPY =
   'This Mailchimp account has no audiences yet. Create one in Mailchimp, then come back and refresh this page.'
+
+// Under the card for a location that is connected but not switched on. Words
+// are Kevin's (2026-10-17).
+export const NOT_LIVE_COPY =
+  'Connected. Syncing isn\u2019t switched on for your location yet, we\u2019ll let you know when it is.'
+
+// The first-sync confirmation. Count and audience name come from the SERVER's
+// needs_confirmation answer — the card never computes either.
+export function firstSyncConfirmCopy(count: number, listName?: string | null): string {
+  const people = count === 1 ? '1 person' : `${count} people`
+  const list = (listName || '').trim() || 'your Mailchimp audience'
+  return `This will subscribe ${people} to ${list}. They have not been synced before.`
+}

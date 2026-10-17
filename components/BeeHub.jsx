@@ -35,7 +35,7 @@ import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
-import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY } from "@/lib/mailchimp-connection-state"
+import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignatureCard, LocationSignatureLinksCard, SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import { financialsVisible } from "@/lib/financial-access"
@@ -19384,14 +19384,18 @@ export function TextsComingSoon() {
 // assertable without mounting this and the three branches cannot each drift
 // into their own tone.
 //
-// WHAT THIS CARD DOES NOT SHOW: mailchimp_sync_live. It is false for every
-// location and Kevin turns it on by hand, per location, exactly like
-// notifications_live. It is not read here, not written here, and not hinted at
-// — which is why the finished state says "Nothing is being sent to Mailchimp
-// yet" rather than anything about syncing.
+// SENDING SWITCHED ON OR NOT: Kevin turns it on by hand, per location, and
+// nothing here can change that. What the card does now (2026-10-17) is SAY so:
+// a connected location asks GET /api/mailchimp/status and, while the answer is
+// not live, shows NOT_LIVE_COPY under the card — an owner who connected used to
+// hear nothing about what happens next. A failed status read shows nothing
+// rather than guessing.
 //
-// NOTHING SYNCS in this step. The only reads are the account's own audience
-// list; the only writes are the chosen audience and the disconnect.
+// THE FIRST SYNC IS CONFIRMED. The server answers the first Sync now for a
+// location with reason 'needs_confirmation' + the count and audience name, and
+// sends nothing. The card shows those numbers, and only "Yes" re-sends with
+// them as `confirm`. If a lead arrived in between, the server asks again with
+// the new count — the number confirmed is always the number sent.
 export function MailchimpCard({ settings, updateLocation }) {
   const locationId  = settings.location.locId || null
   const connected   = !!settings.location.mailchimpConnected
@@ -19430,22 +19434,42 @@ export function MailchimpCard({ settings, updateLocation }) {
   // a gated-off location learns that from the response's reason.
   const [syncing, setSyncing]       = useState(false)
   const [syncResult, setSyncResult] = useState(null)
+  // The server's needs_confirmation answer, verbatim: { count, list_id, list_name }.
+  const [pendingConfirm, setPendingConfirm] = useState(null)
 
-  async function runSync() {
+  // null = not known (not asked yet, or the read failed) — shows nothing.
+  const [live, setLive] = useState(null)
+  useEffect(() => {
+    if (!connected || !locationId) { setLive(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/mailchimp/status?location_id=' + encodeURIComponent(locationId))
+        if (!r.ok) return
+        const j = await r.json()
+        if (!cancelled) setLive(j.live === true)
+      } catch { /* unknown stays unknown */ }
+    })()
+    return () => { cancelled = true }
+  }, [connected, locationId])
+
+  async function runSync(confirm = null) {
     if (!locationId) { setSaveErr('No location id — reload and try again.'); return }
-    setSyncing(true); setSyncResult(null); setSaveErr(null)
+    setSyncing(true); setSyncResult(null); setSaveErr(null); setPendingConfirm(null)
     try {
       const r = await fetch('/api/mailchimp/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location_id: locationId }),
+        body: JSON.stringify(confirm ? { location_id: locationId, confirm } : { location_id: locationId }),
       })
       if (!r.ok) {
         let detail = `sync_failed_${r.status}`
         try { const j = await r.json(); detail = j.error || detail } catch {}
         setSaveErr(detail); setSyncing(false); return
       }
-      setSyncResult(await r.json())
+      const j = await r.json()
+      if (j.reason === 'needs_confirmation' && j.confirm) { setPendingConfirm(j.confirm); return }
+      setSyncResult(j)
     } catch (e) {
       setSaveErr(String(e?.message || e))
     } finally {
@@ -19642,10 +19666,31 @@ export function MailchimpCard({ settings, updateLocation }) {
                 The result line repeats the server's report; when the location's
                 sending isn't switched on yet, the server says so and nothing
                 was sent — the card just relays that in owner words. */}
-            <button onClick={runSync} disabled={syncing} className="bee-small-action"
-              style={{ marginTop:'10px', padding:'9px 16px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
-              {syncing ? 'Syncing…' : 'Sync now'}
-            </button>
+            {!pendingConfirm && (
+              <button onClick={()=>runSync()} disabled={syncing} className="bee-small-action"
+                style={{ marginTop:'10px', padding:'9px 16px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
+                {syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+            )}
+
+            {/* First sync: nothing has been sent; the server is asking. */}
+            {pendingConfirm && (
+              <div style={{ marginTop:'10px', background:HT.state.warning.soft, borderRadius:HT.radius.control, padding:'11px 12px' }}>
+                <p style={{ fontSize:'13px', color:HT.ink.primary, lineHeight:1.6, margin:'0 0 9px' }}>
+                  {firstSyncConfirmCopy(pendingConfirm.count, pendingConfirm.list_name)}
+                </p>
+                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                  <button onClick={()=>runSync({ count: pendingConfirm.count, list_id: pendingConfirm.list_id })} disabled={syncing} className="bee-small-action"
+                    style={{ padding:'8px 14px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
+                    {syncing ? 'Syncing…' : `Yes, subscribe ${pendingConfirm.count}`}
+                  </button>
+                  <button onClick={()=>setPendingConfirm(null)} disabled={syncing} className="bee-small-action"
+                    style={{ padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             {syncResult && (
               <p style={{ fontSize:'12px', color:syncResult.ran?HT.ink.secondary:HT.state.warning.fg, background:syncResult.ran?HT.surface.sunken:HT.state.warning.soft, borderRadius:HT.radius.control, padding:'8px 10px', margin:'8px 0 0', lineHeight:1.5 }}>
@@ -19684,6 +19729,10 @@ export function MailchimpCard({ settings, updateLocation }) {
           <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'10px 0 0', lineHeight:1.5 }}>{saveErr}</p>
         )}
       </div>
+
+      {connected && live === false && (
+        <p style={{ fontSize:'12px', color:HT.ink.secondary, lineHeight:1.5, margin:'8px 2px 0' }}>{NOT_LIVE_COPY}</p>
+      )}
     </div>
   )
 }

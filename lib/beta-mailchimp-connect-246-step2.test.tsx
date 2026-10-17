@@ -17,10 +17,11 @@
 //      location no matter what id they send. The rule lives in one function so
 //      four routes cannot drift; this pins the function.
 //
-//   3. sync_live LEAKING INTO OWNER-FACING COPY. It is false everywhere and
-//      Kevin turns it on by hand, per location. If it ever became an input to
-//      the card's state or words, the card would start describing a switch the
-//      owner cannot see — so it is pinned OUT, at the source.
+//   3. sync_live LEAKING INTO THE CARD'S STATE. Kevin turns it on by hand, per
+//      location. Since 2026-10-17 the owner IS told when it is off (one line,
+//      from a read-only status route) — but it is still not an input to the
+//      three setup states, the hub page still never selects it, and no route
+//      an owner can reach ever sets it true.
 //
 //   4. A SILENT EMPTY DROPDOWN. An account with zero audiences must be told to
 //      go make one. An empty <select> is the one outcome that explains nothing.
@@ -103,9 +104,9 @@ describe('the three states, and the middle one that must not read as finished', 
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2 · sync_live IS NOT PART OF THE OWNER SURFACE
+// 2 · sync_live: TOLD TO THE OWNER, NEVER SET BY THEM
 // ═══════════════════════════════════════════════════════════════════════════
-describe('mailchimp_sync_live never reaches an owner', () => {
+describe('mailchimp_sync_live is read-only to an owner', () => {
   const stateSrc = readFileSync(join(process.cwd(), 'lib/mailchimp-connection-state.ts'), 'utf8')
   const beehubSrc = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
 
@@ -125,12 +126,25 @@ describe('mailchimp_sync_live never reaches an owner', () => {
     expect(mailchimpCopy(deriveMailchimpState(on))).toEqual(mailchimpCopy(deriveMailchimpState(off)))
   })
 
-  it('the card never reads it', () => {
+  it('the card learns it ONLY from the status route, never from a column', () => {
     const start = beehubSrc.indexOf('export function MailchimpCard(')
     expect(start).toBeGreaterThan(-1)
     const after = beehubSrc.slice(start + 10)
     const body = beehubSrc.slice(start, start + 10 + after.search(/\n(export )?function [A-Z]/))
-    expect(body).not.toMatch(/sync_?[Ll]ive/)
+    const code = body.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    expect(code).not.toMatch(/mailchimp_sync_live/)
+    expect(code).toContain('/api/mailchimp/status?location_id=')
+  })
+
+  it('the status route reads it and returns a boolean — it never writes', () => {
+    const src = readFileSync(join(process.cwd(), 'app/api/mailchimp/status/route.ts'), 'utf8')
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    expect(code).toMatch(/resolveMailchimpTarget/)
+    expect(code).toMatch(/export async function GET/)
+    expect(code).not.toMatch(/export async function (POST|PUT|PATCH|DELETE)/)
+    expect(code).not.toMatch(/\.update\(|\.insert\(|\.upsert\(/)
+    expect(code).not.toMatch(/mailchimp_access_token|mailchimp_server_prefix/)
+    expect(code).toMatch(/live: data\.mailchimp_sync_live === true/)
   })
 
   it('the server never selects it into a client payload', () => {
@@ -243,9 +257,12 @@ describe('the card renders the state it is in', () => {
     const btn = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim())
     expect(btn).toContain('Disconnect')
     // Finished means finished: no picker still hanging around, and no audience
-    // fetch for a state that has nothing to choose.
+    // fetch for a state that has nothing to choose. The one read it does make
+    // is the read-only status check behind the "not switched on yet" line.
     expect(container.querySelector('select')).toBeNull()
-    expect(fetchMock.mock.calls).toHaveLength(0)
+    const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
+    expect(urls.filter((u: string) => u.includes('/audiences'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?'))).toHaveLength(0)
   })
 
   it('Disconnect asks first, and says Mailchimp itself is untouched', async () => {
@@ -258,8 +275,10 @@ describe('the card renders the state it is in', () => {
     await act(async () => { disconnect.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
     expect(container.textContent).toMatch(/Nothing in Mailchimp is changed or deleted/i)
-    // Asking is not doing.
-    expect(fetchMock.mock.calls).toHaveLength(0)
+    // Asking is not doing: no disconnect call (the status read on mount is not one).
+    const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
+    expect(urls.filter((u: string) => u.includes('disconnect'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?'))).toHaveLength(0)
   })
 
   it('a failed connect return is surfaced, not swallowed', async () => {
@@ -291,6 +310,7 @@ describe('the connect surface reads no leads and pushes no members', () => {
     'app/api/mailchimp/callback/route.ts',
     'app/api/mailchimp/audiences/route.ts',
     'app/api/locations/[id]/mailchimp-disconnect/route.ts',
+    'app/api/mailchimp/status/route.ts',
   ]
 
   it('no connect-surface file touches the leads table', () => {

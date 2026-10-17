@@ -60,3 +60,4 @@ property-backfill-progress*.json
 *service_account*.json
 *gserviceaccount*.json
 *-sa-key*.json
+.env*
