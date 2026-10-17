@@ -32,6 +32,16 @@ import { sendStageEmail } from '@/lib/stage-emails'
 
 // Prevent Next.js from trying to prerender this route at build time.
 export const dynamic = 'force-dynamic'
+// NOT redundant with force-dynamic (#95/#96): supabase-js reads go through
+// Next's patched fetch as un-annotated GETs, and in 14.2.3 force-dynamic does
+// not stop the Data Cache keeping them. Without this, ensureUnsubscribeToken's
+// per-lead read was answered from the cache with the "no token" it saw before
+// the token was minted — for every hour after — so the welcome and closed-job
+// follow-ups were refused as canspam_no_token up to 18 days running (proven
+// from Supabase edge logs 2026-10-17: ~30 token PATCHes an hour reached the
+// database, 0–3 of the reads that must precede them did). It also froze the
+// per-lead lookups the drip sender's opt-out check reads.
+export const fetchCache = 'force-no-store'
 
 // Hard cap per cron run — safety against a flood, prevents Vercel
 // function timeout. Hourly cron + 100 cap = up to 2400 sends/day,
