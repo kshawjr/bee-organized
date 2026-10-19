@@ -404,3 +404,93 @@ describe('buildLeadSlackMessage — #86 resubmission card', () => {
     expect(JSON.stringify(body.attachments)).toContain('Returning client')
   })
 })
+
+// ── Transfer card (19 Oct 2026) ─────────────────────────────────────────────
+// A lead corporate moved to a location gets the SAME card intake posts, plus
+// one "Moved here from X — reason" line on top and a "moved to you" preview.
+// Before this a transfer posted nothing to Slack at all.
+describe('buildLeadSlackMessage — transfer card', () => {
+  const flat = (blocks: any[]) => JSON.stringify(blocks)
+
+  it('preview summary reads "🔀 Lead moved to you (<location>)", mirrored to fallback', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Palm Beach', leadUrl: null,
+      transfer: { from: 'Other', reason: null },
+    })
+    expect(msg.text).toBe('🔀 Lead moved to you (Palm Beach)')
+    expect(msg.attachments[0].fallback).toBe('🔀 Lead moved to you (Palm Beach)')
+  })
+
+  it('puts ONE line above the headline with where it came from and why', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Southwest Austin', leadUrl: 'https://app.example.com/clients/lead-1',
+      transfer: { from: 'Central Austin', reason: 'Zip 78746 is ours' },
+    })
+    const blocks = msg.attachments[0].blocks
+    expect(blocks[0]).toEqual({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '🔀 *Moved here* from Central Austin — Zip 78746 is ours' }],
+    })
+    expect(blocks[1]).toEqual({ type: 'section', text: { type: 'mrkdwn', text: '*Jane Prospect*' } })
+  })
+
+  it('an unrouted lead (no reason) says only where it came from', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Palm Beach', leadUrl: null,
+      transfer: { from: 'Other' },
+    })
+    expect(msg.attachments[0].blocks[0].elements[0].text).toBe('🔀 *Moved here* from Other')
+  })
+
+  it('the rest of the card is the new-lead card, block for block', () => {
+    const args = { lead: LEAD, locationName: 'Boulder', leadUrl: 'https://app.example.com/clients/lead-1' }
+    const plain = buildLeadSlackMessage(args)
+    const moved = buildLeadSlackMessage({ ...args, transfer: { from: 'Other', reason: 'x' } })
+    expect(moved.attachments[0].blocks.slice(1)).toEqual(plain.attachments[0].blocks)
+    expect(moved.attachments[0].color).toBe(plain.attachments[0].color)
+    // Log call + Open still there.
+    expect(flat(moved.attachments[0].blocks)).toContain('"action_id":"log_call"')
+    expect(flat(moved.attachments[0].blocks)).toContain('Open in Bee Hub')
+  })
+
+  it('escapes the origin and reason, and caps a long reason at 140 chars', () => {
+    const long = 'a'.repeat(200)
+    const msg = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Boulder', leadUrl: null,
+      transfer: { from: 'A & <B>', reason: long },
+    })
+    const line = msg.attachments[0].blocks[0].elements[0].text
+    expect(line).toContain('from A &amp; &lt;B&gt; — ')
+    expect(line).toContain('a'.repeat(140) + '…')
+    expect(line).not.toContain('a'.repeat(141))
+
+    const tricky = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Boulder', leadUrl: null,
+      transfer: { from: 'Other', reason: '<!channel> wrong zip' },
+    })
+    expect(tricky.attachments[0].blocks[0].elements[0].text).toBe('🔀 *Moved here* from Other — &lt;!channel&gt; wrong zip')
+  })
+
+  it('a blank origin falls back to "another location"', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD, locationName: 'Boulder', leadUrl: null, transfer: { from: '  ' },
+    })
+    expect(msg.attachments[0].blocks[0].elements[0].text).toBe('🔀 *Moved here* from another location')
+  })
+
+  it('notifyNewLeadSlack forwards transfer into the posted card', async () => {
+    LOC_ROW = { slack_connected: true, slack_bot_token: 'xoxb-1', slack_channel_id: 'C1' }
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ ok: true }),
+    } as any)
+    const res = await notifyNewLeadSlack({
+      locationId: 'loc-uuid-1', locationName: 'Palm Beach', baseUrl: null,
+      transfer: { from: 'Other' }, lead: LEAD,
+    })
+    expect(res).toEqual({ ok: true })
+    const body = JSON.parse((fetchSpy.mock.calls[0] as any[])[1].body)
+    expect(body.channel).toBe('C1')
+    expect(body.text).toBe('🔀 Lead moved to you (Palm Beach)')
+    expect(JSON.stringify(body.attachments)).toContain('Moved here')
+  })
+})

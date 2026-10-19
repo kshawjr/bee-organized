@@ -102,12 +102,20 @@ vi.mock('@/lib/drip-lifecycle', () => ({
   stopActiveDripsForLead: vi.fn(async () => {}),
   startDripForLead: vi.fn(async () => ({ enrolled: true })),
 }))
+vi.mock('@/lib/slack-bot', () => ({
+  notifyNewLeadSlack: vi.fn(async () => ({ ok: true })),
+}))
+vi.mock('@/lib/notification-log', () => ({
+  logSlackNotification: vi.fn(async () => {}),
+}))
 vi.mock('@/lib/realtime-broadcast', () => ({
   broadcastLeadMoved: vi.fn(async () => true),
 }))
 
 import { POST } from '@/app/api/leads/[id]/transfer/route'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { notifyNewLeadSlack } from '@/lib/slack-bot'
+import { logSlackNotification } from '@/lib/notification-log'
 import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import {
@@ -152,6 +160,9 @@ beforeEach(() => {
   })
   vi.mocked(notifyNewLead).mockClear()
   vi.mocked(broadcastLeadMoved).mockClear()
+  vi.mocked(notifyNewLeadSlack).mockReset()
+  vi.mocked(notifyNewLeadSlack).mockResolvedValue({ ok: true })
+  vi.mocked(logSlackNotification).mockClear()
   vi.mocked(stopActiveDripsForLead).mockClear()
   vi.mocked(startDripForLead).mockClear()
   vi.mocked(startDripForLead).mockResolvedValue({ enrolled: true } as any)
@@ -442,5 +453,80 @@ describe('unchanged refusals', () => {
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('cannot_transfer_to_loc_other')
     expect(writes()).toEqual([])
+  })
+})
+
+// ── SLACK (19 Oct 2026) ──────────────────────────────────────────
+// A transfer used to email the destination and post nothing to Slack, so an
+// owner who works from Slack never heard about a moved lead. The destination
+// now gets the intake card with one "Moved here" line; the losing location is
+// deliberately told nothing.
+describe('the destination is told in Slack', () => {
+  it('posts the card to the DESTINATION with where it came from and why', async () => {
+    const res = await call(GOOD)
+    expect(res.status).toBe(200)
+    expect((await res.json()).slack_posted).toBe(true)
+    expect(notifyNewLeadSlack).toHaveBeenCalledTimes(1)
+    const arg = vi.mocked(notifyNewLeadSlack).mock.calls[0][0]
+    expect(arg.locationId).toBe('sw-uuid')
+    expect(arg.locationName).toBe('Southwest Austin')
+    expect(arg.transfer).toEqual({ from: 'Central Austin', reason: 'Zip 78746 belongs to Southwest Austin' })
+    expect(arg.lead).toMatchObject({ id: 'lead-1', name: 'Kim Terry', zip: '78746', request_details: 'Moving next month' })
+  })
+
+  it('the losing location gets NO Slack post', async () => {
+    await call(GOOD)
+    const targets = vi.mocked(notifyNewLeadSlack).mock.calls.map((c) => c[0].locationId)
+    expect(targets).toEqual(['sw-uuid'])
+  })
+
+  it('an unrouted lead says it came from "Other", with no reason', async () => {
+    h.state.lead = HOMED({ location_id: 'loc_other', location_uuid: 'other-uuid' })
+    const res = await call({ destination_location_id: 'sw-uuid' })
+    expect(res.status).toBe(200)
+    expect(vi.mocked(notifyNewLeadSlack).mock.calls[0][0].transfer).toEqual({ from: 'Other', reason: null })
+  })
+
+  it('writes the notification_log row against the destination', async () => {
+    await call(GOOD)
+    expect(logSlackNotification).toHaveBeenCalledWith(
+      { ok: true },
+      { lead_id: 'lead-1', lead_name: 'Kim Terry', location_id: 'sw-uuid', location_slug: 'loc_swaustin' },
+    )
+  })
+
+  it('a Slack failure (channel_not_found) is a warning — the move still succeeds', async () => {
+    vi.mocked(notifyNewLeadSlack).mockResolvedValue({ ok: false, error: 'channel_not_found' })
+    const res = await call(GOOD)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    expect(j.success).toBe(true)
+    expect(j.slack_posted).toBe(false)
+    expect(j.warnings).toContain('slack_notification_failed: channel_not_found')
+    expect(notifyNewLead).toHaveBeenCalledTimes(1)
+  })
+
+  it('a thrown Slack call is a warning and a failed log row, never a 500', async () => {
+    vi.mocked(notifyNewLeadSlack).mockRejectedValue(new Error('boom'))
+    const res = await call(GOOD)
+    expect(res.status).toBe(200)
+    expect((await res.json()).warnings).toContain('slack_notification_failed: boom')
+    expect(logSlackNotification).toHaveBeenCalledWith(
+      { ok: false, error: 'boom' }, expect.objectContaining({ location_id: 'sw-uuid' }),
+    )
+  })
+
+  it('a location without Slack is a quiet skip — no warning', async () => {
+    vi.mocked(notifyNewLeadSlack).mockResolvedValue({ ok: false, skipped: 'not_connected' })
+    const res = await call(GOOD)
+    const j = await res.json()
+    expect(j.slack_posted).toBe(false)
+    expect(j.warnings ?? []).not.toContainEqual(expect.stringContaining('slack'))
+  })
+
+  it('a refused move posts nothing', async () => {
+    h.state.counts = { engagements: 1 }
+    await call(GOOD)
+    expect(notifyNewLeadSlack).not.toHaveBeenCalled()
   })
 })

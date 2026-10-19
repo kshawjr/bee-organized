@@ -65,6 +65,12 @@ export type SlackLead = {
   zip?: string | null
 }
 
+// Where a transferred lead came from and why — see buildLeadSlackMessage.
+export type SlackTransfer = {
+  from: string | null
+  reason?: string | null
+}
+
 export type SlackPostResult = {
   ok: boolean
   skipped?: string
@@ -214,9 +220,16 @@ export function buildLeadSlackMessage(args: {
   // references stay — Slack only posts where the office INSTALLED the Bee Hub app,
   // so the #91 non-hub concern is email-only. Defaults false.
   resubmission?: boolean
+  // Corporate moved this lead here (POST /api/leads/:id/transfer). Adds ONE
+  // line above the headline saying where it came from and why, and reframes
+  // the preview summary; the rest of the card is the new-lead card unchanged.
+  // `from` is the old location's name ("Other" for the unrouted queue);
+  // `reason` is what corporate typed, absent for an unrouted lead.
+  transfer?: SlackTransfer | null
 }): { text: string; attachments: any[] } {
   const { lead, locationName, leadUrl } = args
   const resubmission = args.resubmission === true
+  const transfer = args.transfer ?? null
   const name = dash(lead.name)
 
   // ── Top-level text = single-line summary (NOT the full detail) ─────────
@@ -231,7 +244,9 @@ export function buildLeadSlackMessage(args: {
   const locPart = locationName?.trim() ? ` (${escapeMrkdwn(locationName.trim())})` : ''
   // #86 — the notification-preview line leads with the framing so a returning
   // client reads as one in the push/preview, not "New lead".
-  const summary = resubmission ? `🔁 Returning client${locPart}` : `🐝 New lead${locPart}`
+  const summary = transfer
+    ? `🔀 Lead moved to you${locPart}`
+    : resubmission ? `🔁 Returning client${locPart}` : `🐝 New lead${locPart}`
   const text = summary
 
   // ── Resolved, display-ready soft fields (null = omit) ──────
@@ -245,6 +260,20 @@ export function buildLeadSlackMessage(args: {
   const hasEmail = !!lead.email?.trim()
 
   const blocks: any[] = []
+
+  // 0. Transfer line — the one thing a moved lead's card adds. Origin and
+  //    reason are escaped like every other field; the reason is capped so a
+  //    long one can't push the card past Slack's "Show more" fold (the full
+  //    reason is on the lead's Timeline).
+  if (transfer) {
+    const from = transfer.from?.trim() ? escapeMrkdwn(transfer.from.trim()) : 'another location'
+    const reasonRaw = transfer.reason?.trim() || ''
+    const reasonShown = reasonRaw.length > 140 ? `${reasonRaw.slice(0, 140)}…` : reasonRaw
+    const line = reasonShown
+      ? `🔀 *Moved here* from ${from} — ${escapeMrkdwn(reasonShown)}`
+      : `🔀 *Moved here* from ${from}`
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: line }] })
+  }
 
   // 1. Returning-client eyebrow (#86) — a small context line ABOVE the headline
   //    on the resubmission card only, so someone reading the card body (not just
@@ -421,6 +450,8 @@ export async function notifyNewLeadSlack(args: {
   // #86 — returning client re-submitting (intake SOLID-merge path). Forwarded to
   // the card builder for the reframed copy; the gate/transport are unchanged.
   resubmission?: boolean
+  // A corporate transfer (the transfer route). Forwarded to the card builder.
+  transfer?: SlackTransfer | null
 }): Promise<SlackPostResult> {
   const { locationId, lead, baseUrl } = args
 
@@ -447,6 +478,7 @@ export async function notifyNewLeadSlack(args: {
     locationName,
     leadUrl,
     resubmission: args.resubmission === true,
+    transfer: args.transfer ?? null,
   })
   return postToSlack(locationId, message)
 }

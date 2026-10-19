@@ -73,6 +73,12 @@ vi.mock('@/lib/drip-lifecycle', () => ({
 // NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY) and push a warning
 // onto every success response. The transport, its payload and its
 // best-effort contract are covered in beta-transfer-broadcast.
+vi.mock('@/lib/slack-bot', () => ({
+  notifyNewLeadSlack: vi.fn(async () => ({ ok: true })),
+}))
+vi.mock('@/lib/notification-log', () => ({
+  logSlackNotification: vi.fn(async () => {}),
+}))
 vi.mock('@/lib/realtime-broadcast', () => ({
   broadcastLeadMoved: vi.fn(async () => true),
   locationTopic: (uuid: string) => `location:${uuid}`,

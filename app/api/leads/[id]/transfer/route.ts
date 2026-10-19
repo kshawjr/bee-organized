@@ -39,6 +39,12 @@
 //   • Notify the DESTINATION's effective recipients (resolveLeadRecipients
 //     resolves by UUID) with the standard new-lead email — the new owner
 //     learns a lead just landed in their inbox.
+//   • Post the destination's Slack card (19 Oct 2026) — the new-lead card with
+//     one "Moved here from X — reason" line on top. Until then a transfer was
+//     email-only, so an owner who lives in Slack never saw it. Same gate and
+//     log row as intake's post (notifyNewLeadSlack / logSlackNotification).
+//     The LOSING location is deliberately not told (Kevin, 19 Oct): nobody
+//     asked, and that card's Log call button would act on the new location.
 //   • Write a 'system' touchpoint recording the move. Its label is the SHARED
 //     TRANSFER_IN_LABEL constant, because the 35-day auto-close reads exactly
 //     this row to start the receiving owner's clock (lib/auto-close): if the
@@ -90,6 +96,8 @@ import {
 } from '@/lib/lead-transfer-rule'
 import { stopActiveDripsForLead, startDripForLead } from '@/lib/drip-lifecycle'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { notifyNewLeadSlack } from '@/lib/slack-bot'
+import { logSlackNotification } from '@/lib/notification-log'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 import { TRANSFER_IN_LABEL } from '@/lib/enquiry-exit'
 import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
@@ -135,7 +143,7 @@ export async function POST(
   // move writes with the service role, never an RLS-scoped client) ─
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, name, email, phone, project_type, request_details, preferred_contact, address, city, state, zip, location_id, location_uuid, assigned_to, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status')
+    .select('id, name, email, phone, project_type, request_details, preferred_contact, source, address, city, state, zip, location_id, location_uuid, assigned_to, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status')
     .eq('id', id)
     .single()
   if (loadError || !existing) {
@@ -221,6 +229,9 @@ export async function POST(
   // The old location's NAME, for the record. Cosmetic: a failed read falls
   // back to the slug rather than stopping a move.
   let originName: string = existing.location_id || 'global form'
+  // What the Slack card says it came from. An unrouted lead came from the
+  // holding pen, whose locations.name is "Other" — not its slug.
+  let originLabel: string = 'Other'
   if (hasHome && existing.location_uuid) {
     const { data: origin } = await supabaseService
       .from('locations')
@@ -228,6 +239,7 @@ export async function POST(
       .eq('id', existing.location_uuid)
       .maybeSingle()
     if (origin?.name) originName = origin.name
+    originLabel = originName
   }
 
   const now = new Date().toISOString()
@@ -368,12 +380,12 @@ export async function POST(
   // UUID. Fires whether or not the location is active — a pre-launch owner
   // still wants to know a lead just landed.
   let notifiedCount = 0
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+    req.nextUrl?.origin ||
+    null
   try {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
-      req.nextUrl?.origin ||
-      null
     const notify = await notifyNewLead({
       location: { id: dest.id, name: dest.name },
       // locations.location_id is the SLUG, not the uuid (notification_log).
@@ -398,6 +410,48 @@ export async function POST(
   } catch (err: any) {
     console.error('[transfer] notifyNewLead threw', err)
     warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
+  }
+
+  // ─── Slack card to the destination (ALWAYS tried) ─────────────
+  // The intake card plus one "Moved here" line. notifyNewLeadSlack never
+  // throws and quietly skips a location without Slack; the try/catch is the
+  // same belt-and-braces intake wears. Non-fatal like everything after the
+  // move: a failure is a warning and a 'failed' notification_log row.
+  const slackLogContext = {
+    lead_id:       existing.id,
+    lead_name:     existing.name,
+    location_id:   dest.id,
+    location_slug: dest.location_id,
+  }
+  let slackPosted = false
+  try {
+    const slackRes = await notifyNewLeadSlack({
+      locationId:   dest.id,
+      locationName: dest.name,
+      baseUrl,
+      transfer:     { from: originLabel, reason: hasHome ? reason : null },
+      lead: {
+        id:                existing.id,
+        name:              existing.name,
+        email:             existing.email,
+        phone:             existing.phone,
+        project_type:      existing.project_type,
+        request_details:   existing.request_details,
+        preferred_contact: existing.preferred_contact,
+        source:            existing.source ?? null,
+        address:           existing.address ?? null,
+        city:              existing.city ?? null,
+        state:             existing.state ?? null,
+        zip:               existing.zip ?? null,
+      },
+    })
+    slackPosted = slackRes.ok
+    if (slackRes.error) warnings.push(`slack_notification_failed: ${slackRes.error}`)
+    await logSlackNotification(slackRes, slackLogContext)
+  } catch (err: any) {
+    console.error('[transfer] notifyNewLeadSlack threw', err)
+    warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
+    await logSlackNotification({ ok: false, error: err?.message || String(err) }, slackLogContext)
   }
 
   // ─── Drip re-enroll — ONLY for an active, STAFFED destination ──
@@ -489,6 +543,7 @@ export async function POST(
       lifecycle_status: dest.lifecycle_status ?? null,
     },
     notified:      notifiedCount,
+    slack_posted:  slackPosted,
     assignees_cleared: assigneesCleared,
     ...(hasHome ? { reason } : {}),
     destination_staffed: destinationStaffed,
