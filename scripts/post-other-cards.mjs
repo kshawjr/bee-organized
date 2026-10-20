@@ -10,7 +10,10 @@
 // buttons and the log row are exactly what a new lead gets.
 //
 // THE RULES are lib/other-card-backlog.ts planBacklog (the tests pin them):
-//   · only leads in Other, not binned; oldest first
+//   · only leads still OPEN in Other, by Bee Hub's own Needs-transfer test:
+//     not binned, archived, dismissed or snoozed — and not already sent the
+//     no-coverage email, and movable (no engagement, nothing in Jobber)
+//   · oldest first
 //   · a lead that already has a posted card is skipped — running this twice
 //     never double-posts. --again (with --lead only) re-posts one on purpose.
 //   · --all leaves out test records (first or last name exactly "test");
@@ -87,7 +90,7 @@ if (otherErr || !other) { console.error(`REFUSING: could not read Other (${other
 if (!other.slack_connected) { console.error('REFUSING: Other is not connected to Slack.'); process.exit(1) }
 
 // ── the leads (a handful; Other never holds 1,000) ───────────────────────────
-const cols = 'id, name, first_name, last_name, email, phone, project_type, request_details, preferred_contact, source, address, city, state, zip, location_id, is_junk, created_at'
+const cols = 'id, name, first_name, last_name, email, phone, project_type, request_details, preferred_contact, source, address, city, state, zip, location_id, is_junk, created_at, archived_at, inbox_dismissed_at, snoozed_until, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status'
 const q = sb.from('leads').select(cols)
 const { data: leads, error: leadErr } = ONLY ? await q.eq('id', ONLY) : await q.eq('location_id', OTHER_SLUG).order('created_at', { ascending: true }).limit(1000)
 if (leadErr) { console.error(`REFUSING: lead read failed (${leadErr.message})`); process.exit(1) }
@@ -106,6 +109,29 @@ if (ids.length) {
     .in('lead_id', ids)
   if (logErr) { console.error(`REFUSING: could not check which cards were already posted (${logErr.message})`); process.exit(1) }
   for (const r of rows) posted.add(r.lead_id)
+}
+
+// ── what else resolves a lead: a no-coverage email, an engagement, Jobber ───
+const noCoverage = new Set()
+const engaged = new Set()
+if (ids.length) {
+  const { data: nc, error: ncErr } = await sb
+    .from('notification_log')
+    .select('lead_id')
+    .eq('email_kind', 'no_coverage_optin')
+    .eq('send_status', 'accepted')
+    .in('lead_id', ids)
+  if (ncErr) { console.error(`REFUSING: could not check for no-coverage emails (${ncErr.message})`); process.exit(1) }
+  for (const r of nc) noCoverage.add(r.lead_id)
+  const { data: eg, error: egErr } = await sb.from('engagements').select('client_id').in('client_id', ids)
+  if (egErr) { console.error(`REFUSING: could not check engagements (${egErr.message})`); process.exit(1) }
+  for (const r of eg) engaged.add(r.client_id)
+}
+const JOBBER_FIELDS = ['jobber_client_id', 'jobber_request_id', 'jobber_quote_id', 'jobber_job_id', 'jobber_invoice_id', 'jobber_assessment_id', 'jobber_sync_status']
+for (const l of leads) {
+  l.no_coverage_sent = noCoverage.has(l.id)
+  l.has_engagement = engaged.has(l.id)
+  l.in_jobber = JOBBER_FIELDS.some((f) => !!l[f])
 }
 
 const plan = planBacklog({ leads, posted, only: ONLY, again: AGAIN })

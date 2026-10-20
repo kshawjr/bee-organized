@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { planBacklog, isTestRecord, type BacklogLead } from '@/lib/other-card-backlog'
+import { planBacklog, isTestRecord, resolvedReason, type BacklogLead } from '@/lib/other-card-backlog'
 
 const lead = (id: string, created: string, over: Partial<BacklogLead> = {}): BacklogLead => ({
   id, first_name: 'Real', last_name: 'Person', location_id: 'loc_other', is_junk: false, created_at: created, ...over,
@@ -59,6 +59,61 @@ describe('--all: the backlog', () => {
 
   it('--again with --all is refused', () => {
     expect(() => planBacklog({ leads: OTHER, posted: new Set(), again: true })).toThrow('--again needs --lead')
+  })
+})
+
+// The real state of Other on 20 Oct 2026, after Leslie's work: six of the
+// seven had been dismissed AND sent the no-coverage email. Only Zach is open.
+const NOW = Date.parse('2026-10-20T22:00:00Z')
+const handled = { inbox_dismissed_at: '2026-10-13T20:17:59Z', no_coverage_sent: true }
+const REAL = [
+  lead('lyndsay', '2026-10-05T18:31:04Z', handled),
+  lead('jessica', '2026-10-09T10:00:00Z', handled),
+  lead('testtest', '2026-10-12T10:00:00Z', { first_name: 'test', last_name: 'test' }),
+  lead('sabrina', '2026-10-13T09:00:00Z', handled),
+  lead('zach', '2026-10-13T10:00:00Z'),
+  lead('alice', '2026-10-13T21:04:05Z', handled),
+  lead('mark', '2026-10-19T10:00:00Z', handled),
+  lead('loujean', '2026-10-20T02:40:34Z', handled),
+]
+
+describe('resolved leads never get a card (Bee Hub\'s Needs-transfer test, plus two)', () => {
+  it('the real backlog on 20 Oct: only Zach is open', () => {
+    const p = planBacklog({ leads: REAL, posted: new Set(), nowMs: NOW })
+    expect(ids(p)).toEqual(['zach'])
+    expect(p.skipped.filter((s) => s.reason === 'dismissed').map((s) => s.id)).toEqual(['lyndsay', 'jessica', 'sabrina', 'alice', 'mark', 'loujean'])
+  })
+
+  it.each([
+    ['archived', { archived_at: '2026-10-01T00:00:00Z' }],
+    ['dismissed', { inbox_dismissed_at: '2026-10-01T00:00:00Z' }],
+    ['snoozed', { snoozed_until: '2026-10-25T00:00:00Z' }],
+    ['no_coverage_sent', { no_coverage_sent: true }],
+    ['has_engagement', { has_engagement: true }],
+    ['in_jobber', { in_jobber: true }],
+  ])('%s → skipped', (reason, over) => {
+    const p = planBacklog({ leads: [lead('x', '2026-10-01T00:00:00Z', over as any)], posted: new Set(), nowMs: NOW })
+    expect(p).toEqual({ post: [], skipped: [{ id: 'x', reason }] })
+  })
+
+  it('a no-coverage email with NO dismiss (the dismiss write failed) still means no card', () => {
+    expect(resolvedReason(lead('x', '2026-10-01T00:00:00Z', { no_coverage_sent: true, inbox_dismissed_at: null }), NOW)).toBe('no_coverage_sent')
+  })
+
+  it('a snooze that has run out is open again', () => {
+    const p = planBacklog({ leads: [lead('x', '2026-10-01T00:00:00Z', { snoozed_until: '2026-10-19T00:00:00Z' })], posted: new Set(), nowMs: NOW })
+    expect(ids(p)).toEqual(['x'])
+  })
+
+  it('--lead and --again never revive a resolved lead', () => {
+    for (const over of [{ inbox_dismissed_at: '2026-10-01T00:00:00Z' }, { no_coverage_sent: true }, { has_engagement: true }, { archived_at: '2026-10-01T00:00:00Z' }]) {
+      const p = planBacklog({ leads: [lead('x', '2026-10-01T00:00:00Z', over as any)], posted: new Set(['x']), only: 'x', again: true, nowMs: NOW })
+      expect(ids(p)).toEqual([])
+    }
+  })
+
+  it('an open lead with every field empty is open', () => {
+    expect(resolvedReason(lead('x', '2026-10-01T00:00:00Z'), NOW)).toBeNull()
   })
 })
 
@@ -133,6 +188,17 @@ describe('the script', () => {
   it('refuses --again without --lead, and needs exactly one of --lead / --all', () => {
     expect(s).toContain('if (AGAIN && !ONLY) {')
     expect(s).toContain('if (!!ALL === !!ONLY) {')
+  })
+
+  it('"already posted" and "no-coverage sent" each count only ACCEPTED sends — a failed one never resolves a lead', () => {
+    expect(s).toContain(".eq('channel', 'slack')\n    .eq('location_slug', OTHER_SLUG)\n    .eq('send_status', 'accepted')\n    .in('lead_id', ids)")
+    expect(s).toContain(".eq('email_kind', 'no_coverage_optin')\n    .eq('send_status', 'accepted')\n    .in('lead_id', ids)")
+  })
+
+  it('reads what resolves a lead: no-coverage emails, engagements, Jobber ids, the Inbox holds', () => {
+    expect(s).toContain(".eq('email_kind', 'no_coverage_optin')")
+    expect(s).toContain(".from('engagements').select('client_id').in('client_id', ids)")
+    for (const col of ['archived_at', 'inbox_dismissed_at', 'snoozed_until', 'jobber_client_id', 'jobber_sync_status']) expect(s).toContain(col)
   })
 
   it('never writes to the lead — the only write is the log row', () => {
