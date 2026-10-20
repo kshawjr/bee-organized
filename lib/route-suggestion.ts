@@ -39,7 +39,7 @@
 import { supabaseService } from '@/lib/supabase-service'
 import { ZIP_FALLBACK_SLUG, locationTakesZipLeads } from '@/lib/zip-routing'
 import {
-  nearestLocationsForZip,
+  nearestLocationsForZips,
   type ProximityResult,
   type ClaimingLocation,
   type StateCheck,
@@ -199,17 +199,46 @@ function stateWarningFor(check: StateCheck, leadState: string | null, zip: strin
 }
 
 // ── the live call ─────────────────────────────────────────────
-// Reads the lead and the map, and builds the card. Refuses a lead that is not
-// in Other — the suggestion is for Leslie's queue only, and a lead with a home
-// would need a reason to move (lib/lead-transfer-rule). Throws on any failed
-// read rather than suggesting from half a picture.
+// ONE function for every surface (Kevin, 20 Oct 2026): the Slack card
+// (suggestRouteForLead, below) and Bee Hub's Needs-transfer row
+// (GET /api/route-suggestions) both read suggestRoutesForLeads, so the two can
+// never give different answers. It reads the leads, then the map ONCE for all
+// of them (lib/zip-proximity nearestLocationsForZips), then builds each card
+// with buildRouteSuggestion.
 //
+// A lead not in Other gets null — the suggestion is for Leslie's queue only,
+// and a lead with a home would need a reason to move (lib/lead-transfer-rule).
 // It reads more than three nearest so that skipping a paused location still
-// leaves three to show.
+// leaves three to show. Throws on a failed read rather than suggesting from
+// half a picture.
+export const SUGGESTION_READ_LIMIT = 60
+
+export async function suggestRoutesForLeads(leadIds: string[]): Promise<Map<string, RouteSuggestion | null>> {
+  const out = new Map<string, RouteSuggestion | null>()
+  const ids = Array.from(new Set(leadIds.filter(Boolean)))
+  if (ids.length === 0) return out
+  const { data, error } = await supabaseService
+    .from('leads')
+    .select('id, zip, state, location_id')
+    .in('id', ids)
+  if (error) throw new Error(`lead read failed: ${error.message}`)
+  const leads = ((data as any[]) || []).filter((l) => l.location_id === ZIP_FALLBACK_SLUG)
+  const found = new Set(((data as any[]) || []).map((l) => l.id))
+  for (const id of ids) if (!found.has(id) || !leads.some((l) => l.id === id)) out.set(id, null)
+  if (leads.length === 0) return out
+  const proximity = await nearestLocationsForZips(leads.map((l) => ({ zip: l.zip, state: l.state })), SUGGESTION_READ_LIMIT)
+  leads.forEach((l, i) => {
+    out.set(l.id, buildRouteSuggestion({ id: l.id, zip: l.zip ?? null, state: l.state ?? null }, proximity[i]))
+  })
+  return out
+}
+
+// The Slack card's call: one lead, through the same function. Refuses — with a
+// reason — a lead that doesn't exist or isn't in Other.
 export async function suggestRouteForLead(leadId: string): Promise<RouteSuggestion> {
   const { data: lead, error } = await supabaseService
     .from('leads')
-    .select('id, zip, state, location_id')
+    .select('id, location_id')
     .eq('id', leadId)
     .maybeSingle()
   if (error) throw new Error(`lead read failed: ${error.message}`)
@@ -217,6 +246,7 @@ export async function suggestRouteForLead(leadId: string): Promise<RouteSuggesti
   if (lead.location_id !== ZIP_FALLBACK_SLUG) {
     throw new Error(`lead ${leadId} is not in Other (it is at ${lead.location_id}) — no suggestion`)
   }
-  const proximity = await nearestLocationsForZip(lead.zip, lead.state, 60)
-  return buildRouteSuggestion({ id: lead.id, zip: lead.zip ?? null, state: lead.state ?? null }, proximity)
+  const s = (await suggestRoutesForLeads([leadId])).get(leadId)
+  if (!s) throw new Error(`lead ${leadId} is not in Other — no suggestion`)
+  return s
 }

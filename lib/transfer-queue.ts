@@ -62,81 +62,9 @@ export async function fetchTransferQueueRows(
 // is a browser component and must not pull this file's server reads with it).
 export { TRANSFER_QUEUE_PAGE_SIZE, pageOfQueue, type QueuePage } from './transfer-queue-page'
 
-// ── which location the zip would have matched ───────────────────────────────
-// A lead lands at loc_other when its zip matched nobody, matched TWO locations
-// (the Denver overlaps), or matched one that doesn't take zip leads (paused). In the last two
-// cases the territory list already knows who it is probably for — say so on
-// the row, so nobody has to open the lead to find out where it is.
-
-export type ZipHintMatch = {
-  id: string                 // location uuid — what the transfer picker selects by
-  slug: string
-  name: string
-  lifecycle_status: string | null
-}
-
-export type ZipHint = {
-  zip: string
-  // 'one' = a single location claims the zip · 'several' = a conflict ·
-  // 'none' = no location has it.
-  kind: 'one' | 'several' | 'none'
-  matches: ZipHintMatch[]
-}
-
-/**
- * The hint for one lead. Uses decideZipRoute — the SAME rule intake routes by
- * — so the row can never suggest something intake would not have considered.
- * null when the lead has no usable zip (nothing to say).
- */
-export function zipHintFor(rawZip: unknown, byZip: Map<string, ZipHintMatch[]>): ZipHint | null {
-  const zip = normalizeZip(rawZip)
-  if (!zip) return null
-  const claimed = byZip.get(zip) || []
-  const rows: ZipLocationRow[] = claimed.map((m) => ({ location_id: m.slug, lifecycle_status: m.lifecycle_status }))
-  const decision = decideZipRoute(zip, rows)
-  const matches = decision.candidates
-    .map((slug) => claimed.find((m) => m.slug === slug))
-    .filter(Boolean) as ZipHintMatch[]
-  return { zip, kind: matches.length === 0 ? 'none' : matches.length === 1 ? 'one' : 'several', matches }
-}
-
-/**
- * One read for the whole queue: who claims each of these zips. Fail-soft —
- * on any error it returns null and the rows simply show no suggestion (a
- * missing hint must never look like "no location has this zip").
- */
-export async function fetchZipHintMatches(
-  sb: { from: (table: string) => any },
-  rawZips: unknown[],
-): Promise<Map<string, ZipHintMatch[]> | null> {
-  const zips = Array.from(new Set(rawZips.map(normalizeZip).filter(Boolean))) as string[]
-  const out = new Map<string, ZipHintMatch[]>()
-  for (let i = 0; i < zips.length; i += 200) {
-    const { data, error } = await sb
-      .from('location_zips')
-      .select('zip, location:locations!inner(id, name, location_id, lifecycle_status)')
-      .in('zip', zips.slice(i, i + 200))
-    if (error) {
-      console.warn(`[transfer-queue] zip suggestion lookup failed: ${error.message} — rows will show no suggested location`)
-      return null
-    }
-    for (const r of data || []) {
-      const l = Array.isArray(r.location) ? r.location[0] : r.location
-      if (!l || !l.location_id || l.location_id === LOC_OTHER_SLUG) continue
-      const list = out.get(r.zip) || []
-      if (!list.some((m) => m.slug === l.location_id)) {
-        list.push({ id: l.id, slug: l.location_id, name: l.name || l.location_id, lifecycle_status: l.lifecycle_status ?? null })
-      }
-      out.set(r.zip, list)
-    }
-  }
-  return out
-}
-
-/** Stamp each queued person with its zipHint (null = nothing to say). */
-export function attachZipHints<P extends { originZip?: unknown }>(
-  people: P[],
-  byZip: Map<string, ZipHintMatch[]> | null,
-): Array<P & { zipHint: ZipHint | null }> {
-  return people.map((p) => ({ ...p, zipHint: byZip ? zipHintFor(p.originZip, byZip) : null }))
-}
+// ── (retired 20 Oct 2026) which location the zip would have matched ─────────
+// zipHintFor / fetchZipHintMatches / attachZipHints gave the Needs-transfer row
+// its own answer about a lead's zip ("→ Reno"), separate from the Slack card's
+// suggestion. Two answers on one row was the bug; the row now shows the card's
+// own suggestion (lib/route-suggestion suggestRoutesForLeads, read through
+// GET /api/route-suggestions).

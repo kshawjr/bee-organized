@@ -24,18 +24,22 @@ vi.mock('@/lib/supabase-service', () => ({
       const b: any = {}
       b.select = () => b
       b.eq = () => b
+      b.in = () => b
       b.maybeSingle = async () => ({ data: h.lead, error: h.leadError })
+      b.then = (res: any, rej: any) => Promise.resolve({ data: h.lead ? [h.lead] : [], error: h.leadError }).then(res, rej)
       return b
     },
   },
 }))
+// The map: both surfaces read suggestRoutesForLeads, which reads the map in one
+// batch (nearestLocationsForZips). The real ranking runs over the snapshot.
 vi.mock('@/lib/zip-proximity', async (orig) => {
   const real: any = await orig()
   return {
     ...real,
-    nearestLocationsForZip: vi.fn(async (zip: unknown, state: unknown, limit: number) => {
-      h.proximityCalls.push({ zip, state, limit })
-      return real.rankNearestLocations({ zip, leadState: state, coords: SNAP_COORDS(), claims: SNAP_CLAIMS(), limit })
+    nearestLocationsForZips: vi.fn(async (items: any[], limit: number) => {
+      h.proximityCalls.push({ items, limit })
+      return items.map((it) => real.rankNearestLocations({ zip: it.zip, leadState: it.state, coords: SNAP_COORDS(), claims: SNAP_CLAIMS(), limit }))
     }),
   }
 })
@@ -320,7 +324,7 @@ describe('suggestRouteForLead', () => {
     const s = await suggestRouteForLead('lead-9')
     expect(s.leadId).toBe('lead-9')
     expect(labels(s)).toEqual(['Lincoln · 19 mi', 'Omaha · 60 mi', 'Kansas City · 131 mi'])
-    expect(h.proximityCalls).toEqual([{ zip: '68310', state: 'NE', limit: 60 }])
+    expect(h.proximityCalls).toEqual([{ items: [{ zip: '68310', state: 'NE' }], limit: 60 }])
   })
 
   it('a lead NOT in Other → refused, nothing measured', async () => {

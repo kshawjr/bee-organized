@@ -63,12 +63,13 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers, IconMail, IconChevronRight } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconUsers, IconMail, IconChevronRight } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import MiniAvatar from './shared/MiniAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
 import { pageOfQueue } from '@/lib/transfer-queue-page'
+import { transferErrorCopy } from '@/lib/lead-transfer-rule'
 import NoCoverageModal from './NoCoverageModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -160,44 +161,32 @@ function SentWaiting({ settled }) {
   )
 }
 
-// What the territory list says about a queued lead's zip, in the reader's
-// words (p.zipHint comes from lib/transfer-queue.ts):
-//   one location that takes zip leads → "→ Lake Norman" (active OR onboarding)
-//   one that doesn't (paused, …)     → "→ Omaha (paused)" / "(not taking leads)"
-//   two claim it (Denver)            → "→ Central Denver or West Denver"
-//   nobody has it                    → "no location has this zip"
-// No hint (no zip, or the lookup failed) says nothing — never a guess.
+// ── The routing suggestion on a Needs-transfer row (20 Oct 2026) ──
+// The SAME suggestion Other's Slack card shows, read through the same
+// lib/route-suggestion suggestRoutesForLeads (GET /api/route-suggestions), so
+// the row and the card can never disagree: up to three hives with their miles,
+// the highlighted one filled, a claimed zip named outright, and "Another
+// location…" for anywhere else. It replaced the row's old separate zip hint
+// (lib/transfer-queue zipHintFor) — two answers on one row was the bug.
 //
-// 20 Oct 2026: this used to add "(not live yet)" to every non-active location.
-// Since 166d3b8 an ONBOARDING location takes its own zips, so that told Leslie
-// a hive couldn't have a lead it now gets directly. Which states take zip leads
-// is lib/zip-routing locationTakesZipLeads; that module is server-only, so the
-// rule is repeated here and a test pins the two together.
-export const hintLocationTakesZipLeads = (status) => status === 'active' || status === 'onboarding'
-export const zipHintText = (hint) => {
-  if (!hint) return ''
-  if (hint.kind === 'none') return 'no location has this zip'
-  const names = hint.matches.map(m => m.name)
-  if (hint.kind === 'one') {
-    const status = hint.matches[0].lifecycle_status
-    if (hintLocationTakesZipLeads(status)) return `→ ${names[0]}`
-    return `→ ${names[0]} (${status === 'paused' ? 'paused' : 'not taking leads'})`
-  }
-  return `→ ${names.join(' or ')}`
-}
+// ONE PRESS ROUTES — after a 5-second "Moving to Lincoln… Undo" (Kevin): a
+// transfer emails an owner and starts a drip and can't be cleanly undone, and
+// a stray click on a list of ten is far likelier than on a Slack card. The
+// move fires only when the 5 seconds run out; Undo, or leaving the Inbox
+// before then, cancels it and nothing is sent.
+export const ROUTE_UNDO_MS = 5000
 
-// The picker opens with the suggestion already selected ONLY when exactly one
-// location claims the zip. A conflict is a person's call, so nothing is
-// pre-picked; the row names both.
-export const zipHintPreselectId = (hint) =>
-  (hint && hint.kind === 'one' ? hint.matches[0].id : null)
+// A chip's words: the card's own label ("Lincoln · 19 mi"), or for a claimed
+// zip the hive named outright.
+export const routeChipLabel = (kind, option) =>
+  kind === 'claimed' ? `${option.name} · their zip` : option.label
 
 // Origin line for a Needs-transfer row: "city, ST zip → Location · project ·
 // from global form". Each part drops out when absent (a lead may carry a zip
 // but no street, or no project_type yet).
 const transferOriginLine = (p) => {
   const cityState = [p.originCity, p.originState].filter(Boolean).join(', ')
-  const place = [cityState, p.originZip, zipHintText(p.zipHint)].filter(Boolean).join(' ')
+  const place = [cityState, p.originZip].filter(Boolean).join(' ')
   return [place, p.project, 'from global form'].filter(Boolean).join(' · ')
 }
 
@@ -256,34 +245,6 @@ function GhostIconButton({ label, icon: Icon, disabled, onClick, ...rest }) {
     <button className="bee-ghost-btn" aria-label={label} title={label}
       disabled={disabled} style={ghostBtn} onClick={onClick} {...rest}>
       <Icon size={17} />
-    </button>
-  )
-}
-
-// The unrouted row's sole action — a filled pill rather than a ghost icon,
-// because routing the lead away is the ONLY thing to do with it and the row
-// shouldn't make you hunt for that. Compact by the standing preference: it
-// reads as a row control, not a call-to-action bar.
-//
-// "Route", not "Transfer": these leads have no home yet, and transfer implies
-// moving one FROM somewhere. The fill is the CORPORATE sand, not the teal
-// action accent — every other green control in the Inbox acts on a lead this
-// location owns, and this one does the opposite. Label and color only; the
-// click still opens the same TransferLeadModal against the same endpoint.
-function RoutePill({ disabled, onClick }) {
-  return (
-    <button className="bee-transfer-pill" aria-label="Route" title="Route to a location"
-      disabled={disabled} onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '5px',
-        padding: '7px 13px', borderRadius: T.radius.pill, border: 'none',
-        background: T.corp.fill, color: T.corp.onFill,
-        fontSize: '13px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-      }}>
-      Route
-      <IconArrowRight size={13} />
     </button>
   )
 }
@@ -504,6 +465,19 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // Which ten of the routing queue are on screen (0-based). Clamped where it
   // is read, so routing the last row of the last page steps back a page.
   const [transferPage, setTransferPage] = useState(0)
+  // The routing suggestion per queued lead: { status: 'loading' | 'ready' |
+  // 'failed', suggestion, locations } — see ROUTE_UNDO_MS above.
+  const [routeSuggest, setRouteSuggest] = useState({})
+  // A chip pressed and counting down: { [leadId]: { destId, destName } }.
+  const [pendingMove, setPendingMove] = useState({})
+  const [moveError, setMoveError] = useState({})
+  const moveTimers = useRef({})
+  // Leaving the Inbox cancels any move still counting down — it never fires
+  // unseen.
+  useEffect(() => () => {
+    for (const t of Object.values(moveTimers.current)) clearTimeout(t)
+    moveTimers.current = {}
+  }, [])
   const [noCoverageFor, setNoCoverageFor] = useState(null)
   // The lead whose "Add to Network" sheet is open. Held as the person for the
   // same reason as the two above: a Move re-derives the row out of its section
@@ -736,6 +710,70 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     working.sort(cmp)
     return { transfer, fresh, working }
   }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, closedLostIds, filters, inboxSort, q, tagById]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Suggestions for the queue page on screen — fetched once per lead, in one
+  // call per page.
+  const visibleTransferIds = useMemo(
+    () => (readOnly ? [] : pageOfQueue(transfer, transferPage).rows.map((p) => p.id)),
+    [transfer, transferPage, readOnly],
+  )
+  useEffect(() => {
+    const need = visibleTransferIds.filter((id) => !routeSuggest[id])
+    if (need.length === 0) return
+    setRouteSuggest((m) => ({ ...m, ...Object.fromEntries(need.map((id) => [id, { status: 'loading' }])) }))
+    let live = true
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/route-suggestions?ids=${encodeURIComponent(need.join(','))}`)
+        const json = await res.json().catch(() => ({}))
+        if (!live) return
+        if (!res.ok || !json?.suggestions) throw new Error(json?.error || `HTTP ${res.status}`)
+        setRouteSuggest((m) => ({
+          ...m,
+          ...Object.fromEntries(need.map((id) => [id, { status: 'ready', suggestion: json.suggestions[id] ?? null, locations: json.locations || {} }])),
+        }))
+      } catch {
+        if (live) setRouteSuggest((m) => ({ ...m, ...Object.fromEntries(need.map((id) => [id, { status: 'failed' }])) }))
+      }
+    })()
+    return () => { live = false }
+  }, [visibleTransferIds.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startMove(p, destId, destName) {
+    if (!destId || pendingMove[p.id]) return
+    setMoveError((m) => { const n = { ...m }; delete n[p.id]; return n })
+    setPendingMove((m) => ({ ...m, [p.id]: { destId, destName } }))
+    moveTimers.current[p.id] = setTimeout(() => fireMove(p, destId, destName), ROUTE_UNDO_MS)
+  }
+
+  function undoMove(p) {
+    clearTimeout(moveTimers.current[p.id])
+    delete moveTimers.current[p.id]
+    setPendingMove((m) => { const n = { ...m }; delete n[p.id]; return n })
+  }
+
+  async function fireMove(p, destId, destName) {
+    delete moveTimers.current[p.id]
+    let json = {}
+    let ok = false
+    try {
+      const res = await fetch(`/api/leads/${p.id}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination_location_id: destId }),
+      })
+      json = await res.json().catch(() => ({}))
+      ok = res.ok && json?.success === true
+    } catch {
+      json = { error: 'network' }
+    }
+    setPendingMove((m) => { const n = { ...m }; delete n[p.id]; return n })
+    if (ok) {
+      onTransferred(p, { id: destId, name: destName })
+    } else {
+      setMoveError((m) => ({ ...m, [p.id]: json?.error === 'network' ? 'Network error — please try again' : transferErrorCopy(json?.error) }))
+    }
+  }
 
   // How many badge-countable leads a VIEW filter is keeping off the list.
   // By construction this equals (nav badge) − (visible fresh + working): same
@@ -1115,6 +1153,70 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // live action cluster swapped for one "Put back" and a line saying when — and
   // by whom, where that was ever recorded. Reusing Row rather than writing a
   // second row component is the #89 lesson applied to markup: two copies drift.
+  // The Needs-transfer row's routing controls — see ROUTE_UNDO_MS.
+  function RouteChoices({ p }) {
+    const pending = pendingMove[p.id]
+    const err = moveError[p.id]
+    if (pending) {
+      return (
+        <span data-bee-route-pending={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          onClick={(ev) => ev.stopPropagation()}>
+          <span style={{ fontSize: '12.5px', color: T.corp.deep, whiteSpace: 'nowrap' }}>Moving to {pending.destName}…</span>
+          <button type="button" data-bee-route-undo className="bee-small-action"
+            onClick={(ev) => { ev.stopPropagation(); undoMove(p) }}
+            style={{ padding: '6px 12px', borderRadius: T.radius.pill, border: `1px solid ${T.corp.border}`, background: 'transparent', color: T.corp.fg, fontWeight: 600, cursor: 'pointer' }}>
+            Undo
+          </button>
+        </span>
+      )
+    }
+    const rs = routeSuggest[p.id]
+    const s = rs?.status === 'ready' ? rs.suggestion : null
+    const options = s?.options || []
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}
+        onClick={(ev) => ev.stopPropagation()}>
+        {rs?.status === 'loading' && (
+          <span data-bee-route-loading style={{ fontSize: '12px', color: T.ink.quiet }}>Finding closest hives…</span>
+        )}
+        {options.map((o) => {
+          const destId = rs.locations?.[o.slug] || null
+          const filled = !!o.highlighted
+          return (
+            <button key={o.slug} type="button" data-bee-route-chip={o.slug} aria-pressed={filled}
+              title={s.kind === 'claimed' ? `Zip ${s.zip} is on ${o.name}'s list` : `Route to ${o.name}`}
+              disabled={!destId || busyId === p.id}
+              onClick={(ev) => { ev.stopPropagation(); startMove(p, destId, o.name) }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px',
+                padding: '7px 12px', borderRadius: T.radius.pill,
+                border: filled ? 'none' : `1px solid ${T.corp.border}`,
+                background: filled ? T.corp.fill : 'transparent',
+                color: filled ? T.corp.onFill : T.corp.fg,
+                fontSize: '12.5px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+                cursor: destId ? 'pointer' : 'not-allowed', opacity: destId ? 1 : 0.5,
+              }}>
+              {routeChipLabel(s.kind, o)}
+            </button>
+          )
+        })}
+        <button type="button" data-bee-route-other aria-label="Another location" className="bee-small-action"
+          disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }}
+          style={{ background: 'none', border: 'none', padding: '4px 2px', color: T.corp.fg, textDecoration: 'underline', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          Another location…
+        </button>
+        <NoCoveragePill disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); setNoCoverageFor(p) }} />
+        {err && (
+          <span role="alert" data-bee-route-error style={{ flexBasis: '100%', textAlign: 'right', fontSize: '12px', color: T.state.danger.fg }}>
+            Couldn&apos;t move: {err}
+          </span>
+        )}
+      </span>
+    )
+  }
+
   function Row({ p, family, pill, dismissed = false }) {
     const isTransfer = pill === 'Transfer'
     // Arrival pulse — the row rings once when it landed via Realtime. The
@@ -1238,19 +1340,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     ) : sent ? (
       <SentWaiting settled={settledSendIds.has(p.id)} />
     ) : readOnly ? null : isTransfer ? (
-      /* Needs-transfer row: TWO corporate dispositions, and ONLY these — the
-         normal cluster (log call, Send to Jobber, ···) stays absent because a
-         lead no location owns isn't ours to call or push to Jobber. Route
-         assigns an owner (the expected outcome, filled pill); No coverage tells
-         the person we can't serve them and offers the mailing list (the
-         deliberate exception, outline). Both are corporate-sand, distinct from
-         the teal controls that act on a lead the current location owns. */
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-        <NoCoveragePill disabled={busyId === p.id}
-          onClick={(ev) => { ev.stopPropagation(); setNoCoverageFor(p) }} />
-        <RoutePill disabled={busyId === p.id}
-          onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
-      </span>
+      /* Needs-transfer row: the routing suggestion (the Slack card's, from
+         the same function) as one-press chips, "Another location…" for
+         anywhere else, and No coverage. The normal cluster (log call, Send to
+         Jobber, ···) stays absent: a lead no location owns isn't ours to call
+         or push to Jobber. Corporate-sand throughout, distinct from the teal
+         controls that act on a lead the current location owns. */
+      <RouteChoices p={p} />
     ) : (
       <>
         {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link
@@ -1845,7 +1941,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <TransferLeadModal
           person={{ id: transferFor.id, name: transferFor.name }}
           subline={transferOriginLine(transferFor)}
-          preselectId={transferFor.routeInsteadId || zipHintPreselectId(transferFor.zipHint)}
+          preselectId={transferFor.routeInsteadId || null}
           onClose={() => setTransferFor(null)}
           onDone={(dest) => onTransferred(transferFor, dest)}
         />

@@ -183,7 +183,7 @@ describe('Inbox — Needs transfer section', () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
-    const transferBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    const transferBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Another location')
     expect(transferBtn).toBeTruthy()
     await act(async () => { transferBtn!.click() })
     await flush()
@@ -201,7 +201,7 @@ describe('Inbox — Needs transfer section', () => {
       .filter(r => (r.textContent || '').includes('Lead'))
     const targetRow = rows.find(r => (r.textContent || '').includes('Second Lead'))
     expect(targetRow).toBeTruthy()
-    const pill = Array.from(targetRow!.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    const pill = Array.from(targetRow!.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Another location')
     await act(async () => { pill!.click() })
     await flush()
     const dlg = document.querySelector('[role="dialog"][aria-label="Transfer lead"]')
@@ -223,8 +223,11 @@ describe('Inbox — Needs transfer section', () => {
     const row = Array.from(host.querySelectorAll('.bee-inbox-row'))
       .find(r => (r.textContent || '').includes('Global Lead'))
     expect(row).toBeTruthy()
-    const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label'))
-    expect(labels).toEqual(['No coverage', 'Route'])
+    // 20 Oct 2026: Route became the card's own suggestion — hive chips (no
+    // aria-label; their text is the hive and miles), "Another location…" and
+    // No coverage. With no suggestion loaded, only the last two show.
+    const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label')).filter(Boolean)
+    expect(labels).toEqual(['Another location', 'No coverage'])
     expect(labels).not.toContain('Log call')
     expect(labels).not.toContain('Send to Jobber')
     expect(labels).not.toContain('More')
@@ -248,24 +251,18 @@ describe('Inbox — Needs transfer section', () => {
     await unmount()
   })
 
-  it('styles the pill from tokens — CORPORATE sand fill, pill radius, compact', async () => {
+  it('"Another location…" is a quiet corporate-sand link — the filled pill is the suggested hive (beta-route-chips)', async () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
-    const pill = Array.from(host.querySelectorAll('button'))
-      .find(b => b.getAttribute('aria-label') === 'Route') as HTMLButtonElement
-    expect(pill.style.borderRadius).toBe(T.radius.pill)
-    // Sand, NOT the teal action accent: every other green control in the Inbox
-    // acts on a lead this location owns, and this one does the opposite.
-    expect(pill.style.background).toBe(asRendered('background', T.corp.fill))
-    expect(pill.style.color).toBe(asRendered('color', T.corp.onFill))
-    expect(pill.style.background).not.toBe(asRendered('background', T.accent.fg))
-    // Compact — a row control, not a call-to-action bar.
-    expect(pill.style.fontSize).toBe('13px')
-    expect(pill.style.padding).toBe('7px 13px')
-    // Label + arrow.
-    expect(pill.textContent).toContain('Route')
-    expect(pill.querySelector('svg')).toBeTruthy()
+    const link = Array.from(host.querySelectorAll('button'))
+      .find(b => b.getAttribute('aria-label') === 'Another location') as HTMLButtonElement
+    expect(link.textContent).toBe('Another location…')
+    expect(link.style.color).toBe(asRendered('color', T.corp.fg))
+    expect(link.style.textDecoration).toBe('underline')
+    // Sand, NOT the teal action accent: every teal control in the Inbox acts on
+    // a lead this location owns, and this one does the opposite.
+    expect(link.style.color).not.toBe(asRendered('color', T.accent.fg))
     await unmount()
   })
 })
@@ -370,7 +367,7 @@ describe('Inbox — the unrouted queue reads as CORPORATE, not as this location'
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead({ id: 'lead-77' })]} engagements={[]} locFilter="all" />,
     )
-    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Another location')
     await act(async () => { pill!.click() })
     await flush()
     const dest = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Boulder'))

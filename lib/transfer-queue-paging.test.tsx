@@ -23,15 +23,11 @@ import { act } from 'react-dom/test-utils'
 
 vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: vi.fn() } }))
 
-import InboxScreen, { zipHintText, zipHintPreselectId } from '@/components/hive/InboxScreen'
+import InboxScreen from '@/components/hive/InboxScreen'
 import {
   fetchTransferQueueRows,
-  fetchZipHintMatches,
-  attachZipHints,
-  zipHintFor,
   pageOfQueue,
   TRANSFER_QUEUE_PAGE_SIZE,
-  type ZipHintMatch,
 } from '@/lib/transfer-queue'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -182,7 +178,7 @@ const lead = (i: number, over: any = {}) => ({
   created: new Date(now - (500 - i) * 3600000).toISOString(),
   isJunk: false, snoozeUntil: null, inboxDismissedAt: null, jobberRef: null,
   outreachTimeline: [], atLocOther: true,
-  originCity: null, originState: null, originZip: null, project: '', zipHint: null,
+  originCity: null, originState: null, originZip: null, project: '',
   ...over,
 })
 // Handed over NEWEST first on purpose — the screen must put them in order.
@@ -218,7 +214,8 @@ const rowNames = (host: HTMLElement) =>
 const pagerText = (host: HTMLElement) => host.querySelector('[data-testid="transfer-pager"]')?.textContent || ''
 const pagerBtn = (host: HTMLElement, label: string) =>
   Array.from(host.querySelectorAll('[data-testid="transfer-pager"] button')).find(b => b.textContent === label) as HTMLButtonElement
-const routeButtons = (host: HTMLElement) => section(host).querySelectorAll('button[aria-label="Route"]')
+// The row's "Another location…" — opens the transfer window.
+const routeButtons = (host: HTMLElement) => section(host).querySelectorAll('button[aria-label="Another location"]')
 
 describe('Inbox — the unrouted queue shows ten at a time', () => {
   it('ten rows, with the true total shown', async () => {
@@ -277,96 +274,18 @@ describe('Inbox — the unrouted queue shows ten at a time', () => {
 })
 
 // ── the zip, and who it would have matched ──────────────────────────────────
-const LKN: ZipHintMatch = { id: 'uuid-lkn', slug: 'loc_lakenorman', name: 'Lake Norman', lifecycle_status: 'active' }
-const OMAHA: ZipHintMatch = { id: 'uuid-omaha', slug: 'loc_omaha', name: 'Omaha', lifecycle_status: 'onboarding' }
-const PAUSED: ZipHintMatch = { id: 'uuid-paused', slug: 'loc_paused', name: 'Pausedville', lifecycle_status: 'paused' }
-const CDEN: ZipHintMatch = { id: 'uuid-cden', slug: 'loc_centraldenver', name: 'Central Denver', lifecycle_status: 'active' }
-const WDEN: ZipHintMatch = { id: 'uuid-wden', slug: 'loc_westdenver', name: 'West Denver', lifecycle_status: 'active' }
-const BY_ZIP = new Map<string, ZipHintMatch[]>([
-  ['28078', [LKN]], ['68102', [OMAHA]], ['80202', [WDEN, CDEN]],
-])
-
-describe('the row\'s "takes zip leads" rule is the routing rule', () => {
-  it.each([['active'], ['onboarding'], ['paused'], [null], ['closed'], ['Onboarding']])('%j agrees with lib/zip-routing', async (status) => {
-    const { locationTakesZipLeads } = await import('@/lib/zip-routing')
-    const { hintLocationTakesZipLeads } = await import('@/components/hive/InboxScreen')
-    expect(hintLocationTakesZipLeads(status)).toBe(locationTakesZipLeads(status as any))
-  })
-})
-
-describe('zipHintFor — what the territory list says about a zip', () => {
-  it('one live location', () => {
-    expect(zipHintFor('28078', BY_ZIP)).toEqual({ zip: '28078', kind: 'one', matches: [LKN] })
-  })
-  it('a location that is not live yet is still named', () => {
-    expect(zipHintFor('68102', BY_ZIP)).toEqual({ zip: '68102', kind: 'one', matches: [OMAHA] })
-  })
-  it('a Denver conflict names both', () => {
-    const h = zipHintFor('80202', BY_ZIP)!
-    expect(h.kind).toBe('several')
-    expect(h.matches.map(m => m.name).sort()).toEqual(['Central Denver', 'West Denver'])
-  })
-  it('a zip nobody has', () => {
-    expect(zipHintFor('99999', BY_ZIP)).toEqual({ zip: '99999', kind: 'none', matches: [] })
-  })
-  it('ZIP+4 is read as its five digits; no zip or a malformed one says nothing', () => {
-    expect(zipHintFor('28078-1234', BY_ZIP)!.matches).toEqual([LKN])
-    expect(zipHintFor(null, BY_ZIP)).toBeNull()
-    expect(zipHintFor('', BY_ZIP)).toBeNull()
-    expect(zipHintFor('2807', BY_ZIP)).toBeNull()
-  })
-  it('the words on the row, and what the picker opens on', () => {
-    expect(zipHintText(zipHintFor('28078', BY_ZIP))).toBe('→ Lake Norman')
-    // 20 Oct 2026: an ONBOARDING location takes its own zips — no "(not live yet)".
-    expect(zipHintText(zipHintFor('68102', BY_ZIP))).toBe('→ Omaha')
-    expect(zipHintText({ zip: '11111', kind: 'one', matches: [PAUSED] })).toBe('→ Pausedville (paused)')
-    expect(zipHintText({ zip: '11111', kind: 'one', matches: [{ ...PAUSED, lifecycle_status: null }] })).toBe('→ Pausedville (not taking leads)')
-    expect(zipHintText(zipHintFor('80202', BY_ZIP))).toMatch(/^→ (Central Denver or West Denver|West Denver or Central Denver)$/)
-    expect(zipHintText(zipHintFor('99999', BY_ZIP))).toBe('no location has this zip')
-    expect(zipHintText(null)).toBe('')
-    // one match → pre-selected; a conflict or nothing → the person chooses
-    expect(zipHintPreselectId(zipHintFor('28078', BY_ZIP))).toBe('uuid-lkn')
-    expect(zipHintPreselectId(zipHintFor('68102', BY_ZIP))).toBe('uuid-omaha')
-    expect(zipHintPreselectId(zipHintFor('80202', BY_ZIP))).toBeNull()
-    expect(zipHintPreselectId(zipHintFor('99999', BY_ZIP))).toBeNull()
-    expect(zipHintPreselectId(null)).toBeNull()
-  })
-})
-
-describe('fetchZipHintMatches / attachZipHints', () => {
-  const zipTable = (data: any[], error: any = null) => {
-    const asked: any[] = []
-    const sb = { from: () => { const b: any = {}; b.select = () => b; b.in = (_c: string, zips: string[]) => { asked.push(zips); return b }; b.then = (r: any) => Promise.resolve({ data: error ? null : data.filter(d => asked[asked.length - 1].includes(d.zip)), error }).then(r); return b } }
-    return { sb, asked }
-  }
-  const row = (zip: string, m: ZipHintMatch) => ({ zip, location: { id: m.id, name: m.name, location_id: m.slug, lifecycle_status: m.lifecycle_status } })
-
-  it('one read for the whole queue, each distinct zip asked once, normalized', async () => {
-    const { sb, asked } = zipTable([row('28078', LKN), row('80202', CDEN), row('80202', WDEN)])
-    const map = await fetchZipHintMatches(sb, ['28078', '28078-1234', '80202', null, '', 'abc'])
-    expect(asked).toEqual([['28078', '80202']])
-    expect(map!.get('28078')).toEqual([LKN])
-    expect(map!.get('80202')!.map(m => m.slug).sort()).toEqual(['loc_centraldenver', 'loc_westdenver'])
-  })
-
-  it('a failed lookup gives NO hints — never "no location has this zip"', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { sb } = zipTable([], { message: 'timeout' })
-    const map = await fetchZipHintMatches(sb, ['28078'])
-    expect(map).toBeNull()
-    const [p] = attachZipHints([{ id: 'a', originZip: '28078' }], map)
-    expect(p.zipHint).toBeNull()
-    expect(zipHintText(p.zipHint)).toBe('')
-  })
-
-  it('stamps each queued lead with its own hint', async () => {
-    const out = attachZipHints([{ id: 'a', originZip: '28078' }, { id: 'b', originZip: '99999' }, { id: 'c', originZip: null }], BY_ZIP)
-    expect(out.map(p => p.zipHint?.kind ?? null)).toEqual(['one', 'none', null])
-  })
-
-  it('the page load attaches them to the queue (source pin)', () => {
+// The old separate zip hint (zipHintFor / fetchZipHintMatches / attachZipHints)
+// was retired 20 Oct 2026: the row now shows the Slack card's own suggestion
+// (beta-route-chips.test.tsx). These pin that it is gone.
+describe('the old zip hint is retired', () => {
+  it('lib/transfer-queue no longer exports it, and the page load no longer attaches it', async () => {
+    const mod: any = await import('@/lib/transfer-queue')
+    expect(mod.zipHintFor).toBeUndefined()
+    expect(mod.fetchZipHintMatches).toBeUndefined()
+    expect(mod.attachZipHints).toBeUndefined()
     const src = readFileSync('app/_hub-page.tsx', 'utf8')
-    expect(src).toContain('initialTransferPeople = attachZipHints(initialTransferPeople, zipMatches)')
+    expect(src).not.toContain('attachZipHints')
+    expect(src).not.toContain('fetchZipHintMatches')
   })
 })
 
@@ -379,40 +298,18 @@ describe('Inbox — the row says where the lead is', () => {
     await unmount()
   })
 
-  it('a zip that matches a location shows which', async () => {
-    const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={one({ originZip: '28078', zipHint: zipHintFor('28078', BY_ZIP) })} engagements={[]} locFilter="all" />)
-    expect(section(host).textContent).toContain('28078 → Lake Norman · Garage · from global form')
-    await unmount()
-  })
-
-  it('an onboarding location, a Denver conflict, and a zip nobody has', async () => {
-    const people = [
-      lead(1, { name: 'A', originZip: '68102', zipHint: zipHintFor('68102', BY_ZIP) }),
-      lead(2, { name: 'B', originZip: '80202', zipHint: zipHintFor('80202', BY_ZIP) }),
-      lead(3, { name: 'C', originZip: '99999', zipHint: zipHintFor('99999', BY_ZIP) }),
-    ]
+  it('the row never shows the old "→ Location" hint, whatever the zip', async () => {
+    const people = [lead(1, { name: 'A', originZip: '68102' }), lead(2, { name: 'B', originZip: '80202' })]
     const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={people} engagements={[]} locFilter="all" />)
     const text = section(host).textContent!
-    expect(text).toContain('68102 → Omaha')
+    expect(text).not.toContain('→')
+    expect(text).not.toContain('no location has this zip')
     expect(text).not.toContain('not live yet')
-    expect(text).toMatch(/80202 → (Central Denver or West Denver|West Denver or Central Denver)/)
-    expect(text).toContain('99999 no location has this zip')
     await unmount()
   })
 
-  it('Route opens the picker with the matched location already selected', async () => {
-    const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={one({ originZip: '28078', zipHint: zipHintFor('28078', BY_ZIP) })} engagements={[]} locFilter="all" />)
-    await click(routeButtons(host)[0])
-    await flush()
-    const selected = Array.from(document.querySelectorAll('[role="option"][aria-selected="true"]'))
-    expect(selected).toHaveLength(1)
-    expect(selected[0].textContent).toContain('Lake Norman')
-    expect(document.body.textContent).toContain('Transfer to Lake Norman')
-    await unmount()
-  })
-
-  it('a conflict pre-selects nothing — a person decides', async () => {
-    const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={one({ originZip: '80202', zipHint: zipHintFor('80202', BY_ZIP) })} engagements={[]} locFilter="all" />)
+  it('"Another location…" opens the picker with nothing pre-selected — a person chooses', async () => {
+    const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={one({ originZip: '28078' })} engagements={[]} locFilter="all" />)
     await click(routeButtons(host)[0])
     await flush()
     expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0)

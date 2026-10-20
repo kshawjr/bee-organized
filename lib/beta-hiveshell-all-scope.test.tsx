@@ -245,10 +245,10 @@ describe('The unrouted queue is visually its own container — both scopes', () 
     // The location's OWN section says whose it is — the other half of the fix.
     expect(host.textContent).toContain('Kansas City · New · 1')
     expect(host.textContent).toContain('Fresh Lead')
-    // The row action reads Route, in its own color family.
-    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    // The row offers routing (20 Oct 2026: the suggestion chips + "Another location…").
+    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Another location')
     expect(pill).toBeTruthy()
-    expect((pill as HTMLElement).textContent).toContain('Route')
+    expect((pill as HTMLElement).textContent).toContain('Another location')
   })
 
   it('a franchise viewer gets NO container in either scope (empty queue upstream)', async () => {

@@ -225,3 +225,20 @@ export async function nearestLocationsForZip(rawZip: unknown, leadState?: unknow
   const coords = await readCoords([zip, ...claims.map((c) => c.zip)])
   return rankNearestLocations({ zip, leadState, coords, claims, limit })
 }
+
+// The same, for many leads at once (the Inbox's Needs-transfer page): the
+// territory list and the zip points are read ONCE, then each lead is ranked by
+// the same rankNearestLocations. Results line up with `items`. A lead with no
+// usable zip costs no read. Throws when a read fails, like the single version.
+export async function nearestLocationsForZips(
+  items: { zip: unknown; state?: unknown }[],
+  limit = 3,
+): Promise<ProximityResult[]> {
+  const zips = items.map((it) => (isBlankZip(it.zip) ? null : normalizeZip(it.zip)))
+  if (zips.every((z) => !z)) {
+    return items.map((it) => rankNearestLocations({ zip: it.zip, leadState: it.state, coords: new Map(), claims: [], limit }))
+  }
+  const claims = await readAllClaims()
+  const coords = await readCoords([...(zips.filter(Boolean) as string[]), ...claims.map((c) => c.zip)])
+  return items.map((it) => rankNearestLocations({ zip: it.zip, leadState: it.state, coords, claims, limit }))
+}

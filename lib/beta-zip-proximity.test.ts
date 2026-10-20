@@ -65,6 +65,7 @@ vi.mock('@/lib/supabase-service', () => ({
 import {
   rankNearestLocations,
   nearestLocationsForZip,
+  nearestLocationsForZips,
   readAllClaims,
   haversineMiles,
   checkLeadState,
@@ -335,6 +336,22 @@ describe('C. nearestLocationsForZip — the database read', () => {
     expect(reads.length).toBeGreaterThan(1)
     expect(Math.max(...reads.map((c) => c.inZips!.length))).toBeLessThanOrEqual(300)
     expect(reads.flatMap((c) => c.inZips!)).toContain('68310')
+  })
+
+  it('the batch: results line up with the leads, the map is read ONCE for all of them', async () => {
+    const out = await nearestLocationsForZips([{ zip: '68310', state: 'NE' }, { zip: null }, { zip: '33928' }, { zip: '89509' }], 3)
+    expect(out.map((r) => r.status)).toEqual(['ok', 'missing', 'ok', 'ok'])
+    expect((out[0] as any).nearest[0].name).toBe('Lincoln')
+    expect((out[2] as any).nearest[0].name).toBe('Miami')
+    expect((out[3] as any).claimedBy[0].name).toBe('Reno')
+    expect(out[0]).toEqual(okResult('68310', 'NE'))
+    expect(db.calls.filter((c) => c.table === 'location_zips')).toHaveLength(2) // the two pages of the territory list, once
+  })
+
+  it('the batch with no usable zip reads nothing at all', async () => {
+    const out = await nearestLocationsForZips([{ zip: null }, { zip: 'abc' }])
+    expect(out.map((r) => r.status)).toEqual(['missing', 'malformed'])
+    expect(db.calls).toEqual([])
   })
 
   it('a missing or malformed zip reads nothing', async () => {

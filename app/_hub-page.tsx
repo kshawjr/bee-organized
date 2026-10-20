@@ -29,7 +29,7 @@ import {
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
-import { fetchTransferQueueRows, fetchZipHintMatches, attachZipHints } from '@/lib/transfer-queue'
+import { fetchTransferQueueRows } from '@/lib/transfer-queue'
 // issue 226 step 2 — per-location seat composition. The derivation moved to
 // lib/billing-state.ts so it could be tested; this is its only caller.
 import { deriveSeatComposition } from '@/lib/billing-state'
@@ -1745,17 +1745,10 @@ export default async function HubPage({
         )
       }
     }
-    // Which location each lead's zip would have matched (the Denver overlaps,
-    // locations not taking zip leads) — shown on the row and pre-selected in the
-    // picker, so nobody opens a lead just to see where it is. Fail-soft: no
-    // answer means no suggestion, never a wrong one.
-    if (initialTransferPeople.length > 0) {
-      const zipMatches = await fetchZipHintMatches(
-        supabaseService,
-        initialTransferPeople.map((p: any) => p.originZip),
-      )
-      initialTransferPeople = attachZipHints(initialTransferPeople, zipMatches)
-    }
+    // Where each lead should go is the Slack card's own suggestion, fetched by
+    // the Inbox for the page on screen (GET /api/route-suggestions) — no
+    // separate zip lookup here any more (retired 20 Oct 2026, see
+    // lib/transfer-queue.ts).
     if (initialTransferPeople.length > 0) {
       console.log(`[hub-page] ${initialTransferPeople.length} lead(s) awaiting transfer for ${hubUser.email}`)
     }
