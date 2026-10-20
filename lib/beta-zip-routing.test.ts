@@ -11,6 +11,7 @@ import {
   zipRouteToken,
   ZIP_FALLBACK_SLUG,
   ROUTE_ONLY_TO_ACTIVE,
+  locationTakesZipLeads,
   zipDecides,
   routeLogToken,
 } from '@/lib/zip-routing'
@@ -57,13 +58,36 @@ describe('decideZipRoute', () => {
     expect(decideZipRoute('1937', [row('loc_x')])).toMatchObject({ slug: ZIP_FALLBACK_SLUG, reason: 'malformed' })
   })
 
-  it('the only claimant is not live → loc_other with it as the candidate (switch is on)', () => {
-    expect(ROUTE_ONLY_TO_ACTIVE).toBe(true)
-    for (const status of ['onboarding', 'paused', null]) {
+  it('the only claimant is ONBOARDING → that location (switch is off, Kevin 20 Oct 2026)', () => {
+    expect(ROUTE_ONLY_TO_ACTIVE).toBe(false)
+    expect(decideZipRoute('89509', [row('loc_reno', 'onboarding')])).toEqual({
+      slug: 'loc_reno', reason: 'matched', zip: '89509', candidates: ['loc_reno'],
+    })
+    expect(decideZipRoute('92651', [row('loc_southorangecounty', 'onboarding')])).toMatchObject({
+      slug: 'loc_southorangecounty', reason: 'matched',
+    })
+  })
+
+  it('the only claimant is paused, null or an unknown state → still loc_other (not_live)', () => {
+    for (const status of ['paused', null, 'closed']) {
       expect(decideZipRoute('89506', [row('loc_reno', status)])).toEqual({
         slug: ZIP_FALLBACK_SLUG, reason: 'not_live', zip: '89506', candidates: ['loc_reno'],
       })
     }
+  })
+
+  it('locationTakesZipLeads: active and onboarding only', () => {
+    expect(locationTakesZipLeads('active')).toBe(true)
+    expect(locationTakesZipLeads('onboarding')).toBe(true)
+    expect(locationTakesZipLeads('paused')).toBe(false)
+    expect(locationTakesZipLeads(null)).toBe(false)
+    expect(locationTakesZipLeads('Onboarding')).toBe(false)
+  })
+
+  it('an onboarding claimant inside a conflict is still a conflict, never a pick', () => {
+    expect(decideZipRoute('80126', [row('loc_denver', 'onboarding'), row('loc_westdenver', 'active')])).toMatchObject({
+      slug: ZIP_FALLBACK_SLUG, reason: 'conflict',
+    })
   })
 
   it('a row pointing at loc_other is never a target', () => {

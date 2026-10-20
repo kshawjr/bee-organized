@@ -101,7 +101,7 @@ export default function LocationZipsPanel({ locationId }) {
 
         {notLive && (
           <div role="note" data-testid="territory-not-live" style={{ ...warnBox, marginTop: '10px', marginBottom: 0 }}>
-            {location.name} isn’t live yet, so leads from these zips go to Leslie at corporate until it is.
+            {location.name} isn’t taking new leads right now, so leads from these zips go to Leslie at corporate.
           </div>
         )}
 

@@ -188,7 +188,7 @@ describe('A. an owner’s write is refused by the SERVER, from the location page
 
 // ═══ B. the read ══════════════════════════════════════════════════
 describe('B. GET /api/locations/[id]/zips — who sees a territory', () => {
-  it('owner of Denver sees Denver: can_edit false, count, conflicts with names, not-live', async () => {
+  it('owner of Denver sees Denver: can_edit false, count, conflicts with names; onboarding takes its zips (20 Oct)', async () => {
     DENVER_OWNER()
     const res = await read(DENVER.id)
     expect(res.status).toBe(200)
@@ -196,11 +196,18 @@ describe('B. GET /api/locations/[id]/zips — who sees a territory', () => {
     expect(j.can_edit).toBe(false)
     expect(j.locations).toBeUndefined() // no picker for a viewer
     expect(j.count).toBe(4)
-    expect(j.not_live_routes_to_other).toBe(true)
+    expect(j.not_live_routes_to_other).toBe(false)
     expect(j.conflicts).toEqual([
       { zip: '80126', claimants: [{ location_uuid: DENVER.id, name: 'Denver' }, { location_uuid: WEST.id, name: 'West Denver' }] },
       { zip: '80203', claimants: [{ location_uuid: CENTRAL.id, name: 'Central Denver' }, { location_uuid: DENVER.id, name: 'Denver' }] },
     ])
+  })
+
+  it('a PAUSED location still says its zips go to Other', async () => {
+    h.state.locations = [CENTRAL, { ...DENVER, lifecycle_status: 'paused' }, OMAHA, OTHER, WEST]
+    DENVER_OWNER()
+    const j = await (await read(DENVER.id)).json()
+    expect(j.not_live_routes_to_other).toBe(true)
   })
 
   it('a manager of Denver may read it too', async () => {
@@ -312,11 +319,18 @@ describe('C1. an owner sees the list and no controls', () => {
     expect(host.querySelector('[data-testid="territory-conflicts"]')!.textContent).toContain('1 zip is also claimed by another location.Leads from it go to Leslie')
   })
 
-  it('a not-live location says its zips go to Leslie', async () => {
+  it('a paused location says its zips go to Leslie', async () => {
+    h.state.locations = [CENTRAL, { ...DENVER, lifecycle_status: 'paused' }, OMAHA, OTHER, WEST]
     DENVER_OWNER()
     const { host } = await mountPanel(DENVER.id)
     expect(host.querySelector('[data-testid="territory-not-live"]')!.textContent)
-      .toBe('Denver isn’t live yet, so leads from these zips go to Leslie at corporate until it is.')
+      .toBe('Denver isn’t taking new leads right now, so leads from these zips go to Leslie at corporate.')
+  })
+
+  it('an onboarding location shows no not-live note — its zips come to it (20 Oct)', async () => {
+    DENVER_OWNER()
+    const { host } = await mountPanel(DENVER.id)
+    expect(host.querySelector('[data-testid="territory-not-live"]')).toBeNull()
   })
 
   it('a live location with no conflicts shows neither note', async () => {

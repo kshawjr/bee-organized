@@ -79,6 +79,7 @@ const globalLead = (over: any = {}) => ({
 
 const PHILLY = { id: 'uuid-philly', name: 'Philadelphia Suburbs', location_id: 'loc_phillysuburbs', lifecycle_status: 'active' }
 const OTHER = { id: 'uuid-other', name: 'Other', location_id: 'loc_other', lifecycle_status: 'active' }
+const RENO = { id: 'uuid-reno', name: 'Reno', location_id: 'loc_reno', lifecycle_status: 'onboarding' }
 
 const zipRow = (location_id: string, lifecycle_status = 'active') => ({
   zip: 'x', location: { location_id, lifecycle_status },
@@ -177,8 +178,17 @@ describe('intake — zip routing (no location sent)', () => {
     expect(lastLog().message).toContain('zip_route=malformed')
   })
 
-  it('a zip held only by a NOT-LIVE location → loc_other, that location named', async () => {
+  it('a zip held only by an ONBOARDING location → that location (20 Oct 2026)', async () => {
     h.enqueue('location_zips', [zipRow('loc_reno', 'onboarding')])
+    landsAt(RENO)
+    const res = await POST(makeReq(globalLead({ zip: '89509' })))
+    expect(res.status).toBe(200)
+    expect(locationLookupSlug()).toBe('loc_reno')
+    expect(lastLog().message).toContain('zip_route=matched zip_loc=loc_reno')
+  })
+
+  it('a zip held only by a PAUSED location → loc_other, that location named', async () => {
+    h.enqueue('location_zips', [zipRow('loc_reno', 'paused')])
     landsAt(OTHER)
     const res = await POST(makeReq(globalLead({ zip: '89506' })))
     expect(res.status).toBe(200)
@@ -273,8 +283,8 @@ describe('intake — the ZIP WINS over the location the website sends (30 Sep 20
     expect(msg).toContain('sent_loc=loc_westdenver sent_overridden=true')
   })
 
-  it('a zip held only by a NOT-LIVE location → loc_other, whatever was sent', async () => {
-    h.enqueue('location_zips', [zipRow('loc_centralar', 'onboarding')])
+  it('a zip held only by a PAUSED location → loc_other, whatever was sent', async () => {
+    h.enqueue('location_zips', [zipRow('loc_centralar', 'paused')])
     landsAt(OTHER)
     await POST(makeReq(localLead('loc_nwarkansas', '72201')))
     expect(locationLookupSlug()).toBe('loc_other')

@@ -22,9 +22,9 @@
 //   not five digits / ZIP+4              → loc_other  ('malformed')
 //   no row in location_zips              → loc_other  ('unmatched')
 //   two or more locations claim it       → loc_other  ('conflict')
-//   one location, not lifecycle 'active' → loc_other  ('not_live')
 //   the lookup itself errored            → loc_other  ('lookup_failed')
-//   one active location                  → that location ('matched')
+//   one location, paused / any other     → loc_other  ('not_live')
+//   one location, active OR onboarding   → that location ('matched')
 //
 // EVERY non-match lands at loc_other, never a guess. Picking "the nearest" or
 // "the first row" would send a lead to the wrong franchise silently — the
@@ -35,23 +35,44 @@
 // codes. The candidates ride along on the decision so the sync_log row names
 // them.
 //
-// NOT-LIVE LOCATIONS. A zip that matches an onboarding location goes to
-// loc_other too, with that location named as the candidate. Reason: an
-// onboarding location has its notifications muted (notifications_live) and no
-// drip, and often no hub_users to assign — a lead routed there can arrive with
-// nobody told. At loc_other a person sees it and can transfer it. This is the
-// one switch Kevin has not ruled on: ROUTE_ONLY_TO_ACTIVE below.
+// ONBOARDING LOCATIONS ROUTE DIRECTLY (Kevin, 20 Oct 2026). A zip whose only
+// claimant is 'onboarding' goes to that location. Until then it went to
+// loc_other ('not_live'), and Leslie moved every one by hand, 1 to 49 hours
+// later.
+//
+// The old comment here said onboarding locations have their notifications
+// muted. That was wrong, and it is what kept this switch on. Muting is
+// locations.notifications_live, NOT lifecycle_status (lib/notifications-live),
+// and every onboarding location had it on. Checked 19 Oct 2026: intake emailed
+// all of them from late July to 30 Sep. The email they get is the non-Bee-Hub
+// one (lib/lead-notification-email): every customer field, no Bee Hub button,
+// nothing that needs a login, and replies go to the customer.
+//
+// What an onboarding location still does NOT get: the drip (intake enrols
+// only 'active'), Slack (none of them have connected it), and usually an
+// assignee (most have no hub_users). So the lead email is the only way the
+// owner hears about it. If that email fails or bounces, lib/failure-alerts
+// tells Kevin ('location_untold').
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from '@/lib/supabase-service'
 
 export const ZIP_FALLBACK_SLUG = 'loc_other'
 
-// Kevin has not decided (30 Sep 2026). true = a zip whose only location is not
-// 'active' goes to loc_other with that location as the candidate. false = it
-// routes to the onboarding location, the "path it's on today" for a local-form
-// lead at that location.
-export const ROUTE_ONLY_TO_ACTIVE = true
+// false (Kevin, 20 Oct 2026): a zip whose only location is onboarding routes
+// there. true would send it to loc_other ('not_live') with that location as
+// the candidate. See ONBOARDING LOCATIONS in the header.
+export const ROUTE_ONLY_TO_ACTIVE = false
+
+// Which lifecycle states a zip may route a lead to. 'active' always;
+// 'onboarding' only while ROUTE_ONLY_TO_ACTIVE is false. Anything else
+// ('paused', null, a state added later) still goes to loc_other as 'not_live':
+// the 20 Oct ruling was about onboarding, and a paused location is read-only
+// (lib/read-only-access), so a lead routed there could not be worked.
+export function locationTakesZipLeads(lifecycleStatus: string | null): boolean {
+  if (lifecycleStatus === 'active') return true
+  return !ROUTE_ONLY_TO_ACTIVE && lifecycleStatus === 'onboarding'
+}
 
 export type ZipRouteReason =
   | 'matched'
@@ -114,7 +135,7 @@ export function decideZipRoute(
     return { slug: ZIP_FALLBACK_SLUG, reason: 'conflict', zip, candidates: slugs }
   }
   const only = rows.find((r) => r.location_id === slugs[0])!
-  if (ROUTE_ONLY_TO_ACTIVE && only.lifecycle_status !== 'active') {
+  if (!locationTakesZipLeads(only.lifecycle_status)) {
     return { slug: ZIP_FALLBACK_SLUG, reason: 'not_live', zip, candidates: slugs }
   }
   return { slug: slugs[0], reason: 'matched', zip, candidates: slugs }

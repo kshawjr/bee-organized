@@ -2,8 +2,8 @@
 //
 // GET — one location's territory: its zips, which of them another location
 // also claims (a conflict: leads from it go to loc_other, not here), and
-// whether the location is live (a not-live location's zips go to loc_other
-// too — lib/zip-routing ROUTE_ONLY_TO_ACTIVE).
+// whether the location takes zip leads (one that doesn't — paused, say — has
+// its zips go to loc_other too; lib/zip-routing locationTakesZipLeads).
 //
 // READ ONLY. There is deliberately no POST/PATCH/DELETE here: every change to
 // a territory goes through app/api/admin/location-zips (+ ./resolve), which
@@ -19,7 +19,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { territoryEditableServer, territoryViewableServer } from '@/lib/territory-access'
 import { fetchAllLocationZips } from '@/lib/location-zips-admin'
-import { ROUTE_ONLY_TO_ACTIVE, ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
+import { locationTakesZipLeads, ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
 
 export const runtime = 'nodejs'
 
@@ -103,7 +103,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     zips,
     count: zipList.length,
     conflicts,
-    not_live_routes_to_other: ROUTE_ONLY_TO_ACTIVE && location.lifecycle_status !== 'active',
+    not_live_routes_to_other: !locationTakesZipLeads(location.lifecycle_status ?? null),
     can_edit: canEdit,
     ...(locations ? { locations } : {}),
   })
