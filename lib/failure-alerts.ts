@@ -134,6 +134,7 @@ export type AlertKind =
   | 'email_held'
   | 'drip_not_starting'
   | 'unrouted_untold'
+  | 'location_untold'
 
 // How long an owner may sit on an unpaid checkout before it is a strand.
 // Measured, not guessed — see the window note in the module header.
@@ -169,6 +170,24 @@ export type UnroutedUntoldRow = {
   send_status: string
   error?: string | null
   created_at: string
+}
+
+// A lead email to an ONBOARDING location that did not reach the location
+// (fetchOnboardingUntold — one row per lead and problem). Onboarding locations
+// mostly have no Bee Hub users and no Slack, so this email is the only way the
+// owner hears about the lead; when it fails nobody else will notice.
+export type LocationUntoldRow = {
+  lead_id: string | null
+  lead_name?: string | null
+  location_slug: string
+  // A send-time outcome (muted / zero_recipients / failed) or a Resend
+  // delivery outcome reported later (bounced / complained).
+  problem: 'muted' | 'zero_recipients' | 'failed' | 'bounced' | 'complained'
+  error?: string | null
+  // The location's own addresses on the affected rows (corporate's copies
+  // left out). Empty for muted / zero_recipients, which have no address.
+  recipients: string[]
+  at: string  // created_at for a send outcome, delivery_updated_at for a bounce
 }
 
 export type AlertItem = {
@@ -376,6 +395,7 @@ export function selectNewAlerts(input: {
   ownerReports?: OwnerReportRow[]                   // feedback_items rows filed by owners
   reconnects?: ReconnectRow[]                       // locations stamped RECONNECT REQUIRED
   unroutedUntold?: UnroutedUntoldRow[]              // loc_other leads whose alert email didn't go
+  locationUntold?: LocationUntoldRow[]              // onboarding-location lead emails that didn't arrive
   locNameByUuid?: Map<string, string>               // locations.id (uuid) → display name
   appUrl?: string                                   // for the triage link on owner reports
   sinceMs: number
@@ -386,7 +406,7 @@ export function selectNewAlerts(input: {
     events, importFailed, mismatches, locName, sinceMs, cutoffMs, nowMs,
     pendingCheckouts = [], locBilling, resolvedSessions,
     heldEmails = [], ownerReports = [], reconnects = [], locNameByUuid, appUrl = '',
-    dripEnrolFailures = [], unroutedUntold = [],
+    dripEnrolFailures = [], unroutedUntold = [], locationUntold = [],
   } = input
   const items: AlertItem[] = []
   const uuidLabel = (id: string | null | undefined) =>
@@ -551,7 +571,38 @@ export function selectNewAlerts(input: {
     })
   }
 
+  // (10) a lead email to an onboarding location didn't reach it — one message
+  // per lead and problem. Names the addresses so Kevin can call or forward.
+  for (const u of locationUntold) {
+    const t = Date.parse(u.at)
+    if (!inWindow(t, sinceMs, cutoffMs)) continue
+    const who = u.lead_name ? clean(u.lead_name, 60) : 'A new lead'
+    const where = locName.get(u.location_slug) || u.location_slug
+    items.push({
+      kind: 'location_untold',
+      ts: t,
+      text:
+        `Lead email didn't reach ${where} — ${who}: ${locationUntoldWhy(u)}. ` +
+        `${where} is onboarding, so this email is how they hear about a lead. ` +
+        `Tell them directly, then fix the address.`,
+    })
+  }
+
   return items.sort((a, b) => a.ts - b.ts)
+}
+
+// Why an onboarding location's lead email didn't arrive, in the words of its fix.
+const locationUntoldWhy = (u: LocationUntoldRow): string => {
+  const to = u.recipients.length ? clean(u.recipients.join(', '), 120) : null
+  if (u.problem === 'zero_recipients') return 'nobody is on its lead-alert list'
+  if (u.problem === 'muted') return `its notifications are switched off (${clean(u.error || 'notifications_live is off', 80)})`
+  if (u.problem === 'bounced') {
+    // Resend reports a bounce for the whole message, so every address on it
+    // reads 'bounced' — it may be only one of them.
+    return `the email bounced${to ? ` (sent to ${to}; Resend doesn't say which address)` : ''}`
+  }
+  if (u.problem === 'complained') return `the email was marked as spam${to ? ` by ${to}` : ''}`
+  return `the email failed to send${to ? ` to ${to}` : ''} (${clean(u.error || 'unknown error', 80)})`
 }
 
 // Why a loc_other lead-alert email didn't go, in the words of its fix.
@@ -579,6 +630,7 @@ const EMOJI: Record<AlertKind, string> = {
   email_held: ':envelope:',
   drip_not_starting: ':mailbox_with_no_mail:',
   unrouted_untold: ':round_pushpin:',
+  location_untold: ':no_bell:',
 }
 
 export type AlertMessage = { text: string; items: AlertItem[] }
@@ -1060,6 +1112,118 @@ export async function fetchUnroutedUntold(
   return out
 }
 
+// Lead emails to ONBOARDING locations that did not reach the location in
+// (since, cutoff]. Two reads of notification_log:
+//   • send outcomes — muted / zero_recipients / failed, by created_at;
+//   • delivery outcomes — bounced / complained, by delivery_updated_at, because
+//     Resend reports them minutes after the send.
+// Rows for corporate's own copies (lead_notification_global_cc) are dropped: a
+// failure there doesn't mean the location missed it, and corporate's addresses
+// are not the ones to fix. A bounce is the exception the CC filter can't fix —
+// Resend marks EVERY row of the message 'bounced', so the location's rows read
+// bounced even if only a corporate copy bounced. The message says so.
+//
+// LIMIT: delivery_status holds the LATEST event, so a later 'opened' by another
+// recipient on the same message overwrites 'bounced'. The 5-minute cron reads
+// it first in almost every case, but a bounce followed within minutes by an open
+// can be missed.
+//
+// Returning-client emails count too: at an onboarding location the owner hears
+// about those only by email as well.
+export const LOCATION_UNTOLD_KINDS = [
+  'lead_notification', 'lead_notification_non_hub',
+  'lead_resubmission', 'lead_resubmission_non_hub',
+] as const
+export const LOCATION_UNTOLD_DELIVERY = ['bounced', 'complained'] as const
+
+export async function fetchOnboardingUntold(
+  supabase: typeof supabaseService,
+  sinceIso: string,
+  cutoffIso: string,
+): Promise<LocationUntoldRow[]> {
+  const { data: locs, error: locErr } = await supabase
+    .from('locations')
+    .select('location_id, lifecycle_status')
+    .eq('lifecycle_status', 'onboarding')
+  if (locErr || !locs) return []
+  const slugs = new Set<string>(
+    (locs as any[])
+      .filter((l) => l.lifecycle_status === 'onboarding' && l.location_id && l.location_id !== LOC_OTHER_SLUG)
+      .map((l) => l.location_id),
+  )
+  if (slugs.size === 0) return []
+
+  const { data: ccRows } = await supabase
+    .from('lead_notification_global_cc')
+    .select('email, active')
+    .eq('active', true)
+  const cc = new Set<string>(
+    ((ccRows as any[]) || []).filter((r) => r.active !== false).map((r) => String(r.email || '').trim().toLowerCase()),
+  )
+
+  const cols = 'lead_id, lead_name, location_slug, channel, email_kind, recipient, send_status, delivery_status, delivery_updated_at, error, created_at'
+  const kinds = LOCATION_UNTOLD_KINDS as unknown as string[]
+  const [sendRes, deliveryRes] = await Promise.all([
+    supabase
+      .from('notification_log')
+      .select(cols)
+      .in('location_slug', Array.from(slugs))
+      .eq('channel', 'email')
+      .in('email_kind', kinds)
+      .in('send_status', UNROUTED_UNTOLD_STATUSES as unknown as string[])
+      .gt('created_at', sinceIso)
+      .lte('created_at', cutoffIso)
+      .order('created_at', { ascending: true })
+      .limit(500),
+    supabase
+      .from('notification_log')
+      .select(cols)
+      .in('location_slug', Array.from(slugs))
+      .eq('channel', 'email')
+      .in('email_kind', kinds)
+      .in('delivery_status', LOCATION_UNTOLD_DELIVERY as unknown as string[])
+      .gt('delivery_updated_at', sinceIso)
+      .lte('delivery_updated_at', cutoffIso)
+      .order('delivery_updated_at', { ascending: true })
+      .limit(500),
+  ])
+
+  const groups = new Map<string, LocationUntoldRow>()
+  const take = (r: any, problem: LocationUntoldRow['problem'], at: string) => {
+    // Re-checked on the row, not trusted to the query (the Sept 2026 rule:
+    // nothing but an email to THIS rail's locations may reach Kevin here).
+    if (r.channel !== 'email' || !slugs.has(r.location_slug)) return
+    if (!(LOCATION_UNTOLD_KINDS as readonly string[]).includes(r.email_kind)) return
+    const addr = String(r.recipient || '').trim().toLowerCase()
+    if (addr && cc.has(addr)) return
+    const key = `${r.lead_id || `${r.created_at}|${r.lead_name}`}|${problem}`
+    const g = groups.get(key)
+    if (g) {
+      if (addr && !g.recipients.includes(addr)) g.recipients.push(addr)
+      return
+    }
+    groups.set(key, {
+      lead_id: r.lead_id ?? null,
+      lead_name: r.lead_name ?? null,
+      location_slug: r.location_slug,
+      problem,
+      error: r.error ?? null,
+      recipients: addr ? [addr] : [],
+      at,
+    })
+  }
+  for (const r of ((sendRes as any)?.data as any[]) || []) {
+    if (!(UNROUTED_UNTOLD_STATUSES as readonly string[]).includes(r.send_status)) continue
+    take(r, r.send_status, r.created_at)
+  }
+  for (const r of ((deliveryRes as any)?.data as any[]) || []) {
+    if (!(LOCATION_UNTOLD_DELIVERY as readonly string[]).includes(r.delivery_status)) continue
+    if (!r.delivery_updated_at) continue
+    take(r, r.delivery_status, r.delivery_updated_at)
+  }
+  return Array.from(groups.values())
+}
+
 export async function collectFailureAlerts(opts: {
   nowMs: number
   sinceMs: number
@@ -1079,7 +1243,7 @@ export async function collectFailureAlerts(opts: {
   // the (sinceMs, cutoffMs] filter — not the fetch window — is the real dedup
   // boundary. A cron outage longer than 24h would drop older failed-lead
   // detail here; the admin Webhooks tab still has every row.
-  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, ownerReports, heldEmails, unroutedUntold] =
+  const [{ events }, importFailed, mismatches, directory, pendingCheckouts, ownerReports, heldEmails, unroutedUntold, locationUntold] =
     await Promise.all([
       fetchEvents({ window: '24h' }),
       fetchImportFailures(supabase, sinceIso, cutoffIso),
@@ -1089,6 +1253,7 @@ export async function collectFailureAlerts(opts: {
       fetchOwnerReports(supabase, sinceIso, cutoffIso),
       fetchHeldSubjectEmails(supabase, opts.sinceMs, cutoffMs),
       fetchUnroutedUntold(supabase, sinceIso, cutoffIso),
+      fetchOnboardingUntold(supabase, sinceIso, cutoffIso),
     ])
 
   // Nurture emails not starting (kind 8). After the batch, not inside it: its
@@ -1111,6 +1276,7 @@ export async function collectFailureAlerts(opts: {
     heldEmails,
     dripEnrolFailures,
     unroutedUntold,
+    locationUntold,
     ownerReports,
     reconnects: directory.reconnects,
     locNameByUuid: directory.namesByUuid,

@@ -356,14 +356,18 @@ describe('cron route + registration pins', () => {
     expect(lib).not.toContain('writeSyncLog(')
   })
 
-  it('is an allowlist: notification_log is read only for loc_other EMAIL (Slack channel failures are the owner\'s fix)', () => {
+  it('is an allowlist: notification_log is read only for loc_other and onboarding-location EMAIL (Slack channel failures are the owner\'s fix)', () => {
     // The Sept 2026 rebuild closed the one notification_log slice the
     // silent-sends rail had opened (channel='slack' failed): every such row is
     // an owner's private channel, which Kevin cannot fix. Kind 9 (2026-09-30)
-    // reopens exactly one read — loc_other, channel email — and nothing else.
-    expect(lib.split("from('notification_log')").length - 1).toBe(1)
+    // reopened one read — loc_other, channel email. Kind 10 (2026-10-20) adds
+    // two more, both channel email, both limited to onboarding locations (send
+    // outcomes, then bounces). Nothing else.
+    expect(lib.split("from('notification_log')").length - 1).toBe(3)
+    expect(lib.split(".eq('channel', 'email')").length - 1).toBe(3)
     expect(lib).toContain(".eq('location_slug', LOC_OTHER_SLUG)")
-    expect(lib).toContain(".eq('channel', 'email')")
+    expect(lib).toContain(".eq('lifecycle_status', 'onboarding')")
+    expect(lib.split(".in('location_slug', Array.from(slugs))").length - 1).toBe(2)
     expect(lib).not.toMatch(/eq\('channel', 'slack'\)/)
     expect(route).not.toContain("from('notification_log')")
     // The original allowlisted sources ARE still queried.
