@@ -41,7 +41,8 @@
 // SOURCE IS NOW SENT (Kevin, 2026-09-30 — reversing the earlier "Source
 // stays in Bee Hub" call). The old worry was raw slugs ("seattle_assessment")
 // landing in a franchisee's Jobber; the value now goes through
-// normalizeLeadSource first, so a slug arrives as its label. It is whatever
+// leadSourceForJobber first, so a slug arrives as its label and our own
+// words (Manual, Returning Client) send nothing. It is whatever
 // is on the lead at the moment Send to Jobber is pressed, as a "Source" line
 // in this form. That line works for a brand-new client AND for a client who
 // already exists in Jobber, whose own source field we cannot edit
@@ -57,7 +58,7 @@ export const REQUEST_FORM_ITEM_PROJECT_TYPE = 'Type of Project'
 export const REQUEST_FORM_ITEM_COMMENTS = 'Additional Comments/Questions'
 export const REQUEST_FORM_ITEM_SOURCE = 'Source'
 
-import { normalizeLeadSource } from './lead-source'
+import { leadSourceForJobber } from './lead-source'
 
 export type RequestFormItem = { label: string; answerText: string }
 export type RequestDetailsInput = {
@@ -98,7 +99,7 @@ export function buildRequestDetails(lead: {
     items.push({ label: REQUEST_FORM_ITEM_COMMENTS, answerText: comments })
   }
 
-  const source = normalizeLeadSource(lead?.source)
+  const source = leadSourceForJobber(lead?.source)
   if (source) {
     items.push({ label: REQUEST_FORM_ITEM_SOURCE, answerText: source })
   }

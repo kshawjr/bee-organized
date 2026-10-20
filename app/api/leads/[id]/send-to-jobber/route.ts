@@ -55,7 +55,7 @@ import {
 import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
-import { normalizeLeadSource } from '@/lib/lead-source'
+import { leadSourceForJobber } from '@/lib/lead-source'
 import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
 import {
   buildAddressChoices,
@@ -772,8 +772,9 @@ export async function POST(
     // So a lead WITH a source sets it; a lead with NONE cannot be made blank
     // in Jobber — it gets Jobber's app-name stamp whatever we send — and the
     // field is simply left out. The value is the lead's source at this
-    // moment, tidied (ig → Instagram, an old form slug → Website).
-    const clientSource = normalizeLeadSource((lead as any).source)
+    // moment, tidied for Jobber by leadSourceForJobber (ig → Instagram, GGLE →
+    // Google, an old form slug → Website; Manual / Returning Client send nothing).
+    const clientSource = leadSourceForJobber((lead as any).source)
     if (clientSource) createInput.sourceAttribution = { sourceText: clientSource }
     let create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
       input: createInput,

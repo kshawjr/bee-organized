@@ -308,3 +308,31 @@ describe("send-to-jobber — the lead's source reaches Jobber", () => {
     expect(requestInput()).not.toHaveProperty('source')
   })
 })
+
+// ── The copy sent to Jobber is tidied for an owner's eyes (2026-10-19) ────────
+// Variants become one name, our own words send nothing, and leads.source in
+// Bee Hub is never touched by it. Both send spots use the same rule.
+describe('send-to-jobber — the source sent to Jobber is tidied for owners', () => {
+  const clientSourceSent = () => mutationInputs('clientCreate')[0]?.input?.sourceAttribution
+
+  it('a variant goes as one name on BOTH the client and the request line (GGLE → Google, chatgpt.com → AI)', async () => {
+    for (const [raw, sent] of [['GGLE', 'Google'], ['chatgpt.com', 'AI']]) {
+      vi.clearAllMocks()
+      wire(baseLead({ source: raw }))
+      await send()
+      expect(clientSourceSent()).toEqual({ sourceText: sent })
+      expect(sourceLine()).toEqual({ label: 'Source', answerText: sent })
+    }
+  })
+
+  it('our own words send NOTHING — no client source, no request line', async () => {
+    for (const raw of ['Manual', 'Returning Client']) {
+      vi.clearAllMocks()
+      wire(baseLead({ source: raw }))
+      await send()
+      expect(mutationInputs('clientCreate')[0].input).not.toHaveProperty('sourceAttribution')
+      expect(sourceLine()).toBeUndefined()
+      expect(JSON.stringify(mutationInputs('requestCreate'))).not.toContain(raw)
+    }
+  })
+})

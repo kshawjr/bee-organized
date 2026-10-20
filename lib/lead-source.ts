@@ -68,6 +68,60 @@ export function normalizeLeadSource(raw: unknown): string | null {
 // lib/jobber-request-form.ts before trying to change it.
 export const JOBBER_APP_SOURCE_STAMP = 'Bee Organized Interface'
 
+// ─── What we SEND to Jobber (2026-10-19) ──────────────────────────────
+//
+// The lead's source goes into an owner's Jobber as free text (the new
+// client's lead source, and the "Source" line on the request). Jobber stores
+// it loose — it never matches the owner's lead-source picklist — so whatever
+// we send is exactly what the owner sees. leads.source itself is NOT changed
+// by this: Bee Hub and the reports keep the value as it is; only the copy
+// sent to Jobber is tidied.
+//
+// Keys are lower case with runs of spaces collapsed.
+const JOBBER_SEND_ALIAS: Record<string, string> = {
+  ggle: 'Google',
+  'chatgpt.com': 'AI',
+  'next door': 'NextDoor',
+  'angi leads integration': 'Angi',
+  'angi integration': 'Angi',
+  'friend referred': 'Referral',
+  'client referral': 'Referral',
+  'referral from other hive': 'Referral',
+  friend: 'Word of Mouth',
+  'personal friend': 'Word of Mouth',
+}
+
+// Our own words, not how the client heard about us — send NOTHING rather
+// than these. "Other" and "Google Voice" are deliberately NOT here: every
+// lead carrying them came from an owner's own Jobber, where the owner chose
+// them ("Other" is on Jobber's own picklist; "Google Voice" means they rang
+// that number).
+const JOBBER_SEND_DROP = new Set([
+  'manual',
+  'returning client',
+  'existing client',
+  'beeorganized',
+  JOBBER_APP_SOURCE_STAMP.toLowerCase(),
+  'bee applicant',
+  'smoke_test',
+  'scout_test',
+])
+
+/**
+ * leads.source → the lead source we send to Jobber. Same tidy-up as every
+ * door (normalizeLeadSource), then obvious variants become one name and our
+ * internal words become nothing. Anything else — a real source we have no
+ * rule for (Thumbtack, Yelp, an owner's local event) — goes as typed.
+ * Null means send no source at all.
+ */
+export function leadSourceForJobber(raw: unknown): string | null {
+  const s = normalizeLeadSource(raw)
+  if (!s) return null
+  const key = s.toLowerCase().replace(/\s+/g, ' ')
+  if (JOBBER_SEND_DROP.has(key)) return null
+  return JOBBER_SEND_ALIAS[key] ?? s
+}
+
 /**
  * Jobber's Client.leadSource → leads.source, for clients arriving FROM
  * Jobber (webhook + initial import). Same tidy-up as every other door;
