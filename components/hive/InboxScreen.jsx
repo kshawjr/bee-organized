@@ -258,13 +258,15 @@ function GhostIconButton({ label, icon: Icon, disabled, onClick, ...rest }) {
 // against /api/leads/:id/no-coverage.
 function NoCoveragePill({ disabled, onClick }) {
   return (
-    <button className="bee-no-coverage-pill" aria-label="No coverage" title="Not available in their area — email + mailing-list invite"
+    <button className="bee-no-coverage-pill bee-chip-action" aria-label="No coverage" title="Not available in their area — email + mailing-list invite"
       disabled={disabled} onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '5px',
         padding: '7px 13px', borderRadius: T.radius.pill,
         border: `1px solid ${T.corp.border}`, background: 'transparent', color: T.corp.fg,
-        fontSize: '13px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+        // .bee-chip-action releases the 16px button floor (globals.css) to
+        // 13.5px, matching the hive chips beside it on the same line.
+        fontSize: '13.5px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.5 : 1,
       }}>
@@ -1159,7 +1161,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     const err = moveError[p.id]
     if (pending) {
       return (
-        <span data-bee-route-pending={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+        <span data-bee-route-pending={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}
           onClick={(ev) => ev.stopPropagation()}>
           <span style={{ fontSize: '12.5px', color: T.corp.deep, whiteSpace: 'nowrap' }}>Moving to {pending.destName}…</span>
           <button type="button" data-bee-route-undo className="bee-small-action"
@@ -1174,7 +1176,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     const s = rs?.status === 'ready' ? rs.suggestion : null
     const options = s?.options || []
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}
+      <span data-bee-route-choices style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-start', minWidth: 0, maxWidth: '100%' }}
         onClick={(ev) => ev.stopPropagation()}>
         {rs?.status === 'loading' && (
           <span data-bee-route-loading style={{ fontSize: '12px', color: T.ink.quiet }}>Finding closest hives…</span>
@@ -1183,7 +1185,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           const destId = rs.locations?.[o.slug] || null
           const filled = !!o.highlighted
           return (
-            <button key={o.slug} type="button" data-bee-route-chip={o.slug} aria-pressed={filled}
+            <button key={o.slug} type="button" className="bee-chip-action" data-bee-route-chip={o.slug} aria-pressed={filled}
               title={s.kind === 'claimed' ? `Zip ${s.zip} is on ${o.name}'s list` : `Route to ${o.name}`}
               disabled={!destId || busyId === p.id}
               onClick={(ev) => { ev.stopPropagation(); startMove(p, destId, o.name) }}
@@ -1193,7 +1195,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 border: filled ? 'none' : `1px solid ${T.corp.border}`,
                 background: filled ? T.corp.fill : 'transparent',
                 color: filled ? T.corp.onFill : T.corp.fg,
-                fontSize: '12.5px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+                // .bee-chip-action releases the 16px button floor (globals.css)
+                // to 13.5px; without it every chip rendered at 16px.
+                fontSize: '13.5px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
                 cursor: destId ? 'pointer' : 'not-allowed', opacity: destId ? 1 : 0.5,
               }}>
               {routeChipLabel(s.kind, o)}
@@ -1209,7 +1213,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <NoCoveragePill disabled={busyId === p.id}
           onClick={(ev) => { ev.stopPropagation(); setNoCoverageFor(p) }} />
         {err && (
-          <span role="alert" data-bee-route-error style={{ flexBasis: '100%', textAlign: 'right', fontSize: '12px', color: T.state.danger.fg }}>
+          <span role="alert" data-bee-route-error style={{ flexBasis: '100%', fontSize: '12px', color: T.state.danger.fg }}>
             Couldn&apos;t move: {err}
           </span>
         )}
@@ -1563,7 +1567,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               <AgeInline created={inboxAgeAnchor(p)} nowMs={nowMs} />
               {/* Selection mode swaps the action cluster for checkboxes —
                   no per-row writes while a batch is being composed. */}
-              {!selectMode && (
+              {!selectMode && !isTransfer && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
                   {actions}
                 </div>
@@ -1571,7 +1575,20 @@ export default function InboxScreen({ people = [], transferPeople = [], location
             </div>
           )}
         </div>
-        {isMobile && !selectMode && (
+        {/* A Needs-transfer row's actions — the suggested-hive chips, Another
+            location…, No coverage — get their OWN line under the details, at
+            every width (20 Oct 2026). In the right-hand cluster, which never
+            shrinks, three chips squeezed the name and details out of the row
+            entirely and cut No coverage off at the edge. Here they wrap
+            instead of overflowing, lined up under the name; the identity and
+            details lines above keep exactly the shape of every other row. */}
+        {isTransfer && !selectMode && actions && (
+          <div data-bee-transfer-actions style={{ marginTop: '8px', paddingLeft: `calc(${T.avatar.identity} + 12px)`, minWidth: 0 }}
+            onClick={ev => ev.stopPropagation()}>
+            {actions}
+          </div>
+        )}
+        {isMobile && !selectMode && !isTransfer && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginTop: '6px', paddingLeft: '37px' }} onClick={ev => ev.stopPropagation()}>
             {actions}
           </div>

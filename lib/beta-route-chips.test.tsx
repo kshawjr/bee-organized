@@ -377,3 +377,110 @@ describe('D. one press → 5 seconds to undo → the move', () => {
     await unmount()
   })
 })
+
+// ═══ E. the layout (20 Oct 2026 fix) ═════════════════════════════
+// The chips once sat in the row's right-hand cluster (which never shrinks)
+// and pushed the name, details and No coverage out of the row. Now a
+// Needs-transfer row reads: identity + details on top, actions on their OWN
+// line underneath, wrapping. (Pixel widths need a real browser; these pin
+// the structure that makes the overflow impossible.)
+describe('E. the row\'s shape', () => {
+  beforeEach(async () => { suggestReply = { body: await SUGGESTIONS() }; installFetch() })
+  // useIsMobile reads __BEE_TEST_WIDTH__ first, then re-checks window.innerWidth
+  // after mount — so a phone-width test must set both.
+  const setWidth = (w: number) => {
+    ;(globalThis as any).__BEE_TEST_WIDTH__ = w
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true })
+  }
+  afterEach(() => setWidth(1200))
+
+  const shape = (row: Element) => {
+    const actions = row.querySelector('[data-bee-transfer-actions]') as HTMLElement | null
+    const identity = row.firstElementChild as HTMLElement
+    return { actions, identity }
+  }
+
+  it.each([[1200], [375]])('at %ipx: name and details on top, actions on their own line below, lined up under the name', async (width) => {
+    setWidth(width)
+    const { host, unmount } = await mount([leadRow({ id: 'zach', name: 'Zach H', originZip: '94122', project: 'Home or Office Organizing' })])
+    // (no suggestion is loaded for this id, so this pins the shape without chips;
+    //  the next test pins it with three)
+    const row = host.querySelector('.bee-inbox-row')!
+    const { actions, identity } = shape(row)
+    expect(actions).toBeTruthy()
+    // the actions line is the row's own child, AFTER the identity line — not inside it
+    expect(actions!.parentElement).toBe(row)
+    expect(identity.contains(actions!)).toBe(false)
+    expect(identity.textContent).toContain('Zach H')
+    expect(identity.textContent).toContain('Needs transfer')
+    expect(identity.textContent).toContain('94122 · Home or Office Organizing')
+    // lined up under the name: avatar width + gap
+    expect(actions!.style.paddingLeft).toBe('calc(32px + 12px)')
+    // and only ONE actions line, at every width
+    expect(row.querySelectorAll('[data-bee-transfer-actions]')).toHaveLength(1)
+    expect(row.querySelectorAll('[aria-label="No coverage"]')).toHaveLength(1)
+    // the date stays in the top part at both widths
+    expect(identity.textContent).toMatch(/ago|today|yesterday|\d/)
+    await unmount()
+  })
+
+  it('at phone width the Inbox really is in its phone layout (the test is honest)', async () => {
+    setWidth(375)
+    const { host, unmount } = await mount([leadRow()])
+    // phone layout puts the date inside the details line, not a right cluster
+    const identity = host.querySelector('.bee-inbox-row')!.firstElementChild as HTMLElement
+    expect(identity.children.length).toBe(2) // avatar + text column, no right cluster
+    await unmount()
+  })
+
+  it('the chips, Another location… and No coverage all sit in that line, which wraps', async () => {
+    const { host, unmount } = await mount([leadRow()])
+    const { actions } = shape(host.querySelector('.bee-inbox-row')!)
+    const choices = actions!.querySelector('[data-bee-route-choices]') as HTMLElement
+    expect(choices.style.flexWrap).toBe('wrap')
+    expect(choices.style.justifyContent).toBe('flex-start')
+    expect(choices.style.maxWidth).toBe('100%')
+    expect(actions!.querySelectorAll('[data-bee-route-chip]')).toHaveLength(3)
+    expect(actions!.querySelector('[data-bee-route-other]')).toBeTruthy()
+    expect(actions!.querySelector('[aria-label="No coverage"]')).toBeTruthy()
+    await unmount()
+  })
+
+  it('the right-hand cluster of a transfer row holds only the date — no buttons', async () => {
+    const { host, unmount } = await mount([leadRow()])
+    const { identity } = shape(host.querySelector('.bee-inbox-row')!)
+    expect(identity.querySelectorAll('button')).toHaveLength(0)
+    await unmount()
+  })
+
+  it('a row with no chips keeps the same shape — same top lines, its actions line just has no chips', async () => {
+    const { host, unmount } = await mount([leadRow(), leadRow({ id: 'nozip', name: 'No Zip', originZip: null })])
+    const rows = Array.from(host.querySelectorAll('.bee-inbox-row'))
+    const [a, b] = rows.map((r) => shape(r))
+    expect(a.identity.children.length).toBe(b.identity.children.length)
+    expect(b.actions!.querySelectorAll('[data-bee-route-chip]')).toHaveLength(0)
+    expect(b.actions!.querySelector('[data-bee-route-other]')).toBeTruthy()
+    await unmount()
+  })
+
+  it('chips and No coverage are released from the 16px button floor to the chip size', async () => {
+    const { host, unmount } = await mount([leadRow()])
+    for (const b of chips(host)) expect(b.className).toContain('bee-chip-action')
+    expect((host.querySelector('[aria-label="No coverage"]') as HTMLElement).className).toContain('bee-chip-action')
+    expect(readFileSync(join(process.cwd(), 'app/globals.css'), 'utf8')).toContain('.bee-chip-action { font-size: 13.5px !important }')
+    await unmount()
+  })
+
+  it('an ordinary (non-transfer) row is unchanged: its buttons stay in the right-hand cluster', async () => {
+    const person = { ...leadRow({ id: 'n1', name: 'Regular Lead', atLocOther: false, locationId: 'loc1' }), stage: 'New', phone: '(555) 123-4567', phoneNormalized: '5551234567' }
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(<InboxScreen people={[person] as any} transferPeople={[]} engagements={[]} locFilter="all" />) })
+    await flush()
+    const row = Array.from(host.querySelectorAll('.bee-inbox-row')).find((r) => (r.textContent || '').includes('Regular Lead'))!
+    expect(row.querySelector('[data-bee-transfer-actions]')).toBeNull()
+    expect((row.firstElementChild as HTMLElement).querySelectorAll('button').length).toBeGreaterThan(0)
+    await act(async () => root.unmount()); host.remove()
+  })
+})
