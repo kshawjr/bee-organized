@@ -68,7 +68,7 @@ export function syncSuffix(wb) {
   if (!wb) return ''
   const bOk = wb.billing === 'updated' || wb.billing === 'added'
   const bFail = wb.billing === 'failed'
-  const pOk = wb.property === 'updated'
+  const pOk = wb.property === 'updated' || wb.property === 'added'
   const pFail = wb.property === 'failed'
   if (wb.property === 'skipped_multiple') {
     // The deliberate skip is said out loud (policy) — unless billing
@@ -84,6 +84,7 @@ export function syncSuffix(wb) {
       ? ' · Jobber sync partial — service address synced, billing failed'
       : ' · Jobber sync failed — saved in Bee Hub only'
   }
+  if (wb.request === 'failed') return ' · synced to Jobber, but the address did not reach the Jobber request'
   if (bOk || pOk) return ' · synced to Jobber'
   return '' // everything already converged — no claim to make
 }

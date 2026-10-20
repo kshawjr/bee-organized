@@ -63,6 +63,9 @@ export function normalizeLeadSource(raw: unknown): string | null {
 // What Jobber writes on a client OUR app created when we send no source:
 // the app's own name. It says "this came through Bee Hub", not how the
 // client heard about us, so it must never be read back in as a source.
+// On a REQUEST it cannot be changed at all (Request.source is read-only) and
+// is kept on purpose as the marker of a Bee Hub request — see the note in
+// lib/jobber-request-form.ts before trying to change it.
 export const JOBBER_APP_SOURCE_STAMP = 'Bee Organized Interface'
 
 /**

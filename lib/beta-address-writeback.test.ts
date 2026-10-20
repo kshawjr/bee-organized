@@ -406,18 +406,39 @@ function wireJobber({
   visits = [] as any[],
   clientEditErrors = null as any,
   propertyEditErrors = null as any,
+  requestProperty = null as any,
+  requestFetchError = null as any,
+  propertyCreateErrors = null as any,
+  requestEditErrors = null as any,
 } = {}) {
-  ;(jobberGraphQL as any).mockResolvedValue({
-    data: {
-      client: {
-        id: gid('Client', '101'),
-        billingAddress,
-        clientProperties: properties,
-        scheduledItems: { nodes: visits },
+  ;(jobberGraphQL as any).mockImplementation(async (_loc: string, query: string) => {
+    if (query.includes('GetRequestProperty')) {
+      return requestFetchError
+        ? { errors: [{ message: requestFetchError }] }
+        : { data: { request: { id: gid('Request', '900'), property: requestProperty } } }
+    }
+    return {
+      data: {
+        client: {
+          id: gid('Client', '101'),
+          billingAddress,
+          clientProperties: properties,
+          scheduledItems: { nodes: visits },
+        },
       },
-    },
+    }
   })
   ;(jobberMutation as any).mockImplementation(async (_loc: string, mutation: string) => {
+    if (mutation.includes('propertyCreate')) {
+      return propertyCreateErrors
+        ? { userErrors: propertyCreateErrors }
+        : { data: { propertyCreate: { properties: [{ id: gid('Property', '777') }] } } }
+    }
+    if (mutation.includes('requestEdit')) {
+      return requestEditErrors
+        ? { userErrors: requestEditErrors }
+        : { data: { requestEdit: { request: { id: gid('Request', '900') } } } }
+    }
     if (mutation.includes('propertyEdit')) {
       return propertyEditErrors
         ? { userErrors: propertyEditErrors }
@@ -655,5 +676,150 @@ describe('PATCH /api/leads/[id] — billing-address write-back trigger', () => {
     await patchLead({ ...AUSTIN_PATCH, addresses: [{ type: 'Service', value: 'user-managed' }] })
     const [, applied] = (updateLead as any).mock.calls[0]
     expect(applied.addresses).toEqual([{ type: 'Service', value: 'user-managed' }])
+  })
+})
+
+// ── the lead's Jobber REQUEST gets the address (2026-10-19) ──────────────────
+//
+// A request sent before the lead had an address is created with no property.
+// The address added afterwards used to reach the client's billing only
+// ("billing:added,property:none") and never the request. Now a request with
+// no property gets one attached via requestEdit { propertyId }.
+describe('PATCH /api/leads/[id] — the address reaches the Jobber request', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    leadRow = { ...baseLead(), jobber_request_id: '900' }
+    touchpointInserts = []
+    wireDb()
+  })
+
+  const reqEdits = () => mutationCalls('requestEdit')
+  const propCreates = () => mutationCalls('propertyCreate')
+  const audit = () => touchpointInserts.filter(t => String(t.label || '').startsWith('Address'))
+
+  it('ZERO properties + request with none → property created on the client, then attached to the request', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+    const res = await patchLead(AUSTIN_PATCH)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.address_writeback).toMatchObject({
+      billing: 'updated', property: 'added', request: 'attached', property_id: '777',
+    })
+    expect(propCreates()).toHaveLength(1)
+    const [, , cvars] = propCreates()[0]
+    expect(cvars.clientId).toBe(gid('Client', '101'))
+    expect(cvars.input).toEqual({
+      properties: [{ address: { street1: '500 Oak Ave', city: 'Austin', province: 'TX', postalCode: '78701' } }],
+    })
+    expect(reqEdits()).toHaveLength(1)
+    const [, rmut, rvars] = reqEdits()[0]
+    expect(rmut).toContain('requestEdit')
+    expect(rvars).toEqual({ requestId: gid('Request', '900'), input: { propertyId: gid('Property', '777') } })
+    expect(audit()[0].notes).toContain('address added to the Jobber request')
+  })
+
+  it('the new property becomes the lead link (jobber_property_id captured)', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+    const updates: any[] = []
+    ;(supabaseService.from as any).mockImplementation((table: string) => {
+      const chain = chainFor(() => (table === 'leads' ? leadRow : null), table === 'touchpoints' ? touchpointInserts : undefined)
+      if (table === 'leads') chain.update = vi.fn((row: any) => { updates.push(row); return chain })
+      return chain
+    })
+    await patchLead(AUSTIN_PATCH)
+    expect(updates).toContainEqual({ jobber_property_id: '777' })
+  })
+
+  it('SINGLE existing property + request with none → that property is attached, nothing created', async () => {
+    wireJobber()
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ property: 'updated', request: 'attached' })
+    expect(propCreates()).toHaveLength(0)
+    expect(reqEdits()[0][2]).toEqual({ requestId: gid('Request', '900'), input: { propertyId: 'prop-1' } })
+  })
+
+  it('request ALREADY has a property → never re-pointed, no requestEdit, no create', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] }, requestProperty: { id: gid('Property', '555') } })
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ property: 'none', request: 'already_set' })
+    expect(reqEdits()).toHaveLength(0)
+    expect(propCreates()).toHaveLength(0)
+  })
+
+  it('MULTIPLE properties, none linked → request left alone (never guess), said in the audit', async () => {
+    wireJobber({
+      properties: {
+        totalCount: 2,
+        nodes: [{ id: 'prop-1', address: OLD_JOBBER_ADDR }, { id: 'prop-2', address: OLD_JOBBER_ADDR }],
+      },
+    })
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ property: 'skipped_multiple', request: 'skipped_multiple' })
+    expect(reqEdits()).toHaveLength(0)
+    expect(propCreates()).toHaveLength(0)
+    expect(audit()[0].notes).toContain('Jobber request left without an address — client has multiple properties')
+  })
+
+  it('no street in the address → no property created, request untouched', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] }, billingAddress: null })
+    leadRow = { ...baseLead(), jobber_request_id: '900', address: null, city: null, state: null, zip: '78701' }
+    const body = await (await patchLead({ zip: '78702' })).json()
+    expect(body.address_writeback?.request ?? null).not.toBe('attached')
+    expect(propCreates()).toHaveLength(0)
+    expect(reqEdits()).toHaveLength(0)
+  })
+
+  it('propertyCreate refused → property failed, request failed, billing still lands, save still 200', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] }, propertyCreateErrors: [{ message: 'bad address' }] })
+    const res = await patchLead(AUSTIN_PATCH)
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'failed', request: 'failed', property_id: null })
+    expect(reqEdits()).toHaveLength(0)
+    expect(audit()[0].notes).toContain('address NOT added to the Jobber request')
+  })
+
+  it('propertyCreate answers with errors AND an id → still treated as refused: nothing attached', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+    const base = (jobberMutation as any).getMockImplementation()
+    ;(jobberMutation as any).mockImplementation(async (loc: string, mutation: string, vars: any) =>
+      mutation.includes('propertyCreate')
+        ? { userErrors: [{ message: 'partial' }], data: { propertyCreate: { properties: [{ id: gid('Property', '777') }] } } }
+        : base(loc, mutation, vars))
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ property: 'failed', request: 'failed', property_id: null })
+    expect(reqEdits()).toHaveLength(0)
+  })
+
+  it('requestEdit refused → request failed, the created property and billing still reported', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] }, requestEditErrors: [{ message: 'nope' }] })
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'added', request: 'failed' })
+  })
+
+  it('request fetch fails → request failed, nothing created or attached', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] }, requestFetchError: 'boom' })
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', request: 'failed' })
+    expect(propCreates()).toHaveLength(0)
+    expect(reqEdits()).toHaveLength(0)
+  })
+
+  it('lead with NO Jobber request → behaviour unchanged: no request read, no create, request null', async () => {
+    leadRow = baseLead()
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'none', request: null })
+    expect((jobberGraphQL as any).mock.calls.some(([, q]: any[]) => q.includes('GetRequestProperty'))).toBe(false)
+    expect(propCreates()).toHaveLength(0)
+  })
+
+  it('breadcrumb carries the request outcome', async () => {
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+    await patchLead(AUSTIN_PATCH)
+    const { writeSyncLog } = await import('@/lib/sync-log')
+    const msgs = (writeSyncLog as any).mock.calls.map(([r]: any[]) => r.message)
+    expect(msgs).toContain('Lead edit address sync; client=101; billing:updated,property:added,request:attached')
   })
 })

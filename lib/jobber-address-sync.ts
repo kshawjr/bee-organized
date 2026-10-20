@@ -15,6 +15,12 @@
 //     carries upcoming_visits so the audit note says to verify the
 //     schedule.
 //
+// A THIRD step since 2026-10-19 — the lead's Jobber REQUEST: a request sent
+// before the lead had an address was created with no property, so the
+// address later reached billing but never the request. When the request has
+// no property we attach one with requestEdit { propertyId } — the client's
+// single (or linked) property, or one created here when the client has none.
+//
 // Failures are per-target and non-fatal: a propertyEdit error never
 // undoes the billing edit, and neither ever blocks the lead save.
 //
@@ -105,7 +111,36 @@ const GET_LINKED_ADDRESS_STATE_QUERY = /* GraphQL */ `
   }
 `
 
-const globalId = (type: 'Client' | 'Property', numeric: string) =>
+// The lead's Jobber request, for the request-property step: does it carry a
+// property yet? A separate small read, made only when the lead has a request.
+const GET_REQUEST_PROPERTY_QUERY = /* GraphQL */ `
+  query GetRequestProperty($requestId: EncodedId!) {
+    request(id: $requestId) {
+      id
+      property { id }
+    }
+  }
+`
+
+const PROPERTY_CREATE_FOR_REQUEST_MUTATION = /* GraphQL */ `
+  mutation PropertyCreateForRequest($clientId: EncodedId!, $input: PropertyCreateInput!) {
+    propertyCreate(clientId: $clientId, input: $input) {
+      properties { id }
+      userErrors { message path }
+    }
+  }
+`
+
+const REQUEST_PROPERTY_EDIT_MUTATION = /* GraphQL */ `
+  mutation RequestPropertyEdit($requestId: EncodedId!, $input: RequestEditInput!) {
+    requestEdit(requestId: $requestId, input: $input) {
+      request { id property { id } }
+      userErrors { message path }
+    }
+  }
+`
+
+const globalId = (type: 'Client' | 'Property' | 'Request', numeric: string) =>
   Buffer.from(`gid://Jobber/${type}/${numeric}`, 'utf8').toString('base64')
 
 const numericFromGlobal = (gid: string | null | undefined): string | null => {
@@ -129,6 +164,9 @@ export async function syncLeadAddressToJobber(opts: {
   // leads.jobber_property_id when the lead carries one — the property this
   // address IS. Present → the correction targets it directly.
   linkedPropertyId?: string | null
+  // leads.jobber_request_id. Present → a request with no property gets this
+  // address attached (created on the client first when it has none).
+  jobberRequestId?: string | null
 }): Promise<AddressWriteback> {
   const { leadId, locationSlug, jobberClientId, target } = opts
 
@@ -143,11 +181,16 @@ export async function syncLeadAddressToJobber(opts: {
       message:
         `Lead edit address sync; client=${jobberClientId}; ` +
         `billing:${outcome.billing},property:${outcome.property}` +
+        (outcome.request ? `,request:${outcome.request}` : '') +
         (outcome.upcoming_visits ? '; upcoming_visits' : '') +
         (detail ? `; ${detail}` : ''),
     })
 
-  const failedBoth: AddressWriteback = { billing: 'failed', property: 'failed', upcoming_visits: false, property_id: null }
+  const requestId = opts.jobberRequestId ? String(opts.jobberRequestId) : null
+  const failedBoth: AddressWriteback = {
+    billing: 'failed', property: 'failed', upcoming_visits: false, property_id: null,
+    request: requestId ? 'failed' : null,
+  }
 
   try {
     const clientGlobalId = globalId('Client', jobberClientId)
@@ -211,20 +254,79 @@ export async function syncLeadAddressToJobber(opts: {
       property = resolvePropertyWriteback(propPlan.kind, !!edit.userErrors?.length)
     }
 
+    // ── the request's property ───────────────────────────────────
+    // A request-only send creates the request with no property. Attach one
+    // now so the address shows on the request itself, not just the client.
+    // Only ever FILLS a blank: a request that already has a property keeps it.
+    let propertyGlobalId: string | null = propPlan.propertyId
+    let request: AddressWriteback['request'] = null
+    if (requestId) {
+      const reqRes = await jobberGraphQL(locationSlug, GET_REQUEST_PROPERTY_QUERY, {
+        requestId: globalId('Request', requestId),
+      })
+      if (reqRes.errors?.length || !reqRes.data?.request) {
+        console.warn('[address-sync] request fetch failed', { leadId, requestId, reason: reqRes.errors?.[0]?.message })
+        request = 'failed'
+      } else if (reqRes.data.request.property?.id) {
+        request = 'already_set'
+      } else if (propPlan.kind === 'skipped_multiple') {
+        request = 'skipped_multiple'
+      } else if (!propertyGlobalId && !target.street?.trim()) {
+        request = 'no_street'
+      } else {
+        if (!propertyGlobalId) {
+          // Zero properties on the client: create the one this address is.
+          const created = await jobberMutation(locationSlug, PROPERTY_CREATE_FOR_REQUEST_MUTATION, {
+            clientId: clientGlobalId,
+            input: {
+              properties: [{
+                address: {
+                  street1: target.street,
+                  city: target.city || null,
+                  province: target.state || null,
+                  postalCode: target.zip || null,
+                },
+              }],
+            },
+          })
+          if (created.userErrors?.length) {
+            console.warn('[address-sync] propertyCreate userErrors', JSON.stringify(created.userErrors))
+          }
+          propertyGlobalId = created.userErrors?.length
+            ? null
+            : created.data?.propertyCreate?.properties?.[0]?.id ?? null
+          property = propertyGlobalId ? 'added' : 'failed'
+        }
+        if (!propertyGlobalId) {
+          request = 'failed'
+        } else {
+          const edit = await jobberMutation(locationSlug, REQUEST_PROPERTY_EDIT_MUTATION, {
+            requestId: globalId('Request', requestId),
+            input: { propertyId: propertyGlobalId },
+          })
+          if (edit.userErrors?.length) {
+            console.warn('[address-sync] requestEdit userErrors', JSON.stringify(edit.userErrors))
+          }
+          request = edit.userErrors?.length || !edit.data?.requestEdit?.request?.id ? 'failed' : 'attached'
+        }
+      }
+    }
+
     const outcome: AddressWriteback = {
       billing,
       property,
       // Numeric, matching the leads.jobber_property_id convention. Set
       // whenever the push identified exactly one property — whether it
-      // needed editing or was already converged.
-      property_id: propPlan.propertyId ? numericFromGlobal(propPlan.propertyId) : null,
+      // needed editing, was already converged, or was just created.
+      property_id: propertyGlobalId ? numericFromGlobal(propertyGlobalId) : null,
+      request,
       // Annotation, not a gate: only meaningful when the service address
       // actually moved under a scheduled future visit.
       upcoming_visits:
         property === 'updated' && hasUpcomingVisit(client.scheduledItems?.nodes, Date.now()),
     }
 
-    const anyFailed = billing === 'failed' || property === 'failed'
+    const anyFailed = billing === 'failed' || property === 'failed' || request === 'failed'
     await breadcrumb(anyFailed ? 'error' : 'success', outcome)
     return outcome
   } catch (err: any) {

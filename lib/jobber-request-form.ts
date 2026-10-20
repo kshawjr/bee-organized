@@ -32,6 +32,12 @@
 // creates; re-checked 2026-09-30, RequestEditInput has none either). The
 // form item below is the ONLY way a source can ride on a request.
 //
+// DO NOT "FIX" THE REQUEST'S SOURCE. Re-checked 2026-10-19 on API versions
+// 2025-04-16 and 2026-09-26: still no source on RequestCreateInput or
+// RequestEditInput. And "Bee Organized Interface" is useful as it is — it
+// marks every request that came from Bee Hub, so owners (and we) can tell
+// ours apart from requests typed into Jobber by hand.
+//
 // SOURCE IS NOW SENT (Kevin, 2026-09-30 — reversing the earlier "Source
 // stays in Bee Hub" call). The old worry was raw slugs ("seattle_assessment")
 // landing in a franchisee's Jobber; the value now goes through

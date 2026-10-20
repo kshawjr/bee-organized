@@ -156,7 +156,8 @@ describe('editing reaches Jobber ON SAVE', () => {
     // one, so a caller never has to guard for its absence.
     const src = readFileSync('lib/jobber-address-sync.ts', 'utf8')
     expect(src).toContain("property_id: null")            // failedBoth
-    expect(src).toContain('property_id: propPlan.propertyId')  // the resolved path
+    expect(src).toContain('let propertyGlobalId: string | null = propPlan.propertyId')  // the resolved path…
+    expect(src).toContain('property_id: propertyGlobalId ? numericFromGlobal(propertyGlobalId) : null')  // …or the one just created
     // numeric ids pass through rather than decoding to null — the
     // leads.jobber_property_id convention, matching extractJobberId
     expect(src).toContain('if (/^\\d+$/.test(String(gid))) return String(gid)')

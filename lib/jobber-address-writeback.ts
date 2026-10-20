@@ -41,10 +41,26 @@ export type AddressPlan = 'edit' | 'add' | 'none'
 //   billing:  updated | added | unchanged | failed
 //   property: updated | unchanged (single, already converged)
 //           | skipped_multiple (deliberate — never guess which property)
+//           | added (client had none; created so a request can carry it)
 //           | none (client has no properties) | failed
+//   request:  what happened to the lead's open Jobber request's property
+//           (null when the lead has no request) — see RequestPropertyOutcome.
 //   upcoming_visits: single property was UPDATED and has future
 //           scheduled visits — audit/toast annotation, never a skip.
-export type PropertyWritebackOutcome = 'updated' | 'unchanged' | 'skipped_multiple' | 'none' | 'failed'
+export type PropertyWritebackOutcome = 'updated' | 'added' | 'unchanged' | 'skipped_multiple' | 'none' | 'failed'
+
+// A request sent with no address (request-only) is created with NO property,
+// and an address added later used to reach only billing — the request itself
+// stayed blank, so whoever does the job could not see where it is.
+// RequestEditInput.propertyId (live introspection 2026-10-19, API 2025-04-16
+// and 2026-09-26) lets us attach one afterwards.
+//   attached         — the request now carries the property
+//   already_set      — it had one; we never re-point a request's property
+//   skipped_multiple — client has several properties, none linked: never guess
+//   no_street        — no street in the address: a property nobody can find
+//                      is not worth creating
+//   failed           — property create or requestEdit was refused
+export type RequestPropertyOutcome = 'attached' | 'already_set' | 'skipped_multiple' | 'no_street' | 'failed'
 
 export interface AddressWriteback {
   billing: AddressWritebackOutcome
@@ -63,6 +79,8 @@ export interface AddressWriteback {
   // Null when nothing identified one (zero properties, or the deliberate
   // multiple-property skip — we still never guess).
   property_id: string | null
+  // Null when the lead has no Jobber request to attach to.
+  request: RequestPropertyOutcome | null
 }
 
 export interface JobberBillingAddress {

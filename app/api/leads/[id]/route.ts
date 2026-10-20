@@ -631,6 +631,9 @@ export async function PATCH(
       // exactly that one, however many properties the client holds. No
       // link → the legacy single-property blast radius decides.
       linkedPropertyId: (existing as any).jobber_property_id || null,
+      // A request sent before the lead had an address has no property; the
+      // sync attaches this address to it.
+      jobberRequestId: (existing as any).jobber_request_id || null,
     })
     // CAPTURE THE LINK. The push just resolved which property this address
     // is; persisting it turns the blast-radius guess into a fact, so the
@@ -662,6 +665,13 @@ export async function PATCH(
     if (!existing.jobber_client_id) noteParts.push('not connected to Jobber — saved here only')
     if (addressWriteback?.property === 'skipped_multiple') {
       noteParts.push('synced to Jobber billing — client has multiple properties, service address not changed')
+    }
+    if (addressWriteback?.request === 'attached') {
+      noteParts.push('address added to the Jobber request')
+    } else if (addressWriteback?.request === 'failed') {
+      noteParts.push('address NOT added to the Jobber request — add the property there by hand')
+    } else if (addressWriteback?.request === 'skipped_multiple') {
+      noteParts.push('Jobber request left without an address — client has multiple properties')
     }
     if (addressWriteback?.upcoming_visits) {
       noteParts.push('property has upcoming visits — verify schedule')
