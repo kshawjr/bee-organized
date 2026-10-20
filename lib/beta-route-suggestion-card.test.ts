@@ -12,6 +12,8 @@ import { join } from 'node:path'
 import {
   buildRouteSuggestionSlackMessage,
   buildResolvedRouteMessage,
+  placeLine,
+  OTHER_CARD_COLOR,
   encodeAcceptValue,
   decodeAcceptValue,
   ROUTE_LEAVE,
@@ -22,6 +24,7 @@ import {
 } from '@/lib/route-suggestion-slack'
 import { buildRouteSuggestion } from '@/lib/route-suggestion'
 import { rankNearestLocations, type ClaimedZip, type ZipPoint } from '@/lib/zip-proximity'
+import { buildLeadSlackMessage } from '@/lib/slack-bot'
 
 const snap = JSON.parse(readFileSync(join(process.cwd(), 'lib/fixtures/zip-proximity-snapshot.json'), 'utf8'))
 const CLAIMS: ClaimedZip[] = snap.claims
@@ -32,7 +35,8 @@ const suggestionFor = (zip: any, state: any = null) =>
 
 const LEAD = (over: any = {}) => ({
   id: 'lead-1', name: 'Jessica Example', email: 'j@example.com', phone: '2395550100', project_type: 'Garage',
-  request_details: 'Two-car garage', preferred_contact: 'Text', source: 'Website', zip: '33928', ...over,
+  request_details: 'Two-car garage', preferred_contact: 'Text', source: 'Instagram',
+  address: '123 Corkscrew Rd', city: 'Estero', state: 'FL', zip: '33928', ...over,
 })
 const card = (zip: any, state: any = null, leadUrl: string | null = 'https://hive.example/clients/lead-1') =>
   buildRouteSuggestionSlackMessage({ lead: LEAD({ zip }), suggestion: suggestionFor(zip, state), leadUrl })
@@ -61,11 +65,40 @@ describe('the card', () => {
     expect(decodeAcceptValue(els[0].value)).toEqual({ lead: 'lead-1', to: 'loc_miami' })
   })
 
-  it('keeps the lead details from the ordinary card', () => {
-    const all = JSON.stringify(card('33928'))
-    expect(all).toContain('*Jessica Example*')
-    expect(all).toContain('Two-car garage')
-    expect(all).toContain('Garage')
+  // Kevin, 20 Oct 2026: Leslie is deciding WHERE it goes, not working it.
+  it('carries ONLY the name, the place, the suggestion and the buttons — in that order', () => {
+    const m = card('33928')
+    const blocks = blocksOf(m)
+    expect(blocks.map((b) => b.block_id ?? b.type)).toEqual(['section', SUGGEST_BLOCK_ID, ACTIONS_BLOCK_ID, 'context', 'divider'])
+    expect(blocks[0].text.text).toBe('*Jessica Example*\nEstero, FL 33928')
+    expect(blocks[3].elements[0].text).toBe('Other · via Bee Hub')
+  })
+
+  it.each([
+    ['phone', '2395550100'], ['phone label', 'Phone'], ['email', 'j@example.com'], ['email label', 'Email'],
+    ['project type', 'Garage'], ['project label', 'Project'], ['preferred contact', 'Preferred contact'],
+    ['what they told us', 'Two-car garage'], ['details label', 'What they told us'],
+    ['source', 'Instagram'], ['street', 'Corkscrew'],
+  ])('leaves out the %s', (_what, text) => {
+    expect(JSON.stringify(card('33928'))).not.toContain(text)
+  })
+
+  it('the stripe is neutral grey whatever the project type (on a franchise card the colour IS the type)', () => {
+    for (const project_type of ['Moving', 'Home Organizing', null]) {
+      const m = buildRouteSuggestionSlackMessage({ lead: LEAD({ project_type }), suggestion: suggestionFor('33928'), leadUrl: null })
+      expect(m.attachments[0].color).toBe(OTHER_CARD_COLOR)
+    }
+    expect(OTHER_CARD_COLOR).toBe('#6b7280')
+  })
+
+  it('no location at all → says so, rather than a blank line', () => {
+    const m = buildRouteSuggestionSlackMessage({ lead: LEAD({ city: null, state: null, zip: null, address: null }), suggestion: suggestionFor(null), leadUrl: null })
+    expect(blocksOf(m)[0].text.text).toBe('*Jessica Example*\n_No location given_')
+  })
+
+  it('a name with < or & is escaped', () => {
+    const m = buildRouteSuggestionSlackMessage({ lead: LEAD({ name: 'A <b> & C' }), suggestion: suggestionFor('33928'), leadUrl: null })
+    expect(blocksOf(m)[0].text.text).toBe('*A &lt;b&gt; &amp; C*\nEstero, FL 33928')
   })
 
   it('Riverside 92503 near-tie: no button is green, and the card says why', () => {
@@ -136,6 +169,31 @@ describe('the card', () => {
     const m = card('33928')
     expect(m.text).toBe('📍 New lead in Other — needs a hive')
     expect(m.attachments[0].fallback).toBe(m.text)
+  })
+})
+
+describe('placeLine — city, state, zip; never the street', () => {
+  it.each([
+    [{ city: 'Estero', state: 'FL', zip: '33928' }, 'Estero, FL 33928'],
+    [{ city: ' Estero ', state: ' FL ', zip: ' 33928 ' }, 'Estero, FL 33928'],
+    [{ city: 'Estero', state: 'FL', zip: null }, 'Estero, FL'],
+    [{ city: 'Estero', state: null, zip: '33928' }, 'Estero, 33928'],
+    [{ city: null, state: 'FL', zip: '33928' }, 'FL 33928'],
+    [{ city: null, state: null, zip: '33928' }, '33928'],
+    [{ city: 'Estero', state: null, zip: null }, 'Estero'],
+    [{ city: '', state: '  ', zip: null }, null],
+    [{ city: null, state: null, zip: null }, null],
+  ])('%j → %j', (lead, line) => {
+    expect(placeLine(lead as any)).toBe(line)
+  })
+})
+
+describe('franchise cards are NOT stripped — the owner works the lead from them', () => {
+  it('buildLeadSlackMessage still carries phone, email, project, preferred contact, what they told us, Log call', () => {
+    const all = JSON.stringify(buildLeadSlackMessage({ lead: LEAD(), locationName: 'Miami', leadUrl: null }))
+    for (const text of ['*Phone:*', '*Email:*', '*Project:*', 'Garage', '*Preferred contact:*', 'What they told us', 'Two-car garage', 'Instagram', 'log_call']) {
+      expect(all).toContain(text)
+    }
   })
 })
 

@@ -5,16 +5,26 @@
 // Slack calls, no database. lib/slack-bot.ts posts it; the interactivity
 // route (lib/route-suggestion-actions.ts) edits it.
 //
-// THE CARD is the ordinary new-lead card (buildLeadSlackMessage: name, phone,
-// email, project, address, what they told us, Open in Bee Hub) with its
-// button row swapped for the suggestion from lib/route-suggestion.ts:
-//   • up to three hive buttons, "Lincoln · 19 mi"; the highlighted one green
-//   • "Leave in Other" — always
-//   • "Not in our service area" — only when the suggestion says so (a measured
-//     nearest hive over 75 miles); red, with a confirm, because it emails the
-//     customer
-// No Log call button: the card lives in corporate's channel, and a call is
-// logged where the lead is worked.
+// THE CARD IS FOR DECIDING WHERE A LEAD GOES, NOT FOR WORKING IT (Kevin,
+// 20 Oct 2026). It carries only:
+//   • the lead's name
+//   • where they are: city, state, zip (never the street)
+//   • the suggestion from lib/route-suggestion.ts and its buttons —
+//       up to three hive buttons, "Lincoln · 19 mi", the highlighted one green;
+//       "Leave in Other", always;
+//       "Not in our service area", only when the suggestion says so (a
+//       measured nearest hive over 75 miles), red, with a confirm, because it
+//       emails the customer
+//   • Open in Bee Hub
+// NO phone, email, project type, preferred contact, source or "What they told
+// us": Leslie opens the lead if she needs them. The stripe is the neutral grey
+// for the same reason — on a franchise card its colour IS the project type.
+// No Log call button: a call is logged where the lead is worked.
+//
+// ONLY THE OTHER CARD. Franchise lead cards (lib/slack-bot
+// buildLeadSlackMessage) keep every field; the owner works the lead from them.
+// This builder deliberately does not reuse that one, so a field added there
+// can never appear here by accident.
 //
 // THE ACTION CONTRACT. action_id route_accept_<n> (value {"lead","to"} as
 // JSON, `to` the location slug), route_leave (value: lead id),
@@ -22,7 +32,7 @@
 // block_ids below so an edit can find and replace them.
 // ─────────────────────────────────────────────────────────────
 
-import { buildLeadSlackMessage, type SlackLead } from '@/lib/slack-bot'
+import type { SlackLead } from '@/lib/slack-bot'
 import type { RouteSuggestion } from '@/lib/route-suggestion'
 
 export const ROUTE_ACCEPT_PREFIX = 'route_accept_'
@@ -73,16 +83,33 @@ export function suggestionHeadline(s: RouteSuggestion | null, rawZip: string | n
   }
 }
 
+// Neutral grey — the franchise card's colour for "no project type".
+export const OTHER_CARD_COLOR = '#6b7280'
+
+// "Beatrice, NE 68310" from whatever was collected; null when nothing was.
+// City, state and zip only — the street is a working detail.
+export function placeLine(lead: Pick<SlackLead, 'city' | 'state' | 'zip'>): string | null {
+  const city = (lead.city || '').trim()
+  const state = (lead.state || '').trim()
+  const zip = (lead.zip || '').trim()
+  const tail = [state, zip].filter(Boolean).join(' ')
+  const line = [city, tail].filter(Boolean).join(', ')
+  return line || null
+}
+
 export function buildRouteSuggestionSlackMessage(args: {
   lead: SlackLead
   suggestion: RouteSuggestion | null
   leadUrl: string | null
 }): { text: string; attachments: any[] } {
   const { lead, suggestion, leadUrl } = args
-  const base = buildLeadSlackMessage({ lead, locationName: 'Other', leadUrl })
-  const att = base.attachments[0]
-  // The base card's one actions block is Log call (+ Open). Replace it.
-  const actionsAt = att.blocks.findIndex((b: any) => b.type === 'actions')
+
+  const name = (lead.name || '').trim() || '—'
+  const place = placeLine(lead)
+  const headBlock = {
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*${esc(name)}*\n${place ? esc(place) : '_No location given_'}` },
+  }
 
   const lines = [suggestionHeadline(suggestion, lead.zip ?? null)]
   if (suggestion?.stateWarning) {
@@ -129,10 +156,15 @@ export function buildRouteSuggestionSlackMessage(args: {
   }
   const actionsBlock = { type: 'actions', block_id: ACTIONS_BLOCK_ID, elements }
 
-  const blocks = [...att.blocks]
-  blocks.splice(actionsAt >= 0 ? actionsAt : blocks.length, actionsAt >= 0 ? 1 : 0, suggestBlock, actionsBlock)
+  const blocks = [
+    headBlock,
+    suggestBlock,
+    actionsBlock,
+    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Other · via Bee Hub' }] },
+    { type: 'divider' },
+  ]
   const text = '📍 New lead in Other — needs a hive'
-  return { text, attachments: [{ ...att, fallback: text, blocks }] }
+  return { text, attachments: [{ color: OTHER_CARD_COLOR, fallback: text, blocks }] }
 }
 
 // The card after a button: the same lead details, the suggestion and its
