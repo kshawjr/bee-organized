@@ -473,6 +473,25 @@ export async function notifyNewLeadSlack(args: {
 
   const locationName = args.locationName?.trim() || 'your location'
   const leadUrl = baseUrl ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}` : null
+
+  // OTHER gets the route-suggestion card (20 Oct 2026): the same lead details
+  // with the three closest hives as buttons, Leave in Other, and — only past
+  // 75 measured miles — Not in our service area. The suggestion reads the
+  // lead and the zip map; if that fails the card still posts, saying so, so a
+  // lead in Other is never left without a card. Imported lazily: the
+  // suggestion pulls in the zip map, which no franchise card needs.
+  if (gate.unroutedQueue) {
+    const { suggestRouteForLead } = await import('@/lib/route-suggestion')
+    const { buildRouteSuggestionSlackMessage } = await import('@/lib/route-suggestion-slack')
+    let suggestion = null
+    try {
+      suggestion = await suggestRouteForLead(lead.id)
+    } catch (err: any) {
+      console.error('[slack-bot] route suggestion failed for lead', lead.id, '—', err?.message || err)
+    }
+    return postToSlack(locationId, buildRouteSuggestionSlackMessage({ lead, suggestion, leadUrl }))
+  }
+
   const message = buildLeadSlackMessage({
     lead,
     locationName,

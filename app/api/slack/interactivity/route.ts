@@ -1,7 +1,9 @@
 // app/api/slack/interactivity/route.ts
 // ─────────────────────────────────────────────────────────────
 // Inbound Slack interactivity endpoint — handles the "Log call" button on the
-// per-location new-lead card (lib/slack-bot.ts buildLeadSlackMessage).
+// per-location new-lead card (lib/slack-bot.ts buildLeadSlackMessage), and the
+// route-suggestion buttons on Other's card (lib/route-suggestion-actions.ts:
+// move to a hive, Leave in Other, Not in our service area).
 //
 // SECURITY BOUNDARY: Slack signs every interactive payload. We verify the
 // signature (HMAC-SHA256 over `v0:${ts}:${rawBody}` with SLACK_SIGNING_SECRET)
@@ -28,8 +30,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { supabaseService } from '@/lib/supabase-service'
+import { waitUntil } from '@vercel/functions'
 import { getSlackUserEmail } from '@/lib/slack-bot'
 import { logCallTouchpoint } from '@/lib/touchpoints'
+import { isRouteAction, handleRouteAction } from '@/lib/route-suggestion-actions'
 
 export const runtime = 'nodejs'
 
@@ -170,6 +174,28 @@ export async function POST(req: NextRequest) {
     payload = JSON.parse(new URLSearchParams(rawBody).get('payload') || '{}')
   } catch {
     // Malformed but signed — ack so Slack doesn't retry/flag it.
+    return NextResponse.json({ ok: true })
+  }
+
+  // Other's route-suggestion buttons (lib/route-suggestion-actions). A move
+  // writes the lead, emails the new owner and posts their Slack card — more
+  // than Slack's 3-second ack allows — so the click is acknowledged now and
+  // the work finishes under waitUntil; the card is edited through
+  // response_url when it is done. Corporate-only: the handler refuses anyone
+  // else before reading or writing anything.
+  const routeAction = (payload.actions || []).find((a: any) => isRouteAction(a?.action_id))
+  if (routeAction) {
+    waitUntil(
+      handleRouteAction({
+        actionId: routeAction.action_id,
+        value: routeAction.value,
+        slackUserId: payload.user?.id,
+        responseUrl: payload.response_url,
+        message: payload.message,
+      })
+        .then((outcome) => console.log('[slack-interactivity] route action', routeAction.action_id, '→', outcome))
+        .catch((err: any) => console.error('[slack-interactivity] route action threw —', err?.message || err)),
+    )
     return NextResponse.json({ ok: true })
   }
 
