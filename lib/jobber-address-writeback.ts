@@ -59,8 +59,10 @@ export type PropertyWritebackOutcome = 'updated' | 'added' | 'unchanged' | 'skip
 //   skipped_multiple — client has several properties, none linked: never guess
 //   no_street        — no street in the address: a property nobody can find
 //                      is not worth creating
+//   several_requests — the lead has more than one open request: never guess
 //   failed           — property create or requestEdit was refused
-export type RequestPropertyOutcome = 'attached' | 'already_set' | 'skipped_multiple' | 'no_street' | 'failed'
+export type RequestPropertyOutcome =
+  'attached' | 'already_set' | 'skipped_multiple' | 'no_street' | 'several_requests' | 'failed'
 
 export interface AddressWriteback {
   billing: AddressWritebackOutcome
@@ -79,7 +81,7 @@ export interface AddressWriteback {
   // Null when nothing identified one (zero properties, or the deliberate
   // multiple-property skip — we still never guess).
   property_id: string | null
-  // Null when the lead has no Jobber request to attach to.
+  // Null when the lead has no open Jobber request to attach to.
   request: RequestPropertyOutcome | null
 }
 

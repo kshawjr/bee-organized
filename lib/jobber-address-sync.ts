@@ -15,11 +15,13 @@
 //     carries upcoming_visits so the audit note says to verify the
 //     schedule.
 //
-// A THIRD step since 2026-10-19 — the lead's Jobber REQUEST: a request sent
-// before the lead had an address was created with no property, so the
-// address later reached billing but never the request. When the request has
-// no property we attach one with requestEdit { propertyId } — the client's
-// single (or linked) property, or one created here when the client has none.
+// A THIRD step since 2026-10-19 — the lead's Jobber REQUEST: a request made
+// before the lead had an address has no property, so the address later
+// reached billing but never the request. When the lead has exactly ONE open
+// request (service_requests — ours or one the owner made in Jobber) and it
+// has no property, we attach one with requestEdit { propertyId } — the
+// client's single (or linked) property, or one created here when the client
+// has none. Several open requests → skipped and said so.
 //
 // Failures are per-target and non-fatal: a propertyEdit error never
 // undoes the billing edit, and neither ever blocks the lead save.
@@ -164,9 +166,12 @@ export async function syncLeadAddressToJobber(opts: {
   // leads.jobber_property_id when the lead carries one — the property this
   // address IS. Present → the correction targets it directly.
   linkedPropertyId?: string | null
-  // leads.jobber_request_id. Present → a request with no property gets this
-  // address attached (created on the client first when it has none).
-  jobberRequestId?: string | null
+  // The lead's OPEN Jobber requests, from service_requests — every request,
+  // whether our Send created it or the owner made it in Jobber (only ours
+  // ever set leads.jobber_request_id, which is why that column is not used).
+  // Exactly one → it gets this address if it has no property (created on the
+  // client first when it has none). Several → skipped: never guess.
+  openRequestIds?: Array<string | number | null | undefined>
 }): Promise<AddressWriteback> {
   const { leadId, locationSlug, jobberClientId, target } = opts
 
@@ -186,10 +191,12 @@ export async function syncLeadAddressToJobber(opts: {
         (detail ? `; ${detail}` : ''),
     })
 
-  const requestId = opts.jobberRequestId ? String(opts.jobberRequestId) : null
+  const openRequestIds = Array.from(new Set((opts.openRequestIds ?? []).filter(Boolean).map(String)))
+  const severalRequests = openRequestIds.length > 1
+  const requestId = openRequestIds.length === 1 ? openRequestIds[0] : null
   const failedBoth: AddressWriteback = {
     billing: 'failed', property: 'failed', upcoming_visits: false, property_id: null,
-    request: requestId ? 'failed' : null,
+    request: severalRequests ? 'several_requests' : requestId ? 'failed' : null,
   }
 
   try {
@@ -259,7 +266,7 @@ export async function syncLeadAddressToJobber(opts: {
     // now so the address shows on the request itself, not just the client.
     // Only ever FILLS a blank: a request that already has a property keeps it.
     let propertyGlobalId: string | null = propPlan.propertyId
-    let request: AddressWriteback['request'] = null
+    let request: AddressWriteback['request'] = severalRequests ? 'several_requests' : null
     if (requestId) {
       const reqRes = await jobberGraphQL(locationSlug, GET_REQUEST_PROPERTY_QUERY, {
         requestId: globalId('Request', requestId),

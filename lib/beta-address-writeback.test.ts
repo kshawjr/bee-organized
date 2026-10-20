@@ -351,6 +351,11 @@ const gid = (type: string, n: string) =>
 
 let leadRow: any
 let touchpointInserts: any[]
+// service_requests rows the open-request lookup returns, and the chain it
+// was built on (to check the filters).
+let srRows: any[] = []
+let srError: any = null
+let srChain: any = null
 
 const baseLead = () => ({
   id: 'lead-1',
@@ -367,7 +372,7 @@ const baseLead = () => ({
 
 function chainFor(rowRef: () => any, inserts?: any[]) {
   const chain: any = {}
-  for (const m of ['select', 'eq', 'neq', 'update']) chain[m] = vi.fn(() => chain)
+  for (const m of ['select', 'eq', 'neq', 'update', 'in']) chain[m] = vi.fn(() => chain)
   chain.insert = vi.fn((row: any) => { inserts?.push(row); return chain })
   chain.single = vi.fn(async () => {
     const row = rowRef()
@@ -386,6 +391,11 @@ function wireDb() {
   ;(supabaseService.from as any).mockImplementation((table: string) => {
     if (table === 'leads') return chainFor(() => leadRow)
     if (table === 'touchpoints') return chainFor(() => null, touchpointInserts)
+    if (table === 'service_requests') {
+      srChain = chainFor(() => null)
+      srChain.then = (resolve: any) => resolve({ data: srError ? null : srRows, error: srError })
+      return srChain
+    }
     return chainFor(() => null)
   })
   ;(updateLead as any).mockImplementation(async (_id: string, patch: any) => {
@@ -689,6 +699,8 @@ describe('PATCH /api/leads/[id] — the address reaches the Jobber request', () 
   beforeEach(() => {
     vi.clearAllMocks()
     leadRow = { ...baseLead(), jobber_request_id: '900' }
+    srRows = [{ jobber_request_id: '900' }]
+    srError = null
     touchpointInserts = []
     wireDb()
   })
@@ -722,7 +734,9 @@ describe('PATCH /api/leads/[id] — the address reaches the Jobber request', () 
   it('the new property becomes the lead link (jobber_property_id captured)', async () => {
     wireJobber({ properties: { totalCount: 0, nodes: [] } })
     const updates: any[] = []
+    const base = (supabaseService.from as any).getMockImplementation()
     ;(supabaseService.from as any).mockImplementation((table: string) => {
+      if (table === 'service_requests') return base(table)
       const chain = chainFor(() => (table === 'leads' ? leadRow : null), table === 'touchpoints' ? touchpointInserts : undefined)
       if (table === 'leads') chain.update = vi.fn((row: any) => { updates.push(row); return chain })
       return chain
@@ -806,8 +820,9 @@ describe('PATCH /api/leads/[id] — the address reaches the Jobber request', () 
     expect(reqEdits()).toHaveLength(0)
   })
 
-  it('lead with NO Jobber request → behaviour unchanged: no request read, no create, request null', async () => {
+  it('lead with NO open Jobber request → behaviour unchanged: no request read, no create, request null', async () => {
     leadRow = baseLead()
+    srRows = []
     wireJobber({ properties: { totalCount: 0, nodes: [] } })
     const body = await (await patchLead(AUSTIN_PATCH)).json()
     expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'none', request: null })
@@ -821,5 +836,104 @@ describe('PATCH /api/leads/[id] — the address reaches the Jobber request', () 
     const { writeSyncLog } = await import('@/lib/sync-log')
     const msgs = (writeSyncLog as any).mock.calls.map(([r]: any[]) => r.message)
     expect(msgs).toContain('Lead edit address sync; client=101; billing:updated,property:added,request:attached')
+  })
+})
+
+// ── BOTH kinds of request (2026-10-20) ───────────────────────────────────────
+//
+// The first cut found the request through leads.jobber_request_id — which
+// only OUR Send ever sets. A request the owner made in Jobber arrives by
+// webhook into service_requests and never touches that column, so it was
+// silently skipped (Stagnant Lead Jr, Test Location, 2026-10-20 02:32:38:
+// "billing:added,property:none" with no request step at all). The lookup now
+// reads the lead's open service_requests rows, whoever made the request.
+describe('PATCH /api/leads/[id] — the address reaches requests OURS and the OWNER\'S', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    touchpointInserts = []
+    srError = null
+    wireDb()
+    wireJobber({ properties: { totalCount: 0, nodes: [] } })
+  })
+
+  const reqEdits = () => mutationCalls('requestEdit')
+  const propCreates = () => mutationCalls('propertyCreate')
+  const requestReads = () => (jobberGraphQL as any).mock.calls.filter(([, q]: any[]) => q.includes('GetRequestProperty'))
+
+  it('a request WE created (lead column set, open SR row) → property attached to it', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: '35282235' }
+    srRows = [{ jobber_request_id: '35282235' }]
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ property: 'added', request: 'attached' })
+    expect(reqEdits()[0][2].requestId).toBe(gid('Request', '35282235'))
+  })
+
+  it('a request the OWNER made in Jobber (lead column NULL, open SR row) → property attached to it', async () => {
+    // Exactly the Stagnant Lead Jr shape that the first cut skipped.
+    leadRow = { ...baseLead(), jobber_request_id: null }
+    srRows = [{ jobber_request_id: '28562815' }]
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'added', request: 'attached' })
+    expect(requestReads()[0][2]).toEqual({ requestId: gid('Request', '28562815') })
+    expect(propCreates()).toHaveLength(1)
+    expect(reqEdits()[0][2]).toEqual({ requestId: gid('Request', '28562815'), input: { propertyId: gid('Property', '777') } })
+  })
+
+  it('the lookup is the lead\'s OPEN requests: this lead, active, stage New / Request / Nurturing', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: null }
+    srRows = [{ jobber_request_id: '28562815' }]
+    await patchLead(AUSTIN_PATCH)
+    expect(supabaseService.from).toHaveBeenCalledWith('service_requests')
+    expect(srChain.eq).toHaveBeenCalledWith('lead_id', 'lead-1')
+    expect(srChain.eq).toHaveBeenCalledWith('status', 'active')
+    expect(srChain.in).toHaveBeenCalledWith('stage', ['New', 'Request', 'Nurturing'])
+  })
+
+  it('a STALE lead column is ignored: the open SR request is the one that gets the address', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: '800' }
+    srRows = [{ jobber_request_id: '901' }]
+    await patchLead(AUSTIN_PATCH)
+    expect(reqEdits()).toHaveLength(1)
+    expect(reqEdits()[0][2].requestId).toBe(gid('Request', '901'))
+  })
+
+  it('lead column set but NO open request (it moved on to a quote/job) → no request step', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: '800' }
+    srRows = []
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ request: null })
+    expect(requestReads()).toHaveLength(0)
+    expect(reqEdits()).toHaveLength(0)
+  })
+
+  it('SEVERAL open requests → skipped (never guess), said in the audit and the log line', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: null }
+    srRows = [{ jobber_request_id: '901' }, { jobber_request_id: '902' }]
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ billing: 'updated', property: 'none', request: 'several_requests' })
+    expect(requestReads()).toHaveLength(0)
+    expect(propCreates()).toHaveLength(0)
+    expect(reqEdits()).toHaveLength(0)
+    const audit = touchpointInserts.filter(t => String(t.label || '').startsWith('Address'))
+    expect(audit[0].notes).toContain('Jobber requests left without an address — lead has several open requests')
+    const { writeSyncLog } = await import('@/lib/sync-log')
+    const msgs = (writeSyncLog as any).mock.calls.map(([r]: any[]) => r.message)
+    expect(msgs).toContain('Lead edit address sync; client=101; billing:updated,property:none,request:several_requests')
+  })
+
+  it('the same request listed twice counts as ONE open request', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: null }
+    srRows = [{ jobber_request_id: '901' }, { jobber_request_id: '901' }]
+    const body = await (await patchLead(AUSTIN_PATCH)).json()
+    expect(body.address_writeback).toMatchObject({ request: 'attached' })
+  })
+
+  it('the lookup failing never blocks the save: treated as no open request', async () => {
+    leadRow = { ...baseLead(), jobber_request_id: null }
+    srError = { message: 'boom' }
+    const res = await patchLead(AUSTIN_PATCH)
+    expect(res.status).toBe(200)
+    expect((await res.json()).address_writeback).toMatchObject({ billing: 'updated', request: null })
+    expect(reqEdits()).toHaveLength(0)
   })
 })

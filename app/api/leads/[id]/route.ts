@@ -31,6 +31,10 @@ import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWri
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 import { diffAddressPatch, buildFormerAddress, parseFormerAddresses, isMissingFormerAddressesColumn } from '@/lib/lead-address'
 import { syncLeadAddressToJobber, createPropertyForMove, type MovePropertyResult } from '@/lib/jobber-address-sync'
+
+// service_requests stages that mean the request has no quote, job or
+// invoice yet (lib/jobber-import determineStage) — i.e. still open.
+const OPEN_REQUEST_STAGES = ['New', 'Request', 'Nurturing']
 import { diffNamePatch, normalizeNamePatch, touchesName, composeLeadName, nameValidationError, nameSyncFailed, NOT_LINKED_NOTE, type NameWriteback } from '@/lib/lead-name'
 import { syncLeadNameToJobber } from '@/lib/jobber-name-sync'
 import type { AddressWriteback } from '@/lib/jobber-address-writeback'
@@ -622,6 +626,18 @@ export async function PATCH(
   // per-target outcomes ride the response.
   let addressWriteback: AddressWriteback | null = null
   if (addrDiff.changed && !addrDiff.cleared && existing.jobber_client_id && existing.location_id) {
+    // The lead's OPEN Jobber requests — from service_requests, which holds
+    // every request: ours and the ones an owner made in Jobber. NOT
+    // leads.jobber_request_id: only our own Send ever sets that, so it missed
+    // every owner-made request (and goes stale when a request moves on).
+    // Open = no quote, job or invoice yet (lib/jobber-import determineStage).
+    const { data: openRequests, error: openReqErr } = await supabaseService
+      .from('service_requests')
+      .select('jobber_request_id')
+      .eq('lead_id', id)
+      .eq('status', 'active')
+      .in('stage', OPEN_REQUEST_STAGES)
+    if (openReqErr) console.warn('[leads PATCH] open request lookup failed', openReqErr.message)
     addressWriteback = await syncLeadAddressToJobber({
       leadId: id,
       locationSlug: existing.location_id,
@@ -631,9 +647,9 @@ export async function PATCH(
       // exactly that one, however many properties the client holds. No
       // link → the legacy single-property blast radius decides.
       linkedPropertyId: (existing as any).jobber_property_id || null,
-      // A request sent before the lead had an address has no property; the
-      // sync attaches this address to it.
-      jobberRequestId: (existing as any).jobber_request_id || null,
+      // A request made before the lead had an address has no property; the
+      // sync attaches this address to it when there is exactly one.
+      openRequestIds: (openRequests ?? []).map((r: any) => r.jobber_request_id),
     })
     // CAPTURE THE LINK. The push just resolved which property this address
     // is; persisting it turns the blast-radius guess into a fact, so the
@@ -672,6 +688,8 @@ export async function PATCH(
       noteParts.push('address NOT added to the Jobber request — add the property there by hand')
     } else if (addressWriteback?.request === 'skipped_multiple') {
       noteParts.push('Jobber request left without an address — client has multiple properties')
+    } else if (addressWriteback?.request === 'several_requests') {
+      noteParts.push('Jobber requests left without an address — lead has several open requests')
     }
     if (addressWriteback?.upcoming_visits) {
       noteParts.push('property has upcoming visits — verify schedule')
