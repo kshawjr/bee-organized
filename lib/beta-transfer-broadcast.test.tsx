@@ -447,7 +447,8 @@ describe('broadcastLeadMoved addresses both ends and the all view', () => {
 // ── source sweep ──────────────────────────────────────────────────
 describe('the app is wired to the seams this suite tests', () => {
   const beeHub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-  const route = readFileSync(join(process.cwd(), 'app/api/leads/[id]/transfer/route.ts'), 'utf8')
+  // The transfer itself moved out of the route into lib/lead-transfer.ts (20 Oct 2026).
+  const route = readFileSync(join(process.cwd(), 'lib/lead-transfer.ts'), 'utf8')
 
   it('the transfer route broadcasts the move', () => {
     expect(route).toContain('broadcastLeadMoved({')
