@@ -107,6 +107,15 @@ const JOBBER_SEND_DROP = new Set([
   'scout_test',
 ])
 
+// What a NEW Jobber client's lead source says when the lead has no source,
+// or leadSourceForJobber drops it. Sending nothing is not an option: Jobber
+// then writes our app name ("Bee Organized Interface") and owners see it as
+// a lead source row in Insights > Reports > Lead source. That report groups
+// by the text (proven 2026-10-19 on Test Location: a client we created with
+// "Website" shows as its own Website row). "Other" is on Jobber's own
+// picklist and is honest.
+export const JOBBER_NO_SOURCE = 'Other'
+
 /**
  * leads.source → the lead source we send to Jobber. Same tidy-up as every
  * door (normalizeLeadSource), then obvious variants become one name and our

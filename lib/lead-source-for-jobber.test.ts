@@ -62,3 +62,13 @@ describe('leadSourceForJobber', () => {
     expect(normalizeLeadSource('chatgpt.com')).toBe('chatgpt.com')
   })
 })
+
+describe('JOBBER_NO_SOURCE', () => {
+  it('is "Other" — on Jobber\'s own picklist, and never our app name', async () => {
+    const { JOBBER_NO_SOURCE, JOBBER_APP_SOURCE_STAMP } = await import('@/lib/lead-source')
+    expect(JOBBER_NO_SOURCE).toBe('Other')
+    expect(JOBBER_NO_SOURCE).not.toBe(JOBBER_APP_SOURCE_STAMP)
+    // and the fallback itself survives the send rule unchanged
+    expect(leadSourceForJobber(JOBBER_NO_SOURCE)).toBe('Other')
+  })
+})

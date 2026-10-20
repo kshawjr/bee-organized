@@ -182,14 +182,12 @@ describe("send-to-jobber — a NEW client's own lead source in Jobber", () => {
     expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Hershey Mills Ads' })
   })
 
-  it('a lead with NO source leaves the field out — never an empty value, never a default', async () => {
-    // An empty value was tested for real and Jobber stamps its app name on
-    // it anyway, so there is nothing to gain by sending one.
+  it('a lead with NO source sends "Other" — never blank (blank lands as our app name in the owner\'s report)', async () => {
     for (const source of [null, '', '   ']) {
       vi.clearAllMocks()
       wire(baseLead({ source }))
       await send()
-      expect(clientInput()).not.toHaveProperty('sourceAttribution')
+      expect(clientInput().sourceAttribution).toEqual({ sourceText: 'Other' })
     }
   })
 
@@ -325,12 +323,12 @@ describe('send-to-jobber — the source sent to Jobber is tidied for owners', ()
     }
   })
 
-  it('our own words send NOTHING — no client source, no request line', async () => {
+  it('our own words are never sent — the client gets "Other", the request gets no line', async () => {
     for (const raw of ['Manual', 'Returning Client']) {
       vi.clearAllMocks()
       wire(baseLead({ source: raw }))
       await send()
-      expect(mutationInputs('clientCreate')[0].input).not.toHaveProperty('sourceAttribution')
+      expect(mutationInputs('clientCreate')[0].input.sourceAttribution).toEqual({ sourceText: 'Other' })
       expect(sourceLine()).toBeUndefined()
       expect(JSON.stringify(mutationInputs('requestCreate'))).not.toContain(raw)
     }

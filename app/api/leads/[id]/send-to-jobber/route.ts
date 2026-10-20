@@ -55,7 +55,7 @@ import {
 import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
-import { leadSourceForJobber } from '@/lib/lead-source'
+import { leadSourceForJobber, JOBBER_NO_SOURCE } from '@/lib/lead-source'
 import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
 import {
   buildAddressChoices,
@@ -769,13 +769,14 @@ export async function POST(
     //   · sourceText "Google" → Jobber shows "Google". Our value survives.
     //   · sourceText ""       → Jobber shows "Bee Organized Interface", the
     //     same stamp as leaving the field out.
-    // So a lead WITH a source sets it; a lead with NONE cannot be made blank
-    // in Jobber — it gets Jobber's app-name stamp whatever we send — and the
-    // field is simply left out. The value is the lead's source at this
-    // moment, tidied for Jobber by leadSourceForJobber (ig → Instagram, GGLE →
-    // Google, an old form slug → Website; Manual / Returning Client send nothing).
-    const clientSource = leadSourceForJobber((lead as any).source)
-    if (clientSource) createInput.sourceAttribution = { sourceText: clientSource }
+    // So the field is NEVER left blank (2026-10-19): a blank lands as our app
+    // name, which owners then see as a lead source in their Insights report.
+    // The value is the lead's source at this moment, tidied for Jobber by
+    // leadSourceForJobber (ig → Instagram, GGLE → Google, an old form slug →
+    // Website); no source, or one it drops (Manual, Returning Client), sends
+    // "Other" (JOBBER_NO_SOURCE).
+    const clientSource = leadSourceForJobber((lead as any).source) ?? JOBBER_NO_SOURCE
+    createInput.sourceAttribution = { sourceText: clientSource }
     let create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
       input: createInput,
     })
