@@ -21,8 +21,14 @@ import { join } from 'node:path'
 const db = vi.hoisted(() => ({
   claims: [] as any[],
   coords: [] as any[],
-  calls: [] as { table: string; range?: [number, number]; inZips?: string[] }[],
+  calls: [] as { table: string; range?: [number, number]; inZips?: string[]; countAsked?: boolean }[],
   failTable: null as string | null,
+  // Supabase's max_rows: the most rows ONE request returns, whatever it asks.
+  cap: 1000,
+  // Test hooks for a database that misbehaves.
+  dropCountFor: null as string | null, // this table returns no count at all
+  shortAfterFirstPage: false, // territory pages after the first come back empty
+  countOverride: null as number | null, // territory count that disagrees with the rows
 }))
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: {
@@ -30,20 +36,26 @@ vi.mock('@/lib/supabase-service', () => ({
       const call: any = { table }
       db.calls.push(call)
       const b: any = {}
-      b.select = () => b
+      b.select = (_cols: string, opts?: any) => { call.countAsked = opts?.count === 'exact'; return b }
       b.order = () => b
       b.range = (a: number, z: number) => { call.range = [a, z]; return b }
       b.in = (_c: string, v: string[]) => { call.inZips = v; return b }
       b.then = (res: any, rej: any) => {
-        if (db.failTable === table) return Promise.resolve({ data: null, error: { message: 'down' } }).then(res, rej)
+        if (db.failTable === table) return Promise.resolve({ data: null, error: { message: 'down' }, count: null }).then(res, rej)
+        let matching: any[]
         let data: any[]
         if (table === 'location_zips') {
-          const [a, z] = call.range ?? [0, 999]
-          data = db.claims.slice(a, Math.min(z + 1, a + 1000)) // the real cap
+          matching = db.claims
+          const [a, z] = call.range ?? [0, Number.MAX_SAFE_INTEGER]
+          data = matching.slice(a, Math.min(z + 1, a + db.cap))
+          if (db.shortAfterFirstPage && a > 0) data = []
         } else {
-          data = db.coords.filter((r) => (call.inZips ?? []).includes(r.zip))
+          matching = db.coords.filter((r) => (call.inZips ?? []).includes(r.zip))
+          data = matching.slice(0, db.cap)
         }
-        return Promise.resolve({ data, error: null }).then(res, rej)
+        let count: number | null = call.countAsked && db.dropCountFor !== table ? matching.length : null
+        if (table === 'location_zips' && count !== null && db.countOverride !== null) count = db.countOverride
+        return Promise.resolve({ data, error: null, count }).then(res, rej)
       }
       return b
     },
@@ -53,6 +65,7 @@ vi.mock('@/lib/supabase-service', () => ({
 import {
   rankNearestLocations,
   nearestLocationsForZip,
+  readAllClaims,
   haversineMiles,
   checkLeadState,
   type ClaimedZip,
@@ -241,6 +254,72 @@ describe('C. nearestLocationsForZip — the database read', () => {
     db.coords = asDbCoords()
     db.calls = []
     db.failTable = null
+    db.cap = 1000
+    db.dropCountFor = null
+    db.shortAfterFirstPage = false
+    db.countOverride = null
+  })
+
+  // Kevin's rule (20 Oct 2026): a silent truncation must break a test, not a
+  // customer's routing. This is that test, against the real 1,535-row list.
+  it('reads back EVERY claimed row: 1,535 rows, 1,535 claimed — none lost to the 1,000-row cap', async () => {
+    const got = await readAllClaims()
+    expect(CLAIMS.length).toBe(1535)
+    expect(got.length).toBe(CLAIMS.length)
+    expect(new Set(got.map((c) => `${c.zip}|${c.slug}`)).size).toBe(new Set(CLAIMS.map((c) => `${c.zip}|${c.slug}`)).size)
+    expect(new Set(got.map((c) => c.zip))).toEqual(new Set(CLAIMS.map((c) => c.zip)))
+  })
+
+  it('still reads every row when the cap is LOWER than the page size (no "short page = the end")', async () => {
+    db.cap = 400
+    const got = await readAllClaims()
+    expect(got.length).toBe(1535)
+    expect(db.calls.filter((c) => c.table === 'location_zips').length).toBe(4) // 400 + 400 + 400 + 335
+  })
+
+  it('a territory read that comes back short THROWS, naming how much it got', async () => {
+    db.shortAfterFirstPage = true
+    await expect(readAllClaims()).rejects.toThrow('location_zips read short: got 1000 of 1535 territory rows')
+    await expect(nearestLocationsForZip('68310')).rejects.toThrow('read short')
+  })
+
+  it.each([['location_zips'], ['zip_coords']])('a %s read with no row count THROWS — without it a short read is invisible', async (t) => {
+    db.dropCountFor = t
+    await expect(nearestLocationsForZip('68310')).rejects.toThrow(`${t} read failed: no row count came back`)
+  })
+
+  it('rows and count that disagree (the list changed mid-read) THROW rather than answer', async () => {
+    db.countOverride = 900
+    await expect(readAllClaims()).rejects.toThrow('location_zips read short: got 1000 of 900 territory rows')
+  })
+
+  it('a territory row with no location THROWS — a dropped row is a short read too', async () => {
+    db.claims = asDbClaims(CLAIMS)
+    db.claims[5] = { zip: db.claims[5].zip, location: null }
+    await expect(readAllClaims()).rejects.toThrow(`zip ${db.claims[5].zip} came back with no location`)
+  })
+
+  it('every read asks the database for the true count', async () => {
+    await nearestLocationsForZip('68310')
+    expect(db.calls.length).toBeGreaterThan(0)
+    expect(db.calls.every((c) => c.countAsked)).toBe(true)
+  })
+
+  it('a coordinates read cut short by the cap THROWS rather than passing real zips off as unknown', async () => {
+    db.cap = 1000
+    // Fine at 1000: no chunk asks for more than 300.
+    await expect(nearestLocationsForZip('68310')).resolves.toMatchObject({ status: 'ok' })
+    // A cap of 50: the territory list still pages whole (50 at a time), but a
+    // 300-zip coordinates chunk with ~270 matching rows gets only 50 back.
+    db.cap = 50
+    db.claims = asDbClaims(CLAIMS).slice(0, 600)
+    await expect(readAllClaims()).resolves.toHaveLength(600)
+    await expect(nearestLocationsForZip('68310')).rejects.toThrow(/zip_coords read short: got 50 of \d+ rows for 300 zips/)
+  })
+
+  it('a claimed zip the Census lacks is NOT a short read (count and rows agree)', async () => {
+    const r = await nearestLocationsForZip('68310')
+    expect((r as any).unmeasuredClaims).toBe(152)
   })
 
   it('pages the 1,535-row territory list past the 1,000-row cap and gets the same answer as the snapshot', async () => {

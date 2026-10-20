@@ -147,41 +147,67 @@ export function rankNearestLocations(args: {
 }
 
 // ── the database read ─────────────────────────────────────────
-// Supabase returns at most 1,000 rows per request whatever .range() asks for,
-// and the territory list is 1,535 rows: every whole-table read here PAGES.
+// SUPABASE CAPS EVERY READ. A request returns at most max_rows rows (1,000 on
+// this project) whatever .range() or .limit() asks for, with NO error — the
+// way System Health asks for 2,000 leads and gets 1,000. The territory list is
+// 1,535 rows, so a single read would silently drop a third of it and the
+// suggestion would be wrong with nothing to show it.
+//
+// So neither read trusts itself to have got everything. Each asks the
+// database for the true number of matching rows (count: 'exact', counted by
+// Postgres, not subject to the cap) and THROWS if what came back is short.
+// Paging stops on that count, never on "this page was short" — a cap set
+// lower than PAGE would otherwise end the loop after the first page.
 const PAGE = 1000
+const COORD_CHUNK = 300 // a long .in() list goes in the URL; 300 zips is well under any limit
 
-async function readAllClaims(): Promise<ClaimedZip[]> {
+// Exported so a test can count what it reads back against what is claimed.
+export async function readAllClaims(): Promise<ClaimedZip[]> {
   const out: ClaimedZip[] = []
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseService
+  let total: number | null = null
+  let read = 0
+  while (total === null || read < total) {
+    const { data, error, count } = await supabaseService
       .from('location_zips')
-      .select('zip, location:locations!inner(location_id, name, lifecycle_status)')
+      .select('zip, location:locations!inner(location_id, name, lifecycle_status)', { count: 'exact' })
       .order('zip', { ascending: true })
       .order('id', { ascending: true })
-      .range(from, from + PAGE - 1)
+      .range(read, read + PAGE - 1)
     if (error) throw new Error(`location_zips read failed: ${error.message}`)
+    if (typeof count !== 'number') throw new Error('location_zips read failed: no row count came back, so a short read could not be detected')
+    total = count
     const rows = (data as any[]) || []
+    if (rows.length === 0 && read < total) {
+      throw new Error(`location_zips read short: got ${read} of ${total} territory rows`)
+    }
+    read += rows.length
     for (const r of rows) {
       const l = Array.isArray(r.location) ? r.location[0] : r.location
-      if (!l?.location_id) continue
+      if (!l?.location_id) throw new Error(`location_zips read failed: zip ${r.zip} came back with no location`)
       out.push({ zip: r.zip, slug: l.location_id, name: l.name || l.location_id, lifecycle_status: l.lifecycle_status ?? null })
     }
-    if (rows.length < PAGE) return out
   }
+  if (out.length !== total) throw new Error(`location_zips read short: got ${out.length} of ${total} territory rows`)
+  return out
 }
 
 async function readCoords(zips: string[]): Promise<Map<string, ZipPoint>> {
   const out = new Map<string, ZipPoint>()
   const unique = Array.from(new Set(zips))
-  // A long .in() list goes in the URL; 300 zips is well under any limit.
-  for (let i = 0; i < unique.length; i += 300) {
-    const { data, error } = await supabaseService
+  for (let i = 0; i < unique.length; i += COORD_CHUNK) {
+    const chunk = unique.slice(i, i + COORD_CHUNK)
+    const { data, error, count } = await supabaseService
       .from('zip_coords')
-      .select('zip, lat, lng, state, states')
-      .in('zip', unique.slice(i, i + 300))
+      .select('zip, lat, lng, state, states', { count: 'exact' })
+      .in('zip', chunk)
     if (error) throw new Error(`zip_coords read failed: ${error.message}`)
-    for (const r of (data as any[]) || []) {
+    const rows = (data as any[]) || []
+    // A zip with no row is fine — the Census lacks it (PO boxes). Fewer rows
+    // than the database says match is NOT: that is a cut-off read, and it
+    // would pass a real zip off as one the Census doesn't carry.
+    if (typeof count !== 'number') throw new Error('zip_coords read failed: no row count came back, so a short read could not be detected')
+    if (rows.length < count) throw new Error(`zip_coords read short: got ${rows.length} of ${count} rows for ${chunk.length} zips`)
+    for (const r of rows) {
       out.set(r.zip, { lat: Number(r.lat), lng: Number(r.lng), state: r.state ?? null, states: Array.isArray(r.states) ? r.states : [] })
     }
   }
