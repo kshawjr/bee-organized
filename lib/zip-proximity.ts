@@ -60,7 +60,8 @@ export type StateCheck =
   | 'no_zip_state'     // the zip has no state on file
 
 export type ProximityResult =
-  | { status: 'missing' | 'malformed'; zip: null }
+  | { status: 'missing'; zip: null }
+  | { status: 'malformed'; zip: null }
   | { status: 'unknown_zip'; zip: string; claimedBy: ClaimingLocation[] }
   | {
       status: 'ok'
