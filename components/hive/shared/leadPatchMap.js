@@ -13,6 +13,8 @@
 // silently corrupt a Person object.
 // ─────────────────────────────────────────────────────────────
 
+import { deriveStreet, formatLeadAddress } from '@/lib/lead-address'
+
 const LEAD_COL_TO_PERSON_FIELD = {
   source: 'source',
   project_type: 'project',
@@ -39,12 +41,17 @@ const LEAD_COL_TO_PERSON_FIELD = {
   assigned_to: 'assignedTo',
   phone: 'phone',               // ContactField inline edit → Inbox tel:/filters live
   email: 'email',
-  // AddressField inline edit. Person has ONE flat address field (the
-  // display string); city/state/zip live only inside the addresses
-  // jsonb → no Person keys to map, deliberately dropped. The composed
-  // `address` col the field PATCHes is the full display string, so the
-  // flat field stays correct on its own.
+  // AddressField inline edit. `address` is the composed full line; the
+  // parts ride as originCity/originState/originZip, exactly as
+  // lib/people-mapper builds them on load. They used to be DROPPED, so a
+  // client whose address was just saved still looked city-less to the
+  // Send to Jobber screen (Lynette Ewy, KC, 2026-10-20) — it asked for
+  // parts the record already had, and the retyped parts doubled the line.
+  // The address list entry is kept in step by mergePersonPatch below.
   address: 'address',
+  city: 'originCity',
+  state: 'originState',
+  zip: 'originZip',
   // NOT a column: the client record's Tags row hands its link ids up here
   // after /api/lead-tags has written them, so Everyone's tag filter and
   // tag search reflect the change without a reload (same seam as above).
@@ -63,4 +70,38 @@ export function leadColsToPersonFields(cols) {
   // it would dial the OLD number after an edit.
   if ('phone' in out) out.phoneNormalized = null
   return out
+}
+
+// Merge translated fields into a Person — what BeeHub's people state does
+// with every hand-up. A plain spread, except for an ADDRESS change: the
+// Person's address list must move with it, the way the server moves it
+// (PATCH /api/leads/:id rewrites the first Service entry's value AND its
+// street/city/state/zip) and the way lib/people-mapper rebuilds it on the
+// next load (no stored list → one entry from the columns). Without this the
+// Send to Jobber screen (lib/visit-address personVisitAddress reads
+// addresses[0] first) checked the OLD address until a reload.
+export function mergePersonPatch(person, fields) {
+  const next = { ...person, ...fields }
+  if (!fields || !('address' in fields)) return next
+  const parts = {
+    address: String(next.address ?? '').trim(),
+    city: String(next.originCity ?? '').trim(),
+    state: String(next.originState ?? '').trim(),
+    zip: String(next.originZip ?? '').trim(),
+  }
+  const display = formatLeadAddress(parts)
+  const list = Array.isArray(person?.addresses) ? person.addresses : []
+  if (list.length === 0) {
+    next.addresses = parts.address
+      ? [{ type: 'Service', value: parts.address, street: parts.address, city: parts.city, state: parts.state, zip: parts.zip }]
+      : []
+    return next
+  }
+  const idx = Math.max(0, list.findIndex(a => a && a.type === 'Service'))
+  next.addresses = !display
+    ? list.filter((_, i) => i !== idx)
+    : list.map((a, i) => (i === idx
+        ? { ...a, value: display, street: deriveStreet(parts.address, parts), city: parts.city, state: parts.state, zip: parts.zip }
+        : a))
+  return next
 }

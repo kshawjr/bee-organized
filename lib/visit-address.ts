@@ -10,6 +10,8 @@
 // parts on the spot) and the send route (refuses anything less, whatever the
 // screen did).
 
+import { deriveStreet } from './lead-address'
+
 export type VisitAddress = { street: string; city: string; state: string; zip: string }
 
 export const VISIT_ADDRESS_REQUIRED = ['street', 'city', 'state'] as const
@@ -29,6 +31,35 @@ export function isVisitAddressComplete(a: Partial<Record<string, unknown>> | nul
 export function describeMissing(parts: VisitAddressPart[]): string {
   if (parts.length <= 1) return parts.join('')
   return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1]
+}
+
+// The client's primary address as the send route sends it to Jobber.
+// Prefer the address list (current write path for new manual leads); fall
+// through to the legacy columns when the entry is missing or has no street —
+// Jobber-imported leads only populate the columns, and a stub entry (e.g.
+// `{ type: 'Service' }`) would otherwise mask a valid legacy address.
+//
+// `street` is the STREET ONLY. leads.address holds the full joined line
+// ("street, city, state, zip" — the import's convention, lib/lead-address.ts),
+// and sending that whole line as street1 alongside city/province/postalCode
+// is what made Jobber show city, state and zip twice — and the property
+// webhook then echoed the doubled line back into leads.address (~420 rows
+// since May). deriveStreet strips the tail, repeats included.
+// `storedStreet` is the line as stored, so a property one of those sends
+// created in Jobber (street1 = the full line) is still recognised.
+export function pickPrimaryAddress(lead: any): (VisitAddress & { storedStreet: string }) | null {
+  const a0 = Array.isArray(lead?.addresses) ? lead.addresses[0] : null
+  const stored0 = clean(a0?.street || a0?.value)
+  if (stored0) {
+    const parts = { city: clean(a0.city), state: clean(a0.state), zip: clean(a0.zip) }
+    return { street: deriveStreet(stored0, parts), ...parts, storedStreet: stored0 }
+  }
+  const stored = clean(lead?.address)
+  if (stored) {
+    const parts = { city: clean(lead.city), state: clean(lead.state), zip: clean(lead.zip) }
+    return { street: deriveStreet(stored, parts), ...parts, storedStreet: stored }
+  }
+  return null
 }
 
 // The client's primary address the way the send route reads it

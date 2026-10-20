@@ -333,7 +333,7 @@ describe('the send route — resolving the chosen property', () => {
     expect(routeSrc).toContain("extractJobberId(p.id) === wantedId")
     // the street match survives as the fallback for entries predating the
     // id capture
-    expect(routeSrc).toContain("(p.address?.street1 || '').trim().toLowerCase() === wantedStreet")
+    expect(routeSrc).toContain("wantedStreets.has((p.address?.street1 || '').trim().toLowerCase())")
   })
 
   it('a former address NEVER creates a property — it fails before propertyCreate', () => {

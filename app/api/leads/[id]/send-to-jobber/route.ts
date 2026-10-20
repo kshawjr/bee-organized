@@ -65,7 +65,7 @@ import {
 } from '@/lib/address-choice'
 import { formatPhone } from '@/lib/phone'
 import { assessmentInstructions } from '@/lib/assessment-type'
-import { missingVisitAddressParts, describeMissing } from '@/lib/visit-address'
+import { missingVisitAddressParts, describeMissing, pickPrimaryAddress } from '@/lib/visit-address'
 import { recordSentAssessmentType } from '@/lib/assessment-type-record'
 
 export const runtime = 'nodejs'
@@ -132,42 +132,6 @@ function toLocalDateTime(iso: string, timezone: string) {
     time:     formatInTimeZone(ms, timezone, 'HH:mm:ss'),
     timezone,
   }
-}
-
-function pickPrimaryAddress(lead: any): {
-  street: string
-  city: string
-  state: string
-  zip: string
-} | null {
-  // Prefer the jsonb array (current write path for new manual leads). Fall
-  // through to the legacy single-column form when the jsonb entry is missing
-  // or malformed — Jobber-imported leads only populate the legacy columns,
-  // and stub jsonb entries (e.g. `{ type: 'Service' }` with no value) would
-  // otherwise mask a perfectly valid legacy address.
-  const addrs = Array.isArray(lead.addresses) ? lead.addresses : []
-  if (addrs.length > 0) {
-    const a = addrs[0]
-    const street = (a.street || a.value || '').trim()
-    if (street) {
-      return {
-        street,
-        city:  (a.city  || '').trim(),
-        state: (a.state || '').trim(),
-        zip:   (a.zip   || '').trim(),
-      }
-    }
-  }
-  // Legacy single-column fallback
-  if (lead.address) {
-    return {
-      street: String(lead.address).trim(),
-      city:   String(lead.city  || '').trim(),
-      state:  String(lead.state || '').trim(),
-      zip:    String(lead.zip   || '').trim(),
-    }
-  }
-  return null
 }
 
 // ── Jobber GraphQL operations ────────────────────────────────────────────────
@@ -827,7 +791,13 @@ export async function POST(
         return fail('property_lookup', propsRes.errors[0]?.message || 'property_lookup_failed')
       }
       const existing: any[] = propsRes.data?.client?.clientProperties?.nodes || []
-      const wantedStreet = address.street.toLowerCase()
+      // The clean street, or the full line an earlier send stored as street1
+      // (before pickPrimaryAddress stripped the tail) — either is this house.
+      const wantedStreets = new Set(
+        [address.street, (address as { storedStreet?: string }).storedStreet]
+          .filter(Boolean)
+          .map(s => String(s).trim().toLowerCase()),
+      )
       // A former address is a property that ALREADY EXISTS in Jobber — the
       // move flow created the new one and left the old one, with its jobs,
       // quotes and invoices, untouched. So prefer the id captured at the
@@ -840,7 +810,7 @@ export async function POST(
       }
       if (!jobberPropertyGlobalId) {
         const matchedProp = existing.find((p: any) =>
-          (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
+          wantedStreets.has((p.address?.street1 || '').trim().toLowerCase())
         )
         if (matchedProp) jobberPropertyGlobalId = matchedProp.id
       }

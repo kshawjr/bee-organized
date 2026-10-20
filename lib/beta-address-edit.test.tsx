@@ -473,10 +473,12 @@ describe('AddressField — the toast tells the whole truth', () => {
 
 // ── propagation ─────────────────────────────────────────────────
 describe('propagation — leadColsToPersonFields', () => {
-  it('maps the composed address col onto Person.address; city/state/zip deliberately dropped', () => {
+  it('maps the composed address col onto Person.address and the parts onto originCity/State/Zip', () => {
     const out = leadColsToPersonFields({
       address: '500 Oak Ave, Austin, TX, 78701', city: 'Austin', state: 'TX', zip: '78701',
     })
-    expect(out).toEqual({ address: '500 Oak Ave, Austin, TX, 78701' })
+    expect(out).toEqual({
+      address: '500 Oak Ave, Austin, TX, 78701', originCity: 'Austin', originState: 'TX', originZip: '78701',
+    })
   })
 })

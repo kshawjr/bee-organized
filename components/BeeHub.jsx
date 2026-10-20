@@ -17,6 +17,7 @@ import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buil
 // daysSince, fmtMoney).
 import { T as HT } from "@/components/hive/shared/tokens"
 import { deriveClientStatus, enquiryDateOf } from "@/components/hive/shared/clientStatus"
+import { mergePersonPatch } from "@/components/hive/shared/leadPatchMap"
 import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagementStatus"
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
@@ -10095,7 +10096,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // Person-shaped field patches after a card edit (source/type/
           // referrer) so Inbox rows + filters reflect it without a reload.
           // State-only merge — the card already persisted via the API.
-          onPersonPatched={(id, fields)=>{ setPeople(prev => prev.map(x => x.id === id ? { ...x, ...fields } : x)) }}
+          onPersonPatched={(id, fields)=>{ setPeople(prev => prev.map(x => x.id === id ? mergePersonPatch(x, fields) : x)) }}
           // Partner-create seam (same direction rule): the beta referrer
           // picker's inline create hands its CONFIRMED /api/partners row up;
           // merge it into the same partners state PartnersScreen reads so it

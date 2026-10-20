@@ -122,11 +122,14 @@ function Tile({ Icon, label, sub, selected, onSelect, ariaLabel }) {
 // The person-shape patch for an address saved from the review screen —
 // mirrors how lib/people-mapper.ts builds a person from the lead row, and how
 // PATCH /api/leads/:id keeps an address list's first entry in step.
+// `street` is the street ONLY: the entry's street is what the next send puts
+// in Jobber's street field, and it once took the whole joined line here
+// (Wanda Wilkinson, KC, 2026-10-20 — city, state and zip twice in Jobber).
 function addressPatch(person, cols, street) {
-  const parts = { street: cols.address, city: cols.city, state: cols.state, zip: cols.zip || '' }
+  const parts = { street: street.trim(), city: cols.city, state: cols.state, zip: cols.zip || '' }
   const list = Array.isArray(person.addresses) ? person.addresses : []
   const addresses = list.length
-    ? list.map((a, i) => (i === 0 ? { ...a, value: cols.address, ...parts, street: street.trim() } : a))
+    ? list.map((a, i) => (i === 0 ? { ...a, value: cols.address, ...parts } : a))
     : [{ type: 'Service', value: cols.address, ...parts }]
   return {
     address: cols.address,
@@ -337,8 +340,14 @@ export default function SendToJobberModal({ person, engagementId = null, address
     // it is still there next time. A failed save stops here, on this screen.
     let savedAddress = null
     if (fixAddressHere) {
+      // The street box can hold more than the street — a pre-fill from a
+      // full saved line, or a pasted address — and joining the typed
+      // city/state/zip onto it doubled them ("…, Overland Park, KS,
+      // Overland Park, KS, 66221"). Whatever trails it that repeats the
+      // typed parts is dropped first.
+      const street = deriveStreet(addrStreet, typedAddress)
       const cols = {
-        address: composeLeadAddress(typedAddress),
+        address: composeLeadAddress({ ...typedAddress, street }),
         city:  addrCity.trim(),
         state: addrState.trim(),
         zip:   addrZip.trim() || null,
@@ -351,7 +360,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
         })
         const j = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-        savedAddress = cols
+        savedAddress = { ...cols, street }
       } catch (e) {
         setErrorMsg(`Couldn't save the address to the client: ${e?.message || e}`)
         setSubmitting(false)
@@ -425,7 +434,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
         outreachTimeline: [...person.outreachTimeline, ...entries],
         // The address completed on this screen, in the person's own shape
         // (lib/people-mapper.ts), so the record shows it without a reload.
-        ...(savedAddress ? addressPatch(person, savedAddress, addrStreet) : {}),
+        ...(savedAddress ? addressPatch(person, savedAddress, savedAddress.street) : {}),
       },
       {
         jobber_client_id: json.jobber_client_id || null,
