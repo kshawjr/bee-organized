@@ -63,6 +63,15 @@ vi.mock('@/lib/no-coverage-email', () => ({
   firstNameOf: (l: any) => (l?.name || '').trim().split(/\s+/)[0] || null,
 }))
 
+// The served-area check (lib/no-coverage-guard) answers "clear" here: this
+// suite is about the send's ORCHESTRATION. The check's own cases — claimed,
+// within 75 miles, unmeasured, a failed read — are in
+// beta-no-coverage-guard.test.tsx.
+vi.mock('@/lib/no-coverage-guard', async (orig) => {
+  const real: any = await orig()
+  return { ...real, checkNoCoverage: vi.fn(async () => ({ kind: 'clear', zip: '60173', nearest: { slug: 'loc_carmel', name: 'Carmel', miles: 163 } })) }
+})
+
 import { POST } from '@/app/api/leads/[id]/no-coverage/route'
 
 const LEAD = (over: any = {}) => ({

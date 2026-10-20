@@ -17,10 +17,11 @@
 //                       to "Moved to Lincoln by Leslie Mullins".
 //   route_leave       → nothing written; the card is edited to "Left in Other
 //                       by …" so the channel shows it was seen.
-//   route_no_coverage → only if the suggestion STILL says the nearest hive is
-//                       over 75 measured miles (recomputed now, never trusted
-//                       from the card); then closeLeadAsNoCoverage, which
-//                       emails the customer, and the card is edited.
+//   route_no_coverage → closeLeadAsNoCoverage, which runs the served-area
+//                       check every door shares (lib/no-coverage-guard): a
+//                       claimed zip is refused, within 75 measured miles needs
+//                       a person to confirm in Bee Hub, past 75 it sends and
+//                       the card is edited.
 // A lead no longer in Other (moved in Bee Hub, or a second click) edits the
 // card to say where it is and changes nothing. A refused move (in Jobber, has
 // an engagement, no email) leaves the card as it is and tells the clicker why,
@@ -32,7 +33,6 @@ import { isAdmin } from '@/lib/auth'
 import { getSlackUserEmail } from '@/lib/slack-bot'
 import { transferLead, type TransferActor } from '@/lib/lead-transfer'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
-import { suggestRouteForLead } from '@/lib/route-suggestion'
 import { ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
 import {
   ROUTE_ACCEPT_PREFIX,
@@ -65,7 +65,8 @@ export type RouteActionOutcome =
   | 'left_in_other'
   | 'no_coverage_sent'
   | 'no_coverage_refused'
-  | 'no_coverage_not_far'
+  | 'no_coverage_blocked'
+  | 'no_coverage_needs_confirmation'
   | 'lead_not_found'
   | 'destination_not_found'
 
@@ -171,23 +172,22 @@ export async function handleRouteAction(input: RouteActionInput): Promise<RouteA
   }
 
   // ── Not in our service area ──────────────────────────────────
+  // ONE rule for every door (lib/no-coverage-guard, run inside
+  // closeLeadAsNoCoverage): a zip on a location's list is refused, and a hive
+  // within 75 measured miles — or a customer Bee Hub can't place — needs a
+  // person's confirmation with the number in front of them. Slack can't show
+  // that, so it never confirms: the card only offers this button past 75
+  // measured miles, and anything else is sent to Bee Hub's Inbox to decide.
   if (actionId === ROUTE_NO_COVERAGE) {
-    // Recomputed, never trusted from the card: the email tells a customer we
-    // don't serve them, so it goes only on a measured distance past 75 miles.
-    let far = false
-    try {
-      far = (await suggestRouteForLead(leadId)).showNotInServiceArea
-    } catch (err: any) {
-      console.error('[route-actions] suggestion recheck failed —', err?.message || err)
+    const out = await closeLeadAsNoCoverage({ leadId, actor, requestOrigin: null, confirmedOutOfRange: false })
+    if (out.status === 409 && out.body.error === 'zip_claimed') {
+      await privately(responseUrl, `:no_entry: ${out.body.detail} Nothing was sent.`)
+      return 'no_coverage_blocked'
     }
-    if (!far) {
-      await privately(
-        responseUrl,
-        ":warning: Bee Hub can't confirm this lead is more than 75 miles from every hive, so it didn't send the not-in-area email. Route it in Bee Hub.",
-      )
-      return 'no_coverage_not_far'
+    if (out.status === 409 && out.body.error === 'needs_confirmation') {
+      await privately(responseUrl, `:warning: ${out.body.detail} That needs a person to confirm in Bee Hub (Inbox → No coverage). Nothing was sent.`)
+      return 'no_coverage_needs_confirmation'
     }
-    const out = await closeLeadAsNoCoverage({ leadId, actor, requestOrigin: null })
     if (out.status !== 200) {
       await privately(responseUrl, `:warning: The not-in-area email didn't go: ${reasonOf(out.body)}. The lead is still in Other.`)
       return 'no_coverage_refused'

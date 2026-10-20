@@ -54,6 +54,11 @@ vi.mock('@/lib/supabase-server', () => ({
   })),
 }))
 
+vi.mock('@/lib/no-coverage-guard', async (orig) => {
+  const real: any = await orig()
+  return { ...real, checkNoCoverage: vi.fn(async () => ({ kind: 'clear', zip: '60173', nearest: { slug: 'loc_carmel', name: 'Carmel', miles: 163 } })) }
+})
+
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
 import * as NoCoverage from '@/lib/lead-no-coverage'
@@ -160,6 +165,32 @@ describe('closeLeadAsNoCoverage — the shared close', () => {
     }
   })
 
+  it.each([
+    [{ confirmed_out_of_range: true }, true],
+    [{ confirmed_out_of_range: 'yes' }, false],
+    [{}, false],
+    [null, false],
+  ])('the web route passes body %j as confirmedOutOfRange=%s (only a real true confirms)', async (body, flag) => {
+    const spy = vi.spyOn(NoCoverage, 'closeLeadAsNoCoverage').mockResolvedValue({ status: 200, body: { success: true } })
+    try {
+      await NO_COVERAGE_POST({ nextUrl: { origin: 'https://req.example' }, json: async () => body } as any, { params: Promise.resolve({ id: 'lead-1' }) })
+      expect(spy.mock.calls[0][0].confirmedOutOfRange).toBe(flag)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('an unreadable body is "not confirmed", not an error', async () => {
+    const spy = vi.spyOn(NoCoverage, 'closeLeadAsNoCoverage').mockResolvedValue({ status: 200, body: { success: true } })
+    try {
+      const res = await NO_COVERAGE_POST({ nextUrl: { origin: 'x' }, json: async () => { throw new Error('bad json') } } as any, { params: Promise.resolve({ id: 'lead-1' }) })
+      expect(res.status).toBe(200)
+      expect(spy.mock.calls[0][0].confirmedOutOfRange).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('a non-corporate web user never reaches closeLeadAsNoCoverage', async () => {
     h.webRole = 'owner'
     const spy = vi.spyOn(NoCoverage, 'closeLeadAsNoCoverage')
@@ -176,8 +207,8 @@ describe('closeLeadAsNoCoverage — the shared close', () => {
   it('the web route passes the signed-in user and its origin, and sends the outcome back unchanged', async () => {
     const spy = vi.spyOn(NoCoverage, 'closeLeadAsNoCoverage').mockResolvedValue({ status: 418, body: { error: 'sentinel' } })
     try {
-      const res = await NO_COVERAGE_POST({ nextUrl: { origin: 'https://req.example' } } as any, { params: Promise.resolve({ id: 'lead-1' }) })
-      expect(spy).toHaveBeenCalledWith({ leadId: 'lead-1', actor: { hubUserId: 'web-user', role: 'super_admin' }, requestOrigin: 'https://req.example' })
+      const res = await NO_COVERAGE_POST({ nextUrl: { origin: 'https://req.example' }, json: async () => ({}) } as any, { params: Promise.resolve({ id: 'lead-1' }) })
+      expect(spy).toHaveBeenCalledWith({ leadId: 'lead-1', actor: { hubUserId: 'web-user', role: 'super_admin' }, requestOrigin: 'https://req.example', confirmedOutOfRange: false })
       expect(res.status).toBe(418)
       expect(await res.json()).toEqual({ error: 'sentinel' })
     } finally {

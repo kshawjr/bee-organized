@@ -1836,7 +1836,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <TransferLeadModal
           person={{ id: transferFor.id, name: transferFor.name }}
           subline={transferOriginLine(transferFor)}
-          preselectId={zipHintPreselectId(transferFor.zipHint)}
+          preselectId={transferFor.routeInsteadId || zipHintPreselectId(transferFor.zipHint)}
           onClose={() => setTransferFor(null)}
           onDone={(dest) => onTransferred(transferFor, dest)}
         />
@@ -1855,6 +1855,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           subline={transferOriginLine(noCoverageFor)}
           onClose={() => setNoCoverageFor(null)}
           onDone={(result) => onNoCoverage(noCoverageFor, result)}
+          onRouteInstead={(locationId) => {
+            // A blocked lead: the zip is this hive's territory. Swap straight
+            // into the transfer with it chosen.
+            const p = noCoverageFor
+            setNoCoverageFor(null)
+            setTransferFor({ ...p, routeInsteadId: locationId })
+          }}
         />
       )}
 

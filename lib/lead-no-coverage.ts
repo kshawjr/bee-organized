@@ -27,6 +27,9 @@
 // send, and the lead is now invisible AND unhelped — nobody ever told them,
 // and nobody will ever see them again. So the order is:
 //
+//   0. the served-area check               (lib/no-coverage-guard — a zip on
+//      a location's list is refused; within 75 measured miles, or a customer
+//      Bee Hub can't place, needs the person's confirmation)
 //   1. mint + persist the token           (no email out, nothing hidden)
 //   2. SEND                               ← the gate
 //   3. only on a successful send: dismiss (inbox_dismissed_at)
@@ -51,6 +54,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { sendNoCoverageEmail, firstNameOf } from '@/lib/no-coverage-email'
 import type { TransferActor, TransferOutcome } from '@/lib/lead-transfer'
+import { checkNoCoverage, mayEmailNoCoverage, verdictWords, type NoCoverageVerdict } from '@/lib/no-coverage-guard'
 
 // 45 days. Long enough that a link sitting in an inbox over a holiday still
 // works, short enough that a leaked link can't mint a consent record a year
@@ -78,9 +82,15 @@ export async function closeLeadAsNoCoverage(args: {
   // For the mailing-list link when no site URL env is set. The web route
   // passes its request origin; a caller without one passes null.
   requestOrigin?: string | null
+  // The person saw the nearest hive and its miles (or that Bee Hub couldn't
+  // measure) and says the customer is out of range. Moves a 'confirm' or
+  // 'unmeasured' verdict to sent; does nothing for 'blocked'. See
+  // lib/no-coverage-guard.ts.
+  confirmedOutOfRange?: boolean
 }): Promise<TransferOutcome> {
   const { leadId: id, actor } = args
   const requestOrigin = args.requestOrigin ?? null
+  const confirmed = args.confirmedOutOfRange === true
 
   // ─── The gate, again, on the actor (see the header) ───────────
   if (!isAdmin(actor.role)) {
@@ -90,7 +100,7 @@ export async function closeLeadAsNoCoverage(args: {
   // ─── Load the lead (service client, same as transfer) ─────────
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, city, state, location_id, location_uuid, inbox_dismissed_at, marketing_consented_at')
+    .select('id, name, first_name, email, city, state, zip, location_id, location_uuid, inbox_dismissed_at, marketing_consented_at')
     .eq('id', id)
     .single()
   if (loadError) {
@@ -109,6 +119,27 @@ export async function closeLeadAsNoCoverage(args: {
   // No address, no message. This is the one hard precondition: the entire
   // action is "email them", so a lead with no email address has nothing to do
   // here and must not be dismissed on the strength of a send that can't happen.
+  // ─── Served area? (lib/no-coverage-guard) — BEFORE anything is minted ──
+  // The one check every door goes through. A zip on a location's list is
+  // refused outright; a hive within 75 measured miles, or a customer Bee Hub
+  // can't place, needs the person's confirmation. A failed check refuses:
+  // "couldn't check" must never become "told someone in a territory".
+  let verdict: NoCoverageVerdict
+  try {
+    verdict = await checkNoCoverage({ id: existing.id, zip: existing.zip ?? null, state: existing.state ?? null })
+  } catch (err: any) {
+    return {
+      status: 503,
+      body: { error: 'coverage_check_failed', detail: `Bee Hub couldn't check whether this customer is in a served area (${err?.message || err}). Nothing was sent.` },
+    }
+  }
+  if (!mayEmailNoCoverage(verdict, confirmed)) {
+    if (verdict.kind === 'blocked') {
+      return { status: 409, body: { error: 'zip_claimed', detail: verdictWords(verdict), verdict } }
+    }
+    return { status: 409, body: { error: 'needs_confirmation', detail: verdictWords(verdict), verdict } }
+  }
+
   const to = (existing.email || '').trim()
   if (!to) {
     return { status: 400, body: { error: 'lead_has_no_email' } }
@@ -200,7 +231,8 @@ export async function closeLeadAsNoCoverage(args: {
       kind:          'system',
       method:        'system',
       label:         'No coverage — mailing-list invite sent',
-      notes:         `Told ${to} we don't serve ${areaLabelOf(existing) || 'their area'} yet, with a link to join the mailing list. Removed from the routing queue.`,
+      notes:         `Told ${to} we don't serve ${areaLabelOf(existing) || 'their area'} yet, with a link to join the mailing list. Removed from the routing queue.` +
+        (verdict.kind === 'clear' ? '' : ` Sent after confirming they're out of range: ${verdictWords(verdict)}`),
       status:        'done',
       occurred_at:   now,
       user_id:       actor.hubUserId,
@@ -219,6 +251,7 @@ export async function closeLeadAsNoCoverage(args: {
     // The client removes the row ONLY on true — see the write-order note above.
     dismissed,
     optin_expires_at: expiresAt,
+    verdict,
     ...(warnings.length ? { warnings } : {}),
   } }
 }

@@ -51,7 +51,6 @@ vi.mock('@/lib/supabase-service', () => ({
 vi.mock('@/lib/slack-bot', () => ({ getSlackUserEmail: vi.fn(async () => h.slackEmail) }))
 vi.mock('@/lib/lead-transfer', () => ({ transferLead: vi.fn(async () => ({ status: 200, body: { success: true } })) }))
 vi.mock('@/lib/lead-no-coverage', () => ({ closeLeadAsNoCoverage: vi.fn(async () => ({ status: 200, body: { success: true, to: 'j@example.com' } })) }))
-vi.mock('@/lib/route-suggestion', () => ({ suggestRouteForLead: vi.fn(async () => ({ showNotInServiceArea: true })) }))
 vi.mock('@/lib/touchpoints', () => ({ logCallTouchpoint: vi.fn(async () => ({ ok: true })) }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: Promise<any>) => { h.waited.push(p) } }))
 
@@ -59,7 +58,6 @@ import { handleRouteAction, resolveCorporateClicker, isRouteAction } from '@/lib
 import { encodeAcceptValue, buildResolvedRouteMessage, DONE_BLOCK_ID } from '@/lib/route-suggestion-slack'
 import { transferLead } from '@/lib/lead-transfer'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
-import { suggestRouteForLead } from '@/lib/route-suggestion'
 import { getSlackUserEmail } from '@/lib/slack-bot'
 import { POST } from '@/app/api/slack/interactivity/route'
 
@@ -191,28 +189,29 @@ describe('Leave in Other', () => {
   })
 })
 
-describe('Not in our service area — re-checked now, never trusted from the card', () => {
-  it('still over 75 measured miles → the email goes, as the clicker; the card says who was told', async () => {
+describe('Not in our service area — the one rule every door shares', () => {
+  it('past 75 measured miles → the email goes, as the clicker, never "confirmed"; the card says who was told', async () => {
     expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_sent')
-    expect(suggestRouteForLead).toHaveBeenCalledWith('lead-1')
-    expect(closeLeadAsNoCoverage).toHaveBeenCalledWith({ leadId: 'lead-1', actor: expect.objectContaining({ hubUserId: 'hu-leslie' }), requestOrigin: null })
+    expect(closeLeadAsNoCoverage).toHaveBeenCalledWith({ leadId: 'lead-1', actor: expect.objectContaining({ hubUserId: 'hu-leslie' }), requestOrigin: null, confirmedOutOfRange: false })
     expect(editedLine()).toBe("📭 Told j@example.com we don't serve their area yet (mailing-list link sent) — by Leslie Mullins.")
   })
 
-  it('no longer over 75 miles (or never measured) → NO email, told privately', async () => {
-    vi.mocked(suggestRouteForLead).mockResolvedValueOnce({ showNotInServiceArea: false } as any)
-    expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_not_far')
-    expect(closeLeadAsNoCoverage).not.toHaveBeenCalled()
-    expect(lastPost().text).toContain("can't confirm this lead is more than 75 miles")
+  it('a claimed zip → refused privately with who claims it; the card stays', async () => {
+    vi.mocked(closeLeadAsNoCoverage).mockResolvedValueOnce({ status: 409, body: { error: 'zip_claimed', detail: "Zip 89509 is on Reno's zip list — that is their territory, so Bee Hub won't send the not-in-area email. Route the lead to Reno instead." } })
+    expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_blocked')
+    expect(lastPost()).toMatchObject({ response_type: 'ephemeral', replace_original: false })
+    expect(lastPost().text).toContain("Zip 89509 is on Reno's zip list")
+    expect(lastPost().text).toContain('Nothing was sent.')
   })
 
-  it('the re-check fails → NO email', async () => {
-    vi.mocked(suggestRouteForLead).mockRejectedValueOnce(new Error('zip_coords read failed'))
-    expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_not_far')
-    expect(closeLeadAsNoCoverage).not.toHaveBeenCalled()
+  it('within 75 miles (or unmeasured) → Slack never confirms; sent to the Inbox to decide', async () => {
+    vi.mocked(closeLeadAsNoCoverage).mockResolvedValueOnce({ status: 409, body: { error: 'needs_confirmation', detail: 'Miami is 48 mi from zip 33928. Check they\'re really out of range before sending.' } })
+    expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_needs_confirmation')
+    expect(lastPost().text).toContain('Miami is 48 mi from zip 33928')
+    expect(lastPost().text).toContain('Inbox → No coverage')
   })
 
-  it('the close refuses (no email address on the lead) → the card stays, told privately', async () => {
+  it('the close refuses for another reason (no email address) → the card stays, told privately', async () => {
     vi.mocked(closeLeadAsNoCoverage).mockResolvedValueOnce({ status: 400, body: { error: 'lead_has_no_email' } })
     expect(await press('route_no_coverage', 'lead-1')).toBe('no_coverage_refused')
     expect(lastPost()).toMatchObject({ response_type: 'ephemeral' })
@@ -223,7 +222,6 @@ describe('Not in our service area — re-checked now, never trusted from the car
     h.lead = { id: 'lead-1', name: 'Jessica', location_id: 'loc_miami' }
     expect(await press('route_no_coverage', 'lead-1')).toBe('already_moved')
     expect(closeLeadAsNoCoverage).not.toHaveBeenCalled()
-    expect(suggestRouteForLead).not.toHaveBeenCalled()
   })
 })
 

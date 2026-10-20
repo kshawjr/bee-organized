@@ -23,6 +23,19 @@
 // open. The primary button says so ("Send and dismiss") rather than leaving
 // the second half of the action to be discovered afterward.
 //
+// SERVED AREAS (Kevin, 20 Oct 2026). Of the 8 no-coverage emails ever sent, 3
+// went to zips on a franchise's list and 7 were within 75 miles of a hive. So
+// the modal asks the server first (GET /api/leads/:id/no-coverage, the same
+// check the send runs — lib/no-coverage-guard) and shows the verdict:
+//   · the zip is on a location's list → BLOCKED. No send button at all, the
+//     claimant named, and "Route to <it> instead" opens the transfer with it
+//     preselected. The server refuses too; there is no override.
+//   · a hive within 75 measured miles, or a customer Bee Hub can't place →
+//     the hive and its miles (or why it can't measure) on screen, and Send
+//     stays off until the person ticks "they're out of range".
+//   · past 75 miles → as before.
+// Until the check answers, Send is off; if it can't answer, Send stays off.
+//
 // A lead with no email address can't be sent to, so the action is refused HERE
 // with an explanation rather than at the endpoint with a code — the endpoint
 // still refuses it too (lead_has_no_email), this just says why first.
@@ -65,10 +78,38 @@ const primaryBtn = (enabled) => ({
 // person: { id, name, email, firstName, city, state }; subline: pre-composed
 // origin string; onDone(result): success handler — the caller closes + removes
 // the row (and ONLY when the endpoint actually dismissed it).
-export default function NoCoverageModal({ person, subline = null, onDone = () => {}, onClose = () => {} }) {
+// onRouteInstead(locationId): a blocked lead's claimant was chosen — the caller
+// closes this and opens the transfer with that location preselected.
+export default function NoCoverageModal({ person, subline = null, onDone = () => {}, onClose = () => {}, onRouteInstead = () => {} }) {
   const isMobile = useIsMobile()
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
+  // The served-area check: { status: 'loading' | 'ready' | 'failed', verdict, words, claimants }
+  const [check, setCheck] = useState({ status: 'loading' })
+  const [confirmedOut, setConfirmedOut] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/leads/${person.id}/no-coverage`, { method: 'GET' })
+        const json = await res.json().catch(() => ({}))
+        if (!live) return
+        if (!res.ok || !json?.verdict) {
+          setCheck({ status: 'failed', words: json?.detail || json?.error || `HTTP ${res.status}` })
+          return
+        }
+        setCheck({ status: 'ready', verdict: json.verdict, words: json.words, claimants: json.claimants || [] })
+      } catch {
+        if (live) setCheck({ status: 'failed', words: 'Network error' })
+      }
+    })()
+    return () => { live = false }
+  }, [person?.id])
+
+  const kind = check.status === 'ready' ? check.verdict.kind : null
+  const blocked = kind === 'blocked'
+  const needsConfirm = kind === 'confirm' || kind === 'unmeasured'
 
   // Esc closes — self-owned (OverlayShell doesn't).
   useEffect(() => {
@@ -78,7 +119,7 @@ export default function NoCoverageModal({ person, subline = null, onDone = () =>
   }, [onClose])
 
   const to = (person?.email || '').trim()
-  const canSend = !!to && !submitting
+  const canSend = !!to && !submitting && check.status === 'ready' && !blocked && (!needsConfirm || confirmedOut)
 
   // The preview. Same builder the server sends with — see the header note.
   const areaLabel = useMemo(() => {
@@ -100,11 +141,11 @@ export default function NoCoverageModal({ person, subline = null, onDone = () =>
       const res = await fetch(`/api/leads/${person.id}/no-coverage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(needsConfirm && confirmedOut ? { confirmed_out_of_range: true } : {}),
       })
       json = await res.json().catch(() => ({}))
       if (!res.ok || !json || json.success !== true) {
-        setErrorMsg((json && json.error) ? json.error : `Send failed (HTTP ${res.status})`)
+        setErrorMsg((json && (json.detail || json.error)) ? (json.detail || json.error) : `Send failed (HTTP ${res.status})`)
         setSubmitting(false)
         return
       }
@@ -150,6 +191,46 @@ export default function NoCoverageModal({ person, subline = null, onDone = () =>
             joining the list is their choice and won&apos;t hold it open.
           </p>
         </div>
+
+        {/* The served-area check — before anything else can be pressed. */}
+        {check.status === 'loading' && (
+          <p data-bee-coverage-check="loading" style={{ fontSize: '12px', color: T.ink.muted }}>Checking whether a hive serves them…</p>
+        )}
+        {check.status === 'failed' && (
+          <div data-bee-coverage-check="failed" style={{ padding: '10px 12px', background: T.state.danger.soft, border: `1px solid ${T.state.danger.strong}`, borderRadius: T.radius.control }}>
+            <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.danger.strong, marginBottom: '2px' }}>Couldn&apos;t check their area</p>
+            <p style={{ fontSize: '12px', color: T.state.danger.fg, wordBreak: 'break-word' }}>
+              Bee Hub won&apos;t send this until it can check whether a hive serves them. ({check.words})
+            </p>
+          </div>
+        )}
+        {blocked && (
+          <div data-bee-coverage-check="blocked" style={{ padding: '10px 12px', background: T.state.danger.soft, border: `1px solid ${T.state.danger.strong}`, borderRadius: T.radius.control }}>
+            <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.danger.strong, marginBottom: '2px' }}>This is a hive&apos;s territory</p>
+            <p style={{ fontSize: '12px', color: T.state.danger.fg, lineHeight: 1.45 }}>{check.words}</p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+              {check.claimants.filter((c) => c.id).map((c) => (
+                <button key={c.id} type="button" data-bee-route-instead={c.id} style={primaryBtn(true)} onClick={() => onRouteInstead(c.id)}>
+                  Route to {c.name} instead
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {needsConfirm && (
+          <div data-bee-coverage-check={kind} style={{ padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
+            <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.deep, marginBottom: '2px' }}>
+              {kind === 'confirm' ? `${check.verdict.nearest.name} is ${check.verdict.nearest.miles} mi away` : 'Bee Hub can\u2019t tell where they are'}
+            </p>
+            <p style={{ fontSize: '12px', color: T.state.warning.deep, lineHeight: 1.45 }}>{check.words}</p>
+            <label style={{ display: 'flex', gap: '7px', alignItems: 'center', marginTop: '8px', fontSize: '12px', color: T.ink.primary, cursor: 'pointer' }}>
+              <input type="checkbox" data-bee-confirm-out-of-range checked={confirmedOut} onChange={(e) => setConfirmedOut(e.target.checked)} />
+              {kind === 'confirm'
+                ? `I've checked: they're out of ${check.verdict.nearest.name}'s range`
+                : "I've checked: they're out of every hive's range"}
+            </label>
+          </div>
+        )}
 
         {/* No address, no action. */}
         {!to && (
@@ -205,9 +286,11 @@ export default function NoCoverageModal({ person, subline = null, onDone = () =>
         {/* Footer */}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button type="button" style={ghostBtn} onClick={onClose} disabled={submitting}>Cancel</button>
-          <button type="button" style={primaryBtn(canSend)} onClick={confirm} disabled={!canSend}>
-            {submitting ? 'Sending…' : (<><IconCheck size={13} /> Send and dismiss</>)}
-          </button>
+          {!blocked && (
+            <button type="button" data-bee-no-coverage-send style={primaryBtn(canSend)} onClick={confirm} disabled={!canSend}>
+              {submitting ? 'Sending…' : (<><IconCheck size={13} /> Send and dismiss</>)}
+            </button>
+          )}
         </div>
       </div>
     </OverlayShell>

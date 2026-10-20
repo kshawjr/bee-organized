@@ -32,11 +32,19 @@ const locOtherLead = (over: any = {}) => ({
   ...over,
 })
 
+// The modal asks the served-area check (GET) before it lets anyone send; these
+// tests are about the send itself, so the check answers "clear" (no claim,
+// nearest hive past 75 miles). The check's own cases are in
+// beta-no-coverage-guard.test.tsx.
+const CLEAR_CHECK = { verdict: { kind: 'clear', zip: '60173', nearest: { slug: 'loc_carmel', name: 'Carmel', miles: 163 } }, words: 'The nearest hive, Carmel, is 163 mi away.' }
 const installFetch = (noCoverageResp: any = { ok: true, status: 200, body: { success: true, dismissed: true } }) => {
-  const mock = vi.fn(async (url: any) => {
+  const mock = vi.fn(async (url: any, init?: any) => {
     const u = String(url)
     if (u.includes('/api/locations/transfer-targets')) {
       return { ok: true, status: 200, json: async () => ({ targets: [] }) }
+    }
+    if (u.includes('/no-coverage') && (init?.method || 'GET') === 'GET') {
+      return { ok: true, status: 200, json: async () => CLEAR_CHECK }
     }
     if (u.includes('/no-coverage')) {
       return { ok: noCoverageResp.ok, status: noCoverageResp.status, json: async () => noCoverageResp.body }
@@ -114,7 +122,7 @@ describe('No coverage — modal + write', () => {
     await act(async () => { (confirm as HTMLButtonElement).click() })
     await flush()
 
-    const callArgs = fetchMock.mock.calls.find(c => String(c[0]).includes('/no-coverage'))
+    const callArgs = fetchMock.mock.calls.find((c: any) => String(c[0]).includes('/no-coverage') && c[1]?.method === 'POST')
     expect(callArgs).toBeTruthy()
     expect(String(callArgs![0])).toBe('/api/leads/lead-77/no-coverage')
     expect((callArgs![1] as any).method).toBe('POST')
