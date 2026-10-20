@@ -51,6 +51,7 @@ import {
   type ContinuationOutcome,
   withEvidence,
 } from '@/lib/import-continuation'
+import { importSweeperQuietLine } from '@/lib/cron-log-lines'
 
 export const dynamic = 'force-dynamic'
 
@@ -135,6 +136,8 @@ export async function GET(req: NextRequest) {
 
   const jobs = stalled || []
   if (jobs.length === 0) {
+    // The quiet run says so (lib/cron-log-lines) — not just the setup line.
+    console.log(importSweeperQuietLine())
     return NextResponse.json({ resumed: 0, checked: 0 })
   }
 

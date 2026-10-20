@@ -211,7 +211,7 @@ describe('D. sweepOtherCards — the backstop', () => {
   it('a live card for a lead still open in Other → left alone', async () => {
     db.tables.slack_cards = [card()]
     const { r, repost } = await sweep()
-    expect(r).toEqual({ retired: 0, reposted: 0, failed: 0 })
+    expect(r).toEqual({ checked: 1, retired: 0, reposted: 0, failed: 0 })
     expect(slackCalls).toEqual([])
     expect(repost).not.toHaveBeenCalled()
   })
@@ -301,7 +301,7 @@ describe('D. sweepOtherCards — the backstop', () => {
   it('a repost that fails is counted, not thrown', async () => {
     db.tables.slack_cards = [card({ resolved_at: '2026-10-20T22:00:00Z', resolution: 'dismissed' })]
     const { r } = await sweep(vi.fn(async () => false))
-    expect(r).toEqual({ retired: 0, reposted: 0, failed: 1 })
+    expect(r).toEqual({ checked: 1, retired: 0, reposted: 0, failed: 1 })
   })
 
   it('a failed facts read throws (the cron reports it) rather than editing on half a picture', async () => {
@@ -329,7 +329,31 @@ describe('E. GET /api/cron/other-cards — auth', () => {
     process.env.CRON_SECRET = 's3cret'
     const res = await call({ authorization: 'Bearer s3cret' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, retired: 0, reposted: 0, failed: 0 })
+    expect(await res.json()).toEqual({ ok: true, checked: 0, retired: 0, reposted: 0, failed: 0 })
+  })
+
+  it('a quiet run still logs its one line — a healthy sweep never looks dead', async () => {
+    process.env.CRON_SECRET = 's3cret'
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await call({ authorization: 'Bearer s3cret' })
+      expect(log).toHaveBeenCalledWith('[cron other-cards] checked 0, retired 0, reposted 0')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('a run that did something logs the counts', async () => {
+    process.env.CRON_SECRET = 's3cret'
+    db.tables.slack_cards = [card(), card({ lead_id: 'lead-2', message_ts: 'x' })]
+    db.tables.leads = [lead({ inbox_dismissed_at: '2026-10-21T10:00:00Z' }), lead({ id: 'lead-2' })]
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await call({ authorization: 'Bearer s3cret' })
+      expect(log).toHaveBeenCalledWith('[cron other-cards] checked 2, retired 1, reposted 0')
+    } finally {
+      log.mockRestore()
+    }
   })
   it('?secret= works for manual testing', async () => {
     process.env.CRON_SECRET = 's3cret'

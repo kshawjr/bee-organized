@@ -226,11 +226,12 @@ async function movedBy(leadId: string): Promise<{ dest: string | null; who: stri
   return { dest, who: await actorName(row?.user_id) }
 }
 
-export type SweepResult = { retired: number; reposted: number; failed: number }
+// checked = how many leads with a card the sweep looked at.
+export type SweepResult = { checked: number; retired: number; reposted: number; failed: number }
 
 export async function sweepOtherCards(opts: { nowMs?: number; repost?: (lead: any) => Promise<boolean> } = {}): Promise<SweepResult> {
   const nowMs = opts.nowMs ?? Date.now()
-  const result: SweepResult = { retired: 0, reposted: 0, failed: 0 }
+  const result: SweepResult = { checked: 0, retired: 0, reposted: 0, failed: 0 }
 
   const { data: cards, error } = await supabaseService
     .from('slack_cards')
@@ -242,6 +243,7 @@ export async function sweepOtherCards(opts: { nowMs?: number; repost?: (lead: an
   for (const c of cards as any[]) (byLead.get(c.lead_id) || byLead.set(c.lead_id, []).get(c.lead_id)!).push(c)
 
   const facts = await leadFacts(Array.from(byLead.keys()))
+  result.checked = byLead.size
 
   for (const [leadId, list] of Array.from(byLead.entries())) {
     const lead = facts.get(leadId)

@@ -34,6 +34,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { getZohoLocationNotificationContacts } from '@/lib/zoho'
 import { buildTopUpPlan, commitTopUpPlan } from '@/lib/zoho-recipient-topup'
+import { zohoTopupLine } from '@/lib/cron-log-lines'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -81,6 +82,14 @@ export async function GET(req: NextRequest) {
         `${plan.locations.filter((l) => l.rows.length > 0).length} location(s)`,
     )
   }
+
+  // One line on EVERY run, even when nothing was added (lib/cron-log-lines).
+  console.log(zohoTopupLine({
+    locations: plan.locations.length,
+    planned: plan.rows.length,
+    inserted,
+    errors: zohoErrors.length + errors.length,
+  }))
 
   return NextResponse.json({
     locations_in_scope: plan.locations.length,

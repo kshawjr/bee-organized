@@ -27,6 +27,7 @@ import { sweepOtherCards } from '@/lib/other-card-sync'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { logSlackNotification } from '@/lib/notification-log'
 import { OTHER_SLUG } from '@/lib/other-card-backlog'
+import { otherCardsLine } from '@/lib/cron-log-lines'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,7 +66,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await sweepOtherCards({ repost: (lead) => repost(lead.id) })
-    if (result.retired || result.reposted || result.failed) console.log('[cron other-cards]', JSON.stringify(result))
+    // EVERY run logs one line, even all zeros — a healthy quiet sweep and a
+    // dead one must not look the same from a log search (Kevin, 20 Oct 2026).
+    console.log(otherCardsLine(result))
     return NextResponse.json({ ok: true, ...result })
   } catch (err: any) {
     console.error('[cron other-cards] sweep failed —', err?.message || err)

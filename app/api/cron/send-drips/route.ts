@@ -29,6 +29,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { sendDripStepForRow } from '@/lib/drip-send'
 import { sendWelcomeEmail } from '@/lib/welcome-email'
 import { sendStageEmail } from '@/lib/stage-emails'
+import { sendDripsLine } from '@/lib/cron-log-lines'
 
 // Prevent Next.js from trying to prerender this route at build time.
 export const dynamic = 'force-dynamic'
@@ -235,6 +236,14 @@ export async function GET(req: NextRequest) {
   if (heldMissingSubject > 0) {
     console.warn(`[cron] ${heldMissingSubject} send(s) held: email subject is blank — held until a subject is entered on the template or drip step`)
   }
+
+  // One line on EVERY run, even all zeros (lib/cron-log-lines).
+  console.log(sendDripsLine({
+    drips:   { sent, skipped, failed, considered: dueRows?.length ?? 0 },
+    welcome: { sent: welcomeSent, skipped: welcomeSkipped, failed: welcomeFailed, considered: welcomeDue?.length ?? 0 },
+    stage:   { sent: stageSent,   skipped: stageSkipped,   failed: stageFailed,   considered: stageDue?.length ?? 0 },
+    held: heldMissingRate + heldMissingBookingLink + heldMissingSubject,
+  }))
 
   return NextResponse.json({
     held_missing_rate: heldMissingRate,

@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runScheduledGmailSync } from '@/lib/gmail-cron'
+import { gmailSyncLine } from '@/lib/cron-log-lines'
 
 // Prevent Next.js from trying to prerender this route at build time.
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const report = await runScheduledGmailSync()
+    // One line on EVERY run, even with nothing to sync (lib/cron-log-lines).
+    console.log(gmailSyncLine(report))
     return NextResponse.json(report)
   } catch (err: any) {
     console.error('[cron gmail-sync]', err?.message || err)
