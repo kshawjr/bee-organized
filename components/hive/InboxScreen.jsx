@@ -162,17 +162,26 @@ function SentWaiting({ settled }) {
 
 // What the territory list says about a queued lead's zip, in the reader's
 // words (p.zipHint comes from lib/transfer-queue.ts):
-//   one live location      → "→ Lake Norman"
-//   one, not live yet      → "→ Omaha (not live yet)"
-//   two claim it (Denver)  → "→ Central Denver or West Denver"
-//   nobody has it          → "no location has this zip"
+//   one location that takes zip leads → "→ Lake Norman" (active OR onboarding)
+//   one that doesn't (paused, …)     → "→ Omaha (paused)" / "(not taking leads)"
+//   two claim it (Denver)            → "→ Central Denver or West Denver"
+//   nobody has it                    → "no location has this zip"
 // No hint (no zip, or the lookup failed) says nothing — never a guess.
+//
+// 20 Oct 2026: this used to add "(not live yet)" to every non-active location.
+// Since 166d3b8 an ONBOARDING location takes its own zips, so that told Leslie
+// a hive couldn't have a lead it now gets directly. Which states take zip leads
+// is lib/zip-routing locationTakesZipLeads; that module is server-only, so the
+// rule is repeated here and a test pins the two together.
+export const hintLocationTakesZipLeads = (status) => status === 'active' || status === 'onboarding'
 export const zipHintText = (hint) => {
   if (!hint) return ''
   if (hint.kind === 'none') return 'no location has this zip'
   const names = hint.matches.map(m => m.name)
   if (hint.kind === 'one') {
-    return `→ ${names[0]}${hint.matches[0].lifecycle_status === 'active' ? '' : ' (not live yet)'}`
+    const status = hint.matches[0].lifecycle_status
+    if (hintLocationTakesZipLeads(status)) return `→ ${names[0]}`
+    return `→ ${names[0]} (${status === 'paused' ? 'paused' : 'not taking leads'})`
   }
   return `→ ${names.join(' or ')}`
 }

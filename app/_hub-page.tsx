@@ -1746,7 +1746,7 @@ export default async function HubPage({
       }
     }
     // Which location each lead's zip would have matched (the Denver overlaps,
-    // locations not live yet) — shown on the row and pre-selected in the
+    // locations not taking zip leads) — shown on the row and pre-selected in the
     // picker, so nobody opens a lead just to see where it is. Fail-soft: no
     // answer means no suggestion, never a wrong one.
     if (initialTransferPeople.length > 0) {

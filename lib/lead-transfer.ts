@@ -107,6 +107,7 @@ import { logSlackNotification } from '@/lib/notification-log'
 import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 import { TRANSFER_IN_LABEL } from '@/lib/enquiry-exit'
 import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
+import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 
 // Who is moving the lead. hubUserId is stamped on the transfer touchpoint
 // (user_id); role is re-checked with isAdmin before anything is read.
@@ -442,6 +443,17 @@ export async function transferLead(args: {
     console.error('[transfer] notifyNewLeadSlack threw', err)
     warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
     await logSlackNotification({ ok: false, error: err?.message || String(err) }, slackLogContext)
+  }
+
+  // ─── Other's Slack card, if it had one (lib/other-card-sync) ────
+  // Edited in place to say where it went and who moved it, buttons gone —
+  // whether the move came from Bee Hub or from the card itself. A lead that
+  // never had a card (any franchise lead) is a no-op. Never fails the move.
+  try {
+    const who = await actorName(actor.hubUserId)
+    await retireOtherCards({ leadId: id, resolution: 'moved', line: exitLine('moved', { dest: dest.name, who }) })
+  } catch (err: any) {
+    console.error('[transfer] slack card edit failed', err)
   }
 
   // ─── Drip re-enroll — ONLY for an active, STAFFED destination ──

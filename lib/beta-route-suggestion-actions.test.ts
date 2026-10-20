@@ -52,6 +52,7 @@ vi.mock('@/lib/slack-bot', () => ({ getSlackUserEmail: vi.fn(async () => h.slack
 vi.mock('@/lib/lead-transfer', () => ({ transferLead: vi.fn(async () => ({ status: 200, body: { success: true } })) }))
 vi.mock('@/lib/lead-no-coverage', () => ({ closeLeadAsNoCoverage: vi.fn(async () => ({ status: 200, body: { success: true, to: 'j@example.com' } })) }))
 vi.mock('@/lib/touchpoints', () => ({ logCallTouchpoint: vi.fn(async () => ({ ok: true })) }))
+vi.mock('@/lib/other-card-sync', () => ({ markCardResolved: vi.fn(async () => {}) }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: Promise<any>) => { h.waited.push(p) } }))
 
 import { handleRouteAction, resolveCorporateClicker, isRouteAction } from '@/lib/route-suggestion-actions'
@@ -60,6 +61,7 @@ import { transferLead } from '@/lib/lead-transfer'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
 import { getSlackUserEmail } from '@/lib/slack-bot'
 import { POST } from '@/app/api/slack/interactivity/route'
+import { markCardResolved } from '@/lib/other-card-sync'
 
 const RESP = 'https://hooks.slack.com/actions/resp'
 const LESLIE = { id: 'hu-leslie', role: 'admin', full_name: 'Leslie Mullins', email: 'Leslie@BeeOrganized.com ', disabled_at: null }
@@ -73,7 +75,7 @@ const CARD = {
   ] }],
 }
 const press = (actionId: string, value: unknown) =>
-  handleRouteAction({ actionId, value, slackUserId: 'U-LESLIE', responseUrl: RESP, message: CARD })
+  handleRouteAction({ actionId, value, slackUserId: 'U-LESLIE', responseUrl: RESP, message: CARD, channelId: 'C-OTHER', messageTs: '111.222' })
 const accept = (to = 'loc_miami', lead = 'lead-1') => press('route_accept_0', encodeAcceptValue(lead, to))
 const lastPost = () => h.posts[h.posts.length - 1]?.body
 const editedLine = () => lastPost().attachments[0].blocks.find((b: any) => b.block_id === DONE_BLOCK_ID).elements[0].text
@@ -182,10 +184,23 @@ describe('Accept — move it, then edit the card in place', () => {
 })
 
 describe('Leave in Other', () => {
-  it('writes nothing; the card says who left it', async () => {
+  it('writes nothing to the lead; the card says who left it, and its row records it (so the sweep never reposts it)', async () => {
     expect(await press('route_leave', 'lead-1')).toBe('left_in_other')
     nothingWritten()
     expect(editedLine()).toBe('📥 Left in Other by Leslie Mullins. Route it in Bee Hub when ready.')
+    expect(markCardResolved).toHaveBeenCalledWith({ channelId: 'C-OTHER', messageTs: '111.222', resolution: 'left_in_other', line: '📥 Left in Other by Leslie Mullins. Route it in Bee Hub when ready.' })
+  })
+
+  it('an already-moved lead\'s card is recorded too', async () => {
+    h.lead = { id: 'lead-1', name: 'Jessica', location_id: 'loc_lincoln' }
+    await accept('loc_miami')
+    expect(markCardResolved).toHaveBeenCalledWith(expect.objectContaining({ messageTs: '111.222', resolution: 'moved' }))
+  })
+
+  it('a refused presser never records anything', async () => {
+    h.hubUsers = []
+    await press('route_leave', 'lead-1')
+    expect(markCardResolved).not.toHaveBeenCalled()
   })
 })
 
@@ -248,6 +263,12 @@ const routePayload = {
 
 describe('app/api/slack/interactivity — route buttons', () => {
   beforeEach(() => { process.env.SLACK_SIGNING_SECRET = SECRET })
+
+  it('the endpoint hands the pressed message\'s channel and id to the handler', async () => {
+    await POST(signedReq({ ...routePayload, actions: [{ action_id: 'route_leave', value: 'lead-1' }], container: { channel_id: 'C-OTHER', message_ts: '999.888' } }))
+    await h.waited[0]
+    expect(markCardResolved).toHaveBeenCalledWith(expect.objectContaining({ channelId: 'C-OTHER', messageTs: '999.888' }))
+  })
 
   it('a signed route click is acked at once and the move finishes under waitUntil', async () => {
     const res = await POST(signedReq(routePayload))

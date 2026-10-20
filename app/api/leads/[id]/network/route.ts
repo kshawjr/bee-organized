@@ -52,6 +52,7 @@ import {
 import { cleanTagIds } from '@/lib/tags'
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { formatPhone } from '@/lib/phone'
+import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 
 export const runtime = 'nodejs'
 
@@ -323,6 +324,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (Object.keys(leadPatch).length > 0) {
     try {
       await updateLead(id, leadPatch as any)
+      // Other's Slack card, if it had one: the lead went to the Network.
+      if (mode === 'move') {
+        try {
+          await retireOtherCards({ leadId: id, resolution: 'network', line: exitLine('network', { who: await actorName(caller.userId) }) })
+        } catch (err) {
+          console.error('[network] slack card edit failed', err)
+        }
+      }
       await applyDripSideEffects({
         leadId: id,
         locationUuid: lead.location_uuid,

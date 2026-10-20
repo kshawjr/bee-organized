@@ -192,6 +192,8 @@ export async function POST(req: NextRequest) {
         slackUserId: payload.user?.id,
         responseUrl: payload.response_url,
         message: payload.message,
+        channelId: payload.container?.channel_id || payload.channel?.id,
+        messageTs: payload.container?.message_ts || payload.message?.ts,
       })
         .then((outcome) => console.log('[slack-interactivity] route action', routeAction.action_id, '→', outcome))
         .catch((err: any) => console.error('[slack-interactivity] route action threw —', err?.message || err)),

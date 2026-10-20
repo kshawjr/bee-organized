@@ -54,12 +54,14 @@ vi.mock('@/lib/supabase-server', () => ({
   })),
 }))
 
+vi.mock('@/lib/other-card-sync', () => ({ recordOtherCard: vi.fn(async () => {}) }))
 vi.mock('@/lib/no-coverage-guard', async (orig) => {
   const real: any = await orig()
   return { ...real, checkNoCoverage: vi.fn(async () => ({ kind: 'clear', zip: '60173', nearest: { slug: 'loc_carmel', name: 'Carmel', miles: 163 } })) }
 })
 
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
+import { recordOtherCard } from '@/lib/other-card-sync'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
 import * as NoCoverage from '@/lib/lead-no-coverage'
 import { POST as NO_COVERAGE_POST } from '@/app/api/leads/[id]/no-coverage/route'
@@ -97,6 +99,26 @@ describe('posting the card', () => {
     expect(posted().text).toBe('📍 New lead in Other — needs a hive')
     expect(actionIds()).toEqual(['route_accept_0', 'route_accept_1', 'route_leave', undefined])
     expect(JSON.stringify(posted())).not.toContain('log_call')
+  })
+
+  it('Slack returns the message id → it comes back on the result and Other\'s card is recorded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => { h.posts.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, ts: '1729.0001', channel: 'C-OTHER' }) } as any }))
+    const res = await notifyNewLeadSlack({ locationId: 'uuid-other', locationName: 'Other', lead: LEAD, baseUrl: null })
+    expect(res).toEqual({ ok: true, ts: '1729.0001', channel: 'C-OTHER' })
+    expect(recordOtherCard).toHaveBeenCalledWith({ leadId: 'lead-1', locationUuid: 'uuid-other', channelId: 'C-OTHER', messageTs: '1729.0001' })
+  })
+
+  it('a franchise card is never recorded, even with a message id', async () => {
+    h.gate = { live: true }
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => { h.posts.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, ts: '1729.0002', channel: 'C-X' }) } as any }))
+    await notifyNewLeadSlack({ locationId: 'uuid-miami', locationName: 'Miami', lead: LEAD, baseUrl: null })
+    expect(recordOtherCard).not.toHaveBeenCalled()
+  })
+
+  it('a failed post is never recorded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: false, error: 'channel_not_found' }) }) as any))
+    await notifyNewLeadSlack({ locationId: 'uuid-other', locationName: 'Other', lead: LEAD, baseUrl: null })
+    expect(recordOtherCard).not.toHaveBeenCalled()
   })
 
   it('the suggestion failing still posts a card (Leave in Other + a plain line) — never silence', async () => {

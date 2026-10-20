@@ -279,11 +279,20 @@ describe('Inbox — the unrouted queue shows ten at a time', () => {
 // ── the zip, and who it would have matched ──────────────────────────────────
 const LKN: ZipHintMatch = { id: 'uuid-lkn', slug: 'loc_lakenorman', name: 'Lake Norman', lifecycle_status: 'active' }
 const OMAHA: ZipHintMatch = { id: 'uuid-omaha', slug: 'loc_omaha', name: 'Omaha', lifecycle_status: 'onboarding' }
+const PAUSED: ZipHintMatch = { id: 'uuid-paused', slug: 'loc_paused', name: 'Pausedville', lifecycle_status: 'paused' }
 const CDEN: ZipHintMatch = { id: 'uuid-cden', slug: 'loc_centraldenver', name: 'Central Denver', lifecycle_status: 'active' }
 const WDEN: ZipHintMatch = { id: 'uuid-wden', slug: 'loc_westdenver', name: 'West Denver', lifecycle_status: 'active' }
 const BY_ZIP = new Map<string, ZipHintMatch[]>([
   ['28078', [LKN]], ['68102', [OMAHA]], ['80202', [WDEN, CDEN]],
 ])
+
+describe('the row\'s "takes zip leads" rule is the routing rule', () => {
+  it.each([['active'], ['onboarding'], ['paused'], [null], ['closed'], ['Onboarding']])('%j agrees with lib/zip-routing', async (status) => {
+    const { locationTakesZipLeads } = await import('@/lib/zip-routing')
+    const { hintLocationTakesZipLeads } = await import('@/components/hive/InboxScreen')
+    expect(hintLocationTakesZipLeads(status)).toBe(locationTakesZipLeads(status as any))
+  })
+})
 
 describe('zipHintFor — what the territory list says about a zip', () => {
   it('one live location', () => {
@@ -308,7 +317,10 @@ describe('zipHintFor — what the territory list says about a zip', () => {
   })
   it('the words on the row, and what the picker opens on', () => {
     expect(zipHintText(zipHintFor('28078', BY_ZIP))).toBe('→ Lake Norman')
-    expect(zipHintText(zipHintFor('68102', BY_ZIP))).toBe('→ Omaha (not live yet)')
+    // 20 Oct 2026: an ONBOARDING location takes its own zips — no "(not live yet)".
+    expect(zipHintText(zipHintFor('68102', BY_ZIP))).toBe('→ Omaha')
+    expect(zipHintText({ zip: '11111', kind: 'one', matches: [PAUSED] })).toBe('→ Pausedville (paused)')
+    expect(zipHintText({ zip: '11111', kind: 'one', matches: [{ ...PAUSED, lifecycle_status: null }] })).toBe('→ Pausedville (not taking leads)')
     expect(zipHintText(zipHintFor('80202', BY_ZIP))).toMatch(/^→ (Central Denver or West Denver|West Denver or Central Denver)$/)
     expect(zipHintText(zipHintFor('99999', BY_ZIP))).toBe('no location has this zip')
     expect(zipHintText(null)).toBe('')
@@ -373,7 +385,7 @@ describe('Inbox — the row says where the lead is', () => {
     await unmount()
   })
 
-  it('a location that is not live yet, a Denver conflict, and a zip nobody has', async () => {
+  it('an onboarding location, a Denver conflict, and a zip nobody has', async () => {
     const people = [
       lead(1, { name: 'A', originZip: '68102', zipHint: zipHintFor('68102', BY_ZIP) }),
       lead(2, { name: 'B', originZip: '80202', zipHint: zipHintFor('80202', BY_ZIP) }),
@@ -381,7 +393,8 @@ describe('Inbox — the row says where the lead is', () => {
     ]
     const { host, unmount } = await mount(<InboxScreen people={[]} transferPeople={people} engagements={[]} locFilter="all" />)
     const text = section(host).textContent!
-    expect(text).toContain('68102 → Omaha (not live yet)')
+    expect(text).toContain('68102 → Omaha')
+    expect(text).not.toContain('not live yet')
     expect(text).toMatch(/80202 → (Central Denver or West Denver|West Denver or Central Denver)/)
     expect(text).toContain('99999 no location has this zip')
     await unmount()

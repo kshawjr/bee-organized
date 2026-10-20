@@ -64,7 +64,7 @@ export { TRANSFER_QUEUE_PAGE_SIZE, pageOfQueue, type QueuePage } from './transfe
 
 // ── which location the zip would have matched ───────────────────────────────
 // A lead lands at loc_other when its zip matched nobody, matched TWO locations
-// (the Denver overlaps), or matched one that is not live yet. In the last two
+// (the Denver overlaps), or matched one that doesn't take zip leads (paused). In the last two
 // cases the territory list already knows who it is probably for — say so on
 // the row, so nobody has to open the lead to find out where it is.
 

@@ -55,6 +55,7 @@ import { isAdmin } from '@/lib/auth'
 import { sendNoCoverageEmail, firstNameOf } from '@/lib/no-coverage-email'
 import type { TransferActor, TransferOutcome } from '@/lib/lead-transfer'
 import { checkNoCoverage, mayEmailNoCoverage, verdictWords, type NoCoverageVerdict } from '@/lib/no-coverage-guard'
+import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 
 // 45 days. Long enough that a link sitting in an inbox over a holiday still
 // works, short enough that a leaked link can't mint a consent record a year
@@ -221,6 +222,15 @@ export async function closeLeadAsNoCoverage(args: {
     warnings.push(`dismiss_write_failed_after_send: ${dismissError.message}`)
   } else {
     dismissed = true
+  }
+
+  // ─── Other's Slack card, if it had one (lib/other-card-sync) ────
+  // The email is out; the card says so and loses its buttons. Never fails.
+  try {
+    const who = await actorName(actor.hubUserId)
+    await retireOtherCards({ leadId: id, resolution: 'no_coverage', line: exitLine('no_coverage', { to, who }) })
+  } catch (err: any) {
+    console.error('[no-coverage] slack card edit failed', err)
   }
 
   // ─── 4. System touchpoint (non-fatal) ─────────────────────────

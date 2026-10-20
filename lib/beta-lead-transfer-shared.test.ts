@@ -55,11 +55,16 @@ vi.mock('@/lib/drip-lifecycle', () => ({ stopActiveDripsForLead: vi.fn(async () 
 vi.mock('@/lib/slack-bot', () => ({ notifyNewLeadSlack: vi.fn(async () => ({ ok: true })) }))
 vi.mock('@/lib/notification-log', () => ({ logSlackNotification: vi.fn(async () => {}) }))
 vi.mock('@/lib/realtime-broadcast', () => ({ broadcastLeadMoved: vi.fn(async () => true) }))
+vi.mock('@/lib/other-card-sync', async (orig) => {
+  const real: any = await orig()
+  return { ...real, retireOtherCards: vi.fn(async () => ({ edited: 1, failed: 0 })), actorName: vi.fn(async () => 'Leslie Mullins') }
+})
 
 import { transferLead } from '@/lib/lead-transfer'
 import * as Shared from '@/lib/lead-transfer'
 import { POST } from '@/app/api/leads/[id]/transfer/route'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { retireOtherCards } from '@/lib/other-card-sync'
 
 const LEAD = {
   id: 'lead-1', name: 'Loujean Test', email: 'l@example.com', phone: null, project_type: 'Garage',
@@ -107,6 +112,27 @@ describe('transferLead — the actor gate', () => {
     await transferLead({ leadId: 'lead-1', destinationLocationId: 'soc-uuid', reason: null, actor: { hubUserId: 'u', role: 'admin' } })
     expect(h.state.eqs[0]).toEqual({ table: 'leads', col: 'id', val: 'lead-1' })
     expect(h.state.eqs[1]).toEqual({ table: 'locations', col: 'id', val: 'soc-uuid' })
+  })
+})
+
+describe('transferLead — Other\'s Slack card', () => {
+  it('a move edits the card: where it went and who moved it', async () => {
+    arm()
+    await transferLead({ leadId: 'lead-1', destinationLocationId: 'soc-uuid', reason: null, actor: { hubUserId: 'u-leslie', role: 'admin' } })
+    expect(retireOtherCards).toHaveBeenCalledWith({ leadId: 'lead-1', resolution: 'moved', line: '✅ Moved to *South Orange County* by Leslie Mullins.' })
+  })
+
+  it('a refused move never touches the card', async () => {
+    arm()
+    await transferLead({ leadId: 'lead-1', destinationLocationId: 'soc-uuid', reason: null, actor: { hubUserId: 'u', role: 'owner' } })
+    expect(retireOtherCards).not.toHaveBeenCalled()
+  })
+
+  it('a card edit that throws never fails the move', async () => {
+    arm()
+    vi.mocked(retireOtherCards).mockRejectedValueOnce(new Error('slack down'))
+    const out = await transferLead({ leadId: 'lead-1', destinationLocationId: 'soc-uuid', reason: null, actor: { hubUserId: 'u', role: 'admin' } })
+    expect(out.status).toBe(200)
   })
 })
 

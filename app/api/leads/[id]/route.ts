@@ -41,6 +41,7 @@ import type { AddressWriteback } from '@/lib/jobber-address-writeback'
 import { normalizeLeadSource } from '@/lib/lead-source'
 import { phoneForWrite } from '@/lib/phone'
 import { recordPhoneNote } from '@/lib/phone-note'
+import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 
 const VALID_STAGES = [
   'New',
@@ -710,6 +711,26 @@ export async function PATCH(
       .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
       .single()
     if (tpRow) contactActivity.push(tpRow)
+  }
+
+  // ─── Other's Slack card, if it had one (lib/other-card-sync) ────
+  // Binned, dismissed or snoozed here takes a lead out of Other's queue, so
+  // its card says so and loses its buttons. Restoring one (is_junk false,
+  // dismiss or snooze cleared) is the sweep's to repost. Never fails the PATCH.
+  {
+    const exit =
+      patch.is_junk === true ? 'binned'
+      : patch.inbox_dismissed_at ? 'dismissed'
+      : patch.snoozed_until && new Date(patch.snoozed_until as any).getTime() > Date.now() ? 'snoozed'
+      : null
+    if (exit) {
+      try {
+        const who = await actorName(hubUser.id)
+        await retireOtherCards({ leadId: id, resolution: exit, line: exitLine(exit, { who, until: exit === 'snoozed' ? String(patch.snoozed_until) : null }) })
+      } catch (err) {
+        console.error('PATCH /api/leads/[id] slack card edit failed:', err)
+      }
+    }
   }
 
   // ─── Return fresh row ─────────────────────────────────────────

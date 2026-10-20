@@ -73,6 +73,11 @@ export type SlackTransfer = {
 
 export type SlackPostResult = {
   ok: boolean
+  // The posted message's id and channel, as Slack returned them — only on a
+  // successful post, and only when Slack sent them. lib/other-card-sync.ts
+  // keeps them for Other's cards so the card can be edited later.
+  ts?: string
+  channel?: string
   skipped?: string
   error?: string
   // Set only alongside skipped:'notifications_off' — why the gate said no
@@ -426,7 +431,9 @@ export async function postToSlack(
       return { ok: false, error: err }
     }
 
-    return { ok: true }
+    return typeof json.ts === 'string' && json.ts
+      ? { ok: true, ts: json.ts, channel: typeof json.channel === 'string' ? json.channel : undefined }
+      : { ok: true }
   } catch (err: any) {
     console.error('[slack-bot] chat.postMessage threw for', locationId, '—', err?.message || err)
     return { ok: false, error: String(err?.message || err) }
@@ -489,7 +496,14 @@ export async function notifyNewLeadSlack(args: {
     } catch (err: any) {
       console.error('[slack-bot] route suggestion failed for lead', lead.id, '—', err?.message || err)
     }
-    return postToSlack(locationId, buildRouteSuggestionSlackMessage({ lead, suggestion, leadUrl }))
+    const posted = await postToSlack(locationId, buildRouteSuggestionSlackMessage({ lead, suggestion, leadUrl }))
+    // Remember which message is this lead's card, so it can be edited when
+    // the lead leaves Other by any route (lib/other-card-sync.ts). Fail-soft.
+    if (posted.ok && posted.ts && posted.channel) {
+      const { recordOtherCard } = await import('@/lib/other-card-sync')
+      await recordOtherCard({ leadId: lead.id, locationUuid: locationId, channelId: posted.channel, messageTs: posted.ts })
+    }
+    return posted
   }
 
   const message = buildLeadSlackMessage({

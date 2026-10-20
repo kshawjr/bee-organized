@@ -34,6 +34,7 @@ import { getSlackUserEmail } from '@/lib/slack-bot'
 import { transferLead, type TransferActor } from '@/lib/lead-transfer'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
 import { ZIP_FALLBACK_SLUG } from '@/lib/zip-routing'
+import { markCardResolved } from '@/lib/other-card-sync'
 import {
   ROUTE_ACCEPT_PREFIX,
   ROUTE_LEAVE,
@@ -53,6 +54,10 @@ export type RouteActionInput = {
   responseUrl: string | undefined
   // The card as Slack sends it back with the click — edited in place.
   message: { text?: string; attachments?: any[] } | undefined
+  // Which message was pressed, so the press is recorded on its slack_cards
+  // row (lib/other-card-sync markCardResolved). Optional: old cards have none.
+  channelId?: string
+  messageTs?: string
 }
 
 // What the handler did, for the logs and the tests.
@@ -130,7 +135,7 @@ async function locationNameBySlug(slug: string | null): Promise<string> {
 }
 
 export async function handleRouteAction(input: RouteActionInput): Promise<RouteActionOutcome> {
-  const { actionId, value, slackUserId, responseUrl, message } = input
+  const { actionId, value, slackUserId, responseUrl, message, channelId, messageTs } = input
 
   const accept = actionId.startsWith(ROUTE_ACCEPT_PREFIX) ? decodeAcceptValue(value) : null
   const leadId = accept ? accept.lead : typeof value === 'string' && value ? value : null
@@ -161,13 +166,17 @@ export async function handleRouteAction(input: RouteActionInput): Promise<RouteA
   }
   if (lead.location_id !== ZIP_FALLBACK_SLUG) {
     const where = await locationNameBySlug(lead.location_id)
-    await editCard(responseUrl, message, `↪️ Already moved to *${where}* — nothing changed. (Pressed by ${actor.name})`)
+    const line = `↪️ Already moved to *${where}* — nothing changed. (Pressed by ${actor.name})`
+    await editCard(responseUrl, message, line)
+    await markCardResolved({ channelId, messageTs, resolution: 'moved', line })
     return 'already_moved'
   }
 
   // ── Leave in Other ───────────────────────────────────────────
   if (actionId === ROUTE_LEAVE) {
-    await editCard(responseUrl, message, `📥 Left in Other by ${actor.name}. Route it in Bee Hub when ready.`)
+    const line = `📥 Left in Other by ${actor.name}. Route it in Bee Hub when ready.`
+    await editCard(responseUrl, message, line)
+    await markCardResolved({ channelId, messageTs, resolution: 'left_in_other', line })
     return 'left_in_other'
   }
 

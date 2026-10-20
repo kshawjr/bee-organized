@@ -74,6 +74,12 @@ vi.mock('@/lib/zip-proximity', async (orig) => {
   }
 })
 
+vi.mock('@/lib/other-card-sync', async (orig) => {
+  const real: any = await orig()
+  return { ...real, retireOtherCards: vi.fn(async () => ({ edited: 1, failed: 0 })), actorName: vi.fn(async () => 'Leslie Mullins') }
+})
+
+import { retireOtherCards } from '@/lib/other-card-sync'
 import { checkNoCoverage, mayEmailNoCoverage, verdictWords, verdictFromSuggestion, type NoCoverageVerdict } from '@/lib/no-coverage-guard'
 import { closeLeadAsNoCoverage } from '@/lib/lead-no-coverage'
 import { GET as CHECK } from '@/app/api/leads/[id]/no-coverage/route'
@@ -215,6 +221,18 @@ describe('B. closeLeadAsNoCoverage refuses a served area from any door', () => {
     expect(out.status).toBe(200)
     expect(out.body.verdict).toMatchObject({ kind: 'clear' })
     expect(h.inserts.find((i) => i.table === 'touchpoints')!.arg.notes).not.toContain('Sent after confirming')
+  })
+
+  it('a sent email edits Other\'s card: who was told and by whom', async () => {
+    h.lead = LEAD({ zip: '55424' })
+    await closeLeadAsNoCoverage({ leadId: 'lead-1', actor: ADMIN })
+    expect(retireOtherCards).toHaveBeenCalledWith({ leadId: 'lead-1', resolution: 'no_coverage', line: "📭 Told j@example.com we don't serve their area yet (mailing-list link sent) — by Leslie Mullins." })
+  })
+
+  it('a refused email never touches the card', async () => {
+    h.lead = LEAD({ zip: '89509' })
+    await closeLeadAsNoCoverage({ leadId: 'lead-1', actor: ADMIN })
+    expect(retireOtherCards).not.toHaveBeenCalled()
   })
 
   it('the check fails → 503, nothing sent (fail closed)', async () => {
