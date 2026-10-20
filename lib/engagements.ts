@@ -701,6 +701,38 @@ export async function findOpenEngagementForClient(
   return (data?.[0] as any) ?? null
 }
 
+// The lost-lead close's second-press guard. The Close wizard on a lead with
+// no engagement asks POST /api/engagements { reuse_open } for a card to close;
+// with no OPEN card it founds one and closes it Lost. Closing the same lead
+// again a minute later (the list hadn't caught up, or a second submit) then
+// found NO open card — the first was already closed — and founded a second
+// closed card. 8 leads got such pairs Aug–Sep 2026, 25 s to 21 min apart.
+//
+// So the reuse also matches a card THIS route made (founded_by 'manual') and
+// closed Lost within JUST_CLOSED_WINDOW_MS. Handed back to the wizard, its
+// close is a same-stage no-op (the PATCH writes nothing): the first answer
+// stands. Lost only — a Won never comes back to be closed Lost. And only
+// manual cards: a request card closed by a webhook (request_destroyed) or by
+// the auto-close cron is real Jobber work, not a press of this button.
+export const JUST_CLOSED_WINDOW_MS = 30 * 60 * 1000
+
+export async function findJustClosedManualEngagement(
+  clientId: string,
+  now: Date = new Date(),
+): Promise<{ id: string; stage: EngagementStage; created_at: string | null; founded_by: FoundedBy | null } | null> {
+  const since = new Date(now.getTime() - JUST_CLOSED_WINDOW_MS).toISOString()
+  const { data } = await supabaseService
+    .from('engagements')
+    .select('id, stage, created_at, founded_by')
+    .eq('client_id', clientId)
+    .eq('founded_by', 'manual')
+    .eq('stage', 'Closed Lost')
+    .gte('closed_at', since)
+    .order('closed_at', { ascending: false })
+    .limit(1)
+  return (data?.[0] as any) ?? null
+}
+
 // Most-recent engagement for a client REGARDLESS of stage — the terminal-
 // inclusive twin of findOpenEngagementForClient. Used ONLY by the invoice
 // rule-6 fallback (#98): a jobless invoice billed straight to a client whose

@@ -40,7 +40,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { foundManualEngagement, findOpenEngagementForClient, BLANK_ENGAGEMENT_ERROR } from '@/lib/engagements'
+import { foundManualEngagement, findOpenEngagementForClient, findJustClosedManualEngagement, BLANK_ENGAGEMENT_ERROR } from '@/lib/engagements'
 import { fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
@@ -390,8 +390,15 @@ export async function POST(req: Request) {
   // instead of founding: the close then lands on the real deal and never
   // creates a duplicate. Default (unset) keeps "Start new engagement"'s
   // always-found behavior (rule 1) untouched.
+  //
+  // With no open card, the close also reuses a card this route closed Lost
+  // moments ago (lib/engagements.ts findJustClosedManualEngagement): closing
+  // the same lead twice used to leave two closed cards. Guarded here, not
+  // only in the wizard, so no second submit gets past it.
   if (body.reuse_open === true) {
-    const existing = await findOpenEngagementForClient(lead.id)
+    const existing =
+      (await findOpenEngagementForClient(lead.id)) ??
+      (await findJustClosedManualEngagement(lead.id))
     if (existing) {
       const { data: row } = await supabaseService
         .from('engagements')

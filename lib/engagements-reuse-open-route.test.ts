@@ -43,11 +43,12 @@ vi.mock('@/lib/lead-suppression', () => ({ fetchSuppressedLeadIds: vi.fn(async (
 vi.mock('@/lib/engagements', () => ({
   foundManualEngagement: vi.fn(async () => ({ engagement: { id: 'eng-NEW', stage: 'Request' }, created: true })),
   findOpenEngagementForClient: vi.fn(async () => null),
+  findJustClosedManualEngagement: vi.fn(async () => null),
   BLANK_ENGAGEMENT_ERROR: 'blank_engagement',
 }))
 
 import { POST } from '@/app/api/engagements/route'
-import { foundManualEngagement, findOpenEngagementForClient } from '@/lib/engagements'
+import { foundManualEngagement, findOpenEngagementForClient, findJustClosedManualEngagement } from '@/lib/engagements'
 
 const arm = () => {
   h.enqueue('hub_users', { id: 'u1', role: 'super_admin', location_id: null })
@@ -62,7 +63,8 @@ const post = (body: any) =>
 beforeEach(() => {
   h.reset()
   vi.mocked(foundManualEngagement).mockClear()
-  vi.mocked(findOpenEngagementForClient).mockClear().mockResolvedValue(null as any)
+  vi.mocked(findOpenEngagementForClient).mockReset().mockResolvedValue(null as any)
+  vi.mocked(findJustClosedManualEngagement).mockReset().mockResolvedValue(null as any)
 })
 
 describe('POST /api/engagements reuse_open — issue 204', () => {
@@ -97,6 +99,51 @@ describe('POST /api/engagements reuse_open — issue 204', () => {
     const res = await post({ client_id: 'c1', title: 'Bedroom closet' })
     expect(res.status).toBe(201)
     expect(findOpenEngagementForClient).not.toHaveBeenCalled()
+    expect(findJustClosedManualEngagement).not.toHaveBeenCalled()
+    expect(foundManualEngagement).toHaveBeenCalledTimes(1)
+  })
+})
+
+// The second press. A lead with no engagement is closed Lost (the route
+// founds a card, the wizard closes it); closing it again found no OPEN card
+// and founded a second closed one — 8 leads, Aug–Sep 2026.
+describe('POST /api/engagements reuse_open — a card closed moments ago', () => {
+  it('hands back the card closed Lost moments ago instead of founding a second', async () => {
+    arm()
+    vi.mocked(findJustClosedManualEngagement).mockResolvedValueOnce({ id: 'eng-JUSTCLOSED', stage: 'Closed Lost', created_at: null, founded_by: 'manual' } as any)
+    h.enqueue('engagements', { id: 'eng-JUSTCLOSED', stage: 'Closed Lost', client_id: 'c1' }) // select('*').single
+    h.enqueue('engagements', null, null, 1)                                                     // repeat count head
+
+    const res = await post({ client_id: 'c1', reuse_open: true, title: 'Enquiry — No response' })
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    expect(j.reused).toBe(true)
+    expect(j.engagement.id).toBe('eng-JUSTCLOSED')
+    expect(j.engagement.stage).toBe('Closed Lost')
+    expect(findJustClosedManualEngagement).toHaveBeenCalledWith('c1')
+    expect(foundManualEngagement).not.toHaveBeenCalled()
+  })
+
+  it('an open card still wins: the closed-moments-ago lookup is only the fallback', async () => {
+    arm()
+    vi.mocked(findOpenEngagementForClient).mockResolvedValueOnce({ id: 'eng-OPEN', stage: 'Request', created_at: null, founded_by: 'request' } as any)
+    vi.mocked(findJustClosedManualEngagement).mockResolvedValueOnce({ id: 'eng-JUSTCLOSED', stage: 'Closed Lost', created_at: null, founded_by: 'manual' } as any)
+    h.enqueue('engagements', { id: 'eng-OPEN', stage: 'Request', client_id: 'c1' })
+    h.enqueue('engagements', null, null, 2)
+
+    const res = await post({ client_id: 'c1', reuse_open: true, title: 'Enquiry — No response' })
+    const j = await res.json()
+    expect(j.engagement.id).toBe('eng-OPEN')
+    expect(findJustClosedManualEngagement).not.toHaveBeenCalled()
+    expect(foundManualEngagement).not.toHaveBeenCalled()
+  })
+
+  it('nothing open and nothing closed moments ago: founds, as before', async () => {
+    arm()
+    h.enqueue('engagements', null, null, 2)
+    const res = await post({ client_id: 'c1', reuse_open: true, title: 'Enquiry — No response' })
+    expect(res.status).toBe(201)
+    expect(findJustClosedManualEngagement).toHaveBeenCalledTimes(1)
     expect(foundManualEngagement).toHaveBeenCalledTimes(1)
   })
 })
