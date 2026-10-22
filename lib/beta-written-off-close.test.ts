@@ -239,7 +239,8 @@ describe('written off is distinguishable from Closed Won and from the owing over
     expect(WRITE_OFF_ACTION).toMatch(/^Write it off/)
     expect(OWING_CLOSE_ACTION).toMatch(/^Close it anyway/)
     expect(WRITE_OFF_ACTION).toMatch(/isn’t coming/)
-    expect(OWING_CLOSE_ACTION).toMatch(/settled in Jobber/)
+    expect(OWING_CLOSE_ACTION).toBe('Close it anyway, this one’s already been paid')
+    expect(OWING_CLOSE_ACTION).not.toMatch(/Jobber|—/)
     expect(WRITE_OFF_ACTION.split(' ')[0]).not.toBe(OWING_CLOSE_ACTION.split(' ')[0])
   })
 

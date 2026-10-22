@@ -120,7 +120,7 @@ export function finalProcessingExplainer(caseKey, invoices = []) {
 // The quiet second action on the owing case. DELIBERATELY not the Mark
 // won button promoted: someone closing forty settled deals must not
 // close an owing one by muscle memory.
-export const OWING_CLOSE_ACTION = 'Close it anyway — it’s settled in Jobber'
+export const OWING_CLOSE_ACTION = 'Close it anyway, this one’s already been paid'
 
 // What the wizard asks for, and why it is not optional. Kevin's ruling:
 // a close over an outstanding balance records why, and that reason shows

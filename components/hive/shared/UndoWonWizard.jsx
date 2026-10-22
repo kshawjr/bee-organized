@@ -14,9 +14,9 @@ import { T } from './tokens'
 
 export const UNDO_WON_ACTION = 'Undo won'
 export const UNDO_WON_SUMMARY =
-  'This deal comes off your won list and goes back to Final Processing, ' +
-  'or back to Request if nothing was ever invoiced. Nothing changes in Jobber, ' +
-  'and the invoice and payment amounts stay as they are.'
+  'This deal comes off your won list and goes back into your pipeline ' +
+  'where the work actually stands. Nothing changes in Jobber, and the ' +
+  'invoice and payment amounts stay as they are.'
 
 export default function UndoWonWizard({ isMobile = false, onCancel = () => {}, onConfirm = () => {} }) {
   const [reason, setReason] = useState('')

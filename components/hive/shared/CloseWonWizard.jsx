@@ -171,7 +171,7 @@ export default function CloseWonWizard({
 
   const satisfactionStep = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {wizLabel('How did it go for the client?')}
+      {wizLabel('How did it go for the client? (optional)')}
       <div style={{ display: 'flex', gap: '8px' }}>
         <button onClick={() => setSatisfaction('happy')} style={wizSeg(satisfaction === 'happy')}>😊 Happy</button>
         <button onClick={() => setSatisfaction('unhappy')} style={wizSeg(satisfaction === 'unhappy')}>😕 Unhappy</button>
@@ -188,7 +188,7 @@ export default function CloseWonWizard({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {happy && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {wizLabel('Ask for a Google review')}
+          {wizLabel('Ask for a Google review (optional)')}
           {reviewsLink ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -220,7 +220,10 @@ export default function CloseWonWizard({
 
   const reengageStep = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {wizLabel('Schedule a reactivation reminder')}
+      {wizLabel('Schedule a reactivation reminder (optional)')}
+      <p data-bee-reactivate-default style={{ fontSize: '11px', color: T.ink.muted }}>
+        We’ve filled in a date 90 days from today. Change it, or clear it if you don’t want a reminder.
+      </p>
       <input type="date" value={reactivateDate} onChange={e => setReactivateDate(e.target.value)} style={wizInput()} />
       <p style={{ fontSize: '11px', color: T.ink.muted }}>
         We’ll drop a re-engage marker on this date so this client resurfaces for a future check-in.
@@ -247,7 +250,9 @@ export default function CloseWonWizard({
     footer = (
       <>
         <button onClick={() => setStep(0)} disabled={busy} style={wizQuietBtn()}>Back</button>
-        <button onClick={() => setStep(2)} disabled={busy || satisfaction == null} style={wizPrimaryBtn(satisfaction == null)}>Next</button>
+        {/* Satisfaction is optional: it is never sent with the close, it
+            only adds the unhappy follow-up touchpoint. Next never waits on it. */}
+        <button onClick={() => setStep(2)} disabled={busy} style={wizPrimaryBtn(false)}>Next</button>
       </>
     )
   } else if (step === 2) {

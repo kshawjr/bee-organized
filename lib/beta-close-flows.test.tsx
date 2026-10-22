@@ -318,6 +318,36 @@ describe('Close-Won wizard — 4-step stepper, satisfaction, review, re-engage',
     expect(labels.some(l => l.includes('Satisfaction follow-up needed'))).toBe(true)
   })
 
+  it('satisfaction is optional: with nothing picked, Next is enabled and moves on', async () => {
+    const { container } = await mountPanel(wonEng(), paidChildren(), client({ reviews_link: 'https://g.page/r/bee/review' }))
+    await openWon(container)
+    await fire(btnByText(container, 'Next')!)                 // → satisfaction
+    expect(container.textContent).toContain('How did it go for the client? (optional)')
+    const next = btnByText(container, 'Next')!
+    expect(next.disabled).toBe(false)
+    await fire(next)                                          // → close out, nothing picked
+    expect(container.textContent).toContain('Completion note (optional)')
+    await fire(btnByText(container, 'Next')!)                 // → re-engage
+    await fire(btnByText(container, 'Close as won')!)
+    await settle()
+    expect(patchCalls[0].body.stage).toBe(CLOSED_WON)
+    expect(touchpointPosts.map(t => t.label).some(l => l.includes('Satisfaction'))).toBe(false)
+  })
+
+  it('labels say which steps are optional, and the reminder date says it is a default you can clear', async () => {
+    const { container } = await mountPanel(wonEng(), paidChildren(), client({ reviews_link: 'https://g.page/r/bee/review' }))
+    await openWon(container)
+    await fire(btnByText(container, 'Next')!)
+    expect(container.textContent).toContain('How did it go for the client? (optional)')
+    await fire(btnByText(container, 'Happy')!)
+    await fire(btnByText(container, 'Next')!)
+    expect(container.textContent).toContain('Ask for a Google review (optional)')
+    await fire(btnByText(container, 'Next')!)
+    expect(container.textContent).toContain('Schedule a reactivation reminder (optional)')
+    expect(container.querySelector('[data-bee-reactivate-default]')?.textContent).toBe(
+      'We’ve filled in a date 90 days from today. Change it, or clear it if you don’t want a reminder.')
+  })
+
   it('no review link configured: skips gracefully (no copy control), still closes won', async () => {
     const { container } = await mountPanel(wonEng(), paidChildren(), client({ reviews_link: null }))
     await openWon(container)

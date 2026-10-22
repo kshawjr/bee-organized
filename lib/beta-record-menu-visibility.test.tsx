@@ -178,8 +178,10 @@ describe('undo won — asks why before it fires', () => {
     const { container } = await mountPanel(CLOSED_WON, { ...emptyChildren(), invoices: paidInvoices() })
     await openMenu(container)
     await fire(menuItem('Undo won')!)
-    expect(document.querySelector('[data-bee-undo-won-summary]')?.textContent).toContain('Final Processing')
-    expect(document.querySelector('[data-bee-undo-won-summary]')?.textContent).toContain('won list')
+    // Names no stage: the route re-derives it, so it can land on any open one.
+    expect(document.querySelector('[data-bee-undo-won-summary]')?.textContent).toBe(
+      'This deal comes off your won list and goes back into your pipeline where the work actually stands. ' +
+      'Nothing changes in Jobber, and the invoice and payment amounts stay as they are.')
     expect(confirmBtn()!.disabled).toBe(true)
     await fire(confirmBtn()!)
     expect(reopenPosts).toHaveLength(0)
