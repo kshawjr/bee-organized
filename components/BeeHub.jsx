@@ -36,6 +36,7 @@ import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 // zero-import module, so the name/shape can never drift between the two sides.
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
+import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
@@ -24980,17 +24981,13 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const newUncontactedOldest = newUncontacted.reduce((m,p)=>{
     const a = enquiryDateOf(p) || p.created; const d = a ? sharedDaysSince(a, nowHome) : 0; return d>m?d:m }, 0)
 
-  // RED · Estimates awaiting follow-up — open Estimate-stage engagements whose
-  // latest quote was SENT more than ESTIMATE_FOLLOWUP_DAYS ago (Jobber tracks no
-  // reply, so sent-age is the honest "no reply yet" proxy).
-  const latestSentH = (e) => (e.quotes||[]).map(q=>q.sent_at).filter(Boolean).sort().pop() || null
-  const estimateFollowUps = openEngsH.filter(e => {
-    if (e.stage !== 'Estimate') return false
-    const sent = latestSentH(e)
-    return sent && sharedDaysSince(sent, nowHome) > ESTIMATE_FOLLOWUP_DAYS
-  })
+  // RED · Estimates awaiting follow-up — THE shared rule (shared/noticed.js
+  // estimateFollowUpDays): open Estimate-stage, no quote approved, latest quote
+  // SENT more than ESTIMATE_FOLLOWUP_DAYS ago (Jobber tracks no reply, so
+  // sent-age is the honest "no reply yet" proxy).
+  const estimateFollowUps = openEngsH.filter(e => estimateFollowUpDays(e, nowHome) !== null)
   const estimateOldest = estimateFollowUps.reduce((m,e)=>{
-    const sent = latestSentH(e); const d = sent ? sharedDaysSince(sent, nowHome) : 0; return d>m?d:m }, 0)
+    const d = estimateFollowUpDays(e, nowHome); return d>m?d:m }, 0)
 
   // AMBER · Assessments today/tomorrow — engagement child assessments scheduled
   // between start of today and end of (today + ASSESSMENT_HORIZON_DAYS). Raw ISO

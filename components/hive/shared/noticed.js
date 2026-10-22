@@ -35,18 +35,38 @@ import { daysSince } from './engagementStatus'
 
 const latestSent = (e) => (e?.quotes || []).map(q => q?.sent_at).filter(Boolean).sort().pop() || null
 
+// THE rule, once (22 Oct 2026). It had three copies — this tab, Home's card
+// (BeeHub.jsx DashboardScreen) and the server's 'All locations' overview
+// (lib/hub-all-overview.ts) — and all three counted an APPROVED quote as
+// unanswered, so Shirley Ann Morgan's accepted $2,960 estimate sat on Central
+// Denver's red card. An approved quote IS the client's answer (Jobber's
+// CONVERTED maps to 'approved' too — lib/quote-status-map), the same reading
+// the card chip gives it (engagementStatus.js: 'Approved'). All three now ask
+// this one function.
+//
+// Returns how many days the estimate has waited, or null when it is not
+// awaiting follow-up: not at Estimate, any quote approved, never sent, or
+// sent within ESTIMATE_FOLLOWUP_DAYS. Quotes need { sent_at, status }.
+export function estimateFollowUpDays(e, nowMs = Date.now()) {
+  if (!e || e.stage !== 'Estimate') return null
+  if ((e.quotes || []).some(q => q?.status === 'approved')) return null
+  const sent = latestSent(e)
+  if (!sent) return null
+  const days = daysSince(sent, nowMs)
+  return days > ESTIMATE_FOLLOWUP_DAYS ? days : null
+}
+
 // engagements: the Hub's open-engagement payload (stage, location_uuid,
-// client_id, client_name, title, quotes[{sent_at}]). locationId: the scope;
-// null = no filter (callers pass a location — the tab asks for one on 'all').
+// client_id, client_name, title, quotes[{sent_at, status}]). locationId: the
+// scope; null = no filter (callers pass a location — the tab asks for one on 'all').
 export function estimatesAwaitingReply(engagements = [], { locationId = null, nowMs = Date.now() } = {}) {
   const out = []
   for (const e of engagements || []) {
-    if (!e || e.stage !== 'Estimate') continue
+    if (!e) continue
     if (locationId && e.location_uuid !== locationId) continue
+    const days = estimateFollowUpDays(e, nowMs)
+    if (days === null) continue
     const sent = latestSent(e)
-    if (!sent) continue
-    const days = daysSince(sent, nowMs)
-    if (!(days > ESTIMATE_FOLLOWUP_DAYS)) continue
     out.push({
       engagement_id: e.id, client_id: e.client_id,
       client_name: e.client_name || 'Unnamed client', title: e.title || null,

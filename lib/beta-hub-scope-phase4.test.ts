@@ -234,7 +234,7 @@ describe('_hub-page wiring — Phase 4', () => {
     // Only the two child tables the overview reduces — no jobs / invoices /
     // service_requests, and no repeat-count or client-name sweep for a board
     // that no longer renders.
-    expect(src).toContain(`chunked('quotes', 'engagement_id, sent_at'`)
+    expect(src).toContain(`chunked('quotes', 'engagement_id, sent_at, status'`)
     expect(src).toContain(`chunked('assessments', 'id, engagement_id, scheduled_at'`)
     const block = src.slice(src.indexOf("The 'all' path: COUNTS ONLY"), src.indexOf('// Recycle Bin: load is_junk=true'))
     expect(block).not.toContain(`chunked('jobs'`)

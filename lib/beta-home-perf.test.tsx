@@ -56,7 +56,9 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     expect(dash).toContain('const openEngagementsCount = openEngsH.length')
     expect(dash).toContain('const activeClientsCount = scopedPeopleH.filter(p => openClientIdsH.has(p.id)).length')
     expect(dash).toContain("deriveClientStatus(p, openClientIdsH, nowHome, wonClientIdsH) === 'New'")
-    expect(dash).toContain('sharedDaysSince(sent, nowHome) > ESTIMATE_FOLLOWUP_DAYS')
+    // 22 Oct 2026: the estimate rule moved into ONE shared function
+    // (shared/noticed.js estimateFollowUpDays) — Home asks it, inside the memo.
+    expect(dash).toContain('const estimateFollowUps = openEngsH.filter(e => estimateFollowUpDays(e, nowHome) !== null)')
     expect(dash).toContain('for (const a of (e.assessments||[]))')
     expect(dash).toContain('sharedDaysSince(inv.date, nowHome)')
     // Fix 2 Phase 2 moved the SOURCE of this card (scopedPeopleH → the

@@ -1559,13 +1559,14 @@ export default async function HubPage({
         }
 
         // Only the two child reads the overview actually reduces:
-        //   quotes      → only for Estimate-stage rows (the follow-up card)
+        //   quotes      → only for Estimate-stage rows (the follow-up card;
+        //                 status too — an approved quote is not awaiting a reply)
         //   assessments → for every open row (the today+1 card windows them)
         // jobs / invoices / service_requests are not read at all here: nothing
         // on the overview derives from them.
         const estimateIds = engLean.filter((e: any) => e.stage === 'Estimate').map((e: any) => e.id)
         const [quoteRows, assessRows] = await Promise.all([
-          estimateIds.length ? chunked('quotes', 'engagement_id, sent_at', 'engagement_id', estimateIds) : Promise.resolve([]),
+          estimateIds.length ? chunked('quotes', 'engagement_id, sent_at, status', 'engagement_id', estimateIds) : Promise.resolve([]),
           chunked('assessments', 'id, engagement_id, scheduled_at', 'engagement_id', engLean.map((e: any) => e.id)),
         ])
 
@@ -1594,7 +1595,7 @@ export default async function HubPage({
           overviewEngagements.push({
             id: e.id, client_id: e.client_id, stage: e.stage,
             client_name: nameById[e.client_id] || 'Client',
-            quotes: (quotesByEng[e.id] || []).map((q: any) => ({ sent_at: q.sent_at })),
+            quotes: (quotesByEng[e.id] || []).map((q: any) => ({ sent_at: q.sent_at, status: q.status })),
             assessments: (assessByEng[e.id] || []).map((a: any) => ({ id: a.id, scheduled_at: a.scheduled_at })),
           })
         }

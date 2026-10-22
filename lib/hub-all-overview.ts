@@ -39,12 +39,13 @@ import {
   enquiryDateOf as enquiryDateOfUntyped,
 } from '@/components/hive/shared/clientStatus'
 import { WEBFORM_RESUBMISSION_LABEL } from '@/lib/enquiry-exit'
+import { estimateFollowUpDays as estimateFollowUpDaysUntyped } from '@/components/hive/shared/noticed'
+const estimateFollowUpDays = estimateFollowUpDaysUntyped as (e: any, nowMs?: number) => number | null
 const deriveClientStatus = deriveClientStatusUntyped as (
   person: any, openClientIds: Set<string> | null, nowMs?: number, wonClientIds?: Set<string> | null
 ) => string
 const enquiryDateOf = enquiryDateOfUntyped as (person: any) => string | null
 import {
-  ESTIMATE_FOLLOWUP_DAYS,
   INVOICE_AGING_DAYS,
   ASSESSMENT_HORIZON_DAYS,
 } from '@/components/hive/shared/attentionThresholds'
@@ -234,16 +235,15 @@ export async function buildAllOverview(
   }
 
   // ── RED · estimates awaiting follow-up ───────────────────────────────────
-  // Open Estimate-stage engagements whose latest quote was SENT more than
-  // ESTIMATE_FOLLOWUP_DAYS ago. Reads the board set the caller already has.
-  const estimateEngs = openEngagements.filter((e: any) => e.stage === 'Estimate')
+  // THE shared rule (components/hive/shared/noticed.js estimateFollowUpDays):
+  // open Estimate-stage, no quote approved, latest quote SENT more than
+  // ESTIMATE_FOLLOWUP_DAYS ago. Reads the board set the caller already has —
+  // its quotes must carry status (app/_hub-page.tsx selects it for this).
   let estCount = 0
   let estOldest = 0
-  for (const e of estimateEngs) {
-    const sent = (e.quotes || []).map((q: any) => q.sent_at).filter(Boolean).sort().pop()
-    if (!sent) continue
-    const age = daysSince(sent, nowMs)
-    if (age <= ESTIMATE_FOLLOWUP_DAYS) continue
+  for (const e of openEngagements) {
+    const age = estimateFollowUpDays(e, nowMs)
+    if (age === null) continue
     estCount++
     if (age > estOldest) estOldest = age
   }

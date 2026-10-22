@@ -77,8 +77,11 @@ describe('T2b — Needs-attention hero: five real signals, role-scoped, empty st
     expect(dash).toContain("key:'new-uncontacted'")
   })
   it('estimate follow-ups read engagement quotes sent-age against the shared threshold', () => {
-    expect(dash).toContain("e.stage !== 'Estimate'")
-    expect(dash).toContain('sharedDaysSince(sent, nowHome) > ESTIMATE_FOLLOWUP_DAYS')
+    // 22 Oct 2026: the rule (Estimate stage, no quote approved, sent-age past
+    // ESTIMATE_FOLLOWUP_DAYS) lives once in shared/noticed.js; Home asks it.
+    // beta-estimate-followup-approved pins the rule and the three surfaces.
+    expect(dash).toContain('estimateFollowUpDays(e, nowHome) !== null')
+    expect(dash).toContain('${ESTIMATE_FOLLOWUP_DAYS}d ago')
   })
   it('assessments today/tomorrow read engagement assessments scheduled_at (raw ISO)', () => {
     expect(dash).toContain('for (const a of (e.assessments||[]))')
