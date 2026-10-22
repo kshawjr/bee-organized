@@ -479,7 +479,8 @@ describe('a save is one PATCH to the existing route', () => {
   it('the modal stays open after a save, so the pass continues', async () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Newer bug')
-    await selectValue(byLabel(host, 'Status') as HTMLSelectElement, 'planned')
+    // Building it now: no default sentence, so this stays a status-only save.
+    await selectValue(byLabel(host, 'Status') as HTMLSelectElement, 'in_progress')
     await click(buttons(host).find(b => (b.textContent || '').trim() === 'Save')!)
     expect(modal(host)).toBeTruthy()
     expect(modal(host)!.textContent).toContain('Saved.')

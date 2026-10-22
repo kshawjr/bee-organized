@@ -402,7 +402,14 @@ describe('the detail modal', () => {
   it('still says nothing is sent for the MIDDLE statuses', async () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Client not moving'))
+    // Building it now has no default sentence, so the box stays empty.
+    await pickStatus(host, 'in_progress')
+    expect(modal(host)!.textContent).not.toContain('emails lynette@kc.com to tell them')
+    expect(sendButton(host)).toBeFalsy()
+    // On the list fills a default (beta-feedback-status-words.test.tsx); once
+    // the box is cleared, nothing is sent for it either.
     await pickStatus(host, 'planned')
+    await typeReply(host, '')
     expect(modal(host)!.textContent).not.toContain('emails lynette@kc.com to tell them')
     expect(sendButton(host)).toBeFalsy()
     await unmount()
@@ -435,6 +442,9 @@ describe('the detail modal', () => {
     )
     await click(row(host, 'Client not moving'))
     await pickStatus(host, 'planned')
+    // The default sentence is there to be used — cleared here, because this
+    // test is about the save that carries a status and nothing else.
+    await typeReply(host, '')
     await click(exact(host, 'Save')!)
     const patch = f.mock.calls.find(c => (c[1] as any)?.method === 'PATCH')!
     expect(JSON.parse((patch[1] as any).body)).toEqual({ status: 'planned' })

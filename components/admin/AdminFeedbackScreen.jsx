@@ -674,6 +674,20 @@ const MODAL_CSS = `
   }
 `
 
+// ── A STATUS CHANGE COMES WITH WORDS ──────────────────────────
+// Lynette's item went to "On the list" in July with one line and nothing
+// since, and moving an item's status without a word left the owner hearing
+// nothing at all. So picking one of these two statuses fills an EMPTY reply
+// box with a starting sentence. It is pre-filled, not sent: a person reads
+// the words before an owner does, because generic text going out unread is
+// what produced the replies the feedback audit is cleaning up. Saving sends
+// it the normal way, and once there is a reply the grouping (which reads the
+// reply, not the status) moves the item to "Heard from us, still waiting".
+export const STATUS_DEFAULT_REPLY = {
+  planned: 'Thanks for this. We have agreed to build it and it is on the list. I will come back here when it ships rather than closing it quietly.',
+  under_review: 'Thanks for this. We are looking at it properly before we commit either way, and I will come back with an answer.',
+}
+
 // ── DETAIL MODAL ──────────────────────────────────────────────
 // `position`/`total` describe the walk — a SNAPSHOT of the visible list taken
 // when the modal opened, held by the parent. Not the live list: saving re-files
@@ -702,6 +716,9 @@ function AdminFeedbackDetailModal({
   // status by hand, `statusTouched` is set and the reply never moves it again.
   const [statusTouched, setStatusTouched] = useState(false)
   const [autoMoved, setAutoMoved]         = useState(false)
+  // Which status's default sentence sits in the reply box, if one does. It
+  // counts as untouched only while the box still holds that sentence exactly.
+  const [defaultFor, setDefaultFor]       = useState(null)
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
   const [result, setResult]     = useState(null)
@@ -737,6 +754,7 @@ function AdminFeedbackDetailModal({
     setStatus(item.status)
     setStatusTouched(false)
     setAutoMoved(false)
+    setDefaultFor(null)
     setItemType(item.type)
     setResponse('')
     setError(null)
@@ -777,6 +795,23 @@ function AdminFeedbackDetailModal({
     setStatus(next)
     setStatusTouched(true)
     setAutoMoved(false)
+    // THE DEFAULT SENTENCE. Same scope as the reply floor: a team reply to
+    // someone else's item. Never overwrites words the admin wrote — it only
+    // fills an empty box, or replaces the previous default while that default
+    // is still sitting there untouched. Moving on to a status with no default
+    // takes an untouched default back out, so "we agreed to build it" never
+    // rides along with Fixed or Not planned.
+    if (!canTriage || isOwnItem || item.is_internal) return
+    const untouchedDefault = !!defaultFor && response === STATUS_DEFAULT_REPLY[defaultFor]
+    const empty = response.trim().length === 0
+    const text = STATUS_DEFAULT_REPLY[next]
+    if (text && (empty || untouchedDefault)) {
+      setResponse(text)
+      setDefaultFor(next)
+    } else if (untouchedDefault) {
+      setResponse('')
+      setDefaultFor(null)
+    }
   }
 
   const canChangeType = canTriage && ['bug', 'feature', 'question'].includes(item.type)
@@ -888,6 +923,16 @@ function AdminFeedbackDetailModal({
   if (status !== item.status) consequences.push({ key: 'status', text: `Move it from ${FEEDBACK_STATUS_PLAIN[item.status] || item.status} to ${FEEDBACK_STATUS_PLAIN[status] || status}` })
   if (response.trim()) consequences.push({ key: 'reply', text: 'Add your reply to the conversation' })
   if (willSend) consequences.push({ key: 'email', text: `Email ${item.submitter_email}`, loud: true })
+  // NOBODY IS BEING TOLD. A status that moves with an empty reply box, and no
+  // email of its own, reaches the owner as silence. Saving is not blocked —
+  // a person may have a reason — but the line says so, loudly, before the click.
+  if (status !== item.status && !response.trim() && !willSend && canTriage && !isOwnItem && !item.is_internal) {
+    consequences.push({
+      key: 'nobody-told',
+      text: `Nobody is being told. ${item.submitter_name || 'The person who sent this'} will not hear that it moved to ${FEEDBACK_STATUS_PLAIN[status] || status}.`,
+      warn: true,
+    })
+  }
 
   // What the confirmation line says after a save — each branch a real outcome
   // from the route, named plainly.
@@ -1166,7 +1211,7 @@ function AdminFeedbackDetailModal({
               <p style={{ fontSize: '12px', fontWeight: 700, color: T.ink.primary, margin: '0 0 4px' }}>Saving will:</p>
               <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {consequences.map(c => (
-                  <li key={c.key} data-consequence={c.key} style={{ fontSize: c.loud ? '14px' : '13px', fontWeight: c.loud ? 700 : 500, color: c.loud ? T.state.info.deep : T.ink.primary, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                  <li key={c.key} data-consequence={c.key} style={{ fontSize: (c.loud || c.warn) ? '14px' : '13px', fontWeight: (c.loud || c.warn) ? 700 : 500, color: c.warn ? T.state.danger.strong : c.loud ? T.state.info.deep : T.ink.primary, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
                     {c.text}
                   </li>
                 ))}
