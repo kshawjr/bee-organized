@@ -14,6 +14,9 @@
 //   · a delivery without the right X-Signature is refused
 //   · a Bee Desk ID matching no row fails loudly
 //   · creating a task stores the returned id in clickup_task_id
+//   · a written reply emails the submitter through the triage save's own
+//     decision; a held close, a repeat of the same text, and Internal/Idea
+//     email nobody; a skipped or failed send is a sync_log error
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
 
@@ -23,6 +26,7 @@ const h = vi.hoisted(() => {
     readError: null as any,
     updates: [] as { table: string; arg: any; filters: Record<string, any> }[],
     syncLog: [] as any[],
+    submitter: null as any,
   }
   const makeBuilder = (table: string) => {
     const b: any = {}
@@ -34,6 +38,7 @@ const h = vi.hoisted(() => {
     b.update = (arg: any) => { update = arg; state.updates.push({ table, arg, filters }); return b }
     const resolve = () => {
       if (update) return { data: { ...(state.row || {}), ...update }, error: null }
+      if (table === 'hub_users') return { data: state.submitter, error: null }
       if (table === 'feedback_items') {
         if (state.readError) return { data: null, error: state.readError }
         return { data: state.row && filters.id === state.row.id ? state.row : null, error: null }
@@ -52,11 +57,13 @@ const h = vi.hoisted(() => {
 const fake = vi.hoisted(() => ({
   client: null as any,
 }))
+const mail = vi.hoisted(() => ({ fn: null as any }))
 
 vi.mock('@/lib/supabase-service', () => ({ supabaseService: h.db }))
 vi.mock('@/lib/sync-log', () => ({
   writeSyncLog: vi.fn(async (row: any) => { h.state.syncLog.push(row) }),
 }))
+vi.mock('@/lib/resend', () => ({ sendEmailDirect: (...a: any[]) => mail.fn(...a) }))
 vi.mock('@/lib/clickup', async () => {
   const actual = await vi.importActual<any>('@/lib/clickup')
   return { ...actual, clickUpClientFromEnv: () => fake.client }
@@ -137,7 +144,10 @@ const itemWrites = () => h.state.updates.filter(u => u.table === 'feedback_items
 beforeEach(() => {
   h.state.row = {
     id: ITEM_ID, status: 'planned', admin_response: null, is_internal: false, clickup_task_id: TASK_ID,
+    user_id: 'owner-9', location_id: 'loc-1', title: 'Snooze button forgets', type: 'bug',
   }
+  h.state.submitter = { email: 'ankur@pb.com', full_name: 'Ankur Patel', first_name: 'Ankur' }
+  mail.fn = vi.fn(async () => ({ success: true, id: 'msg_1' }))
   h.state.readError = null
   h.state.updates = []
   h.state.syncLog = []
@@ -402,5 +412,61 @@ describe('handleClickUpEvent', () => {
     const out = await handleClickUpEvent({ client: fake.client, db: h.db, event: { event: 'taskCreated', task_id: TASK_ID } })
     expect(out.outcome).toBe('ignored')
     expect(fake.client.getTask).not.toHaveBeenCalled()
+  })
+})
+
+// ─── the email ───────────────────────────────────────────────────────
+
+describe('a reply from ClickUp is emailed to the submitter', () => {
+  const sent = () => mail.fn.mock.calls.map((c: any[]) => c[0])
+
+  it('a close with Reply to Owner filled sends one email, to them, quoting the field', async () => {
+    const { body } = await moved(taskWith('answered', { reply: 'Yes — Settings › Tags.' }))
+    expect(body.outcome).toBe('reply_written')
+    expect(body.email).toEqual({ sent: true, to: 'ankur@pb.com', kind: 'reply' })
+    expect(sent()).toHaveLength(1)
+    expect(sent()[0].to).toBe('ankur@pb.com')
+    expect(sent()[0].text).toContain('Yes — Settings › Tags.')
+    expect(sent()[0].email_kind).toBe('feedback_reply')
+  })
+
+  it('re-closing with the identical text sends nothing (rule 1)', async () => {
+    h.state.row = { ...h.state.row, status: 'answered', admin_response: 'Yes — Settings › Tags.' }
+    await moved(taskWith('answered', { reply: 'Yes — Settings › Tags.' }))
+    expect(mail.fn).not.toHaveBeenCalled()
+  })
+
+  it('a held close (field empty) sends nothing', async () => {
+    await moved(taskWith('shipped', { reply: '' }))
+    expect(mail.fn).not.toHaveBeenCalled()
+  })
+
+  it.each([['Internal', 'opt-internal'], ['Idea', 'opt-idea']])('Source %s sends nothing', async (_n, opt) => {
+    await moved(taskWith('shipped', { source: opt, reply: 'internal chatter' }))
+    expect(mail.fn).not.toHaveBeenCalled()
+  })
+
+  it('a middle status sends nothing (rule 2)', async () => {
+    h.state.row.status = 'under_review'
+    await moved(taskWith('on the list', { reply: 'not yet' }))
+    expect(itemWrites()).toEqual([{ status: 'planned' }])
+    expect(mail.fn).not.toHaveBeenCalled()
+  })
+
+  it('no address on file: the reply stays written, and sync_log says they were not emailed', async () => {
+    h.state.submitter = { email: null }
+    const { body } = await moved(taskWith('answered', { reply: 'Answer.' }))
+    expect(itemWrites()[0].admin_response).toBe('Answer.')
+    expect(body.email).toEqual({ sent: false, skipped: 'no_submitter_email' })
+    const row = h.state.syncLog.find(r => /NOT emailed/.test(r.message))
+    expect(row?.status).toBe('error')
+  })
+
+  it('a failed send: the reply stays written, and sync_log says they were not emailed', async () => {
+    mail.fn = vi.fn(async () => ({ success: false, error: 'resend 500' }))
+    const { body } = await moved(taskWith('shipped', { reply: 'Fixed.' }))
+    expect(itemWrites()[0].admin_response).toBe('Fixed.')
+    expect(body.email).toEqual({ sent: false, error: 'resend 500' })
+    expect(h.state.syncLog.find(r => /NOT emailed/.test(r.message))?.status).toBe('error')
   })
 })

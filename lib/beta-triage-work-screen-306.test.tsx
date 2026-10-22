@@ -286,9 +286,15 @@ describe('verdicts write through the existing status path', () => {
   // The route is the party that sends. This asserts the screen's target route
   // is the one wired to the mailer — the link a direct write would break.
   it('the route the verdict calls is the one that sends the email', () => {
+    // The send decision moved to lib/feedback-notify (shared with the ClickUp
+    // close, task 868mm1h7z); follow the route's call into it to the mailer.
     const route = readFileSync('app/api/admin/feedback/[id]/route.ts', 'utf8')
-    expect(route).toContain('sendFeedbackReplyEmail')
+    expect(route).toContain("from '@/lib/feedback-notify'")
+    expect(route).toMatch(/await maybeNotifySubmitter\(/)
     expect(route).toContain('export async function PATCH')
+    const notify = readFileSync('lib/feedback-notify.ts', 'utf8')
+    expect(notify).toContain('export async function maybeNotifySubmitter')
+    expect(notify).toContain('sendFeedbackReplyEmail')
   })
 
   it('arming a mailing verdict says how many people it emails, before committing', async () => {

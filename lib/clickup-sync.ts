@@ -48,8 +48,16 @@
 // (fill the field, then move the card). Filling the field AFTER the move fires
 // no status event, which is why the held message says to move it again.
 //
-// Source Internal and Idea trigger NOTHING — no item write, no sync_log row.
-// Only Source = Owner Request is read further.
+// THE EMAIL. A written reply is then emailed to the submitter through the SAME
+// decision the triage save uses (lib/feedback-notify): a new or changed reply
+// sends; re-closing with the identical text does not; moving INTO Shipped
+// carries the Fixed line. 35 of 43 owners never open Bee Desk, so a reply with
+// no email reaches nobody. The write never waits on the mail: a send that
+// fails or is skipped (no address on file) leaves the reply written and adds a
+// sync_log ERROR row saying the owner was not emailed.
+//
+// Source Internal and Idea trigger NOTHING — no item write, no email, no
+// sync_log row. Only Source = Owner Request is read further.
 //
 // Every failure is a sync_log row with status 'error'. None is swallowed: a
 // failure here means an owner silently never hears back.
@@ -58,6 +66,7 @@ import type { ClickUpClient, ClickUpField, ClickUpTask } from './clickup'
 import { CLICKUP_BEE_DESK_LIST_ID } from './clickup'
 import { writeSyncLog } from './sync-log'
 import { wouldHandSetStuck } from './feedback-admin-tiles'
+import { maybeNotifySubmitter, type ReplyEmailOutcome } from './feedback-notify'
 
 export const SOURCE_FIELD = 'Source'
 export const BEE_DESK_ID_FIELD = 'Bee Desk ID'
@@ -210,7 +219,8 @@ export async function createClickUpTaskForFeedback(args: {
 export const HANDLED_EVENTS = new Set(['taskStatusUpdated'])
 
 export type InboundOutcome =
-  | { ok: true; outcome: 'ignored' | 'not_owner_request' | 'no_change' | 'status_written' | 'reply_written'; feedback_id?: string }
+  | { ok: true; outcome: 'ignored' | 'not_owner_request' | 'no_change' | 'status_written'; feedback_id?: string }
+  | { ok: true; outcome: 'reply_written'; feedback_id: string; email: ReplyEmailOutcome | null }
   | { ok: false; outcome: 'held'; feedback_id: string }
   | { ok: false; outcome: 'error'; error: string }
 
@@ -270,7 +280,8 @@ export async function handleClickUpEvent(args: {
   if (!mapped) return fail('unmapped_status', feedbackId, `ClickUp status "${task.status?.status}" has no Bee Desk status`)
 
   const { data: row, error: readErr } = await db
-    .from('feedback_items').select('id, status, admin_response, is_internal, clickup_task_id')
+    .from('feedback_items')
+    .select('id, status, admin_response, is_internal, clickup_task_id, user_id, location_id, title, type')
     .eq('id', feedbackId).maybeSingle()
   if (readErr || !row) {
     return fail('no_feedback_item', feedbackId, `Bee Desk ID ${feedbackId} matches no feedback_items row${readErr ? ` (${readErr.message})` : ''}`)
@@ -315,5 +326,27 @@ export async function handleClickUpEvent(args: {
   })
   if (err) return fail('write_failed', feedbackId, err.message)
   await log('success', feedbackId, 'inbound', `event=${event.event} task=${taskId} status ${row.status} → ${mapped} reply written from Reply to Owner`)
-  return { ok: true, outcome: 'reply_written', feedback_id: feedbackId }
+
+  // The triage save's rules, compared against the BEFORE row like the route
+  // does: changed text only, and Fixed only on the move INTO shipped.
+  let email: ReplyEmailOutcome | null
+  try {
+    email = await maybeNotifySubmitter({
+      newReplyText: reply !== String(row.admin_response ?? '').trim() ? reply : null,
+      statusChanged: mapped !== row.status,
+      shippedNow: mapped === 'shipped' && row.status !== 'shipped',
+      callerId: null,
+      target: row,
+      newStatus: mapped,
+    })
+  } catch (e: any) {
+    email = { sent: false, error: String(e?.message || e) }
+  }
+  if (email && !email.sent) {
+    const why = 'error' in email ? `error=${email.error}` : `skipped=${email.skipped}`
+    console.error(`[clickup-webhook] reply written but owner NOT emailed task=${taskId} item=${feedbackId}: ${why}`)
+    await log('error', feedbackId, 'inbound',
+      `event=${event.event} task=${taskId} reply written but the owner was NOT emailed (${why}). They will only see it if they open Bee Desk.`)
+  }
+  return { ok: true, outcome: 'reply_written', feedback_id: feedbackId, email }
 }
