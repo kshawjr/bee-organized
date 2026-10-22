@@ -251,10 +251,12 @@ export default function HiveShell({
   // ignores it, which every non-sidebar caller does.
   onLensChange = () => {},
 }) {
-  // Top-level tab — default 'engagements' (opens on the board), hydrated
-  // from localStorage after mount (SSR-safe). A stored legacy 'board'/'list'
-  // value migrates to 'engagements' (they're now the sub-toggle, not tabs).
-  const [lens, setLens] = useState('engagements')
+  // Top-level tab — default 'inbox' (Kevin, 2026-10-21: a new owner should
+  // land on the people waiting on them), hydrated from localStorage after
+  // mount (SSR-safe), so a saved lens still wins. A stored legacy
+  // 'board'/'list' value migrates to 'engagements' (they're now the
+  // sub-toggle, not tabs).
+  const [lens, setLens] = useState('inbox')
   const isMobile = useIsMobile()
   useEffect(() => {
     try {

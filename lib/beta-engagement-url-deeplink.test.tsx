@@ -37,6 +37,20 @@ import HiveShell from '@/components/hive/HiveShell'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
+// The Clients page opens on the Inbox for an owner with no saved choice
+// (2026-10-21). These tests start where they always did, on the board, the
+// way a returning owner arrives: with the Engagements lens saved.
+const lensStore = new Map<string, string>()
+beforeEach(() => {
+  lensStore.clear()
+  lensStore.set('bee_hive_beta_lens', 'engagements')
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (lensStore.has(k) ? lensStore.get(k)! : null),
+    setItem: (k: string, v: string) => { lensStore.set(k, String(v)) },
+    removeItem: (k: string) => { lensStore.delete(k) },
+  })
+})
+
 // ── A) pathname + search ↔ engagement id ───────────────────────
 describe('parseHubUrl — ?e= engagement param', () => {
   it('extracts the engagement id from /clients/<id>?e=<engId>', () => {

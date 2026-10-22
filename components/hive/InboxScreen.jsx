@@ -523,12 +523,12 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [confirmRemove, setConfirmRemove] = useState(false) // bulk remove confirm step (any N)
-  // Default OLDEST first (Kevin, 2026-09-03): the Inbox rule has no clock, so
-  // the people it surfaces are the ones waiting longest — newest-first would
-  // sink them to the bottom and leave them unseen in a different way. A sort
-  // the owner has chosen by hand is still honoured.
-  const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'oldest' })
-  const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'oldest'
+  // Default NEWEST first (Kevin, 2026-10-21, reversing the oldest-first call
+  // of 2026-09-03): owners open the Inbox to see who just came in. A sort the
+  // owner has picked by hand is still honoured. The Needs-transfer queue
+  // below ignores this and stays oldest-first.
+  const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
+  const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   // Inbox filters are namespaced per location scope (issue 123). The `sources`
   // filter is drawn from each location's OWN leads, so under a single shared
   // key a source set at one location emptied every other location's Inbox

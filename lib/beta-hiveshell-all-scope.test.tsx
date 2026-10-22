@@ -18,7 +18,7 @@
 // next/dynamic chunk that will not resolve under vitest, so HiveShell is
 // mounted directly here; App's shell/Home bindings are covered in
 // lib/beta-home-mounts.test.tsx.)
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -35,6 +35,20 @@ vi.mock('next/navigation', () => ({
 }))
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
+
+// The Clients page opens on the Inbox for an owner with no saved choice
+// (2026-10-21). These tests start where they always did, on the board, the
+// way a returning owner arrives: with the Engagements lens saved.
+const lensStore = new Map<string, string>()
+beforeEach(() => {
+  lensStore.clear()
+  lensStore.set('bee_hive_beta_lens', 'engagements')
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (lensStore.has(k) ? lensStore.get(k)! : null),
+    setItem: (k: string, v: string) => { lensStore.set(k, String(v)) },
+    removeItem: (k: string) => { lensStore.delete(k) },
+  })
+})
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
 ;(globalThis as any).fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ targets: [] }) })) as any
 

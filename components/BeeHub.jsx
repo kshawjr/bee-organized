@@ -10990,7 +10990,7 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
 }
 
 // ─── Onboarding Screen ────────────────────────────────────────────────────────
-function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
+export function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
   // ownerName arrives as the FULL stored name (full_name || email — see the
   // DashboardScreen mount). splitNameForPrefill handles the email/'there'
@@ -11216,7 +11216,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     city:            currentLocationCtx?.city             || '',
     state:           currentLocationCtx?.state            || '',
     zip:             currentLocationCtx?.zip              || '',
-    phone:           currentLocationCtx?.phone            || currentUserCtx?.phone || '',
+    phone:           currentLocationCtx?.phone            || '',
     senderName:      currentLocationCtx?.sender_name      || '',
     sendFromEmail:   currentLocationCtx?.send_from_email  || '',
     replyToEmail:    currentLocationCtx?.reply_to_email   || '',
@@ -11317,7 +11317,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             city:            locationForm.city,
             state:           locationForm.state,
             zip:             locationForm.zip,
-            phone:           locationForm.phone || profileForm.phone,
+            phone:           locationForm.phone,
             timezone:        locationForm.timezone,
             sender_name:     locationForm.senderName,
             send_from_email: locationForm.sendFromEmail,
@@ -13119,12 +13119,14 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
     )
   }
   if (step.id==='location') {
-    // Autofill phone from profile if not yet set
-    const locPhone = locationForm.phone || profileForm.phone
+    // The location phone is asked for on its own, never copied from the
+    // personal phone, so an owner can keep their own number out of emails.
+    const locPhone = locationForm.phone || ''
+    const locPhoneValid = locPhone.replace(/\D/g,'').length >= 10
     const reviewsLinkError = validateReviewsLink(locationForm.reviewsLink)
     const replyToError = locationForm.sendFromEmail ? replyToProblem(onboardingReplyTo(locationForm)) : null
     const sendFromError = locationForm.sendFromEmail ? senderAddressProblem(locationForm.sendFromEmail, null) : null
-    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError && !replyToError && !sendFromError
+    const ready = locationForm.address && locationForm.city && locationForm.state && locPhoneValid && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError && !replyToError && !sendFromError
 
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
@@ -13158,18 +13160,19 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           </div>
         </div>
 
-        {/* Location phone - prefilled from profile */}
+        {/* Location phone - typed separately from the personal phone */}
         <div>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📞 Location Phone</p>
-            {locationForm.phone && locationForm.phone===profileForm.phone && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
+            {locPhone && !locPhoneValid && <span style={{ fontSize:'10px', color:'#ef4444' }}>Needs 10 digits</span>}
+            {locPhoneValid && <span style={{ fontSize:'10px', color:'#22c55e' }}>✓ Valid</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>This is the business number shown in your emails. Prefilled from your profile - change it if you have a dedicated business line.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>This is the business number shown in your emails. We ask for it separately on purpose. If it is the same as your personal number, just type it again.</p>
           <input type="tel"
             value={locationForm.phone}
-            onChange={e=>setLocationForm(f=>({...f,phone:e.target.value}))}
+            onChange={e=>{ const v=e.target.value.replace(/[^\d\s\-().+]/g,''); setLocationForm(f=>({...f,phone:v})) }}
             placeholder="(555) 000-0000"
-            style={{ ...inp, background: locationForm.phone===profileForm.phone ? 'rgba(168,201,196,0.06)' : 'white', borderColor: locationForm.phone===profileForm.phone ? 'rgba(168,201,196,0.4)' : 'rgba(0,0,0,0.1)' }} />
+            style={{ ...inp, borderColor: locPhone && !locPhoneValid ? 'rgba(239,68,68,0.4)' : 'rgba(0,0,0,0.1)' }} />
         </div>
 
         {/* Send-from email */}

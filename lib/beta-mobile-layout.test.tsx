@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 // Beta mobile-layout regression: renders the shell + beta surfaces with
 // the mobile branch forced (globalThis.__BEE_TEST_WIDTH__ seeds
 // useIsMobile, since renderToString never runs effects) and asserts the
@@ -10,9 +11,11 @@
 //   - chip strips stay single-line horizontal scrollers (nowrap)
 //   - overlays are bottom sheets with contained overscroll
 // Born from Kevin's 2026-07-04 mobile screenshots (overlapping shell row).
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
 import HiveShell from '@/components/hive/HiveShell'
 import EngagementGroupedList from '@/components/hive/EngagementGroupedList'
 import ClientGroupedList from '@/components/hive/ClientGroupedList'
@@ -58,12 +61,40 @@ const ENGAGEMENTS = [
 const PEOPLE = [person(), person({ id: 'c1' })]
 
 const setWidth = (w: number | undefined) => { (globalThis as any).__BEE_TEST_WIDTH__ = w }
-afterEach(() => setWidth(undefined))
+afterEach(() => { setWidth(undefined); vi.unstubAllGlobals() })
+
+// The shell's first paint is the Inbox for an owner with no saved choice
+// (2026-10-21), so the board's toolbar only appears once a saved Engagements
+// lens hydrates, which renderToString never does. These two tests mount in
+// the browser with that lens saved, and flatten the browser's "a: b;" style
+// text to the server's "a:b" so the layout patterns read the same.
+;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
+const renderBoardShell = async () => {
+  const ls = new Map<string, string>([['bee_hive_beta_lens', 'engagements']])
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (ls.has(k) ? ls.get(k)! : null),
+    setItem: (k: string, v: string) => { ls.set(k, String(v)) },
+    removeItem: (k: string) => { ls.delete(k) },
+  })
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => ({ rows: [], total: 0 }) }))
+  // useIsMobile re-reads window.innerWidth after mount; match the seeded width.
+  const width = (globalThis as any).__BEE_TEST_WIDTH__
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: typeof width === 'number' ? width : 1200 })
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  await act(async () => { root.render(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />) })
+  const html = host.innerHTML.replace(/style="([^"]*)"/g, (_m, css) =>
+    `style="${css.replace(/:\s+/g, ':').replace(/;\s*/g, ';').replace(/;$/, '')}"`)
+  await act(async () => root.unmount())
+  host.remove()
+  return html
+}
 
 describe('beta mobile layout', () => {
-  it('mobile shell stacks: pills scroll on row 1, Board/List toggle on row 2', () => {
+  it('mobile shell stacks: pills scroll on row 1, Board/List toggle on row 2', async () => {
     setWidth(390)
-    const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
+    const html = await renderBoardShell()
 
     // Row 1: a nowrap horizontal scroller holding the three tab pills
     // (nav restructure 2026-07-18 — Board+List merged into Engagements).
@@ -76,7 +107,10 @@ describe('beta mobile layout', () => {
     // (its count is now the Engagements tab badge). Classic hatch already gone.
     expect(html).not.toContain('Open engagements')
     expect(html).toContain('aria-label="Board view"')
-    const toggleRow = html.match(/<div style="[^"]*justify-content:flex-end[^"]*">(.*?)<\/div>/)
+    // A browser mount carries other right-aligned rows the server render
+    // did not, so look for the one holding the toggle, not just the first.
+    const toggleRow = [...html.matchAll(/<div style="[^"]*justify-content:flex-end[^"]*">(.*?)<\/div>/g)]
+      .find(m => m[1].includes('aria-label="Engagements view"'))
     expect(toggleRow, 'toggle row missing').toBeTruthy()
     expect(toggleRow![1]).toContain('aria-label="Engagements view"')
     expect(html).not.toContain('Back to classic')
@@ -85,8 +119,8 @@ describe('beta mobile layout', () => {
     expect(strip![1]).not.toContain('flex-wrap:wrap')
   })
 
-  it('desktop shell keeps the single top row, no corner counter', () => {
-    const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
+  it('desktop shell keeps the single top row, no corner counter', async () => {
+    const html = await renderBoardShell()
     // Corner "Open engagements · N" text removed 2026-07-19.
     expect(html).not.toContain('Open engagements')
     expect(html).not.toContain('Back to classic') // Classic retired 2026-07-18

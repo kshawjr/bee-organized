@@ -123,12 +123,22 @@ describe('nav — exactly two tabs with count badges', () => {
 
 // ── 2) opens on Board; toggle persists ──────────────────────────
 describe('Engagements Board|List sub-toggle', () => {
-  it('defaults to Board active (SSR initial state)', () => {
-    const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
-    expect(html).toContain('aria-label="Board view"')
-    expect(html).toContain('aria-label="List view"')
-    expect(html).toMatch(/aria-pressed="true" aria-label="Board view"/)
-    expect(html).toMatch(/aria-pressed="false" aria-label="List view"/)
+  // The Clients page opens on the Inbox for an owner with no saved choice
+  // (2026-10-21). These tests are about the Engagements lens, so they arrive
+  // with it saved, which needs a browser mount rather than renderToString.
+  beforeEach(() => { lsStore.set('bee_hive_beta_lens', 'engagements') })
+
+  it('defaults to Board active when no Board/List choice is saved', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ rows: [], total: 0 })))
+    const { host, unmount } = await mount(
+      <HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} locations={LOCATIONS as any} />
+    )
+    const btn = (label: string) => host.querySelector(`button[aria-label="${label}"]`)
+    expect(btn('Board view')).toBeTruthy()
+    expect(btn('List view')).toBeTruthy()
+    expect(btn('Board view')!.getAttribute('aria-pressed')).toBe('true')
+    expect(btn('List view')!.getAttribute('aria-pressed')).toBe('false')
+    await unmount()
   })
 
   it('clicking List persists bee_hive_eng_view=list and swaps to the grouped list', async () => {

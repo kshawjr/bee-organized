@@ -19,6 +19,20 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
+
+// The Clients page opens on the Inbox for an owner with no saved choice
+// (2026-10-21). These tests start where they always did, on the board, the
+// way a returning owner arrives: with the Engagements lens saved.
+const lensStore = new Map<string, string>()
+beforeEach(() => {
+  lensStore.clear()
+  lensStore.set('bee_hive_beta_lens', 'engagements')
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (lensStore.has(k) ? lensStore.get(k)! : null),
+    setItem: (k: string, v: string) => { lensStore.set(k, String(v)) },
+    removeItem: (k: string) => { lensStore.delete(k) },
+  })
+})
 // Desktop width so the board renders every column (data-board-col) and is
 // draggable — useIsMobile reads this seam (see useIsMobile.js).
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200

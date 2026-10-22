@@ -109,14 +109,14 @@ afterEach(() => {
 
 // ── siblings: displayed order, per section ─────────────────────
 describe('InboxScreen — row click hands the section displayed order as siblings', () => {
-  it('a New row passes the New section in DISPLAYED (oldest-first, the Inbox-rule default) order, not raw array order', async () => {
+  it('a New row passes the New section in DISPLAYED (newest-first, the Inbox default) order, not raw array order', async () => {
     const onOpen = vi.fn()
     const m = await mount(<InboxScreen people={PEOPLE} engagements={[]} locFilter="all" onOpenPerson={onOpen} />)
     await click(rowByName(m.host, 'Cleo Middle'))
     expect(onOpen).toHaveBeenCalledTimes(1)
     expect(onOpen.mock.calls[0][0].id).toBe('new-cleo')
-    // raw order is Bev, Amy, Cleo; the screen (and so the walk) is waiting-longest first: Bev 5d → Cleo 3d → Amy 1d
-    expect(onOpen.mock.calls[0][1]).toEqual(['new-bev', 'new-cleo', 'new-amy'])
+    // raw order is Bev, Amy, Cleo; the screen (and so the walk) is newest first: Amy 1d → Cleo 3d → Bev 5d
+    expect(onOpen.mock.calls[0][1]).toEqual(['new-amy', 'new-cleo', 'new-bev'])
     await m.unmount()
   })
 
@@ -127,7 +127,7 @@ describe('InboxScreen — row click hands the section displayed order as sibling
     )
     await click(rowByName(m.host, 'Amy Newest'))
     const sibs = onOpen.mock.calls[0][1]
-    expect(sibs).toEqual(['new-bev', 'new-cleo', 'new-amy'])
+    expect(sibs).toEqual(['new-amy', 'new-cleo', 'new-bev'])
     expect(sibs).not.toContain('att-walt')
     expect(sibs).not.toContain('tr-ann')
     await m.unmount()
@@ -160,6 +160,14 @@ describe('InboxScreen — row click hands the section displayed order as sibling
 // ── the stale-sibling decision, asserted end-to-end ────────────
 describe('HiveShell — mid-walk disposition (capture-at-open, the decided behavior)', () => {
   it('dismissing a sibling mid-walk keeps it walkable: Next lands on the dismissed lead and RENDERS it (never blank)', async () => {
+    // The walk below needs Cleo before Amy, so this owner has picked oldest
+    // first by hand (the default is newest first since 2026-10-21).
+    const ls = new Map<string, string>([['bee_hive_inbox_sort', JSON.stringify({ key: 'oldest' })]])
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => (ls.has(k) ? ls.get(k)! : null),
+      setItem: (k: string, v: string) => { ls.set(k, String(v)) },
+      removeItem: (k: string) => { ls.delete(k) },
+    })
     const m = await mount(
       <HiveShell engagements={[]} people={[AMY, CLEO]} locFilter="all" locations={[]} />
     )
