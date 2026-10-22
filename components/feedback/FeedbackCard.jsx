@@ -40,6 +40,7 @@ import { FeedbackAttachmentList } from '@/components/feedback/feedbackShared'
 import { isReplyUnseen, hasFeedbackReply, FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 import { buildFeedbackThread, ownerCanReply, isClosedFeedback } from '@/lib/feedback-replies'
 import { ownerCanEdit, ownerCanDelete } from '@/lib/feedback-edit'
+import { announceFeedbackSeen } from '@/components/feedback/UnreadRepliesBadge'
 
 // ── STATUS COLOURS ────────────────────────────────────────────
 // The WORDS are not here: every status label comes from FEEDBACK_STATUS_PLAIN
@@ -113,14 +114,16 @@ export function feedbackCardId(id) {
 // ONE item per call, on purpose: the only callers are an action on that item.
 // Fire and forget — the local copy is marked straight away so the marker and
 // the banner clear, and a failed POST only means it shows again on the next
-// load, which is far better than hiding a reply.
+// load, which is far better than hiding a reply. Once the POST has come back
+// the Help nav badge is told to recount (announceFeedbackSeen), so it drops in
+// the same visit — after the stamp, never before, or it would count it again.
 export function postFeedbackSeen(id) {
   try {
     return fetch('/api/feedback/seen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: [id] }),
-    }).catch(() => {})
+    }).then(() => announceFeedbackSeen(), () => {})
   } catch { return Promise.resolve() }
 }
 
@@ -136,8 +139,10 @@ export function useFeedbackCardHandlers(setItems) {
   }, [setItems])
 
   // The replies route stamps reply_seen_at itself ("replying implies having
-  // read what was there"), so the local copy follows without a second POST.
+  // read what was there"), so the local copy follows without a second POST —
+  // and the badge recounts, the reply having already been saved.
   const appendReply = useCallback((itemId, row) => {
+    announceFeedbackSeen()
     const now = new Date().toISOString()
     setItems(prev => prev.map(i => (i.id === itemId
       ? {

@@ -36,6 +36,15 @@
 //     everything whether or not they scrolled to it. The banner stays until
 //     each item is stamped, and its titles are links that scroll to the item.
 //
+//   · SORT AND FILTER (ClickUp 868mm1h81), put back after the redesign took
+//     the tabs away and left nothing in their place. Two plain selects above
+//     the list, shown once there are two or more items: Show (everything / not
+//     answered yet / replied, still open / closed) and Order (newest / oldest).
+//     The four Show choices split the list without overlapping — the old tabs'
+//     overlapping counts are the reason they went — and none is called
+//     "Answered", which is a closed status here. A banner link to an item the
+//     current choice hides switches back to everything first.
+//
 // WHAT IT DELIBERATELY DOES NOT HAVE:
 //   · no status control, no "From: <your own name>"
 //   · no queue cards, no oldest-waiting, no going-stale — metrics about OUR
@@ -133,6 +142,43 @@ const CLOSED_WORDS = ['shipped', 'answered', 'declined']
   .join(', ')
 
 const newestFirst = (a, b) => new Date(b.created_at) - new Date(a.created_at)
+const oldestFirst = (a, b) => new Date(a.created_at) - new Date(b.created_at)
+
+// ── sort and filter ───────────────────────────────────────────
+export const LIST_FILTERS = [
+  { key: 'all',      label: 'Everything' },
+  { key: 'waiting',  label: 'Not answered yet' },
+  { key: 'replied',  label: 'Replied, still open' },
+  { key: 'closed',   label: `Closed (${CLOSED_WORDS})` },
+]
+export const LIST_ORDERS = [
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
+]
+
+export function matchesListFilter(item, filter) {
+  if (filter === 'waiting') return !isDoneItem(item) && !hasReply(item)
+  if (filter === 'replied') return !isDoneItem(item) && hasReply(item)
+  if (filter === 'closed') return isDoneItem(item)
+  return true
+}
+
+const orderFn = (order) => (order === 'oldest' ? oldestFirst : newestFirst)
+
+export function sortForList(items, order) {
+  return [...items].sort(orderFn(order))
+}
+
+const controlSelect = {
+  width: '100%', minHeight: '44px', padding: '0 12px', boxSizing: 'border-box',
+  // 16px: anything smaller makes iOS zoom the page when the select is tapped.
+  fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary,
+  background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.control,
+}
+const controlLabel = {
+  flex: '1 1 160px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px',
+  fontSize: '12.5px', fontWeight: 600, color: T.ink.muted,
+}
 
 // ── the screen ────────────────────────────────────────────────
 export default function OwnerFeedbackScreen({
@@ -154,6 +200,8 @@ export default function OwnerFeedbackScreen({
   // null = the reader has not touched the closed link; the default is derived
   // (open when nothing else is), so nothing races the fetch.
   const [showClosed, setShowClosed] = useState(null)
+  const [listFilter, setListFilter] = useState('all')
+  const [listOrder, setListOrder] = useState('newest')
 
   const currentUser = useContext(CurrentUserContext)
   const myId = currentUser?.id || null
@@ -191,20 +239,26 @@ export default function OwnerFeedbackScreen({
   )
   const unreadIds = useMemo(() => new Set(unreadItems.map(i => i.id)), [unreadItems])
 
-  const openItems = useMemo(() => items.filter(i => !isDoneItem(i)).sort(newestFirst), [items])
-  const closedItems = useMemo(() => items.filter(isDoneItem).sort(newestFirst), [items])
+  const openItems = useMemo(() => items.filter(i => !isDoneItem(i)).sort(orderFn(listOrder)), [items, listOrder])
+  const closedItems = useMemo(() => items.filter(isDoneItem).sort(orderFn(listOrder)), [items, listOrder])
+  const filteredItems = useMemo(
+    () => sortForList(items.filter(i => matchesListFilter(i, listFilter)), listOrder),
+    [items, listFilter, listOrder],
+  )
   const closedOpen = showClosed ?? (openItems.length === 0)
 
   // The banner's links. A closed item may be folded away, so unfold first and
   // scroll on the next frame, once the card exists.
   const jumpTo = useCallback((id) => {
+    const target = items.find(i => i.id === id)
+    if (target && !matchesListFilter(target, listFilter)) setListFilter('all')
     if (closedItems.some(i => i.id === id)) setShowClosed(true)
     const go = () => {
       try { document.getElementById(feedbackCardId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } catch {}
     }
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go)
     else setTimeout(go, 0)
-  }, [closedItems])
+  }, [closedItems, items, listFilter])
 
   const card = (it) => (
     <FeedbackCard
@@ -289,6 +343,34 @@ export default function OwnerFeedbackScreen({
         <EmptyCard />
       ) : (
         <>
+          {items.length >= 2 && (
+            <div data-feedback-list-controls style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px', minWidth: 0 }}>
+              <label style={controlLabel}>
+                Show
+                <select data-feedback-filter value={listFilter} onChange={e => setListFilter(e.target.value)} style={controlSelect}>
+                  {LIST_FILTERS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                </select>
+              </label>
+              <label style={controlLabel}>
+                Order
+                <select data-feedback-order value={listOrder} onChange={e => setListOrder(e.target.value)} style={controlSelect}>
+                  {LIST_ORDERS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
+          {listFilter !== 'all' ? (
+            <div data-feedback-filtered-list style={{ display: 'flex', flexDirection: 'column', gap: '11px' }}>
+              {filteredItems.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '14.5px', color: T.ink.secondary }}>
+                  Nothing here.{' '}
+                  <button type="button" onClick={() => setListFilter('all')} style={{ minHeight: '44px', padding: '0 2px', background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontSize: '14px', fontWeight: 600, textDecoration: 'underline', cursor: 'pointer' }}>
+                    Show everything
+                  </button>
+                </p>
+              ) : filteredItems.map(card)}
+            </div>
+          ) : (<>
           <div data-feedback-open-list style={{ display: 'flex', flexDirection: 'column', gap: '11px' }}>
             {openItems.length === 0 && (
               <p style={{ margin: 0, fontSize: '14.5px', color: T.ink.secondary }}>
@@ -322,6 +404,7 @@ export default function OwnerFeedbackScreen({
               )}
             </div>
           )}
+          </>)}
         </>
       )}
     </div>

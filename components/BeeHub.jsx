@@ -29,6 +29,7 @@ import FeedbackModal from "@/components/feedback/FeedbackModal"
 // and its screen (OwnerFeedbackScreen) is mounted by HelpScreen's My requests
 // tab — same component, same route, same threads, at a different address.
 import HelpScreen from "@/components/help/HelpScreen"
+import { useUnreadReplyCount, NavCountBadge } from "@/components/feedback/UnreadRepliesBadge"
 import { feedbackTimeAgo } from "@/components/feedback/feedbackShared"
 import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
@@ -37236,6 +37237,10 @@ export default function App({
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
+  // The Help nav badge: unread replies to the signed-in person's own reports
+  // (ClickUp 868mm1h81). Off under view-as — the screen then shows someone
+  // else's reports, and this number is not about them.
+  const helpUnread = useUnreadReplyCount(!viewAsUser)
   const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
   // ── Scope switch (Fix 2, Phase 1) ──────────────────────────────────────────
   // locFilter used to be a purely client-side array filter, so the server never
@@ -37735,6 +37740,8 @@ if (Array.isArray(initialPeople)) return
   const betaReadOnly = resolveBetaReadOnly({ role, franchiseRole, crmStatus: effectiveCrmStatus })
 
   function nav(key) {
+    // Replies waiting behind the Help badge: land on My requests, where they are.
+    if (key === 'help' && helpUnread > 0) setHelpIntent('requests')
     setActiveNav(key)
     window.scrollTo(0,0)
     // Leaving the Clients tab — drop the open lead (and any open engagement)
@@ -37846,7 +37853,7 @@ if (Array.isArray(initialPeople)) return
     { key:'settings', icon:'⚙️', label:'Settings'},
     // Help is for EVERY role — owners read it, super_admin/corporate write it
     // (the plus buttons are gated inside HelpScreen and on the server).
-    { key:'help',     icon:'❓', label:'Help'    },
+    { key:'help',     icon:'❓', label:'Help', badge: helpUnread },
     // 'Manual' moved out of the nav — the Guide and the Manual both open
     // from the Ask Bee Hub panel footer (issue 132).
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
@@ -38004,7 +38011,8 @@ if (Array.isArray(initialPeople)) return
                   style={{ width:'100%', minHeight:'48px', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left', background:isActive?'rgba(168,201,196,0.14)':'transparent', opacity:isLocked?0.3:1 }}>
                   <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                   <span style={{ fontSize:'14px', fontWeight:isActive?600:500, color:isActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{item.label}</span>
-                  {isActive&&<div style={{ marginLeft:'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
+                  <NavCountBadge count={item.badge} />
+                  {isActive&&<div style={{ marginLeft:item.badge>0?'8px':'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
                 </button>
                 {/* Same nesting as the desktop sidebar, at this drawer's own
                     scale: its rows are 20px icon + 14px gap off a 14px inset,
@@ -38533,7 +38541,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               <button onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
                 <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                 <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
-                {isActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
+                <NavCountBadge count={item.badge} />
+                {isActive&&<div style={{ marginLeft:item.badge>0?'8px':'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
               </button>
               {/* Nested items — the sidebar's FIRST nesting, so the language is
                   borrowed from the rows above rather than from the tab row it

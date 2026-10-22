@@ -145,7 +145,11 @@ describe('an owner gets no write controls at all', () => {
     const { host, unmount } = await mountScreen()
     expect(host.querySelectorAll('textarea').length).toBe(0)
     expect(host.querySelectorAll('input').length).toBe(0)
-    expect(host.querySelectorAll('select').length).toBe(0)
+    // The only selects allowed are the list's own Show and Order (ClickUp
+    // 868mm1h81) — they change what the owner SEES, never a stored value.
+    const selects = Array.from(host.querySelectorAll('select'))
+    expect(selects.every(s => s.hasAttribute('data-feedback-filter') || s.hasAttribute('data-feedback-order'))).toBe(true)
+    expect(selects.length).toBeLessThanOrEqual(2)
     await unmount()
   })
 
