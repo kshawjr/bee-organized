@@ -531,6 +531,7 @@ describe('Put back', () => {
     const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
     const undo = kids.find(k => k?.type === 'button')
     expect(undo, 'Put back offers an Undo').toBeTruthy()
+    expect(lastToast.duration, 'the undo window is 6s').toBe(6000)
     await act(async () => { await undo.props.onClick() })
     expect(patches[1].body.inbox_dismissed_at).toBeTruthy()
   })

@@ -917,9 +917,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // InlineToast (BeeHub scope) renders {msg} verbatim, so a React node
   // rides through untouched — the Undo button lives inside the toast.
   // The undo window is the host's toast auto-dismiss (~3s by default); the
-  // host now honors an explicit `duration`, so DESTRUCTIVE undos (junk /
-  // bulk remove) pass 6s to give a real window to catch a stray click —
-  // scoped here, never a global toast-default change.
+  // host honors an explicit `duration`, and every undo here passes 6s (junk,
+  // bulk remove, dismiss, put back) to give a real window to catch a stray
+  // click — scoped to undos, never a global toast-default change.
   const undoToast = (text, onUndo, duration) => ({
     kind: 'success',
     ...(duration ? { duration } : {}),
@@ -1048,7 +1048,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
-      }))
+      }, 6000))
     } catch (e) {
       setToast({ kind: 'error', msg: `Dismiss failed: ${e.message}` })
     } finally {
@@ -1083,7 +1083,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
-      }))
+      }, 6000))
     } catch (e) {
       setToast({ kind: 'error', msg: `Put back failed: ${e.message}` })
     } finally {

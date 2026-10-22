@@ -109,6 +109,26 @@ describe('the Clients screen toast host (App)', () => {
     expect(host.textContent, 'gone at 6s').not.toContain('Marked as junk')
   })
 
+  it('a new toast replaces the old one AND its timer — the first toast\'s 6s cannot cut the second short', async () => {
+    // Undo's own follow-up ("Sarah restored") or the next action's undo lands
+    // while the first toast's timer is still running. If that old timer
+    // survived, it would clear the NEW toast at 6s instead of letting it run
+    // its own window.
+    const host = await mountClients()
+    await raise(undoToast('First undo', () => {}, 6000))
+    await advance(1000)
+    await act(async () => { captured.setToast!(undoToast('Second undo', () => {}, 6000)) })
+    expect(host.textContent, 'one toast at a time — the new one replaces the old').not.toContain('First undo')
+    expect(host.textContent).toContain('Second undo')
+
+    await advance(5000) // 6s since the first toast: its timer would fire here
+    expect(host.textContent, 'still up at 6s — the first timer did not clear it').toContain('Second undo')
+    await advance(900)
+    expect(host.textContent, 'still up at 6.9s').toContain('Second undo')
+    await advance(100)
+    expect(host.textContent, 'gone at 7s — 6s after it was raised').not.toContain('Second undo')
+  })
+
   it('a toast with no duration still goes at 3000ms (success and error messages unchanged)', async () => {
     const host = await mountClients()
     await raise({ kind: 'success', msg: 'Saved the thing' })
@@ -163,12 +183,12 @@ describe('client card undos', () => {
     expect(toasts.at(-1)?.duration).toBe(6000)
   })
 
-  it('Dismiss on the card keeps the default window, matching the Inbox', async () => {
+  it('Dismiss on the card raises its undo with duration 6000, matching the Inbox', async () => {
     const toasts: any[] = []
     await openCard(toasts)
     await pick('menu-dismiss')
     await pick('menu-confirm-dismiss-yes')
     expect(toasts.at(-1)?.kind).toBe('success')
-    expect(toasts.at(-1)?.duration).toBeUndefined()
+    expect(toasts.at(-1)?.duration).toBe(6000)
   })
 })

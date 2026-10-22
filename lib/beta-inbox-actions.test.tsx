@@ -311,13 +311,18 @@ describe('wiring', () => {
     expect(hub).toMatch(/setToast\(null\),\s*toast\.duration\s*\|\|\s*3000/)
   })
 
-  it('the dismiss undo keeps the 3s default — only junk opts into 6s', async () => {
-    // The snooze half is gone with the menu item; dismiss still carries the
-    // default, and junk still opts into 6s below.
+  it('the dismiss undo gets 6s too, like junk', async () => {
+    // CHANGED 2026-10-22 (ClickUp 868kaxm2z). This used to pin dismiss at the
+    // 3s default on purpose — only destructive undos were to get the longer
+    // window. That reason no longer holds: there is one host toast, a new
+    // toast REPLACES the old one (and its timer — see
+    // lib/undo-toast-duration.test.tsx), so a longer undo never stacks up or
+    // lingers behind the next message. Kevin's 6-second undo now applies to
+    // every undo, dismiss included.
     const m2 = await mount(inbox([person()]))
     await openMenuAnd(m2.host, 'Dismiss')
     await click(menuByTestId('menu-confirm-dismiss-yes')!)
-    expect(lastToast.duration).toBeUndefined()
+    expect(lastToast.duration).toBe(6000)
     await m2.unmount()
   })
 })

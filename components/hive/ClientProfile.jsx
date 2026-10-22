@@ -511,7 +511,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           onLeadPatched(c.id, { inbox_dismissed_at: null })
           setToast({ kind: 'success', msg: `${c.name} restored` })
         } catch (e) { setToast({ kind: 'error', msg: `Undo failed: ${e.message}` }) }
-      }))
+      }, 6000))
     } catch (e) { setToast({ kind: 'error', msg: `Dismiss failed: ${e.message}` }) }
   }
 
