@@ -121,6 +121,10 @@ import { isInternalItem, withInternalFallback } from '@/lib/feedback-internal'
 import { isMissingRepliesTable } from '@/lib/feedback-replies'
 import { seedReleaseItemFromFeedback } from '@/lib/help-releases'
 import { wouldHandSetStuck } from '@/lib/feedback-admin-tiles'
+import { clickUpClientFromEnv } from '@/lib/clickup'
+import {
+  createClickUpTaskForFeedback, shouldCreateClickUpTask, type CreateOutcome,
+} from '@/lib/clickup-sync'
 
 export const runtime = 'nodejs'
 
@@ -410,6 +414,24 @@ export async function PATCH(
     }
   }
 
+  // ─── THE CLICKUP TASK (task 868mm1h7z) ──────────────────────────────
+  // A team save that leaves an owner's item open past 'submitted' is triage,
+  // and triage opens a ClickUp task (lib/clickup-sync has the full rule). Never
+  // fatal: the save above stands; every failure is a sync_log error row, and
+  // the outcome rides back on the response as `clickup`, like reply_email.
+  let clickup: CreateOutcome | null = null
+  if (shouldCreateClickUpTask({
+    isElevatedCaller,
+    isInternal: isInternalItem(target),
+    statusAfter: row.status,
+  })) {
+    clickup = await createClickUpTaskForFeedback({
+      client: clickUpClientFromEnv(),
+      db: supabaseService,
+      item: { id, title: row.title, description: row.description, status: row.status },
+    })
+  }
+
   const replyEmail = await maybeNotifySubmitter({
     newReplyText,
     statusChanged,
@@ -443,7 +465,7 @@ export async function PATCH(
   // reply_email is ADDITIVE — the row shape callers already merge into their
   // list is unchanged, so a client that ignores this key behaves exactly as
   // before.
-  return NextResponse.json({ ...out, reply_email: replyEmail })
+  return NextResponse.json({ ...out, reply_email: replyEmail, clickup })
 }
 
 // The whole send decision in one place, returning a description of what

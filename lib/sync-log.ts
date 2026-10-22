@@ -30,6 +30,9 @@ export async function writeSyncLog({
   location_id:      string | null
   entity_id:        string
   entity_type?:     'client' | 'request' | 'quote' | 'job' | 'invoice' | 'payment' | 'note' | 'location' | 'property' | 'assessment' | 'engagement'
+                    // 'feedback' = Bee Desk ↔ ClickUp sync rows (lib/clickup-sync).
+                    // Requires migrations/feedback_items_clickup_task_id.sql.
+                    | 'feedback'
   direction?:       'inbound' | 'outbound'
   zoho_record_id?:  string
   jobber_record_id?: string
