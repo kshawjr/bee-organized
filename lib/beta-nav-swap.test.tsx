@@ -163,7 +163,7 @@ describe('the reply email link opens Help, My requests', () => {
 // ─── the owner's items, unchanged, at the new address ─────────────────
 
 describe("an owner's existing items and threads render in Help › My requests unchanged", () => {
-  it('same route, same thread, same composer offer, no second heading', async () => {
+  it('same route, same thread, the write-back offer, no second heading', async () => {
     window.history.replaceState({}, '', '/help?tab=requests')
     const f = stubFetch({
       '/api/help/entries': { sections: [], deleted: [], canEdit: false },
@@ -178,15 +178,16 @@ describe("an owner's existing items and threads render in Help › My requests u
     expect(text).toContain('You replied')
     expect(text).toContain('It happened again this morning.')
     expect(text.indexOf('We found the cause')).toBeLessThan(text.indexOf('It happened again'))
-    expect(text).toContain('Reply to the team')
+    expect(text).toContain('Write back')
     expect(text).toContain('Report something')
     // the heading is the tab's, not a second one
     expect(text).not.toContain('What you’ve told us')
     expect(host.querySelectorAll('h1').length).toBe(1)
-    // the same two calls the old screen made — the list, and the seen stamp
+    // The list, and NOT the seen stamp: the help-desk redesign stopped
+    // stamping on load — only acting on an item stamps it.
     const urls = f.mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.startsWith('/api/admin/feedback'))).toBe(true)
-    expect(urls.some(u => u === '/api/feedback/seen')).toBe(true)
+    expect(urls.some(u => u === '/api/feedback/seen')).toBe(false)
     await unmount()
   })
 })

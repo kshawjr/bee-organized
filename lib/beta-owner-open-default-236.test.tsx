@@ -2,19 +2,17 @@
 //
 // issue 236 — THE OWNER SCREEN OPENS ON WHAT IS STILL OPEN.
 //
-// Issue 235's default tab was "Everything", so the Palm Beach owner's first
+// Issue 235's default view was "Everything", so the Palm Beach owner's first
 // screen was thirty-one cards with nineteen already-fixed ones mixed through
-// them, and the handful still owed an answer had to be found among them. Issue
-// 233 fixed the same fault on the triage side by hiding closed items; this is
-// that fix arriving from the other direction.
-//
-// Done stays a tab — nineteen fixed things are the evidence that reporting
-// works, which is what makes someone report again. It just is not the first
-// thing in the way.
+// them. Issue 236 fixed it with an Open tab; the help-desk redesign removed the
+// tabs (Open double-counted Answered and Waiting) and kept the promise: the
+// open items are the list, and the finished ones fold behind ONE link that
+// says how many — still one click away, because nineteen fixed things are the
+// evidence that reporting works.
 //
 // The case worth most of this file: an owner whose items are ALL finished.
-// Defaulting them onto an empty "Nothing open" card would be a worse screen
-// than the crowding being fixed, so they land on Done instead.
+// Opening them onto a bare "Show 2 closed" link would be a worse screen than
+// the crowding being fixed, so their finished items start unfolded.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -22,7 +20,7 @@ import { act } from 'react-dom/test-utils'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
-import OwnerFeedbackScreen, { defaultTabFor } from '@/components/feedback/OwnerFeedbackScreen'
+import OwnerFeedbackScreen from '@/components/feedback/OwnerFeedbackScreen'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
@@ -77,8 +75,7 @@ async function mountScreen(items: any[]) {
 }
 
 const buttons = (host: HTMLElement) => [...host.querySelectorAll('button')] as HTMLButtonElement[]
-const tab = (host: HTMLElement, prefix: string) =>
-  buttons(host).find(b => (b.textContent || '').trim().startsWith(prefix))
+const fold = (host: HTMLElement) => host.querySelector('[data-feedback-closed-toggle]') as HTMLButtonElement | null
 const click = async (el: any) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -95,79 +92,62 @@ describe('the default view is what is still open', () => {
     await unmount()
   })
 
-  it('lands on Open, and says how many — no "Everything" tab any more', async () => {
+  it('says how many are still with the team — and has no tabs, Everything or otherwise', async () => {
     const { host, unmount } = await mountScreen(MIXED)
-    const open = tab(host, 'Open')!
-    expect(open).toBeTruthy()
-    expect(open.textContent).toContain('· 2')
-    expect(open.getAttribute('aria-pressed')).toBe('true')
+    expect(host.textContent).toContain('5 sent · 2 still with the team')
+    expect(host.querySelector('[aria-pressed], [role="tab"]')).toBeNull()
     expect(buttons(host).some(b => (b.textContent || '').includes('Everything'))).toBe(false)
     await unmount()
   })
 })
 
-describe('Done is still reachable', () => {
-  it('is a tab, carrying its count, and it reaches both shipped and declined', async () => {
+describe('the finished ones are still reachable', () => {
+  it('one link, carrying the count, reaches both shipped and declined', async () => {
     const { host, unmount } = await mountScreen(MIXED)
-    const done = tab(host, 'Done')!
-    expect(done.textContent).toContain('· 3')
-    await click(done)
+    expect(fold(host)!.textContent).toMatch(/^Show 3 closed/)
+    await click(fold(host))
     expect(host.textContent).toContain('Fixed thing one')
     expect(host.textContent).toContain('Declined thing')
-    // …and the open ones step aside in turn — these are tabs, not a filter that
-    // only ever adds.
-    expect(host.textContent).not.toContain('Still waiting on this')
-    await unmount()
-  })
-
-  it('nothing is hidden behind a show/hide-closed toggle instead', async () => {
-    const { host, unmount } = await mountScreen(MIXED)
-    expect(buttons(host).some(b => /(show|hide)\s+\d*\s*closed/i.test(b.textContent || ''))).toBe(false)
+    // The open ones stay where they were — unfolding adds, it does not swap.
+    expect(host.textContent).toContain('Still waiting on this')
     await unmount()
   })
 })
 
-// THE EMPTY-TAB CASE. Ten of the twenty-one owners have never filed anything
+// THE EMPTY-LIST CASE. Ten of the twenty-one owners have never filed anything
 // and most of the rest have filed once or twice, so "every item I ever sent is
 // finished" is a live shape, not a hypothetical.
 describe('an owner whose items are ALL finished', () => {
-  it('lands on Done and sees them — never an empty Open tab', async () => {
+  it('sees them straight away — never a bare link over an empty list', async () => {
     const { host, unmount } = await mountScreen(ALL_DONE)
-    expect(tab(host, 'Done')!.getAttribute('aria-pressed')).toBe('true')
-    expect(tab(host, 'Open')!.getAttribute('aria-pressed')).toBe('false')
     expect(host.textContent).toContain('The one thing I ever reported')
-    expect(host.textContent).not.toContain('Nothing open')
+    expect(host.textContent).toContain('And this one')
+    expect(fold(host)!.getAttribute('aria-expanded')).toBe('true')
     await unmount()
   })
 
-  it('can still choose Open, and gets an explanation rather than a blank', async () => {
+  it('gets an explanation of the empty open list rather than a blank', async () => {
     const { host, unmount } = await mountScreen(ALL_DONE)
-    await click(tab(host, 'Open')!)
     expect(host.textContent).toContain('Nothing open')
     expect(host.textContent).toContain('has been dealt with')
-    // A chosen tab STAYS chosen — the default must not pull them back to Done.
-    expect(tab(host, 'Open')!.getAttribute('aria-pressed')).toBe('true')
+    await unmount()
+  })
+
+  it('can still fold them away, and the choice sticks', async () => {
+    const { host, unmount } = await mountScreen(ALL_DONE)
+    await click(fold(host))
+    expect(host.textContent).not.toContain('The one thing I ever reported')
+    expect(fold(host)!.getAttribute('aria-expanded')).toBe('false')
     await unmount()
   })
 })
 
 describe('an owner with nothing at all is unchanged', () => {
-  it('still gets the invitation to report, and no tab row to land on', async () => {
+  it('still gets the invitation to report, and no closed link to land on', async () => {
     const { host, unmount } = await mountScreen([])
     expect(host.textContent).toContain('Nothing here yet')
     expect(host.textContent).toContain('We read every one and write back')
-    expect(tab(host, 'Done')).toBeFalsy()
-    expect(tab(host, 'Open')).toBeFalsy()
+    expect(fold(host)).toBeNull()
     await unmount()
-  })
-})
-
-describe('the rule itself', () => {
-  it('open unless there is nothing open and something finished', () => {
-    expect(defaultTabFor({ open: 4, done: 19 })).toBe('open')
-    expect(defaultTabFor({ open: 0, done: 3 })).toBe('done')
-    // Nothing at all is NOT the Done case — that screen has no tabs and gets
-    // the invitation empty state instead.
-    expect(defaultTabFor({ open: 0, done: 0 })).toBe('open')
   })
 })

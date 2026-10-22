@@ -196,12 +196,29 @@ describe('the ask strip', () => {
     expect(onAsk).toHaveBeenLastCalledWith({ type: 'feature', about: 'Getting started', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 's1' } })
 
     await click(host.querySelector('[data-help-item-row="i1"]'))
-    expect(host.textContent).toContain('Still stuck on Getting started › Connect Jobber › Turn on alerts')
+    expect(host.textContent).toContain('Can’t find it in Getting started › Connect Jobber › Turn on alerts?')
     await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Ask a question')) || null)
     expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', about: 'Getting started › Connect Jobber › Turn on alerts', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 'i1' } })
     // the third door
     await click(host.querySelector('[data-help-door="bug"]'))
     expect(onAsk).toHaveBeenLastCalledWith({ type: 'bug', about: 'Getting started › Connect Jobber › Turn on alerts', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 'i1' } })
+    await unmount()
+  })
+})
+
+describe('the ask strip opens every level instead of ending it', () => {
+  it('sits above the section list, the topic list and the article', async () => {
+    stubFetch({ '/api/help/entries': OWNER_TREE })
+    const { host, unmount } = await mount(<HelpScreen canEdit={false} onAsk={() => {}} />)
+    const before = (a: Element | null, b: Element | null) => {
+      expect(a).toBeTruthy(); expect(b).toBeTruthy()
+      return !!(a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    }
+    expect(before(host.querySelector('[data-help-ask-strip]'), host.querySelector('[data-help-section="s1"]'))).toBe(true)
+    await click(host.querySelector('[data-help-section="s1"]'))
+    expect(before(host.querySelector('[data-help-ask-strip]'), host.querySelector('[data-help-item-row="i1"]'))).toBe(true)
+    await click(host.querySelector('[data-help-item-row="i1"]'))
+    expect(before(host.querySelector('[data-help-ask-strip]'), host.querySelector('[data-help-item="i1"]'))).toBe(true)
     await unmount()
   })
 })
@@ -227,7 +244,7 @@ describe('My requests', () => {
     expect(host.textContent).toContain('Alerts stopped')
     expect(host.textContent).toContain('The team replied')
     expect(host.textContent).toContain('Found it — a fix is queued.')
-    expect(host.textContent).toContain('Reply to the team')
+    expect(host.textContent).toContain('Write back')
     expect(f.mock.calls.some(c => String(c[0]).startsWith('/api/admin/feedback'))).toBe(true)
     await unmount()
   })

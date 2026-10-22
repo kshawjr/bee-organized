@@ -2,9 +2,10 @@
 //
 // WHAT THE OWNER SEES, AND WHAT THE TEAM SEES.
 //
-// Owner side (Help › My requests): Edit and Delete are on YOUR OWN card and
-// nobody else's; Edit disappears the moment the team replies, and the reply box
-// is what stands in its place; the confirmation says the irreversible part.
+// Owner side (Help › My requests): "Change what I wrote" and "Remove this" are
+// on YOUR OWN card and nobody else's; the edit disappears the moment the team
+// replies, and "Write back" is what stands in its place; the confirmation says
+// the irreversible part.
 //
 // Team side (triage): a report the owner withdrew mid-conversation does not
 // fail with "please try again" — that would be a lie, since trying again can
@@ -106,12 +107,12 @@ describe('the test data itself', () => {
 
 // ─── the owner's own card ─────────────────────────────────────────────
 
-describe('Edit and Delete on Help › My requests', () => {
+describe('changing and removing on Help › My requests', () => {
   it('offers both on your own unanswered report', async () => {
     stubFetch({ '/api/admin/feedback': { items: [item({})] } })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    expect(byText(host, 'Edit')).toBeTruthy()
-    expect(byText(host, 'Delete')).toBeTruthy()
+    expect(byText(host, 'Change what I wrote')).toBeTruthy()
+    expect(byText(host, 'Remove this')).toBeTruthy()
     await unmount()
   })
 
@@ -120,12 +121,12 @@ describe('Edit and Delete on Help › My requests', () => {
     // touching it is not — and the screen must not offer what the route refuses.
     stubFetch({ '/api/admin/feedback': { items: [item({ user_id: 'someone-else' })] } })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    expect(byText(host, 'Edit')).toBeNull()
-    expect(byText(host, 'Delete')).toBeNull()
+    expect(byText(host, 'Change what I wrote')).toBeNull()
+    expect(byText(host, 'Remove this')).toBeNull()
     await unmount()
   })
 
-  it('swaps Edit for the reply box the moment the team replies', async () => {
+  it('swaps the edit for Write back the moment the team replies', async () => {
     // The lock is not announced — the thing to do instead simply appears.
     stubFetch({
       '/api/feedback/seen': { marked: 1, supported: true },
@@ -135,10 +136,10 @@ describe('Edit and Delete on Help › My requests', () => {
       })] },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    expect(byText(host, 'Edit')).toBeNull()
-    expect(byText(host, 'Reply to the team')).toBeTruthy()
-    // Delete survives a reply — it has no such gate.
-    expect(byText(host, 'Delete')).toBeTruthy()
+    expect(byText(host, 'Change what I wrote')).toBeNull()
+    expect(byText(host, 'Write back')).toBeTruthy()
+    // Remove survives a reply — it has no such gate.
+    expect(byText(host, 'Remove this')).toBeTruthy()
     await unmount()
   })
 
@@ -148,7 +149,7 @@ describe('Edit and Delete on Help › My requests', () => {
       '/api/feedback/x': { ...item({}), title: 'Sort does not stick', description: 'It resets every refresh.' },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    await click(byText(host, 'Edit'))
+    await click(byText(host, 'Change what I wrote'))
 
     const input = host.querySelector('input#fb-title-x') as HTMLInputElement
     const area = host.querySelector('textarea#fb-desc-x') as HTMLTextAreaElement
@@ -181,7 +182,7 @@ describe('Edit and Delete on Help › My requests', () => {
       '/api/feedback/x': { __status: 409, body: { error: 'edit_locked_after_reply' } },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    await click(byText(host, 'Edit'))
+    await click(byText(host, 'Change what I wrote'))
     const input = host.querySelector('input#fb-title-x') as HTMLInputElement
     await act(async () => {
       const setV = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
@@ -201,7 +202,7 @@ describe('the delete confirmation', () => {
   it('asks with the irreversible part, and Keep it backs out unharmed', async () => {
     const f = stubFetch({ '/api/admin/feedback': { items: [item({ attachments: [{ path: 'u1/a-shot.png', name: 'shot.png' }] })] } })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    await click(byText(host, 'Delete'))
+    await click(byText(host, 'Remove this'))
     expect(host.textContent).toContain('This deletes your report for good — we can’t get it back')
     expect(host.textContent).toContain('and the file you sent goes with it')
     expect(byText(host, 'Yes, delete it')).toBeTruthy()
@@ -220,20 +221,20 @@ describe('the delete confirmation', () => {
       '/api/feedback/x': { deleted: true, id: 'x' },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    expect(host.textContent).toContain('2 things')
+    expect(host.textContent).toContain('2 sent')
     // The first card is x's — asserted, not assumed.
     expect(host.textContent!.indexOf('Sort not permanent')).toBeLessThan(host.textContent!.indexOf('Another thing'))
 
-    await click(buttons(host).filter(b => (b.textContent || '').trim() === 'Delete')[0])
+    await click(buttons(host).filter(b => (b.textContent || '').trim() === 'Remove this')[0])
     await click(byText(host, 'Yes, delete it'))
 
     const call = f.mock.calls.find(c => String(c[0]) === '/api/feedback/x')
     expect((call![1] as any).method).toBe('DELETE')
     expect(host.textContent).not.toContain('Sort not permanent')
     expect(host.textContent).toContain('Another thing')
-    // The tab counts and the subtitle are derived from the list, so they fall
-    // on their own — nothing keeps a second tally.
-    expect(host.textContent).toContain('1 thing ·')
+    // The subtitle is derived from the list, so it falls on its own —
+    // nothing keeps a second tally.
+    expect(host.textContent).toContain('1 sent ·')
     await unmount()
   })
 })

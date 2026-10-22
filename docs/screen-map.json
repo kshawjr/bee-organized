@@ -3118,13 +3118,13 @@
         "submit feedback"
       ],
       "lines": [
-        64,
-        188
+        67,
+        196
       ]
     },
     {
       "id": "feedback.owner-screen",
-      "surface": "Help › My requests — an owner's read-only history of what they reported (was \"What you've told us\")",
+      "surface": "Help › My requests — an owner's list of what they reported and what the team said back (was \"What you've told us\")",
       "nav": "Help",
       "file": "components/feedback/OwnerFeedbackScreen.jsx",
       "symbol": "OwnerFeedbackScreen",
@@ -3147,10 +3147,10 @@
         "my requests"
       ],
       "lines": [
-        741,
-        1000
+        138,
+        330
       ],
-      "note": "Mounted only by components/help/HelpScreen.jsx (the My requests tab). The reply email links to /help?tab=requests; the legacy /?feedback=1 is redirected there by BeeHub."
+      "note": "Mounted only by components/help/HelpScreen.jsx (the My requests tab). One list, closed items folded behind one link, the three doors on top. Every card is components/feedback/FeedbackCard.jsx (also used by HelpScreen's list for other roles and the composer's My Items), which holds the write-back, edit, remove and seen-stamp calls; nothing is stamped seen on load. The reply email links to /help?tab=requests; the legacy /?feedback=1 is redirected there by BeeHub."
     },
     {
       "id": "auth.login",
@@ -3287,10 +3287,10 @@
         "moving a help item up or down",
         "restoring a deleted help item"
       ],
-      "note": "Authoring controls render only when canEdit (super_admin/corporate, never under view-as); the server filters drafts and 403s writes for everyone else. My requests mounts OwnerFeedbackScreen for franchise owner/manager and the composer’s My Items list for other roles.",
+      "note": "Authoring controls render only when canEdit (super_admin/corporate, never under view-as); the server filters drafts and 403s writes for everyone else. My requests mounts OwnerFeedbackScreen for franchise owner/manager and a list of the viewer’s own items for other roles; both render the one FeedbackCard. The ask strip (components/help/AskStrip.jsx) opens every Help level.",
       "lines": [
-        191,
-        443
+        171,
+        423
       ]
     },
     {

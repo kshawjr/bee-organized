@@ -6,13 +6,15 @@
 //                phone screen only ever shows one list. An item is a title, a
 //                one-line lead, EITHER a video OR a screenshot, the steps one
 //                per line, and one optional callout for the thing people get
-//                wrong. Every level ends in the ask strip.
+//                wrong. Every level OPENS with the ask strip (it used to end
+//                each level, after the whole article list).
 //
-//   My requests  the owner's own feedback items and reply threads, EXACTLY
-//                as they work today: the owner/manager "What you've told us"
-//                screen for franchise owners and managers, and the composer's
-//                My Items list for everyone else. Nothing here is a copy —
-//                both are the same components mounted in a tab.
+//   My requests  the owner's own feedback items and reply threads: the
+//                owner/manager screen (OwnerFeedbackScreen) for franchise
+//                owners and managers, and a plain list of the viewer's own
+//                items for everyone else. Both render the ONE card
+//                (components/feedback/FeedbackCard) — same design, same
+//                unread marker; view-as only hides the actions.
 //
 //   What's new   the weekly release note (components/help/WhatsNew): the
 //                published weeks, newest first, grouped New / Changed /
@@ -33,13 +35,15 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, useContext } from 'react'
 import { T } from '@/components/hive/shared/tokens'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
 import useIsMobile from '@/components/hive/shared/useIsMobile'
 import { IconPlus, IconPencil, IconChevronRight } from '@/components/ui/icons'
+import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import OwnerFeedbackScreen from '@/components/feedback/OwnerFeedbackScreen'
-import { FeedbackItemCard } from '@/components/feedback/feedbackShared'
+import FeedbackCard, { isUnreadReply, seenSupported, useFeedbackCardHandlers } from '@/components/feedback/FeedbackCard'
+import { AskStrip } from '@/components/help/AskStrip'
 import HelpEntryForm from '@/components/help/HelpEntryForm'
 import WhatsNew from '@/components/help/WhatsNew'
 import { helpBreadcrumb } from '@/lib/help-content'
@@ -90,39 +94,9 @@ function BackLink({ label, onClick }) {
   )
 }
 
-// ── the ask strip ─────────────────────────────────────────────
-// Ends every level. Three doors — the guided intake's own three — so the
-// type is chosen here and the form opens straight on question 1. Carries
-// where the owner was: the breadcrumb in words as `about` (stored as an
-// "About:" line under the answers, visible to triage today) and the entry
-// id in context (for a future resolver).
-export function AskStrip({ crumbs, onAsk, stripRef = null }) {
-  const where = helpBreadcrumb(crumbs) || 'Help'
-  const deepest = [...crumbs].reverse().find(c => c && c.id) || null
-  const ask = (type) => onAsk?.({
-    type,
-    about: where,
-    context: { origin: 'help_ask_strip', screen: 'Help', ...(deepest ? { help_entry_id: deepest.id } : {}) },
-  })
-  return (
-    <div ref={stripRef} data-help-ask-strip style={{ marginTop: '28px', background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset, padding: '16px' }}>
-      <p style={{ margin: '0 0 10px', fontSize: '14.5px', color: T.ink.secondary, lineHeight: 1.5 }}>
-        Still stuck on <b style={{ color: T.ink.primary }}>{where}</b>? A person reads every one and writes back — the reply lands under My requests.
-      </p>
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => ask('bug')} data-help-door="bug" style={{ minHeight: '46px', padding: '10px 14px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
-          🐛 Report a bug
-        </button>
-        <button type="button" onClick={() => ask('question')} data-help-door="question" style={{ minHeight: '46px', padding: '10px 14px', background: T.ink.primary, color: T.ink.inverse, border: 'none', borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
-          ❓ Ask a question
-        </button>
-        <button type="button" onClick={() => ask('feature')} data-help-door="feature" style={{ minHeight: '46px', padding: '10px 14px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
-          ✨ Share an idea
-        </button>
-      </div>
-    </div>
-  )
-}
+// The three doors live in components/help/AskStrip; re-exported for the
+// callers that have always imported them from here.
+export { AskStrip }
 
 // ── one item, in full ─────────────────────────────────────────
 export function HelpItemView({ item }) {
@@ -157,12 +131,16 @@ export function HelpItemView({ item }) {
 }
 
 // ── My requests, for the roles that have no owner screen ──────
-// Lite users and the corp tier see their own items the way the composer's
-// My Items tab shows them — same route, same card.
+// Lite users and the corp tier: their own items, newest first as the route
+// returns them, on the same card the owner screen uses — with its unread
+// marker, which these roles never had. Under view-as the cards are read-only:
+// they are someone else's reports, and the server would refuse every write.
 function MyRequestsList({ viewAsUserId }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const myId = useContext(CurrentUserContext)?.id || null
+  const { markSeen, appendReply, applyEdit, applyDelete } = useFeedbackCardHandlers(setItems)
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
@@ -174,14 +152,16 @@ function MyRequestsList({ viewAsUserId }) {
     finally { setLoading(false) }
   }, [viewAsUserId])
   useEffect(() => { load() }, [load])
+  const supported = seenSupported(items)
   if (loading) return <BeeLoader label="Gathering your reports…" />
   if (error) return <p style={{ color: T.state.danger.strong }}>{error}</p>
-  if (items.length === 0) return <p style={{ color: T.ink.quiet, fontSize: '14.5px' }}>You haven&rsquo;t sent anything yet. The ask strip under any Help item is the fastest way.</p>
+  if (items.length === 0) return <p style={{ color: T.ink.quiet, fontSize: '14.5px' }}>You haven&rsquo;t sent anything yet. The three doors at the top of Help are the fastest way.</p>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {items.map(it => (
-        <FeedbackItemCard key={it.id} item={it} allowReply={!viewAsUserId}
-          onReplied={(id, row) => setItems(prev => prev.map(i => i.id === id ? { ...i, replies: [...(Array.isArray(i.replies) ? i.replies : []), row] } : i))} />
+        <FeedbackCard key={it.id} item={it} myId={myId} readOnly={!!viewAsUserId}
+          isNew={supported && isUnreadReply(it, myId)}
+          onSeen={markSeen} onReplied={appendReply} onEdited={applyEdit} onDeleted={applyDelete} />
       ))}
     </div>
   )
@@ -297,6 +277,7 @@ export default function HelpScreen({
   // ── the three Help views ──
   const renderSections = () => (
     <>
+      <AskStrip crumbs={[]} onAsk={onAsk} stripRef={askStripRef} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {sections.map((s, i) => (
           <div key={s.id} style={rowStyle} role="button" tabIndex={0} onClick={() => setView({ sectionId: s.id, topicId: null, itemId: null })}
@@ -312,7 +293,7 @@ export default function HelpScreen({
           </div>
         ))}
         {sections.length === 0 && !canEdit && (
-          <p style={{ color: T.ink.quiet, fontSize: '14.5px', margin: '8px 0' }}>Nothing here yet. Help is being written — check back soon, or ask below.</p>
+          <p style={{ color: T.ink.quiet, fontSize: '14.5px', margin: '8px 0' }}>Nothing here yet. Help is being written — check back soon, or ask above.</p>
         )}
         {canEdit && <AddButton label="Add section" onClick={() => openAdd('section', null, '')} />}
       </div>
@@ -327,7 +308,6 @@ export default function HelpScreen({
           ))}
         </div>
       )}
-      <AskStrip crumbs={[]} onAsk={onAsk} stripRef={askStripRef} />
     </>
   )
 
@@ -337,6 +317,7 @@ export default function HelpScreen({
       <h2 style={{ fontFamily: 'Georgia,serif', fontSize: '22px', fontWeight: 600, color: T.ink.primary, margin: '4px 0 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span>{section.icon || '📘'}</span> {section.title}
       </h2>
+      <AskStrip crumbs={[section]} onAsk={onAsk} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
         {section.children.map((t, ti) => (
           <div key={t.id} data-help-topic={t.id}>
@@ -368,7 +349,6 @@ export default function HelpScreen({
         ))}
         {canEdit && <AddButton label="Add topic" onClick={() => openAdd('topic', section.id, helpBreadcrumb([section]))} />}
       </div>
-      <AskStrip crumbs={[section]} onAsk={onAsk} />
     </>
   )
 
@@ -381,8 +361,8 @@ export default function HelpScreen({
         )}
       </div>
       <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '0 0 6px' }}>{helpBreadcrumb([section, topic])}</p>
-      <HelpItemView item={item} />
       <AskStrip crumbs={[section, topic, item]} onAsk={onAsk} />
+      <HelpItemView item={item} />
     </>
   )
 
@@ -409,7 +389,7 @@ export default function HelpScreen({
         <WhatsNew canEdit={canEdit} isMobile={isMobile} />
       ) : tab === 'requests' ? (
         showOwnerScreen
-          ? <OwnerFeedbackScreen locationId={locationId} onReportSomething={onReportSomething} title={null} />
+          ? <OwnerFeedbackScreen locationId={locationId} onAsk={onAsk} onReportSomething={onReportSomething} title={null} />
           : <MyRequestsList viewAsUserId={viewAsUserId} />
       ) : loading ? (
         <BeeLoader size="screen" label="Opening Help…" />

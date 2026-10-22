@@ -14,10 +14,13 @@
 // typed in stays on screen — the fault Ankur reported on the new-lead form
 // (feedback ddc3afab). Desktop keeps the centred modal.
 'use client'
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useContext } from 'react'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
 import useIsMobile from '@/components/hive/shared/useIsMobile'
-import { FeedbackItemCard } from '@/components/feedback/feedbackShared'
+import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
+// The ONE feedback card — the same one Help › My requests renders, unread
+// marker and all. View-as makes it read-only rather than a different design.
+import FeedbackCard, { isUnreadReply, seenSupported, useFeedbackCardHandlers } from '@/components/feedback/FeedbackCard'
 import GuidedIntake from '@/components/feedback/GuidedIntake'
 
 // The visible height of the viewport — the part the keyboard has not taken.
@@ -64,6 +67,8 @@ function useVisualViewportHeight(enabled) {
 export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null, ambientContext = null }) {
   const [tab, setTab]           = useState(initialTab) // 'mine' | 'submit'
   const [items, setItems]       = useState([])
+  const myId = useContext(CurrentUserContext)?.id || null
+  const { markSeen, appendReply, applyEdit, applyDelete } = useFeedbackCardHandlers(setItems)
   const [loading, setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [toast, setToast]       = useState(null)
@@ -157,17 +162,20 @@ export default function FeedbackModal({ onClose, initialTab = 'mine', viewAsUser
               </div>
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
-                {/* allowReply: only for the real session's own items — under
-                    view-as these are the IMPERSONATED user's reports, and the
-                    server would refuse the write anyway (submitter only). */}
+                {/* readOnly under view-as — these are the IMPERSONATED user's
+                    reports, and the server would refuse every write anyway
+                    (submitter only). */}
                 {items.map(it => (
-                  <FeedbackItemCard
+                  <FeedbackCard
                     key={it.id}
                     item={it}
-                    allowReply={!viewAsUserId}
-                    onReplied={(id, row) => setItems(prev => prev.map(i => i.id === id
-                      ? { ...i, replies: [...(Array.isArray(i.replies) ? i.replies : []), row] }
-                      : i))}
+                    myId={myId}
+                    readOnly={!!viewAsUserId}
+                    isNew={seenSupported(items) && isUnreadReply(it, myId)}
+                    onSeen={markSeen}
+                    onReplied={appendReply}
+                    onEdited={applyEdit}
+                    onDeleted={applyDelete}
                   />
                 ))}
               </div>

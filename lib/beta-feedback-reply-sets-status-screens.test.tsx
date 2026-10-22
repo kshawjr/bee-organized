@@ -20,7 +20,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import AdminFeedbackScreen from '@/components/admin/AdminFeedbackScreen'
 import OwnerFeedbackScreen from '@/components/feedback/OwnerFeedbackScreen'
-import { FeedbackItemCard, FeedbackStatusBadge } from '@/components/feedback/feedbackShared'
+import { FeedbackStatusBadge } from '@/components/feedback/feedbackShared'
+import FeedbackCard from '@/components/feedback/FeedbackCard'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 import { FEEDBACK_TYPE_WORD, FEEDBACK_TYPE_TAB_LABEL } from '@/lib/feedback-types'
@@ -252,12 +253,13 @@ describe('every status reads the same word on every surface', () => {
 
   it('the owner screen says each status in the shared word — planned and in_progress no longer read alike', async () => {
     const { host, unmount } = await ownerScreen(ONE_EACH.map(i => ({ ...i, user_id: 'u1' })))
-    let text = host.textContent || ''
-    for (const label of ['Open', 'Answered', 'Waiting', 'Done']) {
-      const tab = btn(host, `${label} · `)
-      if (tab) { await click(tab); text += host.textContent || '' }
-    }
-    for (const s of ALL_STATUSES) expect(text, s).toContain(FEEDBACK_STATUS_PLAIN[s])
+    // One list: unfold the closed ones, then read each card's own pill — not
+    // the page text, which the closed link's label would satisfy on its own.
+    const fold = host.querySelector('[data-feedback-closed-toggle]') as HTMLElement | null
+    if (fold && fold.getAttribute('aria-expanded') === 'false') await click(fold)
+    const pills = [...host.querySelectorAll('[data-feedback-status]')].map(p => [p.getAttribute('data-feedback-status'), p.textContent])
+    for (const s of ALL_STATUSES) expect(pills, s).toContainEqual([s, FEEDBACK_STATUS_PLAIN[s]])
+    const text = host.textContent || ''
     expect(FEEDBACK_STATUS_PLAIN.planned).not.toBe(FEEDBACK_STATUS_PLAIN.in_progress)
     for (const w of ['Sent', 'Being looked at']) expect(text).not.toContain(w)
     await unmount()
@@ -265,7 +267,7 @@ describe('every status reads the same word on every surface', () => {
 
   it('the shared card and its badge say each status in the shared word', () => {
     for (const s of ALL_STATUSES) {
-      const card = renderToStaticMarkup(<FeedbackItemCard item={item({ id: s, title: 't', status: s })} />)
+      const card = renderToStaticMarkup(<FeedbackCard item={item({ id: s, title: 't', status: s })} />)
       expect(card, s).toContain(`>${FEEDBACK_STATUS_PLAIN[s]}<`)
       expect(renderToStaticMarkup(<FeedbackStatusBadge status={s} />), s).toContain(`>${FEEDBACK_STATUS_PLAIN[s]}<`)
       for (const w of OLD_WORDS) expect(card, `${s}: ${w}`).not.toContain(`>${w}<`)

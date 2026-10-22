@@ -377,7 +377,7 @@ describe('GET /api/feedback — the "mine" tab', () => {
 
 // ═══════════════════════════════════════════════════════════════════
 // A leak in a COUNT is still a leak. The owner screen derives its header count,
-// its four tab counts and its subtitle from the GET response asserted above, so
+// its open/closed counts and its subtitle from the GET response asserted above, so
 // those are covered by construction. These pin the claim that there is no OTHER
 // owner-facing consumer of feedback rows — every remaining one is corp-gated.
 describe('no other owner-facing count reads feedback rows', () => {
@@ -386,16 +386,22 @@ describe('no other owner-facing count reads feedback rows', () => {
 
   it('the owner screen computes every count from the scoped GET, not a second read', () => {
     const owner = read('components/feedback/OwnerFeedbackScreen.jsx')
-    // Its only fetches are the scoped list and FOUR writes — the read-receipt,
-    // the submitter's reply into the thread, and the owner's own edit and
-    // delete of their own report. Not one of the four reads rows back into the
-    // list, so the counts still have exactly one source: an edit merges the
-    // route's echo of the row it just wrote, and a delete drops a row it
-    // already had. Neither refetches, and there is still no second read.
-    const fetches = owner.match(/fetch\(\s*[`'"][^`'"]+/g) || []
-    for (const f of fetches) expect(f).toMatch(/\/api\/admin\/feedback|\/api\/feedback\/seen|\/api\/feedback\/\$\{item\.id\}/)
+    const card = read('components/feedback/FeedbackCard.jsx')
+    // The screen's only fetch is the scoped list. The card's are FOUR writes —
+    // the read-receipt, the submitter's reply into the thread, and the owner's
+    // own edit and delete of their own report. Not one of them reads rows back
+    // into the list, so the counts still have exactly one source: an edit
+    // merges the route's echo of the row it just wrote, and a delete drops a
+    // row it already had. Neither refetches, and there is still no second read.
+    expect(owner.match(/\bfetch\(/g) || []).toHaveLength(1)
+    expect(owner).toMatch(/const res = await fetch\(url\)/)
+    const urls = owner.match(/const url = locationId[\s\S]*?'\/api\/admin\/feedback'/)
+    expect(urls, 'the one fetch is the scoped list').toBeTruthy()
+    const cardFetches = card.match(/fetch\(\s*[`'"][^`'"]+/g) || []
+    for (const f of cardFetches) expect(f).toMatch(/\/api\/feedback\/seen|\/api\/feedback\/\$\{item\.id\}/)
     // Counts are derived from `items` — the response — not fetched separately.
-    expect(owner).toMatch(/const counts = useMemo\(\(\) => \{/)
+    expect(owner).toMatch(/const openItems = useMemo\(\(\) => items\.filter/)
+    expect(owner).toMatch(/const closedItems = useMemo\(\(\) => items\.filter/)
     expect(owner).not.toContain('summarizeFeedbackQueues')
   })
 

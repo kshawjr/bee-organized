@@ -4,9 +4,11 @@
 //
 // The screen exists because owners were mounting the corp triage console with
 // one prop changed. So most of what is asserted here is ABSENCE: no status
-// control, no reply box, no queue metrics, nothing hidden behind a toggle. The
-// rest is that the reply — the reason someone opens this screen — renders as
-// the body of the card, in text, with the team's actual words.
+// control, no reply box open on arrival, no queue metrics. The rest is that the
+// reply — the reason someone opens this screen — renders as the body of the
+// card, in text, with the team's actual words. (Since the help-desk redesign:
+// one list, closed items folded behind one counted link, nothing stamped seen
+// on load — see lib/beta-owner-help-desk.test.tsx.)
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -113,7 +115,11 @@ async function mountScreen(items = ITEMS, onReport: any = () => {}) {
 const buttons = (host: HTMLElement) => [...host.querySelectorAll('button')] as HTMLButtonElement[]
 const byText = (host: HTMLElement, t: string) =>
   buttons(host).find(b => (b.textContent || '').trim() === t)
-const click = async (el: any) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
+const click = async (el: any) => {
+  if (!el) throw new Error('click(): the control to click is not on the screen')
+  await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+}
+const unfoldClosed = async (host: HTMLElement) => click(host.querySelector('[data-feedback-closed-toggle][aria-expanded="false"]'))
 
 beforeEach(() => { stubFetch() })
 afterEach(() => { vi.restoreAllMocks() })
@@ -159,11 +165,11 @@ describe('an owner gets no write controls at all', () => {
     await unmount()
   })
 
-  it('the only PATCH-capable route it can reach is never called — it reads, and marks seen', async () => {
+  it('the only PATCH-capable route it can reach is never called — loading only reads', async () => {
     const f = stubFetch()
     const { unmount } = await mountScreen()
     const methods = f.mock.calls.map(c => (c[1] as any)?.method).filter(Boolean)
-    expect(methods.every(m => m === 'POST')).toBe(true)
+    expect(methods).toEqual([])
     const urls = f.mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.startsWith('/api/admin/feedback/'))).toBe(false)
     await unmount()
@@ -172,9 +178,8 @@ describe('an owner gets no write controls at all', () => {
 
 // ── the reply is the point ────────────────────────────────────
 describe('the reply renders as text, as the body of the card', () => {
-  // a4 is open-and-answered, so it is on the default (Open) tab since issue
-  // 236. a1's reply says the same thing about a shipped item and is asserted
-  // through the Done tab below.
+  // a4 is open-and-answered, so it is in the open list. a1's reply says the
+  // same thing about a shipped item, folded under the closed link.
   it('quotes the team words with when they arrived', async () => {
     const { host, unmount } = await mountScreen()
     expect(host.textContent).toContain('Reproduced it on an iPhone — on the list to fix.')
@@ -184,7 +189,7 @@ describe('the reply renders as text, as the body of the card', () => {
 
   it('quotes them on a finished item too', async () => {
     const { host, unmount } = await mountScreen()
-    await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
+    await unfoldClosed(host)
     expect(host.textContent).toContain('Good catch — closed clients now stay out of the inbox.')
     expect(host.textContent).toContain('The team replied, 2 days ago')
     await unmount()
@@ -192,50 +197,58 @@ describe('the reply renders as text, as the body of the card', () => {
 
   it('says so plainly when nobody has replied', async () => {
     const { host, unmount } = await mountScreen()
-    expect(host.textContent).toContain('Nobody’s replied yet.')
+    expect(host.textContent).toContain('Nobody has written back yet.')
     await unmount()
   })
 
   it('shows the plain words, never the database ones', async () => {
     const { host, unmount } = await mountScreen()
-    // The open vocabulary is on the landing tab…
-    expect(host.textContent).toContain('Looking at it')
-    expect(host.textContent).toContain('On the list')
-    expect(host.textContent).toContain('With the team')
-    // …and the finished word is one tab away (issue 236 moved it there).
-    await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
-    expect(host.textContent).toContain('Fixed')
+    // The open vocabulary is in the open list…
+    const pills = () => [...host.querySelectorAll('[data-feedback-status]')].map(p => p.textContent)
+    expect(pills()).toContain('Looking at it')
+    expect(pills()).toContain('On the list')
+    expect(pills()).toContain('With the team')
+    // …and the finished word is one click away, under the closed link.
+    expect(pills()).not.toContain('Fixed')
+    await unfoldClosed(host)
+    expect(pills()).toContain('Fixed')
     await unmount()
   })
 })
 
-// ── done is a tab ─────────────────────────────────────────────
-describe('done is a tab, not a collapsed toggle', () => {
-  it('offers Done as a tab with a count, and no Show-N-closed control', async () => {
+// ── closed items fold away ────────────────────────────────────
+// Done USED to be a tab — "nineteen fixed things are the evidence that
+// reporting works". The redesign keeps the evidence one click away but stops
+// it splitting the list: one link, saying how many.
+describe('closed items fold behind one counted link, not a tab', () => {
+  it('offers no Done tab, and one link that names how many are closed', async () => {
     const { host, unmount } = await mountScreen()
-    expect(buttons(host).some(b => (b.textContent || '').startsWith('Done · '))).toBe(true)
-    // No show/hide-closed CONTROL. Matched on the toggle's SHAPE, not on the
-    // word: "Closed Lost clients…" is the owner's own report title, and the
-    // card header is itself a button, so a bare /closed/ sweep hits their words.
-    expect(buttons(host).some(b => /(show|hide)\s+\d*\s*closed/i.test(b.textContent || ''))).toBe(false)
+    expect(buttons(host).some(b => (b.textContent || '').startsWith('Done'))).toBe(false)
+    const fold = host.querySelectorAll('[data-feedback-closed-toggle]')
+    expect(fold.length).toBe(1)
+    expect(fold[0].textContent).toMatch(/^Show 2 closed/)
     await unmount()
   })
 
-  it('the Done tab reaches the shipped AND the declined item', async () => {
+  it('the link reaches the shipped AND the declined item', async () => {
     const { host, unmount } = await mountScreen()
-    await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
+    expect(host.textContent).not.toContain('Not doing this one')
+    await unfoldClosed(host)
     expect(host.textContent).toContain('Closed Lost clients showing back up in my inbox')
     expect(host.textContent).toContain('Not doing this one')
     // …and a declined item is NOT dressed up as Fixed.
-    expect(host.textContent).toContain('Not planned')
+    const declined = host.querySelector('[data-feedback-card="a5"] [data-feedback-status]')
+    expect(declined?.textContent).toBe('Not planned')
     await unmount()
   })
 
-  it('Waiting shows only the unanswered open one', async () => {
+  it('only the unanswered open one carries the waiting line', async () => {
     const { host, unmount } = await mountScreen()
-    await click(buttons(host).find(b => (b.textContent || '').startsWith('Waiting · '))!)
-    expect(host.textContent).toContain('Client showing in Request')
-    expect(host.textContent).not.toContain('Bulk update')
+    const waiting = [...host.querySelectorAll('[data-feedback-waiting]')].map(w => w.closest('[data-feedback-card]')?.getAttribute('data-feedback-card'))
+    // a3 is open and unanswered; a2 is open and answered; a5 is closed.
+    expect(waiting).toContain('a3')
+    expect(waiting).not.toContain('a2')
+    expect(waiting).not.toContain('a5')
     await unmount()
   })
 })
@@ -252,10 +265,10 @@ describe('the unread-replies banner', () => {
     await unmount()
   })
 
-  it('marks exactly those items seen, and nothing else', async () => {
-    const { unmount } = await mountScreen()
-    expect(seenCalls.length).toBe(1)
-    expect(seenCalls[0].ids.sort()).toEqual(['a1', 'a4'])
+  it('marks NOTHING seen on load — the banner is shown, not cleared', async () => {
+    const { host, unmount } = await mountScreen()
+    expect(host.textContent).toContain('Two new replies')
+    expect(seenCalls.length).toBe(0)
     await unmount()
   })
 
@@ -267,7 +280,7 @@ describe('the unread-replies banner', () => {
     expect(host.textContent).not.toContain('new reply')
     expect(seenCalls.length).toBe(0)
     // The replies themselves still render — nothing is hidden by the absence.
-    // (a4's, since the default tab is Open since issue 236; a1's is on Done.)
+    // (a4's, in the open list; a1's is folded under the closed link.)
     expect(host.textContent).toContain('Reproduced it on an iPhone — on the list to fix.')
     await unmount()
   })
@@ -306,9 +319,9 @@ describe('the empty state — most people who open this screen see it', () => {
     await unmount()
   })
 
-  it('hides the tab row when there is nothing to filter', async () => {
+  it('shows no closed link when there is nothing at all', async () => {
     const { host, unmount } = await mountScreen([])
-    expect(buttons(host).some(b => (b.textContent || '').startsWith('Done'))).toBe(false)
+    expect(host.querySelector('[data-feedback-closed-toggle]')).toBeNull()
     await unmount()
   })
 })

@@ -4,16 +4,12 @@
 // (components/admin/AdminFeedbackScreen) re-imports the status maps +
 // FeedbackStatusBadge/AttachmentList/timeAgo; BeeHub.jsx keeps only timeAgo.
 'use client'
-import React, { useState } from 'react'
+import React from 'react'
 // The plain-word status vocabulary moved to a server-safe module (issue 233) so
 // the reply email can speak the same words as the UI — an API route cannot
 // import this 'use client' file. Re-exported below, so every existing importer
 // of FEEDBACK_STATUS_PLAIN from here keeps working and there is still one home.
 import { FEEDBACK_STATUS_PLAIN, feedbackStatusWord } from '@/lib/feedback-queues'
-// The conversation thread + the "does this item invite a reply?" rule — the
-// same builders the owner screen and the triage modal use, so all three
-// surfaces render one history from one definition.
-import { buildFeedbackThread, threadInvitesReply } from '@/lib/feedback-replies'
 
 // Chip COLOURS per status. No words here — the label comes from
 // FEEDBACK_STATUS_PLAIN (lib/feedback-queues), the one status vocabulary.
@@ -112,150 +108,12 @@ function FeedbackAttachmentList({ attachments, thumb = 80 }) {
   )
 }
 
-// The glyph per type (issue 247 step 2). Was `type === 'bug' ? '🐛' : '✨'`,
-// which gave a hazard the sparkle an idea wears.
-//
-// AN OWNER CANNOT REACH THE NEW GLYPHS — decision and hazard exist only on
-// internal rows, which every owner-facing read excludes server-side. This card
-// still needs them because the SAME card renders in the "My Items" tab for an
-// ELEVATED viewer, where Kevin's own internal items do appear.
-//
-// An unrecognised type gets a neutral pin, never another type's glyph.
-const FEEDBACK_TYPE_EMOJI = { bug: '🐛', feature: '✨', question: '❓', decision: '🔀', hazard: '⚠️' }
-function feedbackTypeEmoji(type) {
-  return FEEDBACK_TYPE_EMOJI[String(type || '')] || '📌'
-}
-
-// One card in the "My Items" tab — handles its own show-more collapse.
-//
-// THE THREAD AND THE REPLY BOX LIVE HERE TOO. The reply email's button lands
-// on this tab (the one surface every role can reach), so the promise the email
-// makes — "tap the button and reply right on your report" — has to be true
-// HERE, not only on the owner nav screen. allowReply comes from the mount:
-// false under view-as (those are someone else's items; the server would refuse
-// the write anyway) and for any read-only rendering.
-function FeedbackItemCard({ item, allowReply = false, onReplied = () => {} }) {
-  const [expanded, setExpanded] = useState(false)
-  const [replyOpen, setReplyOpen] = useState(false)
-  const [replyText, setReplyText] = useState('')
-  const [sending, setSending] = useState(false)
-  const [replyError, setReplyError] = useState(null)
-  const long = (item.description || '').length > 150
-  const shown = !long || expanded ? item.description : `${item.description.slice(0, 150)}…`
-  const thread = buildFeedbackThread(item)
-  const canReply = allowReply && threadInvitesReply(item)
-
-  const sendReply = async () => {
-    const body = replyText.trim()
-    if (!body || sending) return
-    setSending(true)
-    setReplyError(null)
-    try {
-      const res = await fetch(`/api/feedback/${item.id}/replies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const row = await res.json()
-      setReplyText('')
-      setReplyOpen(false)
-      onReplied(item.id, row)
-    } catch {
-      // The words stay in the box — the one failure that must not lose them.
-      setReplyError('Couldn’t send your reply. Please try again.')
-    } finally {
-      setSending(false)
-    }
-  }
-  return (
-    <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'14px', background:'white' }}>
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px', marginBottom:'6px' }}>
-        <div style={{ display:'flex', alignItems:'flex-start', gap:'8px', minWidth:0 }}>
-          <span style={{ fontSize:'18px', lineHeight:1.2, flexShrink:0 }}>{feedbackTypeEmoji(item.type)}</span>
-          <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.35, wordBreak:'break-word' }}>{item.title}</p>
-        </div>
-        <FeedbackStatusBadge status={item.status} />
-      </div>
-      <p style={{ fontSize:'11px', color:'#8a9e9a', margin:'0 0 8px 26px' }}>{feedbackTimeAgo(item.created_at)}</p>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.55, margin:'0 0 0 26px', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-        {shown}
-        {long && (
-          <button onClick={() => setExpanded(e => !e)} style={{ marginLeft:'6px', background:'none', border:'none', color:'#2563eb', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', padding:0 }}>
-            {expanded ? 'Show less' : 'Show more'}
-          </button>
-        )}
-      </p>
-      {/* The whole conversation, oldest first — team words and the owner's
-          answers, from the same builder every other surface uses. This used to
-          show only the LATEST team reply (admin_response), which made the
-          email's "reply right on your report" land on a card with no history
-          and no box. */}
-      {thread.map(e => {
-        const team = e.authorRole === 'team'
-        return (
-          <div key={e.id} style={{ marginTop:'12px', marginLeft:'26px', padding:'10px 12px', background: team ? 'rgba(168,201,196,0.14)' : 'rgba(0,0,0,0.035)', border: team ? '1px solid rgba(168,201,196,0.3)' : '1px solid rgba(0,0,0,0.08)', borderRadius:'10px' }}>
-            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>
-              {team ? '💬 Response from team' : 'You replied'}
-            </p>
-            <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{e.body}</p>
-            {e.createdAt && (
-              <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px' }}>{feedbackTimeAgo(e.createdAt)}</p>
-            )}
-          </div>
-        )
-      })}
-      {canReply && !replyOpen && (
-        <button
-          type="button"
-          onClick={() => setReplyOpen(true)}
-          style={{ marginTop:'10px', marginLeft:'26px', padding:0, background:'none', border:'none', color:'#2563eb', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}
-        >
-          Reply to the team
-        </button>
-      )}
-      {canReply && replyOpen && (
-        <div style={{ marginTop:'10px', marginLeft:'26px' }}>
-          <textarea
-            value={replyText}
-            onChange={e => setReplyText(e.target.value)}
-            rows={3}
-            maxLength={2000}
-            placeholder="Write back to the team — they’ll see it on your report."
-            style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }}
-          />
-          {replyError && <p style={{ fontSize:'12px', color:'#b91c1c', margin:'6px 0 0' }}>{replyError}</p>}
-          <div style={{ display:'flex', gap:'8px', marginTop:'7px' }}>
-            <button
-              type="button"
-              onClick={sendReply}
-              disabled={sending || !replyText.trim()}
-              style={{ padding:'8px 14px', background:'#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, cursor:(sending || !replyText.trim()) ? 'default' : 'pointer', opacity:(sending || !replyText.trim()) ? 0.6 : 1 }}
-            >
-              {sending ? 'Sending…' : 'Send reply'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setReplyOpen(false); setReplyError(null) }}
-              style={{ padding:'8px 10px', background:'transparent', border:'none', color:'#8a9e9a', fontFamily:'inherit', fontSize:'13px', fontWeight:500, cursor:'pointer' }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-      {Array.isArray(item.attachments) && item.attachments.length > 0 && (
-        <div style={{ marginTop:'12px', marginLeft:'26px' }}>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', marginBottom:'6px' }}>📎 {item.attachments.length} attachment{item.attachments.length !== 1 ? 's' : ''}</p>
-          <FeedbackAttachmentList attachments={item.attachments} thumb={80} />
-        </div>
-      )}
-    </div>
-  )
-}
+// THE CARD ITSELF IS NOT HERE ANY MORE. FeedbackItemCard (hardcoded hex, a
+// 150-character "Show more", no unread marker) was one of three designs for
+// the same record; every surface now renders components/feedback/FeedbackCard.
 
 export {
   FEEDBACK_STATUS_CONF, FEEDBACK_STATUS_ORDER, FEEDBACK_STATUS_PLAIN,
   FeedbackStatusBadge, feedbackTimeAgo, feedbackFmtBytes, feedbackIsImage,
-  feedbackAttUrl, FeedbackAttachmentChip, FeedbackAttachmentList, FeedbackItemCard,
+  feedbackAttUrl, FeedbackAttachmentChip, FeedbackAttachmentList,
 }

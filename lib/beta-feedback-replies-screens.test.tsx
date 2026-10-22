@@ -2,11 +2,10 @@
 //
 // THE CONVERSATION, ON BOTH SCREENS.
 //
-// Owner side ("What you've told us"): the reply is the body of the card — so
+// Owner side (Help › My requests): the reply is the body of the card — so
 // the thread renders as the team's words and the owner's answers on one rail,
 // the composer is offered ONLY to the person who filed the report, and a
-// status decision is readable without asking anyone (the Fixed pill, the Done
-// tab).
+// status decision is readable without asking anyone (the Fixed pill).
 //
 // Admin side (triage): the list stays a work order — oldest first inside the
 // bugs-before-ideas bands — and the two states that need words from us are
@@ -100,7 +99,7 @@ describe('the owner sees the conversation', () => {
     await unmount()
   })
 
-  it('offers "Reply to the team" to the submitter, and NOT on a colleague’s report', async () => {
+  it('offers "Write back" to the submitter, and NOT on a colleague’s report', async () => {
     stubFetch({
       '/api/feedback/seen': { marked: 1, supported: true },
       '/api/admin/feedback': { items: [
@@ -110,29 +109,33 @@ describe('the owner sees the conversation', () => {
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
     const replyButtons = [...host.querySelectorAll('button')]
-      .filter(b => (b.textContent || '').trim() === 'Reply to the team')
+      .filter(b => (b.textContent || '').trim() === 'Write back')
     expect(replyButtons).toHaveLength(1)
     await unmount()
   })
 
-  it('an unanswered report cannot be replied to yet — answering is what the box is for', async () => {
+  it('an unanswered report says nobody has written back, and offers only "It’s holding me up" — not Write back', async () => {
     stubFetch({
       '/api/feedback/seen': { marked: 1, supported: true },
       '/api/admin/feedback': { items: [item({})] },
     })
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
-    expect(host.textContent).toContain('Nobody’s replied yet.')
-    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').trim() === 'Reply to the team')).toBe(false)
+    // The redesign's waiting line (Kevin, 2026-10-22: the honest line, with a
+    // way to say it is holding them up — no promise that it moves up a list).
+    expect(host.textContent).toContain('Nobody has written back yet.')
+    expect(host.textContent).not.toContain('moves up')
+    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').trim() === 'Write back')).toBe(false)
+    expect([...host.querySelectorAll('button')].filter(b => (b.textContent || '').trim() === 'It’s holding me up')).toHaveLength(1)
     await unmount()
   })
 
-  it('a decided item is readable without asking anyone — the Fixed pill on the Done tab', async () => {
+  it('a decided item is readable without asking anyone — the Fixed pill', async () => {
     stubFetch({
       '/api/feedback/seen': { marked: 1, supported: true },
       '/api/admin/feedback': { items: [item({ status: 'shipped', admin_response: 'Done.', admin_response_at: daysAgo(1), reply_seen_at: daysAgo(0) })] },
     })
-    // All items decided → the screen lands on Done (issue 236) and the status
-    // reads in the owner's four words, not the database's six.
+    // All items decided → the closed list starts unfolded, and the status
+    // reads in the owner's words, not the database's.
     const { host, unmount } = await mount(asUser('u1', <OwnerFeedbackScreen />))
     expect(host.textContent).toContain('Fixed')
     await unmount()
