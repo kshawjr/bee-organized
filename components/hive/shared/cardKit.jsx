@@ -286,9 +286,11 @@ function MenuHeading({ children }) {
 
 // InlineToast (BeeHub scope) renders {msg} verbatim, so a React node
 // rides through — the Undo button lives inside the toast; the undo
-// window is the host's ~3s auto-dismiss.
-export const undoToast = (text, onUndo) => ({
+// window is the host's ~3s auto-dismiss unless a `duration` is passed
+// (junk passes 6s, matching the Inbox's undoToast).
+export const undoToast = (text, onUndo, duration) => ({
   kind: 'success',
+  ...(duration ? { duration } : {}),
   msg: (
     <span>
       {text} ·{' '}

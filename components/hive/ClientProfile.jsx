@@ -526,7 +526,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           onLeadPatched(c.id, { is_junk: false })
           setToast({ kind: 'success', msg: `${c.name} restored` })
         } catch (e) { setToast({ kind: 'error', msg: `Undo failed: ${e.message}` }) }
-      }))
+      }, 6000))
     } catch (e) { setToast({ kind: 'error', msg: `Junk failed: ${e.message}` }) }
   }
 

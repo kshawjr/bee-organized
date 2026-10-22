@@ -1329,16 +1329,33 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               a second path that could drift from it.
               ONE ROW AT A TIME, deliberately. There is no "bin all" here and
               must not be: a single click that empties a shelf of 40 is exactly
-              the accident this whole piece of work exists to prevent. */}
+              the accident this whole piece of work exists to prevent.
+              CONFIRM FIRST, like every other junk door: Bin opens the same
+              in-menu confirm the ··· Mark as junk arms — same sentence, same
+              buttons, same RowMenu portal anchored to Bin — and writes only
+              on "Yes". It rides menuFor, so any menu close disarms it. */}
           <button
             className="bee-small-action"
             data-testid={`bin-${p.id}`}
+            data-bee-menu-trigger={`bin-${p.id}`}
             title="Move to the Recycle Bin"
             disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); markJunk(p) }}
+            onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === `bin-${p.id}` ? null : `bin-${p.id}`) }}
             style={{ ...dismissedVerb, opacity: busyId === p.id ? 0.5 : 1, cursor: busyId === p.id ? 'default' : 'pointer' }}>
             Bin
           </button>
+          {menuFor === `bin-${p.id}` && (
+            <RowMenu anchorId={`bin-${p.id}`} isMobile={isMobile} onClose={() => setMenuFor(null)}>
+              <MenuConfirm
+                testid="menu-confirm-junk"
+                prompt={confirmPrompt('junk', p.name)}
+                yes={CONFIRM_YES.junk}
+                danger
+                disabled={busyId === p.id}
+                onConfirm={() => { setMenuFor(null); markJunk(p) }}
+                onCancel={() => setMenuFor(null)} />
+            </RowMenu>
+          )}
         </span>
       )
     ) : sent ? (

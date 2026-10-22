@@ -407,9 +407,11 @@ export default function Timeline({ leadId = null, partnerId = null, engagementId
   const unremove = (id) => setRemovedIds(prev => { const n = new Set(prev); n.delete(id); return n })
 
   // Same undo idiom as the Inbox actions — the host toast renders {msg}
-  // verbatim, so the Undo button rides inside; window = ~3s auto-dismiss.
-  const undoToast = (text, onUndo) => ({
+  // verbatim, so the Undo button rides inside; window = ~3s auto-dismiss
+  // unless a `duration` is passed (both undos below pass 6s).
+  const undoToast = (text, onUndo, duration) => ({
     kind: 'success',
+    ...(duration ? { duration } : {}),
     msg: (
       <span>
         {text} ·{' '}
@@ -442,7 +444,7 @@ export default function Timeline({ leadId = null, partnerId = null, engagementId
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
-      }))
+      }, 6000))
     } catch (e) {
       unremove(it.id) // revert
       setToast({ kind: 'error', msg: `Cancel failed: ${e.message}` })
@@ -473,7 +475,7 @@ export default function Timeline({ leadId = null, partnerId = null, engagementId
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
-      }))
+      }, 6000))
     } catch (e) {
       unremove(it.id) // revert
       setToast({ kind: 'error', msg: `Un-snooze failed: ${e.message}` })

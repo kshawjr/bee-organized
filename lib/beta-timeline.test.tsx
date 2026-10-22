@@ -332,6 +332,7 @@ describe('inline actions', () => {
     expect(calls).toEqual([{ url: expect.stringContaining('/api/scheduled-stage-emails/se-1'), method: 'PATCH', body: { cancelled: true } }])
     expect(host.textContent).not.toContain('3-month check-in') // removed from the stream
     expect(toasts.at(-1)?.kind).toBe('success')
+    expect(toasts.at(-1)?.duration, 'the undo window is 6s').toBe(6000)
     await unmount()
   })
 
@@ -350,14 +351,16 @@ describe('inline actions', () => {
   it('un-snooze reuses the snooze-clear PATCH and propagates via onLeadPatched', async () => {
     withActionable()
     const patched: any[] = []
+    const toasts: any[] = []
     const { host, unmount } = await mount(
-      <Timeline leadId="lead-9" nowMs={NOW} onLeadPatched={(id: string, cols: any) => patched.push([id, cols])} />,
+      <Timeline leadId="lead-9" nowMs={NOW} onLeadPatched={(id: string, cols: any) => patched.push([id, cols])} setToast={t => toasts.push(t)} />,
     )
     await click(rowButton(host, 'Snoozed until')!)
     await click([...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Un-snooze')!)
     expect(calls).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), method: 'PATCH', body: { snoozed_until: null } }])
     expect(patched).toEqual([['lead-9', { snoozed_until: null }]])
     expect(host.textContent).not.toContain('Snoozed until')
+    expect(toasts.at(-1)?.duration, 'the undo window is 6s').toBe(6000)
     // and the translator carries it to the Person shape for the Inbox
     expect(leadColsToPersonFields({ snoozed_until: null })).toEqual({ snoozeUntil: null })
     await unmount()

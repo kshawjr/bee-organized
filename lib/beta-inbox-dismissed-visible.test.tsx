@@ -37,6 +37,7 @@ import {
   describeDismissal, dismissalLine, dismissRouteOfLabel,
   DISMISS_BUTTON_LABEL, NO_COVERAGE_LABEL,
 } from '@/components/hive/shared/dismissalFacts'
+import { confirmPrompt } from '@/components/hive/shared/leadDispositions'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -559,6 +560,12 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
     await click(band(m.host)!)
     return m
   }
+  // Bin confirms first (the junk confirm, in its RowMenu portal on <body>),
+  // so binning is two clicks: Bin, then Yes.
+  const binAndConfirm = async (m: any, p: any) => {
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    await click(document.querySelector('[data-testid="menu-confirm-junk-yes"]')!)
+  }
 
   it('junks the lead and it leaves the shelf', async () => {
     const p = dismissedNoActor({ personOver: { id: 'bn', name: 'Courtney Grady' } })
@@ -566,7 +573,7 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
 
     const btn = m.host.querySelector(`[data-testid="bin-${p.id}"]`) as HTMLButtonElement
     expect(btn, 'a dismissed row offers the Bin').toBeTruthy()
-    await click(btn)
+    await binAndConfirm(m, p)
 
     // The EXISTING junk write — is_junk, and nothing else. Not a delete, and
     // not a second path of its own.
@@ -580,7 +587,7 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
   it('the binned lead is in the Recycle Bin — is_junk is what the Bin reads', async () => {
     const p = dismissedNoActor({ personOver: { id: 'bn2', name: 'Courtney Grady' } })
     const m = await expandedShelf(p)
-    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    await binAndConfirm(m, p)
     expect(patches[0].body.is_junk).toBe(true)
     // Nothing about the dismissal was touched on the way there.
     expect('inbox_dismissed_at' in patches[0].body).toBe(false)
@@ -589,7 +596,7 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
   it('UNDO returns it to the shelf STILL DISMISSED — it does not jump the worklist', async () => {
     const p = dismissedNoActor({ personOver: { id: 'bn3', name: 'Courtney Grady' } })
     const m = await expandedShelf(p)
-    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    await binAndConfirm(m, p)
 
     const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
     const undo = kids.find(k => k?.type === 'button')
@@ -611,7 +618,7 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
   it('says where it went back to, rather than claiming it was "restored"', async () => {
     const p = dismissedNoActor({ personOver: { id: 'bn4', name: 'Courtney Grady' } })
     const m = await expandedShelf(p)
-    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    await binAndConfirm(m, p)
     const kids = React.Children.toArray(lastToast.msg.props.children) as any[]
     await act(async () => { await kids.find(k => k?.type === 'button').props.onClick() })
     expect(lastToast.msg).toContain('back under Dismissed')
@@ -622,6 +629,29 @@ describe('Bin — a dismissed lead can go to the Recycle Bin', () => {
     const m = await expandedShelf(p)
     expect((m.host.querySelector(`[data-testid="put-back-${p.id}"]`) as HTMLElement).className).toContain('bee-small-action')
     expect((m.host.querySelector(`[data-testid="bin-${p.id}"]`) as HTMLElement).className).toContain('bee-small-action')
+  })
+
+  it('Bin asks first — the same junk confirm as the ··· menu — and writes nothing until Yes', async () => {
+    const p = dismissedNoActor({ personOver: { id: 'bc', name: 'Courtney Grady' } })
+    const m = await expandedShelf(p)
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+
+    // Armed, not fired: the junk confirm is up, carrying the junk sentence.
+    const confirm = document.querySelector('[data-testid="menu-confirm-junk"]')
+    expect(confirm, 'Bin shows a confirm').toBeTruthy()
+    expect(confirm!.textContent).toContain(confirmPrompt('junk', 'Courtney Grady'))
+    expect(patches).toHaveLength(0)
+    expect(m.host.textContent).toContain('Courtney Grady')
+
+    // "Keep it" backs out with nothing written.
+    await click(document.querySelector('[data-testid="menu-confirm-junk-no"]')!)
+    expect(document.querySelector('[data-testid="menu-confirm-junk"]')).toBeNull()
+    expect(patches).toHaveLength(0)
+
+    // Yes writes the junk.
+    await click(m.host.querySelector(`[data-testid="bin-${p.id}"]`)!)
+    await click(document.querySelector('[data-testid="menu-confirm-junk-yes"]')!)
+    expect(patches).toEqual([{ id: p.id, body: { is_junk: true } }])
   })
 
   it('there is NO bulk bin — one row at a time, deliberately', async () => {

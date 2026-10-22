@@ -12488,6 +12488,22 @@ function InlineToast({ kind, msg }) {
   )
 }
 
+// The one host-toast state behind InlineToast, shared by App and
+// DashboardScreen (App's is the one the live Clients screen draws). Default
+// auto-dismiss is 3s; a toast may carry an explicit `duration` to widen its
+// window (undo toasts pass 6s) without moving the default for success and
+// error messages. Before this was shared, App's copy hardcoded 3000 and
+// silently dropped every undo's 6000.
+function useHostToast() {
+  const [toast, setToast] = useState(null)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), toast.duration || 3000)
+    return () => clearTimeout(t)
+  }, [toast])
+  return [toast, setToast]
+}
+
 function JobberConnectStep({ markDone, setActiveStepOpen }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
@@ -24824,15 +24840,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     return () => { dead = true }
   }, [showNewLead, homeLookups])
   const [locIndicatorHover, setLocIndicatorHover] = useState(false)
-  const [toast, setToast] = useState(null)
-  useEffect(() => {
-    if (!toast) return
-    // Default auto-dismiss is 3s; a toast may carry an explicit `duration`
-    // to widen its window (destructive undo toasts pass 6s) without moving
-    // the global default.
-    const t = setTimeout(() => setToast(null), toast.duration || 3000)
-    return () => clearTimeout(t)
-  }, [toast])
+  const [toast, setToast] = useHostToast()
   // Client-side override to dismiss onboarding after a milestone (e.g. import
   // succeeds). The real source of truth is locations.subscription_status; this
   // state lets the user exit without a DB write. Resets on page reload —
@@ -36931,12 +36939,7 @@ export default function App({
 } = {}) {
   const router = useRouter()
   const [role, setRole]                     = useState(initialRole ?? 'super_admin')
-  const [toast, setToast]                   = useState(null)
-  useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => setToast(null), 3000)
-    return () => clearTimeout(t)
-  }, [toast])
+  const [toast, setToast]                   = useHostToast()
   // Hive Hub Guide: slides come from Supabase via page.tsx → initialGuideSlides.
   // No client-side defaults — empty array stays empty, modal stays hidden.
   const [guideSlides, setGuideSlides]       = useState(Array.isArray(initialGuideSlides) ? initialGuideSlides : [])
