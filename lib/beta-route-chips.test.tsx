@@ -300,6 +300,22 @@ describe('D. one press → 5 seconds to undo → the move', () => {
     await unmount()
   })
 
+  // 22 Oct 2026 — already a client there: the server attached the enquiry to
+  // their record and binned this copy. The toast must not say "transferred".
+  it('already a client at Lincoln: the row goes and the toast says it was added to their record', async () => {
+    transferReply = { ok: true, status: 200, body: { success: true, attached_to: 'beatrice-real' } }
+    const setToast = vi.fn()
+    const { host, unmount } = await mount([leadRow()], { setToast })
+    vi.useFakeTimers()
+    await act(async () => { chips(host)[0].click() })
+    await act(async () => { vi.advanceTimersByTime(ROUTE_UNDO_MS) })
+    vi.useRealTimers()
+    await flush()
+    expect(Array.from(host.querySelectorAll('.bee-inbox-row')).some((r) => (r.textContent || '').includes('Beatrice Lead'))).toBe(false)
+    expect(setToast).toHaveBeenCalledWith({ kind: 'success', msg: 'Beatrice Lead is already a client at Lincoln — added to their record' })
+    await unmount()
+  })
+
   it('after a move the page changes, but leads already fetched are not fetched again', async () => {
     const { host, unmount } = await mount([leadRow(), leadRow({ id: 'reno', name: 'Reno Lead', originZip: '89509' })])
     vi.useFakeTimers()

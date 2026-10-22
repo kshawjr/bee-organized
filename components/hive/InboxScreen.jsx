@@ -771,7 +771,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     }
     setPendingMove((m) => { const n = { ...m }; delete n[p.id]; return n })
     if (ok) {
-      onTransferred(p, { id: destId, name: destName })
+      onTransferred(p, { id: destId, name: destName }, json)
     } else {
       setMoveError((m) => ({ ...m, [p.id]: json?.error === 'network' ? 'Network error — please try again' : transferErrorCopy(json?.error) }))
     }
@@ -1125,10 +1125,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // The transfer landed (endpoint already moved the lead + notified +
   // re-enrolled). Suppress the row this session and confirm; the Realtime
   // refetch will re-map it under its new location.
-  function onTransferred(p, dest) {
+  // An `attached_to` result means the person was already a client there: the
+  // enquiry went onto that record and this copy was binned, not moved.
+  function onTransferred(p, dest, result) {
     addTo(setTransferredIds, p.id)
     setTransferFor(null)
-    setToast({ kind: 'success', msg: `${p.name} transferred to ${dest?.name || 'location'}` })
+    setToast({ kind: 'success', msg: result?.attached_to
+      ? `${p.name} is already a client at ${dest?.name || 'that location'} — added to their record`
+      : `${p.name} transferred to ${dest?.name || 'location'}` })
   }
 
   // "No coverage" landed. The endpoint sent the email and — per Kevin's rule —
@@ -1977,7 +1981,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           subline={transferOriginLine(transferFor)}
           preselectId={transferFor.routeInsteadId || null}
           onClose={() => setTransferFor(null)}
-          onDone={(dest) => onTransferred(transferFor, dest)}
+          onDone={(dest, result) => onTransferred(transferFor, dest, result)}
         />
       )}
 

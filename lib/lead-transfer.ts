@@ -27,6 +27,13 @@
 // engagement is what the old location's reports count. Read that file before
 // loosening either.
 //
+// ALREADY A CLIENT THERE (22 Oct 2026) — before moving, the destination is
+// checked for the same person by intake's own match (exact email or phone,
+// that location only, never name). One clear match: no move and no second
+// record — the enquiry is attached to their record as a resubmission and the
+// waiting copy is binned, flagged (attachToExistingClient). An ambiguous
+// match moves as before, flagged possible_duplicate_of.
+//
 // A lead that already has a home additionally:
 //   • OWES A REASON (400 reason_required). It is written on the transfer
 //     touchpoint, beside who moved it (user_id), so the timeline says why.
@@ -108,6 +115,8 @@ import { locationHasOperationalStaff } from '@/lib/notification-recipients'
 import { TRANSFER_IN_LABEL } from '@/lib/enquiry-exit'
 import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
 import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
+import { queryLeadMatches, classifyLeadMatches } from '@/components/hive/shared/clientMatch'
+import { attachResubmission } from '@/lib/enquiry-resubmission'
 
 // Who is moving the lead. hubUserId is stamped on the transfer touchpoint
 // (user_id); role is re-checked with isAdmin before anything is read.
@@ -146,7 +155,7 @@ export async function transferLead(args: {
   // move writes with the service role, never an RLS-scoped client) ─
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, name, email, phone, project_type, request_details, preferred_contact, source, address, city, state, zip, location_id, location_uuid, assigned_to, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status')
+    .select('id, name, email, phone, project_type, request_details, preferred_contact, source, address, city, state, zip, location_id, location_uuid, assigned_to, jobber_client_id, jobber_request_id, jobber_quote_id, jobber_job_id, jobber_invoice_id, jobber_assessment_id, jobber_sync_status, possible_duplicate_of')
     .eq('id', id)
     .single()
   if (loadError || !existing) {
@@ -238,6 +247,46 @@ export async function transferLead(args: {
 
   const now = new Date().toISOString()
 
+  // ─── Already a client at the destination? ─────────────────────
+  // The same match-or-create gate intake runs at the location a form lands
+  // at, run here at the location the lead is moving TO — intake never saw
+  // that location (Shirley Ann Morgan: the general form put her in Other on
+  // 12 Oct, the move into Central Denver on 13 Oct made her a second record
+  // there). Same vocabulary, same tiers (clientMatch): exact email (case and
+  // whitespace ignored) or phone_normalized, this location only, never name.
+  //   SOLID       — attach the enquiry to that record as a resubmission and
+  //                 bin this copy, flagged (attachToExistingClient below).
+  //   IN QUESTION — move as before, flagged possible_duplicate_of.
+  // A failed match read degrades to the plain move with a warning — a
+  // duplicate is recoverable, a move that silently never happens is not.
+  const matchWarnings: string[] = []
+  let possibleDuplicateIds: string[] = []
+  try {
+    const rows = await queryLeadMatches(supabaseService, {
+      email: existing.email,
+      phone: existing.phone,
+      locationUuid: dest.id,
+    })
+    const verdict = classifyLeadMatches(rows.filter((r: { id: string }) => r.id !== id), { email: existing.email, phone: existing.phone }) as {
+      tier: 'solid' | 'in_question' | 'none'
+      match?: any
+      matchedOn?: string
+      matchIds?: string[]
+    }
+    if (verdict.tier === 'solid') {
+      return await attachToExistingClient({
+        existing, dest, actor, now, originLabel, requestOrigin,
+        match: verdict.match,
+        matchedOn: verdict.matchedOn ?? 'email',
+        baseWarnings: matchWarnings,
+      })
+    }
+    if (verdict.tier === 'in_question') possibleDuplicateIds = verdict.matchIds ?? []
+  } catch (err: any) {
+    console.error('[transfer] destination match failed — moving without it', err)
+    matchWarnings.push(`dedup_match_failed: ${err?.message || String(err)}`)
+  }
+
   // ─── Move BOTH location columns coherently ────────────────────
   // Dedicated write (NOT the generic PATCH allowlist, which deliberately
   // excludes the location columns) via the service client.
@@ -254,6 +303,10 @@ export async function transferLead(args: {
       // is no window where the lead sits at its new location still hidden.
       inbox_dismissed_at: null,
       snoozed_until: null,
+      // IN QUESTION at the destination: move it, but say who it might be.
+      ...(possibleDuplicateIds.length
+        ? { possible_duplicate_of: withDuplicateIds(existing.possible_duplicate_of, possibleDuplicateIds) }
+        : {}),
       updated_at: now,
     })
     .eq('id', id)
@@ -284,7 +337,23 @@ export async function transferLead(args: {
     return { status: 409, body: { error: 'lead_changed' } }
   }
 
-  const warnings: string[] = []
+  const warnings: string[] = [...matchWarnings]
+
+  // The IN QUESTION flag, in words the timeline shows — intake's own trace.
+  if (possibleDuplicateIds.length > 0) {
+    const { error: dupTpErr } = await supabaseService.from('touchpoints').insert({
+      lead_id:       id,
+      location_uuid: dest.id,
+      kind:          'system',
+      method:        'system',
+      label:         'Possible duplicate — transfer matched existing lead(s)',
+      notes:         `Suspected match at ${dest.name}: ${possibleDuplicateIds.join(', ')}`,
+      status:        'done',
+      occurred_at:   now,
+      user_id:       actor.hubUserId,
+    })
+    if (dupTpErr) warnings.push(`dup_touchpoint_insert_failed: ${dupTpErr.message}`)
+  }
 
   // ─── Clear the assignee rows ──────────────────────────────────
   // Best effort like everything after the move — but a failure here is said
@@ -552,5 +621,136 @@ export async function transferLead(args: {
     drip_enrolled: dripEnrolled,
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(warnings.length ? { warnings } : {}),
+  } }
+}
+
+// leads.possible_duplicate_of is JSONB holding an ARRAY of lead ids (some rows
+// carry several, from intake and the Jobber import). Add to it, never replace
+// it, and never list an id twice.
+export function withDuplicateIds(current: unknown, add: string[]): string[] {
+  const had = Array.isArray(current)
+    ? current.filter((v): v is string => typeof v === 'string')
+    : typeof current === 'string' && current ? [current] : []
+  return Array.from(new Set([...had, ...add]))
+}
+
+// ─── The person is already a client at the destination ────────────
+// No second record. The enquiry goes onto the record they already have, by
+// the SAME attach a website resubmission gets (lib/enquiry-resubmission):
+// empty fields filled, an open engagement surfaced or a past client's card
+// founded, a "Webform resubmission" touchpoint (which reopens their Inbox
+// entry), drip only if never enrolled, and the location told "returning
+// client".
+//
+// The copy that was waiting to be moved is BINNED, flagged (Kevin, 22 Oct
+// 2026): is_junk true and possible_duplicate_of naming the real record, its
+// drip stopped, its Other card retired. Nothing is deleted, and Restore
+// brings it back. Its location columns are left alone — it never arrived.
+async function attachToExistingClient(args: {
+  existing: Record<string, any>
+  dest: { id: string; name: string; location_id: string; lifecycle_status: string | null }
+  actor: TransferActor
+  now: string
+  originLabel: string
+  requestOrigin: string | null
+  match: Record<string, any> & { id: string }
+  matchedOn: string
+  baseWarnings: string[]
+}): Promise<TransferOutcome> {
+  const { existing, dest, actor, now, originLabel, requestOrigin, match, matchedOn } = args
+  const id: string = existing.id
+
+  // Bin the waiting copy first: if this write fails, nothing has been
+  // attached and the lead is exactly where it was.
+  const { data: binned, error: binError } = await supabaseService
+    .from('leads')
+    .update({
+      is_junk: true,
+      possible_duplicate_of: withDuplicateIds(existing.possible_duplicate_of, [match.id]),
+      updated_at: now,
+    })
+    .eq('id', id)
+    // Same race guard as the move: a Send to Jobber landing in between
+    // means this lead is no longer a clean copy.
+    .is('jobber_client_id', null)
+    .select('id')
+  if (binError) {
+    return { status: 500, body: { error: 'transfer_failed', detail: binError.message } }
+  }
+  if (Array.isArray(binned) && binned.length === 0) {
+    return { status: 409, body: { error: 'lead_changed' } }
+  }
+
+  const warnings: string[] = [...args.baseWarnings]
+
+  try {
+    await stopActiveDripsForLead(id, 'junk')
+  } catch (err: any) {
+    console.error('[transfer] binned copy drip stop failed', err)
+    warnings.push(`drip_stop_failed: ${err?.message || String(err)}`)
+  }
+
+  const { error: tpError } = await supabaseService.from('touchpoints').insert({
+    lead_id:       id,
+    location_uuid: existing.location_uuid,
+    kind:          'system',
+    method:        'system',
+    label:         'Already a client — added to their record',
+    notes:         `Already a client at ${dest.name} (matched on ${matchedOn}). This enquiry was added to their record (${match.id}) instead of making a second one, and this copy was binned.`,
+    status:        'done',
+    occurred_at:   now,
+    user_id:       actor.hubUserId,
+  })
+  if (tpError) warnings.push(`touchpoint_insert_failed: ${tpError.message}`)
+
+  const attached = await attachResubmission({
+    matched: match,
+    matchedOn,
+    location: dest,
+    submittedName: existing.name || match.name || '',
+    submission: {
+      email: existing.email ?? null,
+      phone: existing.phone ?? null,
+      address: existing.address ?? null,
+      city: existing.city ?? null,
+      state: existing.state ?? null,
+      zip: existing.zip ?? null,
+      project_type: existing.project_type ?? null,
+      message: existing.request_details ?? null,
+      preferred_contact: existing.preferred_contact ?? null,
+    },
+    source: existing.source ?? null,
+    baseWarnings: warnings,
+    now,
+    reqOrigin: requestOrigin,
+    phoneNote: null,
+    via: `transferred from ${originLabel}`,
+  })
+
+  try {
+    const who = await actorName(actor.hubUserId)
+    await retireOtherCards({ leadId: id, resolution: 'binned', line: `🔁 Already a client at *${dest.name}* — added to their record${who ? ` by ${who}` : ''}.` })
+  } catch (err: any) {
+    console.error('[transfer] slack card edit failed', err)
+  }
+
+  return { status: 200, body: {
+    success:     true,
+    lead_id:     id,
+    attached_to: match.id,
+    matched_on:  matchedOn,
+    from:        { uuid: existing.location_uuid, slug: existing.location_id },
+    to:          {
+      uuid:             dest.id,
+      slug:             dest.location_id,
+      name:             dest.name,
+      lifecycle_status: dest.lifecycle_status ?? null,
+    },
+    notified:      attached.notifiedCount,
+    drip_enrolled: attached.dripEnrolled,
+    ...(attached.engagementId
+      ? { engagement_id: attached.engagementId, engagement_action: attached.engagementFounded ? 'founded' : 'updated' }
+      : attached.foundingSkipped ? { engagement_action: 'skipped', engagement_skipped: attached.foundingSkipped } : {}),
+    ...(attached.warnings.length ? { warnings: attached.warnings } : {}),
   } }
 }

@@ -32,7 +32,7 @@ const h = vi.hoisted(() => {
       ? state.queue.splice(idx, 1)[0].resp
       : { data: null, error: null }
     const b: any = {}
-    for (const m of ['select', 'eq', 'neq', 'or', 'not', 'is', 'in', 'order', 'limit']) {
+    for (const m of ['select', 'eq', 'neq', 'or', 'not', 'is', 'in', 'order', 'limit', 'range']) {
       b[m] = () => b
     }
     b.update = (arg: any) => { state.updates.push({ table, arg }); return b }
@@ -115,7 +115,8 @@ const DEST = (over: any = {}) => ({
 })
 
 // Order the endpoint consumes: hub_users (server) → leads (existing) →
-// locations (dest) → leads (update result) → touchpoints (insert) →
+// locations (dest) → leads (destination match: nobody there) →
+// leads (update result) → touchpoints (insert) →
 // lead_drip_progress (verify). Callers tune the pieces they assert on.
 const arm = (opts: {
   role?: string
@@ -130,6 +131,7 @@ const arm = (opts: {
   h.enqueue('hub_users', { id: 'u1', role: opts.role ?? 'admin', location_id: null })
   h.enqueue('leads', opts.lead ?? LEAD())
   h.enqueue('locations', opts.dest ?? DEST())
+  h.enqueue('leads', [])                              // destination match — nobody there
   h.enqueue('leads', {}, opts.moveError ?? null)      // update result
   h.enqueue('touchpoints', { id: 'tp-1' })            // touchpoint insert
   // verify query — only consumed on the active path

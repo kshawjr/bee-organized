@@ -152,6 +152,21 @@ export function matchPartnerToClients(people, { name, email, phone, locationId }
   return { auto: strong.length === 1 ? strong[0] : null, candidates: hits }
 }
 
+// Email is matched CASE-INSENSITIVELY on the stored side too (22 Oct 2026).
+// normalizeEmail lowercases what was typed, but leads.email is stored as it
+// arrived — 6,895 of 45,068 rows carry a capital — so an exact `eq` on the
+// lowercased key could never find them, at any door. `ilike` with no
+// wildcard is an exact, case-blind compare; `_` IS a LIKE wildcard, so it is
+// escaped. Inside a quoted PostgREST value the escape needs TWO backslashes
+// (one is eaten by PostgREST) — checked read-only against production: `\\_`
+// is literal, `\_` still matches any character. The rare address carrying
+// `%`, `*` or `\` keeps the old exact `eq` rather than an untested escape.
+function emailMatchFilter(e) {
+  const v = e.replace(/"/g, '')
+  if (/[%*\\]/.test(v)) return `email.eq."${v}"`
+  return `email.ilike."${v.replace(/_/g, '\\\\_')}"`
+}
+
 // The .or() filter string for the authoritative DB gate — built ONLY
 // from keys that actually exist. Returns null when there is no usable
 // key (never emit email.eq.null / phone_normalized.eq.). Values are
@@ -162,7 +177,7 @@ export function buildLeadMatchOr({ email, phone } = {}) {
   const parts = []
   const e = normalizeEmail(email)
   const d = normalizePhone(phone)
-  if (e) parts.push(`email.eq."${e.replace(/"/g, '')}"`)
+  if (e) parts.push(emailMatchFilter(e))
   // Both the 10-digit key and its "1"-prefixed twin: rows saved before
   // migrations/phone_normalized_drop_leading_one.sql still hold the 1 in
   // phone_normalized. Harmless once the migration has run.

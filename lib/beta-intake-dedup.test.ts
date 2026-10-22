@@ -325,7 +325,7 @@ describe('intake dedup — NO MATCH inserts as today', () => {
 
     const matchCall = callsFor('leads')[0]
     const orArg = opsOf(matchCall, 'or')[0][1][0] as string
-    expect(orArg).toBe('email.eq."sarah@email.com"') // no phone key → no phone clause
+    expect(orArg).toBe('email.ilike."sarah@email.com"') // no phone key → no phone clause
     expect(orArg).not.toContain('null')
     expect(opsOf(matchCall, 'not')[0][1]).toEqual(['is_junk', 'is', true])
     expect(opsOf(matchCall, 'eq')[0][1]).toEqual(['location_uuid', 'loc-uuid-1'])

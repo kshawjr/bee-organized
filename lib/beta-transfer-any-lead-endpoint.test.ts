@@ -36,6 +36,7 @@ const h = vi.hoisted(() => {
     countErrors: {} as Record<string, string>,
     assigneeRows: [] as any[],
     moveResult: [{ id: 'lead-1' }] as any,
+    destMatches: [] as any[],
     // lead_drip_progress verify answers, consumed in order; last one repeats.
     activeRows: [{ id: 'ldp-1' }] as any[],
     ops: [] as Op[],
@@ -44,6 +45,9 @@ const h = vi.hoisted(() => {
     const t = op.table
     if (op.kind === 'select') {
       if (t === 'hub_users') return { data: { id: 'u-corp', role: state.role, location_id: null }, error: null }
+      // The destination match (clientMatch queryLeadMatches, an .or() on
+      // email/phone) — nobody there unless a test says so.
+      if (t === 'leads' && op.filters.some((f: any[]) => f[0] === 'or')) return { data: state.destMatches, error: null }
       if (t === 'leads') return { data: state.lead, error: state.lead ? null : { message: 'nope' } }
       // The route reads the DESTINATION first, then the origin's name.
       if (t === 'locations') return { data: state.locationReads++ === 0 ? state.dest : state.origin, error: null }
@@ -68,7 +72,7 @@ const h = vi.hoisted(() => {
     const record = () => { if (!recorded) { recorded = true; state.ops.push(op) } }
     const b: any = {}
     b.select = (_cols?: any, opts?: any) => { if (opts?.count) wantsCount = true; return b }
-    for (const m of ['eq', 'neq', 'is', 'in', 'not', 'or', 'order', 'limit']) {
+    for (const m of ['eq', 'neq', 'is', 'in', 'not', 'or', 'order', 'limit', 'range']) {
       b[m] = (...a: any[]) => { op.filters.push([m, ...a]); return b }
     }
     b.update = (arg: any) => { op.kind = 'update'; op.arg = arg; return b }
@@ -156,7 +160,7 @@ beforeEach(() => {
   Object.assign(h.state, {
     role: 'admin', lead: HOMED(), dest: DEST(), origin: { name: 'Central Austin' }, locationReads: 0,
     counts: {}, countErrors: {}, assigneeRows: [{ hub_user_id: 'central-staff-1' }],
-    moveResult: [{ id: 'lead-1' }], activeRows: [{ id: 'ldp-1' }], ops: [],
+    moveResult: [{ id: 'lead-1' }], destMatches: [], activeRows: [{ id: 'ldp-1' }], ops: [],
   })
   vi.mocked(notifyNewLead).mockClear()
   vi.mocked(broadcastLeadMoved).mockClear()

@@ -220,6 +220,10 @@ export async function handleRouteAction(input: RouteActionInput): Promise<RouteA
     await privately(responseUrl, `:warning: Couldn't move this lead to ${dest.name}: ${reasonOf(out.body)}. It is still in Other.`)
     return 'move_refused'
   }
-  await editCard(responseUrl, message, `✅ Moved to *${dest.name}* by ${actor.name}.`)
+  // Already a client there: the enquiry went onto their record and this copy
+  // was binned (lib/lead-transfer attachToExistingClient) — say that, not "moved".
+  await editCard(responseUrl, message, out.body.attached_to
+    ? `🔁 Already a client at *${dest.name}* — added to their record by ${actor.name}.`
+    : `✅ Moved to *${dest.name}* by ${actor.name}.`)
   return 'moved'
 }

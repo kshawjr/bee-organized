@@ -201,7 +201,7 @@ export default function TransferLeadModal({ person, subline = null, preselectId 
     }
     setSubmitting(false)
     // Caller owns the close + optimistic row removal; hand up what happened.
-    onDone(selected)
+    onDone(selected, json)
   }
 
   const head = [person?.name, subline].filter(Boolean).join(' · ')

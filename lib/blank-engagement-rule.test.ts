@@ -156,14 +156,15 @@ describe('no path around the rule', () => {
         at = src.indexOf('foundManualEngagement({', at + 1)
       }
     }
-    // The route and the webform resubmission — if a new caller appears, it
-    // is checked by the loop above; if one vanishes, look at why.
+    // The route and the webform resubmission (lib/enquiry-resubmission.ts since
+    // 22 Oct 2026, shared by intake and the transfer) — if a new caller
+    // appears, it is checked by the loop above; if one vanishes, look at why.
     expect(sites.some(f => f.endsWith(join('app', 'api', 'engagements', 'route.ts')))).toBe(true)
-    expect(sites.some(f => f.endsWith(join('app', 'api', 'leads', 'intake', 'route.ts')))).toBe(true)
+    expect(sites.some(f => f.endsWith(join('lib', 'enquiry-resubmission.ts')))).toBe(true)
   })
 
   it('the webform resubmission names its card and carries the message', () => {
-    const src = readFileSync(join(process.cwd(), 'app/api/leads/intake/route.ts'), 'utf8')
+    const src = readFileSync(join(process.cwd(), 'lib/enquiry-resubmission.ts'), 'utf8')
     const at = src.indexOf('foundManualEngagement({')
     const call = src.slice(at, src.indexOf('})', at))
     expect(call).toContain("title: 'Website enquiry'")

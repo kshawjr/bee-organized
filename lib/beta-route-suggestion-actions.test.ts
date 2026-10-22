@@ -151,6 +151,14 @@ describe('Accept — move it, then edit the card in place', () => {
     expect(JSON.stringify(lastPost())).not.toContain('route_actions')
   })
 
+  // 22 Oct 2026 — already a client there: the enquiry went onto their record
+  // and this copy was binned, so the card must not claim a move.
+  it('already a client at the hive pressed: the card says it was added to their record', async () => {
+    vi.mocked(transferLead).mockResolvedValueOnce({ status: 200, body: { success: true, attached_to: 'real-1' } })
+    expect(await accept('loc_miami')).toBe('moved')
+    expect(editedLine()).toBe('🔁 Already a client at *Miami* — added to their record by Leslie Mullins.')
+  })
+
   it('a refused move (e.g. already in Jobber) leaves the card and tells the clicker why, privately', async () => {
     vi.mocked(transferLead).mockResolvedValueOnce({ status: 409, body: { error: 'lead_in_jobber', detail: 'This lead is already in Jobber.' } })
     expect(await accept()).toBe('move_refused')
