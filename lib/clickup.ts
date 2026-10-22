@@ -11,8 +11,8 @@
 //                           "Bearer"). ClickUp tokens are not scoped; a token
 //                           acts as the user who made it, so that user must be
 //                           able to see and create tasks on list
-//                           CLICKUP_BEE_DESK_LIST_ID and read its custom fields
-//                           and comments. Make it from a user who can do no
+//                           CLICKUP_BEE_DESK_LIST_ID and read its custom
+//                           fields. Make it from a user who can do no
 //                           more than that if one exists.
 //   CLICKUP_WEBHOOK_SECRET  the `secret` ClickUp returns when the webhook is
 //                           registered. ClickUp signs every delivery with it
@@ -41,18 +41,11 @@ export interface ClickUpTask {
   status?: { status?: string }
   custom_fields?: ClickUpField[]
 }
-export interface ClickUpComment {
-  id: string
-  comment_text?: string
-  date?: string | number
-  user?: { username?: string; email?: string }
-}
 
 export interface ClickUpClient {
   listFields(listId: string): Promise<ClickUpField[]>
   createTask(listId: string, body: Record<string, unknown>): Promise<{ id: string }>
   getTask(taskId: string): Promise<ClickUpTask>
-  getComments(taskId: string): Promise<ClickUpComment[]>
 }
 
 export function clickUpClientFromEnv(): ClickUpClient | null {
@@ -75,7 +68,6 @@ export function clickUpClientFromEnv(): ClickUpClient | null {
     createTask: async (listId, body) =>
       call(`/list/${listId}/task`, { method: 'POST', body: JSON.stringify(body) }),
     getTask: async (taskId) => call(`/task/${taskId}`),
-    getComments: async (taskId) => (await call(`/task/${taskId}/comment`)).comments ?? [],
   }
 }
 

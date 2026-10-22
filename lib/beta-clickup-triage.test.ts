@@ -73,12 +73,11 @@ beforeEach(() => {
   authUser.current = { id: 'admin-1' }
   fake.client = {
     listFields: vi.fn(async () => [
-      { id: 'f-source', name: 'Source', type: 'drop_down', type_config: { options: [{ id: 'opt-owner', name: 'Owner request' }] } },
+      { id: 'f-source', name: 'Source', type: 'drop_down', type_config: { options: [{ id: 'opt-owner', name: 'Owner Request' }] } },
       { id: 'f-desk', name: 'Bee Desk ID', type: 'short_text' },
     ]),
     createTask: vi.fn(async () => ({ id: 'cu-task-77' })),
     getTask: vi.fn(),
-    getComments: vi.fn(),
   }
 })
 

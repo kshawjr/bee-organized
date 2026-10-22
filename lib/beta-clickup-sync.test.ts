@@ -3,9 +3,13 @@
 // BEE DESK ↔ CLICKUP (task 868mm1h7z). The ClickUp client is always a fake —
 // nothing here can reach api.clickup.com.
 //
-//   · a close WITH a comment writes admin_response and the mapped status
-//   · a close with NO comment writes nothing and invents nothing (held)
-//   · each of the nine ClickUp statuses lands as its one Bee Desk status
+//   · a close WITH Reply to Owner filled writes admin_response and the status
+//   · a close with Reply to Owner EMPTY writes nothing and invents nothing (held)
+//   · comments are never the reply — there is no comment read at all
+//   · the reply field is found by name ignoring case, else by its id
+//   · each of the nine ClickUp statuses lands as its one Bee Desk status,
+//     including the exact lowercase strings the live board stores
+//   · Source "Owner Request" (the board's spelling) matches ignoring case
 //   · Source Internal / Idea trigger nothing at all
 //   · a delivery without the right X-Signature is refused
 //   · a Bee Desk ID matching no row fails loudly
@@ -60,6 +64,7 @@ vi.mock('@/lib/clickup', async () => {
 
 import {
   CLICKUP_TO_BEE_DESK, mapClickUpStatus, handleClickUpEvent, createClickUpTaskForFeedback,
+  REPLY_FIELD_ID,
 } from '@/lib/clickup-sync'
 import { CLICKUP_BEE_DESK_LIST_ID } from '@/lib/clickup'
 import { POST } from '@/app/api/webhooks/clickup/route'
@@ -68,8 +73,9 @@ const ITEM_ID = '11111111-2222-3333-4444-555555555555'
 const TASK_ID = '86abc123'
 const SOURCE_FIELD_ID = 'f-source'
 const DESK_FIELD_ID = 'f-desk'
+// The board's spellings, exactly.
 const OPTIONS = [
-  { id: 'opt-owner', name: 'Owner request', orderindex: 0 },
+  { id: 'opt-owner', name: 'Owner Request', orderindex: 0 },
   { id: 'opt-internal', name: 'Internal', orderindex: 1 },
   { id: 'opt-idea', name: 'Idea', orderindex: 2 },
 ]
@@ -78,13 +84,26 @@ const LIST_FIELDS = [
   { id: DESK_FIELD_ID, name: 'Bee Desk ID', type: 'short_text' },
 ]
 
-function taskWith(status: string, source = 'opt-owner', deskId: string | null = ITEM_ID) {
+// A task as GET /task returns it. `reply` is the Reply to Owner field; pass
+// replyField to change its name/id (rename + fallback tests).
+function taskWith(
+  status: string,
+  opts: {
+    source?: string; deskId?: string | null; reply?: string | null
+    replyField?: { id: string; name: string } | null
+  } = {},
+) {
+  const { source = 'opt-owner', deskId = ITEM_ID, reply = null } = opts
+  const replyField = opts.replyField === undefined
+    ? { id: REPLY_FIELD_ID, name: 'Reply to Owner' }
+    : opts.replyField
   return {
     id: TASK_ID,
     status: { status },
     custom_fields: [
       { id: SOURCE_FIELD_ID, name: 'Source', type: 'drop_down', type_config: { options: OPTIONS }, value: source },
       { id: DESK_FIELD_ID, name: 'Bee Desk ID', type: 'short_text', value: deskId },
+      ...(replyField ? [{ ...replyField, type: 'text', value: reply }] : []),
     ],
   }
 }
@@ -94,7 +113,6 @@ function makeClient(over: Partial<Record<string, any>> = {}) {
     listFields: vi.fn(async () => LIST_FIELDS),
     createTask: vi.fn(async () => ({ id: 'new-task-9' })),
     getTask: vi.fn(async () => taskWith('shipped')),
-    getComments: vi.fn(async () => [] as any[]),
     ...over,
   }
 }
@@ -110,6 +128,10 @@ const deliver = async (payload: any, signature?: string | null) => {
   const res = await POST(req)
   return { status: res.status, body: await res.json() }
 }
+const moved = (task: any) => {
+  fake.client = makeClient({ getTask: vi.fn(async () => task) })
+  return deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+}
 const itemWrites = () => h.state.updates.filter(u => u.table === 'feedback_items').map(u => u.arg)
 
 beforeEach(() => {
@@ -123,18 +145,11 @@ beforeEach(() => {
   process.env.CLICKUP_WEBHOOK_SECRET = SECRET
 })
 
-// ─── closing statuses carry real words ───────────────────────────────
+// ─── closing statuses carry real words, from the field ───────────────
 
-describe('a close with a comment', () => {
-  it('writes admin_response from the comment and the mapped status', async () => {
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith('Shipped')),
-      getComments: vi.fn(async () => [
-        { id: 'c1', comment_text: 'old note', date: '1000' },
-        { id: 'c2', comment_text: '  Fixed — the snooze button now sticks.  ', date: '2000' },
-      ]),
-    })
-    const { status, body } = await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+describe('a close with Reply to Owner filled', () => {
+  it('writes admin_response from the field and the mapped status', async () => {
+    const { status, body } = await moved(taskWith('shipped', { reply: '  Fixed — the snooze button now sticks.  ' }))
     expect(status).toBe(200)
     expect(body.outcome).toBe('reply_written')
     const w = itemWrites()
@@ -143,32 +158,72 @@ describe('a close with a comment', () => {
     expect(w[0].admin_response).toBe('Fixed — the snooze button now sticks.')
     expect(typeof w[0].admin_response_at).toBe('string')
   })
+
+  it('never reads comments — the client has no way to', async () => {
+    const client = makeClient({ getTask: vi.fn(async () => taskWith('answered', { reply: 'Yes, it does.' })) })
+    expect('getComments' in client).toBe(false)
+    fake.client = client
+    await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+    expect(itemWrites()[0].admin_response).toBe('Yes, it does.')
+  })
 })
 
-describe('a close with no comment', () => {
-  it('writes nothing to the item, invents no text, and logs a held reply loudly', async () => {
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith('answered')),
-      getComments: vi.fn(async () => [{ id: 'c1', comment_text: '   ', date: '1' }]),
-    })
-    const { status, body } = await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+describe('a close with Reply to Owner empty', () => {
+  it.each([
+    ['null', null],
+    ['blank', '   '],
+  ])('(%s) writes nothing, invents no text, and logs a held reply loudly', async (_l, reply) => {
+    const { status, body } = await moved(taskWith('answered', { reply }))
     expect(status).toBe(200)
     expect(body.ok).toBe(false)
     expect(body.outcome).toBe('held')
     expect(itemWrites()).toEqual([])
     const held = h.state.syncLog.find(r => /HELD/.test(r.message))
     expect(held?.status).toBe('error')
+    expect(held?.message).toMatch(/Fill in Reply to Owner, then move the task/)
   })
 
-  it('a later comment on the held task releases the close with that comment', async () => {
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith('not doing')),
-      getComments: vi.fn(async () => [{ id: 'c9', comment_text: 'Not doing this one — Jobber owns that screen.', date: '5' }]),
-    })
-    await deliver({ event: 'taskCommentPosted', task_id: TASK_ID })
+  it('a task with no reply field at all is held too', async () => {
+    const { body } = await moved(taskWith('not doing', { replyField: null }))
+    expect(body.outcome).toBe('held')
+    expect(itemWrites()).toEqual([])
+  })
+
+  it('moving it into the closing status again, once filled, releases it', async () => {
+    await moved(taskWith('not doing', { reply: '' }))
+    expect(itemWrites()).toEqual([])
+    await moved(taskWith('not doing', { reply: 'Not doing this one — Jobber owns that screen.' }))
     expect(itemWrites()).toEqual([
       expect.objectContaining({ status: 'declined', admin_response: 'Not doing this one — Jobber owns that screen.' }),
     ])
+  })
+})
+
+describe('finding the reply field', () => {
+  it('by name, ignoring case, even when the id is not the known one', async () => {
+    await moved(taskWith('shipped', { reply: 'By name.', replyField: { id: 'some-new-id', name: 'reply TO owner' } }))
+    expect(itemWrites()[0].admin_response).toBe('By name.')
+  })
+
+  it('by id when the name does not match (the old "Note to Client" name)', async () => {
+    await moved(taskWith('shipped', { reply: 'By id.', replyField: { id: REPLY_FIELD_ID, name: 'Note to Client' } }))
+    expect(itemWrites()[0].admin_response).toBe('By id.')
+  })
+
+  it('neither name nor id → held, not some other field', async () => {
+    const { body } = await moved(taskWith('shipped', { reply: 'Wrong field.', replyField: { id: 'other', name: 'Internal notes' } }))
+    expect(body.outcome).toBe('held')
+    expect(itemWrites()).toEqual([])
+  })
+})
+
+describe('only taskStatusUpdated is handled', () => {
+  it.each(['taskCommentPosted', 'taskUpdated', 'taskCreated'])('%s is ignored without reading the task', async (ev) => {
+    fake.client = makeClient({ getTask: vi.fn(async () => taskWith('shipped', { reply: 'x' })) })
+    const { body } = await deliver({ event: ev, task_id: TASK_ID })
+    expect(body.outcome).toBe('ignored')
+    expect(fake.client.getTask).not.toHaveBeenCalled()
+    expect(itemWrites()).toEqual([])
   })
 })
 
@@ -186,20 +241,40 @@ const NINE: [string, string][] = [
   ['Not doing', 'declined'],
 ]
 
+// Exactly what the live board stores (confirmed 2026-10-22).
+const LIVE_LOWERCASE: [string, string][] = [
+  ['submitted', 'submitted'],
+  ['on the list', 'planned'],
+  ['looking at it', 'under_review'],
+  ['needs input', 'under_review'],
+  ['in progress', 'planned'],
+  ['testing', 'planned'],
+  ['answered', 'answered'],
+  ['not doing', 'declined'],
+  ['shipped', 'shipped'],
+]
+
 describe('the status map', () => {
   it('has exactly the nine ClickUp statuses', () => {
-    expect(Object.keys(CLICKUP_TO_BEE_DESK).sort()).toEqual(NINE.map(([c]) => c.toLowerCase()).sort())
+    expect(Object.keys(CLICKUP_TO_BEE_DESK).sort()).toEqual(LIVE_LOWERCASE.map(([c]) => c).sort())
   })
 
-  it.each(NINE)('ClickUp "%s" writes Bee Desk %s', async (clickup, desk) => {
+  it.each(LIVE_LOWERCASE)('the live board\'s "%s" maps to %s', (clickup, desk) => {
     expect(mapClickUpStatus(clickup)).toBe(desk)
+  })
+
+  it.each([
+    ['  On   The LIST ', 'planned'],
+    ['NOT DOING', 'declined'],
+    ['\tlooking  at it\n', 'under_review'],
+  ])('case and whitespace are ignored: %j → %s', (clickup, desk) => {
+    expect(mapClickUpStatus(clickup)).toBe(desk)
+  })
+
+  it.each([...NINE, ...LIVE_LOWERCASE])('a move to "%s" writes Bee Desk %s', async (clickup, desk) => {
     // Start from a status different from the target so a write must happen.
     h.state.row.status = desk === 'declined' ? 'planned' : 'declined'
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith(clickup)),
-      getComments: vi.fn(async () => [{ id: 'c', comment_text: 'Words from a person.', date: '1' }]),
-    })
-    await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+    await moved(taskWith(clickup, { reply: 'Words from a person.' }))
     const w = itemWrites()
     expect(w).toHaveLength(1)
     expect(w[0].status).toBe(desk)
@@ -208,17 +283,30 @@ describe('the status map', () => {
 
 // ─── Source gates everything ─────────────────────────────────────────
 
-describe.each([['Internal', 'opt-internal'], ['Idea', 'opt-idea']])('Source %s', (_name, opt) => {
-  it.each(['Shipped', 'On the list'])('moving to %s triggers nothing', async (status) => {
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith(status, opt)),
-      getComments: vi.fn(async () => [{ id: 'c', comment_text: 'internal chatter', date: '1' }]),
+describe('Source "Owner Request" matches ignoring case', () => {
+  it.each(['Owner Request', 'owner request', 'OWNER REQUEST', ' Owner  request '])(
+    'an option named %j is read as an owner request', async (name) => {
+      const task: any = taskWith('shipped', { reply: 'Done.' })
+      task.custom_fields[0].type_config = { options: [{ id: 'opt-owner', name, orderindex: 0 }] }
+      const { body } = await moved(task)
+      expect(body.outcome).toBe('reply_written')
     })
-    const { body } = await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+
+  it('the create picks the board\'s "Owner Request" option', async () => {
+    h.state.row = { id: ITEM_ID, clickup_task_id: null }
+    const client = makeClient()
+    await createClickUpTaskForFeedback({ client, db: h.db, item: { id: ITEM_ID, title: 't', status: 'planned' } })
+    const body = (client.createTask.mock.calls[0] as any[])[1]
+    expect(body.custom_fields[0]).toEqual({ id: SOURCE_FIELD_ID, value: 'opt-owner' })
+  })
+})
+
+describe.each([['Internal', 'opt-internal'], ['Idea', 'opt-idea']])('Source %s', (_name, opt) => {
+  it.each(['shipped', 'on the list'])('moving to %s triggers nothing', async (status) => {
+    const { body } = await moved(taskWith(status, { source: opt, reply: 'internal chatter' }))
     expect(body.outcome).toBe('not_owner_request')
     expect(itemWrites()).toEqual([])
     expect(h.state.syncLog).toEqual([])
-    expect(fake.client.getComments).not.toHaveBeenCalled()
   })
 })
 
@@ -249,11 +337,7 @@ describe('the signature gate', () => {
 describe('a Bee Desk ID that matches no row', () => {
   it('fails loudly: error outcome, sync_log error, no write', async () => {
     h.state.row = { ...h.state.row, id: 'some-other-id' }
-    fake.client = makeClient({
-      getTask: vi.fn(async () => taskWith('shipped')),
-      getComments: vi.fn(async () => [{ id: 'c', comment_text: 'Done.', date: '1' }]),
-    })
-    const { body } = await deliver({ event: 'taskStatusUpdated', task_id: TASK_ID })
+    const { body } = await moved(taskWith('shipped', { reply: 'Done.' }))
     expect(body.ok).toBe(false)
     expect(body.error).toBe('no_feedback_item')
     expect(itemWrites()).toEqual([])
@@ -278,7 +362,7 @@ describe('creating a task', () => {
     expect(listId).toBe(CLICKUP_BEE_DESK_LIST_ID)
     expect(body.name).toBe('Snooze button forgets')
     expect(body.description).toBe('It resets overnight.')
-    expect(body.status).toBe('On the list')
+    expect(body.status).toBe('on the list')
     expect(body.custom_fields).toEqual([
       { id: SOURCE_FIELD_ID, value: 'opt-owner' },
       { id: DESK_FIELD_ID, value: ITEM_ID },

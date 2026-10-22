@@ -15,8 +15,8 @@
 //      suspends the webhook, which would stop every later reply too. The
 //      sync_log row is the loud record; the body says ok:false.
 //
-// Register for events: taskStatusUpdated, taskCommentPosted (the second is
-// what releases a close that was held for want of a comment).
+// Register for one event: taskStatusUpdated. The reply is read from the
+// task's Reply to Owner field at the moment of the move (lib/clickup-sync).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { clickUpClientFromEnv, verifyClickUpSignature } from '@/lib/clickup'

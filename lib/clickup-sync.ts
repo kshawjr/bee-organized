@@ -10,48 +10,68 @@
 // it is work. It is NOT a claim or a tick on a 'submitted' item (nobody has
 // decided anything), and NOT a save straight to answered/shipped/declined (the
 // item is already closed; a task would open only to sit there). Internal items
-// never get one: Source = Owner request is a promise someone is waiting.
+// never get one: Source = Owner Request is a promise someone is waiting.
 //
 // The task is created on list CLICKUP_BEE_DESK_LIST_ID with the report's title
 // and body, the ClickUp status matching where triage put it, and two custom
-// fields read BY NAME at runtime — Source (= "Owner request") and Bee Desk ID
+// fields read BY NAME at runtime — Source (= "Owner Request") and Bee Desk ID
 // (= the feedback_items uuid). If either field is missing, or Source has no
-// "Owner request" option, NO task is created and a sync_log error says which.
+// "Owner Request" option, NO task is created and a sync_log error says which.
+// Field names, option names and status names all match ignoring case and
+// whitespace (norm, below) — the live board stores statuses lowercase and
+// spells the option "Owner Request".
 // A task without them would be one the inbound half can never reply from.
 //
 // ─── IN: A CLICKUP CLOSE IS THE REPLY ─────────────────────────────────
 // Every ClickUp status maps to exactly one Bee Desk status (CLICKUP_TO_BEE_DESK).
-// Moves into Shipped / Answered / Not doing write admin_response from a REAL
-// COMMENT on the task — never generated text. admin_response has no author
-// column, so a generated reply would be words nobody wrote, read by the owner
-// as ours.
+// Moves into Shipped / Answered / Not doing write admin_response from the
+// task's "Reply to Owner" custom field — words a person typed into a field
+// that exists only to be sent to the owner. Never generated text, and never a
+// comment: the newest comment can be an internal engineering note, and it
+// would have gone to a franchise owner as their answer. admin_response has no
+// author column, so a reply has to be words somebody wrote FOR the owner.
 //
-// NO COMMENT → HELD, NOT REJECTED. Rejecting means refusing the webhook, and
+// The field is matched by name ("Reply to Owner", ignoring case), falling back
+// to its id (REPLY_FIELD_ID) — it was "Note to Client" before the rename, and
+// the id survives a rename where the name does not.
+//
+// EMPTY FIELD → HELD, NOT REJECTED. Rejecting means refusing the webhook, and
 // ClickUp does not show a refusal to the person who moved the card — it retries,
 // then suspends the webhook. The close would be lost and every later close with
-// it. Held means: nothing is written to the item (no status, no text), a
-// sync_log ERROR row says a reply is owed and how to release it, and the close
-// completes on its own the moment someone comments on the task (the webhook
-// also listens for taskCommentPosted, and a comment on a task that sits in a
-// closing status its Bee Desk row has not reached yet releases it). Same rule
-// as caa0fda on the Bee Desk side: the status change has to carry words.
+// it. Held means: nothing is written to the item (no status, no text), and a
+// sync_log ERROR row says a reply is owed and how to release it: fill in Reply
+// to Owner, then move the task into the closing status again. Same rule as
+// caa0fda on the Bee Desk side: the status change has to carry words.
+//
+// ONE EVENT: taskStatusUpdated. The handler reads the field from the task at
+// the moment of the move, so no second event is needed for the ordinary close
+// (fill the field, then move the card). Filling the field AFTER the move fires
+// no status event, which is why the held message says to move it again.
 //
 // Source Internal and Idea trigger NOTHING — no item write, no sync_log row.
-// Only Source = Owner request is read further.
+// Only Source = Owner Request is read further.
 //
 // Every failure is a sync_log row with status 'error'. None is swallowed: a
 // failure here means an owner silently never hears back.
 
-import type { ClickUpClient, ClickUpComment, ClickUpField, ClickUpTask } from './clickup'
+import type { ClickUpClient, ClickUpField, ClickUpTask } from './clickup'
 import { CLICKUP_BEE_DESK_LIST_ID } from './clickup'
 import { writeSyncLog } from './sync-log'
 import { wouldHandSetStuck } from './feedback-admin-tiles'
 
 export const SOURCE_FIELD = 'Source'
 export const BEE_DESK_ID_FIELD = 'Bee Desk ID'
-export const OWNER_REQUEST = 'Owner request'
+export const OWNER_REQUEST = 'Owner Request'
+export const REPLY_FIELD = 'Reply to Owner'
+// The field's id on list 901111225249 (created as "Note to Client"). Used only
+// when no field carries REPLY_FIELD's name.
+export const REPLY_FIELD_ID = 'c31305bb-4e98-46af-9e1e-9986617dbea2'
 
-// ClickUp status (lowercased) → feedback_items.status. Several share one; none
+// Case- and whitespace-blind comparison for every name read off ClickUp:
+// statuses, field names, dropdown options. "  On   the List " → "on the list".
+export const norm = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+// ClickUp status (norm'd) → feedback_items.status. Several share one; none
 // maps to two (a Record cannot hold two values per key).
 export const CLICKUP_TO_BEE_DESK: Record<string, string> = {
   'submitted': 'submitted',
@@ -69,15 +89,15 @@ export const CLOSING_CLICKUP_STATUSES = new Set(['shipped', 'answered', 'not doi
 
 // The ClickUp status a newly-created task starts in, by where triage put the
 // item. Only the open statuses past 'submitted' — the same set that triggers
-// a create.
+// a create. Spelled exactly as the live board stores them (lowercase).
 export const CREATE_STATUS_FOR: Record<string, string> = {
-  under_review: 'Looking at it',
-  planned: 'On the list',
-  in_progress: 'In progress',
+  under_review: 'looking at it',
+  planned: 'on the list',
+  in_progress: 'in progress',
 }
 
 export function mapClickUpStatus(status: string | null | undefined): string | null {
-  return CLICKUP_TO_BEE_DESK[String(status ?? '').trim().toLowerCase()] ?? null
+  return CLICKUP_TO_BEE_DESK[norm(status)] ?? null
 }
 
 export function shouldCreateClickUpTask(args: {
@@ -100,7 +120,6 @@ const log = (status: 'success' | 'error', entityId: string, direction: 'inbound'
     message: `clickup ${message}`.slice(0, 1000),
   })
 
-const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 const findField = (fields: ClickUpField[] | undefined, name: string) =>
   (fields || []).find(f => norm(f.name) === norm(name))
 
@@ -188,7 +207,7 @@ export async function createClickUpTaskForFeedback(args: {
 
 // ─── IN ───────────────────────────────────────────────────────────────
 
-export const HANDLED_EVENTS = new Set(['taskStatusUpdated', 'taskCommentPosted'])
+export const HANDLED_EVENTS = new Set(['taskStatusUpdated'])
 
 export type InboundOutcome =
   | { ok: true; outcome: 'ignored' | 'not_owner_request' | 'no_change' | 'status_written' | 'reply_written'; feedback_id?: string }
@@ -206,12 +225,11 @@ const fieldText = (f: ClickUpField | undefined): string | null => {
   return String(f.value).trim() || null
 }
 
-export function latestComment(comments: ClickUpComment[]): string | null {
-  const real = comments
-    .map(c => ({ text: String(c.comment_text ?? '').trim(), at: Number(c.date ?? 0) }))
-    .filter(c => c.text)
-    .sort((a, b) => b.at - a.at)
-  return real[0]?.text ?? null
+// The Reply to Owner field: by name first, then by id. Returns the trimmed
+// text, or null when the field is absent or empty.
+export function replyFieldText(fields: ClickUpField[] | undefined): string | null {
+  const f = findField(fields, REPLY_FIELD) ?? (fields || []).find(x => x.id === REPLY_FIELD_ID)
+  return fieldText(f)
 }
 
 export async function handleClickUpEvent(args: {
@@ -245,7 +263,7 @@ export async function handleClickUpEvent(args: {
   }
 
   const feedbackId = fieldText(findField(task.custom_fields, BEE_DESK_ID_FIELD))
-  if (!feedbackId) return fail('no_bee_desk_id', taskId, 'Owner request task has no Bee Desk ID; nobody can be replied to')
+  if (!feedbackId) return fail('no_bee_desk_id', taskId, 'Owner Request task has no Bee Desk ID; nobody can be replied to')
 
   const clickupStatus = norm(task.status?.status)
   const mapped = mapClickUpStatus(clickupStatus)
@@ -257,17 +275,12 @@ export async function handleClickUpEvent(args: {
   if (readErr || !row) {
     return fail('no_feedback_item', feedbackId, `Bee Desk ID ${feedbackId} matches no feedback_items row${readErr ? ` (${readErr.message})` : ''}`)
   }
-  if (row.is_internal) return fail('internal_item', feedbackId, 'Owner request task points at an internal item; refusing to write')
+  if (row.is_internal) return fail('internal_item', feedbackId, 'Owner Request task points at an internal item; refusing to write')
   if (row.clickup_task_id && row.clickup_task_id !== taskId) {
     return fail('task_mismatch', feedbackId, `item is linked to task ${row.clickup_task_id}, not ${taskId}`)
   }
 
   const closing = CLOSING_CLICKUP_STATUSES.has(clickupStatus)
-
-  // A comment only matters when it releases a held close.
-  if (event.event === 'taskCommentPosted' && !(closing && row.status !== mapped)) {
-    return { ok: true, outcome: 'no_change', feedback_id: feedbackId }
-  }
 
   const write = async (patch: Record<string, unknown>) => {
     const { error } = await db.from('feedback_items').update(patch).eq('id', feedbackId)
@@ -287,17 +300,11 @@ export async function handleClickUpEvent(args: {
     return { ok: true, outcome: 'status_written', feedback_id: feedbackId }
   }
 
-  let comments: ClickUpComment[]
-  try {
-    comments = await client.getComments(taskId)
-  } catch (err: any) {
-    return fail('comment_read_failed', feedbackId, String(err?.message || err))
-  }
-  const reply = latestComment(comments)
+  const reply = replyFieldText(task.custom_fields)
   if (!reply) {
-    console.error(`[clickup-webhook] held task=${taskId} item=${feedbackId}: closed with no comment`)
+    console.error(`[clickup-webhook] held task=${taskId} item=${feedbackId}: closed with Reply to Owner empty`)
     await log('error', feedbackId, 'inbound',
-      `event=${event.event} task=${taskId} HELD — moved to "${task.status?.status}" with no comment. Nothing written; the owner is still owed a reply. Add a comment on the task to release it.`)
+      `event=${event.event} task=${taskId} HELD — moved to "${task.status?.status}" with Reply to Owner empty. Nothing written; the owner is still owed a reply. Fill in Reply to Owner, then move the task into "${task.status?.status}" again to release it.`)
     return { ok: false, outcome: 'held', feedback_id: feedbackId }
   }
 
@@ -307,6 +314,6 @@ export async function handleClickUpEvent(args: {
     admin_response_at: (args.now ?? new Date()).toISOString(),
   })
   if (err) return fail('write_failed', feedbackId, err.message)
-  await log('success', feedbackId, 'inbound', `event=${event.event} task=${taskId} status ${row.status} → ${mapped} reply written from task comment`)
+  await log('success', feedbackId, 'inbound', `event=${event.event} task=${taskId} status ${row.status} → ${mapped} reply written from Reply to Owner`)
   return { ok: true, outcome: 'reply_written', feedback_id: feedbackId }
 }

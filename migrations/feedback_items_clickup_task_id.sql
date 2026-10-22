@@ -2,9 +2,12 @@
 --
 -- Bee Desk ↔ ClickUp two-way sync (ClickUp task 868mm1h7z).
 --
--- HELD: run this by hand (Kevin). The system is LIVE.
+-- RUN and verified live by Kevin (reported 2026-10-22). This file now reads
+-- as the corrected form — see THE LOCKS below. Re-running it is safe: the
+-- column and index are IF NOT EXISTS, and the CHECK is dropped and re-added
+-- with the same twelve values.
 --
--- Two changes, one transaction:
+-- Two changes:
 --
 --   1. feedback_items.clickup_task_id — nullable text. The id ClickUp returns
 --      when triage creates a task for an owner's item (lib/clickup-sync). Null
@@ -19,8 +22,24 @@
 --      rejection — the exact silence the sync_log rule exists to prevent (a
 --      failed sync here means an owner never hears back). The set below is the
 --      one migrations/sync_log_entity_type_extend.sql installed, plus
---      'feedback'. Added NOT VALID then VALIDATEd, so the scan of sync_log runs
---      under a SHARE UPDATE EXCLUSIVE lock and webhook inserts keep landing.
+--      'feedback'.
+--
+-- THE LOCKS. DROP CONSTRAINT and ADD CONSTRAINT both take an ACCESS EXCLUSIVE
+-- lock on sync_log, and Postgres holds every lock until its transaction ends.
+-- A VALIDATE inside that same transaction therefore scans the whole table
+-- while ACCESS EXCLUSIVE is still held, and every webhook insert waits behind
+-- it — NOT VALID buys nothing there. So the VALIDATE runs in its OWN
+-- transaction after the COMMIT: the swap itself is instant (NOT VALID skips
+-- the scan), and the scan then runs under SHARE UPDATE EXCLUSIVE, which lets
+-- inserts keep landing. Between the two commits the new CHECK is already
+-- enforced on new rows; it is only marked unvalidated for the old ones.
+--
+-- THE COST OF SPLITTING. If the VALIDATE fails (an old row carries a value
+-- the list below omits), the first transaction has already committed: the
+-- CHECK stays in force for NEW rows, and any writer of the omitted value is
+-- silently rejected by writeSyncLog's catch. Read the live definition first
+-- (pg_get_constraintdef, in VERIFY below) and make sure every value in it is
+-- in this list.
 --
 -- ORDER: run this BEFORE the code deploys. The code reads clickup_task_id with
 -- its own query and degrades loudly (a sync_log error, no task) when the column
@@ -49,6 +68,11 @@ ALTER TABLE public.sync_log
     'payment', 'note', 'location', 'property', 'assessment',
     'engagement', 'feedback'
   )) NOT VALID;
+
+COMMIT;
+
+-- Its own transaction — see THE LOCKS above.
+BEGIN;
 
 ALTER TABLE public.sync_log
   VALIDATE CONSTRAINT sync_log_entity_type_check;
