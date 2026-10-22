@@ -408,7 +408,7 @@ describe('no other owner-facing count reads feedback rows', () => {
   it('the nav badge and its count fetch are corp-only', () => {
     expect(beehub).toContain("const showFeedback = role === 'super_admin' || role === 'corporate' || role === 'admin'")
     // The badge fetch is guarded by that same flag.
-    expect(beehub).toMatch(/if \(!showFeedback\) return\s*\n\s*let cancelled = false\s*\n\s*fetchFeedbackOpenCount\(\)/)
+    expect(beehub).toMatch(/if \(!showFeedback\) return\s*\n\s*let cancelled = false\s*\n\s*fetchFeedbackBadgeCount\(\)/)
     // …and the legacy admin shell gates its Feedback tab the same way.
     expect(beehub).toContain("const showFeedbackTab = role === 'super_admin' || role === 'corporate' || role === 'admin'")
   })

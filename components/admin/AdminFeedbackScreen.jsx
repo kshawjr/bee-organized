@@ -7,53 +7,52 @@
 // and renders a stripped-down owner-safe view when it gets them, because the
 // mount tests exercise that shape and nothing about role gating lives here.
 //
-// ─── THE QUEUES REDESIGN (design C, "Queues") ─────────────────
-// What Kevin could not do with the issue 233/306 screen: scan it, or work it
-// on a phone. Three queue cards, five filters, a colour per status, a colour
-// per type, and the analysis, the copy-prompt button and the draft-reply
-// button all stacked INLINE under every row. What replaced it:
+// ─── THE TILES REDESIGN ───────────────────────────────────────
+// The sidebar badge said 40 and Leslie read it as forty things on fire; four
+// were bugs nobody had answered. What replaced the queues and the type tabs:
 //
-//   TWO QUEUES, GROUPED BY WHOSE TURN IT IS. "Needs an answer" (nobody from
-//   the team has replied, or the owner spoke last) and "Waiting on them" (we
-//   spoke last). Each header carries its count and the age of its oldest
-//   item, and turns red past fourteen days. lib/feedback-triage-groups owns
-//   the arithmetic; the three-card summary in lib/feedback-queues still
-//   feeds the nav badge, the dashboard and the Slack nudge untouched.
+//   THE BADGE counts people waiting on a real answer — open bugs and open
+//   questions with no reply (lib/feedback-admin-tiles adminBadgeCount,
+//   reported up through onBadgeCountChange). Ideas never set it off.
 //
-//   A FIXED TYPE ORDER INSIDE EACH QUEUE — bugs, questions, ideas, hazards,
-//   decisions — longest waiting first within each type. The type subheading
-//   is the type's own colour and disappears when a type tab is active.
+//   TWO GROUPS, SIX TILES. "Nobody has replied": Fix (bugs), Answer
+//   (questions), Decide (ideas). "We replied": Build (planned), Still deciding
+//   (under review), Stuck (replied but still at submitted — a defect state,
+//   never settable by hand). Each tile: count, verb, what it is, oldest age.
+//   A tile is a filter. The six are mutually exclusive and sum to the open
+//   total (lib/feedback-admin-tiles owns all of it).
 //
-//   CLOSED ITEMS ARE NOT A QUEUE. A grey "Show N closed" line at the bottom
-//   reveals them as a third group.
+//   SECTIONS MATCH THE TILES — same word, same colour, the tile's own line.
+//   Status chips appear only in the replied group and the closed list; in
+//   Fix / Answer / Decide the section already is the status.
 //
-//   ONE FILTER THAT MATTERS: underlined type tabs (Everything / Bugs / Ideas
-//   / Questions, plus the internal-only types once one exists), the same
-//   tab anatomy the record cards use, underline in the type's colour.
-//   Search and the location select survive as one quiet row — sixty rows
-//   still need finding — and "Just mine" is gone.
+//   AGE CARRIES THE URGENCY, on every row and tile: amber past 10 days, red
+//   past 21. Red and amber mean age and nothing else here — the old red
+//   "needs an answer" dot is gone, the type glyph on a row is neutral ink, and
+//   the tile colours avoid both.
 //
-//   NO PILLS. Status is plain text on the row and a dropdown in the modal.
-//   Type is coloured text and a small coloured glyph — no background, no
-//   border, no chip. The only other colour is a small red dot on the rows
-//   that need a response from us.
+//   WHO HAS IT — a claim circle on every row (initials, or a dashed plus),
+//   a "who has it" filter beside the location filter, and the same in the
+//   modal. assigned_to, self-or-nobody, through the PATCH route.
 //
-//   THE DETAIL IS A FOCUSED MODAL: centred on desktop, full-screen on a
-//   phone with its buttons pinned. Arrows walk the visible list, Escape
-//   closes, the left/right arrow keys walk too. Inside: type and status
-//   dropdowns, what they said, the conversation, the reply box, and a plain
-//   line under the box saying what emails and what does not.
+//   LOOKS ALREADY BUILT — a tick in the modal (looks_shipped), a flag on the
+//   row. A human judgement, never computed.
 //
-//   THE CORPORATE-ONLY BLOCK, inside the modal, headed so nobody mistakes it
-//   for owner-facing: the per-item analysis (issue 307), the cluster note,
-//   the draft reply (issue 309) and the Copy prompt button (issue 308) MOVED
-//   here from under the row. Nothing about how they are built changed.
+//   CLOSED ITEMS ARE REACHED THROUGH THE FILTERS (Open / Closed / Everything),
+//   not a grey link at the bottom.
 //
-// WHAT DID NOT CHANGE: the routes, the PATCH body shapes, the send rules
-// (a reply emails; a status change alone does not — except Fixed, which
-// already did under issue 236), the thread builder, the verdict bar and its
-// one-PATCH-per-item write, the internal composer, the type and status
-// vocabularies.
+//   THE MODAL reads top-down in the order you work: who has it, what they
+//   said, type and status, the conversation, the team-only analysis, THEN the
+//   reply box — and the footer lists what Save will do (refile, move the
+//   status, store the reply, EMAIL someone) before the button is pressed.
+//
+// WHAT DID NOT CHANGE: the send rules (a reply emails; a status change alone
+// does not — except Fixed, which already did under issue 236), the reply-sets-
+// status rule (ee2cc9e), the release-note seeding, the thread builder, the
+// verdict bar and its one-PATCH-per-item write, the cluster bars, the
+// internal composer, the type and status vocabularies. The PATCH body gained
+// two optional team-only fields (assigned_to, looks_shipped) and one refusal
+// (stuck_is_not_settable); nothing it already accepted changed.
 //
 // TOKENIZATION. This file carries NO colour literal of its own — every value
 // resolves through T / the ui tokens, comments included, so issue numbers are
@@ -75,9 +74,7 @@ import {
 } from '@/components/ui/icons'
 // The type vocabulary (issue 247 step 2). Labels and the known-value
 // predicate only — the write validators live in their routes.
-import {
-  INTERNAL_ONLY_TYPES, FEEDBACK_TYPE_TAB_LABEL, FEEDBACK_TYPE_CHIP_STYLE, FEEDBACK_TYPE_WORD, isKnownFeedbackType,
-} from '@/lib/feedback-types'
+import { FEEDBACK_TYPE_CHIP_STYLE, FEEDBACK_TYPE_WORD } from '@/lib/feedback-types'
 // The status vocabulary and the attachment list live in feedbackShared; the
 // open-count arithmetic lives in lib/feedback-queues, shared with the nav
 // badge and the admin dashboard so the numbers cannot drift apart.
@@ -89,16 +86,21 @@ import {
   summarizeFeedbackQueues, isClosedFeedback, feedbackAgeDays,
   hasFeedbackReply, isAwaitingConfirmation, isAnsweredButUnmoved,
 } from '@/lib/feedback-queues'
-// The two queues + the fixed type order (this redesign).
-import {
-  groupFeedbackForTriage, triageQueueOf, triageWaitingDays, TRIAGE_QUEUE_LABEL,
-} from '@/lib/feedback-triage-groups'
 // issue 308 — the paste-ready session prompt. The text and the two tiers live
 // in the lib; this file owns the button, the gesture and the failure path.
 import { buildCopyPrompt, promptTierFor } from '@/lib/feedback-prompt'
 // The conversation thread (feedback_replies + the legacy single-reply merge),
 // shared with the owner screen so both render one history from one builder.
 import { buildFeedbackThread, awaitingTeamReply } from '@/lib/feedback-replies'
+// The cluster modal's "waiting N days" — unchanged by the redesign.
+import { triageWaitingDays } from '@/lib/feedback-triage-groups'
+// The admin redesign's arithmetic: six tiles in two groups, the badge, the age
+// colour, the Stuck guard. Shared with the nav badge in BeeHub and the PATCH
+// route, so the three cannot disagree.
+import {
+  ADMIN_TILES, ADMIN_GROUPS, adminTileOf, adminGroupOf, summarizeAdminTiles, adminBadgeCount,
+  ageTone, wouldHandSetStuck, initialsOf,
+} from '@/lib/feedback-admin-tiles'
 
 // ── ONE COLOUR PER TYPE, THE SAME MAP EVERY SCREEN USES ───────
 // The families come from lib/feedback-types (FEEDBACK_TYPE_CHIP_STYLE) —
@@ -121,10 +123,6 @@ function typeColor(type) { return TYPE_COLOR[String(type || '')] || TYPE_COLOR_F
 function typeWord(type) {
   const key = String(type || '')
   return TYPE_WORD[key] || (key ? key.slice(0, 24) : 'unspecified')
-}
-function typePlural(type) {
-  const key = String(type || '')
-  return FEEDBACK_TYPE_TAB_LABEL[key] || 'Other'
 }
 
 // The glyph: the icon alone, in the type's colour. No box, no background.
@@ -182,6 +180,85 @@ function replyNote(item, internal) {
   if (internal) return 'Replied'
   if (isAwaitingConfirmation(item)) return 'Replied · not seen yet'
   return 'Replied · seen'
+}
+
+// ── TILE COLOURS ──────────────────────────────────────────────
+// One family per tile; the tile, its section heading and (in the replied
+// group) the row's status chip all wear it. RED AND AMBER ARE NOT HERE: they
+// belong to AGE alone, so a red thing on this screen only ever means "old".
+const TILE_FAMILY = {
+  fix: 'purple', answer: 'teal', decide: 'blue',
+  build: 'green', deciding: 'quiet', stuck: 'gray',
+}
+const CLOSED_FAMILY = { shipped: 'green', answered: 'teal', declined: 'gray' }
+const CLOSED_ORDER = ['shipped', 'answered', 'declined']
+function tileInk(key) { return (T.family[TILE_FAMILY[key]] || T.family.gray).text }
+
+// ── AGE ───────────────────────────────────────────────────────
+// Plain to 10 days, amber past 10, red past 21 (lib/feedback-admin-tiles).
+// On every row and every tile — one question was 44 days old and nothing on
+// its row said so.
+function ageInk(tone) {
+  return tone === 'red' ? T.state.danger.strong : tone === 'amber' ? T.state.warning.deep : T.ink.muted
+}
+function AgeText({ days, prefix = '' }) {
+  if (days == null) return null
+  const tone = ageTone(days)
+  return (
+    <span data-age-tone={tone} style={{ color: ageInk(tone), fontWeight: tone === 'plain' ? 400 : 700, whiteSpace: 'nowrap' }}>
+      {prefix}{days <= 0 ? 'today' : `${dayPhrase(days)} old`}
+    </span>
+  )
+}
+
+// ── STATUS, WITH SHAPE ────────────────────────────────────────
+// A chip, not grey text in a run of dots — and only where the status tells
+// you something the section does not: the replied group, where Build, Still
+// deciding and Stuck are genuinely different, and the closed list.
+function StatusChip({ item }) {
+  const tile = adminTileOf(item)
+  const fam = T.family[tile ? TILE_FAMILY[tile] : (CLOSED_FAMILY[item.status] || 'gray')] || T.family.gray
+  return (
+    <span data-status-chip={item.status} style={{ display: 'inline-block', padding: '1px 8px', borderRadius: T.radius.pill, fontSize: '11.5px', fontWeight: 600, lineHeight: 1.6, background: fam.bg, color: fam.text, whiteSpace: 'nowrap' }}>
+      {FEEDBACK_STATUS_PLAIN[item.status] || item.status}
+    </span>
+  )
+}
+
+// ── WHO HAS IT ────────────────────────────────────────────────
+// A circle: initials when someone has claimed it, a dashed circle with a plus
+// when nobody has. Unclaimed → claims it for you. Claimed → releases it (yours
+// or someone else's — the circle is a shared note, not a lock). 44px target
+// around a 28px circle.
+function ClaimCircle({ item, myId, busy = false, onToggle }) {
+  const claimed = !!item.assigned_to
+  const mine = claimed && item.assigned_to === myId
+  const name = item.assigned_to_name || (mine ? 'You' : 'Someone')
+  const label = claimed
+    ? (mine ? `You have “${item.title}” — release it` : `${name} has “${item.title}” — release it`)
+    : `Claim “${item.title}”`
+  return (
+    <button
+      type="button"
+      data-claim={item.id}
+      data-claimed={claimed ? 'yes' : 'no'}
+      aria-label={label}
+      title={claimed ? `${name} has this` : 'Nobody has this — claim it'}
+      disabled={busy || (!claimed && !myId)}
+      onClick={(e) => { e.stopPropagation(); onToggle(claimed ? null : myId) }}
+      style={{ minWidth: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', padding: 0, cursor: busy ? 'default' : 'pointer', flexShrink: 0, opacity: busy ? 0.5 : 1 }}
+    >
+      <span aria-hidden="true" style={{
+        width: '28px', height: '28px', borderRadius: T.radius.round, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '11px', fontWeight: 700, letterSpacing: '0.02em',
+        ...(claimed
+          ? { background: mine ? T.accent.fg : T.ink.strong, color: T.ink.inverse, border: 'none' }
+          : { background: 'transparent', color: T.ink.muted, border: `1.5px dashed ${T.ink.quiet}` }),
+      }}>
+        {claimed ? initialsOf(item.assigned_to_name || (mine ? 'Me' : '?')) : <IconPlus size={12} />}
+      </span>
+    </button>
+  )
 }
 
 // ── THE RECORD POINTER ────────────────────────────────────────
@@ -592,7 +669,7 @@ const MODAL_CSS = `
 // `draft` (issue 309) is a suggested reply. It is TEXT until Kevin presses
 // Save, and Save is the existing PATCH — the only thing that sends an email.
 function AdminFeedbackDetailModal({
-  item, queueLabel, position, total, isOwnItem = false, canTriage = false,
+  item, queueLabel, position, total, isOwnItem = false, canTriage = false, myId = null,
   analysis = null, cluster = null, draft = null,
   onPrev, onNext, onClose, onSaved,
 }) {
@@ -611,7 +688,30 @@ function AdminFeedbackDetailModal({
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
   const [result, setResult]     = useState(null)
+  // The claim and the tick save ON THEIR OWN, immediately — neither is news,
+  // neither emails anyone, and neither should wait behind (or ride along with)
+  // a Save that might.
+  const [sideBusy, setSideBusy]   = useState(null)  // 'claim' | 'looks' | null
+  const [sideError, setSideError] = useState(null)
   const bodyRef = useRef(null)
+
+  async function sideWrite(kind, body) {
+    setSideBusy(kind)
+    setSideError(null)
+    try {
+      const res = await fetch(`/api/admin/feedback/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      onSaved(await res.json())
+    } catch {
+      setSideError(kind === 'claim' ? 'Could not change who has this — please try again.' : 'Could not save the tick — please try again.')
+    } finally {
+      setSideBusy(null)
+    }
+  }
 
   // Walking to another item re-points this same mounted modal, so every
   // per-item piece of state is re-seeded — otherwise the previous item's
@@ -624,6 +724,7 @@ function AdminFeedbackDetailModal({
     setResponse('')
     setError(null)
     setResult(null)
+    setSideError(null)
     if (bodyRef.current) bodyRef.current.scrollTop = 0
   }, [item.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -669,8 +770,12 @@ function AdminFeedbackDetailModal({
   // Fixed sends (issue 236); neither does when it is your own item or there is
   // no address on file (rules 4 and no_submitter_email).
   const shipsNow = status === 'shipped' && item.status !== 'shipped'
-  const canNotify = !isOwnItem && !!item.submitter_email
+  const canNotify = !isOwnItem && !!item.submitter_email && !item.is_internal
   const willSend = (response.trim().length > 0 || shipsNow) && canNotify
+  // STUCK IS NEVER PICKED BY HAND. The option that would move a replied item
+  // back into 'submitted' is disabled, and the route refuses it anyway.
+  const replyAfter = response.trim() || item.admin_response
+  const stuckOption = (s) => wouldHandSetStuck({ fromStatus: item.status, toStatus: s, replyAfter })
 
   async function save() {
     setSaving(true)
@@ -738,6 +843,7 @@ function AdminFeedbackDetailModal({
   // THE LINE UNDER THE REPLY BOX. Always present, always true for THIS item
   // in THIS state. Each branch is a real outcome of the route's rules.
   const sendLine = (() => {
+    if (item.is_internal) return 'Internal item — nothing saved here emails anyone.'
     if (isOwnItem) {
       if (shipsNow && !response.trim()) return 'This is your own report — saving marks it Fixed, and no email is sent.'
       if (response.trim()) return 'This is your own report — saving stores the reply, but no email is sent.'
@@ -753,6 +859,18 @@ function AdminFeedbackDetailModal({
     if (response.trim()) return `Saving emails this to ${who}. Changing the type or status alone would not.`
     return `Sending a reply emails ${who}. Changing the type or status alone sends nothing — except Fixed, which tells them by email.`
   })()
+
+  // WHAT SAVE WILL DO — listed above the button, before the click. One Save can
+  // refile the type, move the status, store a reply and send an email; the old
+  // screen said so in a sentence under the textarea, which is exactly where
+  // nobody looks at the moment they press the button. Each line is a real
+  // effect of THIS save; the email line is the loud one.
+  const firstName = String(item.submitter_name || '').trim().split(/\s+/)[0] || 'them'
+  const consequences = []
+  if (typeChanged) consequences.push({ key: 'type', text: `Refile it as ${itemType === 'feature' ? 'an' : 'a'} ${String(FEEDBACK_TYPE_WORD[itemType] || itemType).toLowerCase()}` })
+  if (status !== item.status) consequences.push({ key: 'status', text: `Move it from ${FEEDBACK_STATUS_PLAIN[item.status] || item.status} to ${FEEDBACK_STATUS_PLAIN[status] || status}` })
+  if (response.trim()) consequences.push({ key: 'reply', text: 'Add your reply to the conversation' })
+  if (willSend) consequences.push({ key: 'email', text: `Email ${item.submitter_email}`, loud: true })
 
   // What the confirmation line says after a save — each branch a real outcome
   // from the route, named plainly.
@@ -831,6 +949,34 @@ function AdminFeedbackDetailModal({
             {item.is_internal && <div><strong>Internal</strong> — only the team sees this item.</div>}
           </div>
 
+          {/* WHO HAS IT, AND DOES IT LOOK ALREADY BUILT — team only. So two
+              people never answer the same item without knowing. Both save on
+              the spot. */}
+          {canTriage && (
+            <div data-modal-team-facts style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px', borderRadius: T.radius.control, background: T.surface.sunken, border: T.border.thin }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <ClaimCircle item={item} myId={myId} busy={sideBusy === 'claim'} onToggle={(next) => sideWrite('claim', { assigned_to: next })} />
+                <span data-modal-assignee style={{ fontSize: '13.5px', color: T.ink.primary }}>
+                  {item.assigned_to
+                    ? <><strong>{item.assigned_to === myId ? 'You have this' : `${item.assigned_to_name || 'Someone'} has this`}</strong></>
+                    : <span style={{ color: T.ink.muted }}>Nobody has this yet</span>}
+                </span>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', minHeight: '44px', cursor: 'pointer', fontSize: '13.5px', color: T.ink.primary }}>
+                <input
+                  type="checkbox"
+                  data-looks-shipped-box
+                  checked={!!item.looks_shipped}
+                  disabled={sideBusy === 'looks'}
+                  onChange={e => sideWrite('looks', { looks_shipped: e.target.checked })}
+                  style={{ width: '18px', height: '18px', margin: 0, cursor: 'pointer' }}
+                />
+                <span>Looks already built — the owner may not know</span>
+              </label>
+              {sideError && <p style={{ fontSize: '12.5px', color: T.state.danger.strong, margin: 0 }}>{sideError}</p>}
+            </div>
+          )}
+
           <ContextCard item={item} />
 
           {/* WHAT THEY SAID */}
@@ -870,7 +1016,7 @@ function AdminFeedbackDetailModal({
               <label style={fieldLabel} htmlFor="fb-status">Status</label>
               <select id="fb-status" aria-label="Status" value={status} onChange={e => pickStatus(e.target.value)} style={{ ...control, cursor: 'pointer' }}>
                 {FEEDBACK_STATUS_ORDER.map(s => (
-                  <option key={s} value={s}>{FEEDBACK_STATUS_PLAIN[s]}</option>
+                  <option key={s} value={s} disabled={stuckOption(s)}>{FEEDBACK_STATUS_PLAIN[s]}</option>
                 ))}
               </select>
             </div>
@@ -913,28 +1059,9 @@ function AdminFeedbackDetailModal({
             })}
           </div>
 
-          {/* THE REPLY BOX, and the line that says what Save does. */}
-          <div style={section}>
-            <label style={{ ...fieldLabel, marginBottom: 0 }} htmlFor="fb-reply">Reply</label>
-            <textarea
-              id="fb-reply"
-              value={response}
-              onChange={e => writeReply(e.target.value)}
-              rows={4}
-              placeholder="Write back in plain words — they will read this in an email."
-              style={{ ...control, outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
-            />
-            <p style={{ fontSize: '12.5px', color: T.ink.muted, margin: 0, lineHeight: 1.5 }}>{sendLine}</p>
-          </div>
-
-          {error && <p style={{ fontSize: '13px', color: T.state.danger.strong, margin: 0 }}>{error}</p>}
-          {resultLine && (
-            <p style={{ fontSize: '13px', lineHeight: 1.5, margin: 0, color: resultLine.tone === 'bad' ? T.state.danger.strong : T.accent.deep }}>
-              {resultLine.text}
-            </p>
-          )}
-
-          {/* ── THE CORPORATE-ONLY BLOCK ────────────────────────────
+          {/* ── THE CORPORATE-ONLY BLOCK — ABOVE THE REPLY BOX ──────
+              It used to sit below it, so you scrolled past where you write
+              the answer to read the thing that tells you the answer.
               Elevated mounts only. The analysis names files and fleet-wide
               counts, the prompt is a session brief, the draft is a guess at a
               reply — none of it is owner-facing. The UI gate is canTriage;
@@ -962,7 +1089,7 @@ function AdminFeedbackDetailModal({
 
               {/* DRAFT REPLY (issue 309) — present only when this deployment
                   appears to have answered this report. Opening it fills the
-                  reply box above; sending is still Save, i.e. the route. */}
+                  reply box below; sending is still Save, i.e. the route. */}
               {draft && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px' }}>
                   <button
@@ -990,14 +1117,54 @@ function AdminFeedbackDetailModal({
               )}
             </div>
           )}
+
+          {/* THE REPLY BOX. What Save does is said in the footer, next to
+              the button, not under here. */}
+          <div style={section}>
+            <label style={{ ...fieldLabel, marginBottom: 0 }} htmlFor="fb-reply">Reply</label>
+            <textarea
+              id="fb-reply"
+              value={response}
+              onChange={e => writeReply(e.target.value)}
+              rows={4}
+              placeholder="Write back in plain words — they will read this in an email."
+              style={{ ...control, outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
+            />
+          </div>
+
+          {error && <p style={{ fontSize: '13px', color: T.state.danger.strong, margin: 0 }}>{error}</p>}
+          {resultLine && (
+            <p style={{ fontSize: '13px', lineHeight: 1.5, margin: 0, color: resultLine.tone === 'bad' ? T.state.danger.strong : T.accent.deep }}>
+              {resultLine.text}
+            </p>
+          )}
+
         </div>
 
         {/* FOOTER — pinned. */}
-        <div style={{ padding: '12px 16px', borderTop: T.border.divider, display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0, background: T.surface.raised }}>
+        <div style={{ padding: '12px 16px', borderTop: T.border.divider, display: 'flex', flexDirection: 'column', gap: '10px', flexShrink: 0, background: T.surface.raised }}>
+          {/* WHAT SAVE WILL DO — the consequence before the click. */}
+          {dirty ? (
+            <div data-save-consequences style={{ padding: '10px 12px', borderRadius: T.radius.control, background: willSend ? T.state.info.bg : T.surface.sunken, border: T.border.thin }}>
+              <p style={{ fontSize: '12px', fontWeight: 700, color: T.ink.primary, margin: '0 0 4px' }}>Saving will:</p>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {consequences.map(c => (
+                  <li key={c.key} data-consequence={c.key} style={{ fontSize: c.loud ? '14px' : '13px', fontWeight: c.loud ? 700 : 500, color: c.loud ? T.state.info.deep : T.ink.primary, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                    {c.text}
+                  </li>
+                ))}
+              </ul>
+              <p data-send-line style={{ fontSize: '12.5px', color: T.ink.secondary, margin: '6px 0 0', lineHeight: 1.5 }}>{sendLine}</p>
+            </div>
+          ) : (
+            <p data-send-line style={{ fontSize: '12.5px', color: T.ink.muted, margin: 0, lineHeight: 1.5 }}>{sendLine}</p>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
           <button onClick={onClose} style={{ minHeight: '44px', padding: '0 16px', background: 'transparent', border: T.border.control, borderRadius: T.radius.control, fontFamily: 'inherit', fontWeight: 600, color: T.ink.secondary, cursor: 'pointer' }}>Close</button>
           <button onClick={save} disabled={saving || !dirty} style={{ minHeight: '44px', padding: '0 18px', background: T.accent.fg, border: 'none', borderRadius: T.radius.control, fontFamily: 'inherit', fontWeight: 700, color: T.accent.onFill, cursor: (saving || !dirty) ? 'default' : 'pointer', opacity: (saving || !dirty) ? 0.6 : 1 }}>
-            {saving ? 'Saving…' : (willSend ? 'Save and send' : 'Save')}
+            {saving ? 'Saving…' : (willSend ? `Save and email ${firstName}` : 'Save')}
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1167,46 +1334,62 @@ function ClusterModal({ cluster, items, analyses, onClose, onSelect }) {
   )
 }
 
-// ── TYPE TABS ─────────────────────────────────────────────────
-// The record cards' tab anatomy (CardTabs): 44px targets, inset underline,
-// no layout shift — except the underline takes the TYPE's colour when a type
-// is selected, which CardTabs' one-accent rule cannot do. aria-label stays
-// `${label} tab`, the same convention every tab-driving test keys on.
-function TypeTabs({ tabs, active, onChange }) {
+// ── THE TILES ─────────────────────────────────────────────────
+// Two labelled groups of three. Every tile says the same four things in the
+// same order: the count, the verb, what it is, how old the oldest one is. A
+// tile is a filter toggle (aria-pressed), not a tab: pressing the lit one
+// clears it.
+function AdminTiles({ summary, active, onPick }) {
   return (
-    <div role="tablist" style={{ display: 'flex', gap: '2px', borderBottom: T.border.divider, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
-      {tabs.map(t => {
-        const on = active === t.key
-        const ink = t.color || T.ink.primary
-        return (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={on}
-            aria-label={`${t.label} tab`}
-            onClick={() => onChange(t.key)}
-            style={{
-              minHeight: '44px', padding: '0 12px', flexShrink: 0,
-              border: 'none', background: 'transparent', cursor: 'pointer',
-              fontFamily: 'inherit', fontWeight: on ? 600 : 500,
-              color: on ? ink : T.ink.muted,
-              boxShadow: on ? `inset 0 -2px 0 ${ink}` : 'none',
-            }}
-          >
-            {t.label}
-            {t.count != null && (
-              <span style={{ marginLeft: '5px', fontWeight: 400, color: on ? ink : T.ink.quiet, fontVariantNumeric: T.type.tabular }}>{t.count}</span>
-            )}
-          </button>
-        )
-      })}
+    <div data-admin-tiles style={{ display: 'flex', flexDirection: 'column', gap: '14px', margin: '4px 0 14px' }}>
+      {ADMIN_GROUPS.map(g => (
+        <section key={g.key} data-tile-group={g.key} aria-label={g.label}>
+          <p style={{ margin: '0 0 6px', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11.5px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.ink.primary }}>{g.label}</span>
+            <span data-group-count={g.key} style={{ fontSize: '13px', fontWeight: 700, color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>{summary.groups[g.key].count}</span>
+            <span style={{ fontSize: '12.5px', color: T.ink.muted }}>{g.line}</span>
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+            {ADMIN_TILES.filter(t => t.group === g.key).map(t => {
+              const on = active === t.key
+              const tile = summary.tiles[t.key]
+              const ink = tileInk(t.key)
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  data-tile={t.key}
+                  aria-pressed={on}
+                  onClick={() => onPick(on ? null : t.key)}
+                  style={{
+                    textAlign: 'left', minHeight: '44px', padding: '10px 12px', cursor: 'pointer', fontFamily: 'inherit',
+                    background: on ? (T.family[TILE_FAMILY[t.key]] || T.family.gray).bg : T.surface.raised,
+                    border: on ? `1.5px solid ${ink}` : T.border.thin, borderRadius: T.radius.control,
+                    display: 'flex', flexDirection: 'column', gap: '2px',
+                  }}
+                >
+                  <span data-tile-count style={{ fontSize: '22px', fontWeight: 700, color: ink, lineHeight: 1.1, fontVariantNumeric: T.type.tabular }}>{tile.count}</span>
+                  <span data-tile-verb style={{ fontSize: '14px', fontWeight: 700, color: ink }}>{t.verb}</span>
+                  <span data-tile-what style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.4 }}>{t.what}</span>
+                  <span data-tile-oldest style={{ fontSize: '12px', marginTop: '2px' }}>
+                    {tile.oldestDays == null
+                      ? <span style={{ color: T.ink.quiet }}>nothing here</span>
+                      : <AgeText days={tile.oldestDays} prefix="oldest " />}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
 
 export default function AdminFeedbackScreen({
-  // Reports the ONE open count (lib/feedback-queues) up to the nav badge.
-  onOpenCountChange = () => {},
+  // Reports the BADGE count (lib/feedback-admin-tiles adminBadgeCount) up to
+  // the nav: unanswered bugs + unanswered questions. Not the open count.
+  onBadgeCountChange = () => {},
   // VIEW-AS DATA SCOPING IS PER-SURFACE: "view as" swaps displayed role and
   // name only — API calls still ride the REAL session, so an elevated
   // impersonator's fetch takes the route's elevated branch. The franchise
@@ -1221,11 +1404,13 @@ export default function AdminFeedbackScreen({
   const [items, setItems]     = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
-  const [typeFilter, setTypeFilter] = useState('all')
-  // Closed items are HIDDEN by default — decided items were the bulk of the
-  // list and none of them needed anything.
-  const [showClosed, setShowClosed] = useState(false)
+  // THE FILTERS. A tile (or none), open/closed/everything, location, who has
+  // it, search. Closed items are reached HERE — there is no link at the
+  // bottom any more; 71 of 113 items used to hide behind one.
+  const [tileFilter, setTileFilter] = useState(null)
+  const [scope, setScope]           = useState('open') // 'open' | 'closed' | 'all'
   const [locFilter, setLocFilter]   = useState('all')
+  const [whoFilter, setWhoFilter]   = useState('anyone') // 'anyone' | 'mine' | 'nobody' | <user id>
   const [userQuery, setUserQuery]   = useState('')
   // The open modal: a snapshot of the visible list's ids plus the index.
   const [walk, setWalk] = useState(null)
@@ -1238,6 +1423,8 @@ export default function AdminFeedbackScreen({
   const [armed, setArmed]             = useState(null)
   const [applying, setApplying]       = useState(null)
   const [verdictNote, setVerdictNote] = useState(null)
+  const [claimBusy, setClaimBusy]     = useState(null)
+  const [claimError, setClaimError]   = useState(null)
 
   const currentUserCtx = useContext(CurrentUserContext)
   const myId = currentUserCtx?.id || null
@@ -1286,9 +1473,11 @@ export default function AdminFeedbackScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onReportFeedback, items.length])
 
-  // ONE open count, shared with the header, the badge and the dashboard.
+  // The header's open count (the dashboard's number too) and the BADGE, which
+  // is not the open count — see lib/feedback-admin-tiles.
   const summary = useMemo(() => summarizeFeedbackQueues(items), [items])
-  useEffect(() => { onOpenCountChange(summary.open) }, [summary.open, onOpenCountChange])
+  const badge = useMemo(() => adminBadgeCount(items), [items])
+  useEffect(() => { onBadgeCountChange(badge) }, [badge, onBadgeCountChange])
 
   const franchiseMount = !!onReportFeedback
   const canTriage = !franchiseMount
@@ -1298,13 +1487,19 @@ export default function AdminFeedbackScreen({
     items.forEach(i => { if (i.location_id) seen.set(i.location_id, i.location_name || i.location_id) })
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
   }, [items])
+  // Everyone who has something claimed, for the "who has it" filter.
+  const whoOptions = useMemo(() => {
+    const seen = new Map()
+    items.forEach(i => { if (i.assigned_to && i.assigned_to !== myId) seen.set(i.assigned_to, i.assigned_to_name || 'Someone') })
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [items, myId])
 
-  // ── FILTERS. Type is the tab; search + location are the quiet row. ──
-  const matchType = (i, t) =>
-    t === 'all' ? true
-    : t === 'other' ? !isKnownFeedbackType(i.type)
-    : i.type === t
   const matchLoc = (i) => locFilter === 'all' || i.location_id === locFilter
+  const matchWho = (i) =>
+    whoFilter === 'anyone' ? true
+    : whoFilter === 'mine' ? (!!myId && i.assigned_to === myId)
+    : whoFilter === 'nobody' ? !i.assigned_to
+    : i.assigned_to === whoFilter
   const matchQuery = (i) => {
     const q = userQuery.trim().toLowerCase()
     if (!q) return true
@@ -1312,47 +1507,44 @@ export default function AdminFeedbackScreen({
       .toLowerCase().includes(q)
   }
 
-  // Everything that survives search + location, before the type tab.
+  // Everything that survives search + location + who — what the tiles count.
   const scoped = useMemo(
-    () => items.filter(i => matchLoc(i) && matchQuery(i)),
+    () => items.filter(i => matchLoc(i) && matchWho(i) && matchQuery(i)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, locFilter, userQuery],
+    [items, locFilter, whoFilter, userQuery, myId],
   )
+  const tiles = useMemo(() => summarizeAdminTiles(scoped), [scoped])
 
-  // Tab counts are FACETED against what the list would show: closed rows
-  // count only while they are revealed, so a tab never promises rows the
-  // current view hides.
-  const countType = t => scoped.filter(i => matchType(i, t) && (showClosed || !isClosedFeedback(i.status))).length
-
-  // Which tabs exist. Bugs, Ideas and Questions are always offered (the
-  // owner-fileable three); the internal-only types appear once one exists;
-  // "Other" catches anything outside the vocabulary so the tabs always
-  // reconcile with Everything.
-  const presentTypes = useMemo(() => new Set(items.map(i => String(i.type || ''))), [items])
-  const hasUnknownType = useMemo(() => items.some(i => !isKnownFeedbackType(i.type)), [items])
-  const tabs = [
-    { key: 'all',      label: 'Everything', count: countType('all') },
-    { key: 'bug',      label: FEEDBACK_TYPE_TAB_LABEL.bug,      count: countType('bug'),      color: TYPE_COLOR.bug },
-    { key: 'feature',  label: FEEDBACK_TYPE_TAB_LABEL.feature,  count: countType('feature'),  color: TYPE_COLOR.feature },
-    { key: 'question', label: FEEDBACK_TYPE_TAB_LABEL.question, count: countType('question'), color: TYPE_COLOR.question },
-    ...INTERNAL_ONLY_TYPES
-      .filter(t => presentTypes.has(t))
-      .map(t => ({ key: t, label: FEEDBACK_TYPE_TAB_LABEL[t], count: countType(t), color: TYPE_COLOR[t] })),
-    ...(hasUnknownType ? [{ key: 'other', label: 'Other', count: countType('other'), color: TYPE_COLOR_FALLBACK }] : []),
-  ]
-
-  // ── THE QUEUES ──────────────────────────────────────────────────
-  const grouping = useMemo(
-    () => groupFeedbackForTriage(scoped.filter(i => matchType(i, typeFilter))),
+  // ── THE SECTIONS ─────────────────────────────────────────────────
+  // Open: one section per tile, in tile order, oldest first inside each — the
+  // same word and colour as the tile, and the tile's own line, never a second
+  // explanation. Closed: one section per closed status, most recently
+  // decided first.
+  const byAgeOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at)
+  const byRecent = (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)
+  const sections = useMemo(() => {
+    const out = []
+    const showOpen = scope !== 'closed'
+    const showClosed = scope !== 'open' && !tileFilter
+    if (showOpen) {
+      for (const t of ADMIN_TILES) {
+        if (tileFilter && tileFilter !== t.key) continue
+        const rows = scoped.filter(i => adminTileOf(i) === t.key).sort(byAgeOldest)
+        out.push({ key: t.key, kind: 'tile', title: t.verb, line: t.what, ink: tileInk(t.key), group: t.group, items: rows })
+      }
+    }
+    if (showClosed) {
+      for (const st of CLOSED_ORDER) {
+        const rows = scoped.filter(i => i.status === st).sort(byRecent)
+        out.push({ key: `closed-${st}`, kind: 'closed', title: FEEDBACK_STATUS_PLAIN[st], line: null, ink: (T.family[CLOSED_FAMILY[st]] || T.family.gray).text, items: rows })
+      }
+    }
+    return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scoped, typeFilter],
-  )
-  const openShown = grouping.needs.count + grouping.waiting.count
+  }, [scoped, scope, tileFilter])
   // The visible list, in render order — what the modal walks.
-  const visible = useMemo(
-    () => [...grouping.needs.items, ...grouping.waiting.items, ...(showClosed ? grouping.closed.items : [])],
-    [grouping, showClosed],
-  )
+  const visible = useMemo(() => sections.flatMap(s => s.items), [sections])
+  const closedTotal = summary.closed
 
   const selectedItem = walk ? items.find(i => i.id === walk.ids[walk.index]) : null
 
@@ -1429,28 +1621,51 @@ export default function AdminFeedbackScreen({
   const goPrev = useCallback(() => stepWalk(-1), [stepWalk])
   const goNext = useCallback(() => stepWalk(1), [stepWalk])
 
+  // Merge a saved row back in. reply_email is the route's report on the send,
+  // not a column.
+  const mergeRow = useCallback((updated) => {
+    const { reply_email: _ignored, ...row } = updated || {}
+    if (!row.id) return
+    setItems(prev => prev.map(i => (i.id === row.id ? { ...i, ...row } : i)))
+  }, [])
+
+  // CLAIM / RELEASE from the row — the same PATCH the modal makes.
+  const toggleClaim = useCallback(async (item, next) => {
+    setClaimBusy(item.id)
+    setClaimError(null)
+    try {
+      const res = await fetch(`/api/admin/feedback/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assigned_to: next }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      mergeRow(await res.json())
+    } catch {
+      setClaimError(`Could not change who has “${item.title}”. Please try again.`)
+    } finally {
+      setClaimBusy(null)
+    }
+  }, [mergeRow])
+
   // 16px so a phone does not zoom on focus; 44px tall so a thumb can hit it.
   const quietInput = { minHeight: '44px', padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, cursor: 'pointer' }
   const linkBtn = { padding: 0, background: 'none', border: 'none', color: T.accent.fg, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }
 
   // ── ONE ROW ─────────────────────────────────────────────────────
-  // A flat wrapping flex row: the checkbox is a SIBLING of the row button,
-  // never nested in it. The button's text starts with the title. Nothing in
-  // it has a background or a border; the type is a coloured glyph, the
-  // status is a word, and the red dot marks a row that needs a response.
+  // checkbox · claim circle · the row button. The type glyph is drawn in a
+  // neutral ink — the section already says what type it is, and red on this
+  // screen is reserved for age. The status is a chip, and only in the replied
+  // group and the closed list. Age is coloured on the row itself.
   const renderRow = (it) => {
     const closed = isClosedFeedback(it.status)
     const internal = !!it.is_internal
     const picked = selected.has(it.id)
-    const queue = triageQueueOf(it)
-    const needsResponse = queue === 'needs' && !internal
-    const days = triageWaitingDays(it)
+    const tile = adminTileOf(it)
+    const showChip = closed || (tile && adminGroupOf(tile) === 'replied')
     const note = replyNote(it, internal)
-    const when = closed
-      ? feedbackTimeAgo(it.updated_at || it.created_at)
-      : (days == null ? null : days <= 0 ? 'waiting since today' : `waiting ${dayPhrase(days)}`)
     return (
-      <div key={it.id} style={{ borderTop: T.border.divider, opacity: closed ? 0.72 : 1, background: picked ? T.accent.faint : 'transparent', display: 'flex', alignItems: 'flex-start' }}>
+      <div key={it.id} data-row={it.id} style={{ borderTop: T.border.divider, opacity: closed ? 0.72 : 1, background: picked ? T.accent.faint : 'transparent', display: 'flex', alignItems: 'flex-start' }}>
         {canTriage && (
           <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '44px', minHeight: '44px', paddingTop: '2px', cursor: 'pointer', flexShrink: 0 }}>
             <input
@@ -1462,22 +1677,29 @@ export default function AdminFeedbackScreen({
             />
           </label>
         )}
+        {canTriage && (
+          <ClaimCircle item={it} myId={myId} busy={claimBusy === it.id} onToggle={(next) => toggleClaim(it, next)} />
+        )}
         <button
           onClick={() => openRow(it.id)}
           style={{
             flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: '10px',
-            minHeight: '44px', padding: canTriage ? '12px 14px 12px 0' : '12px 14px', border: 'none',
+            minHeight: '44px', padding: canTriage ? '12px 14px 12px 4px' : '12px 14px', border: 'none',
             background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
           }}
         >
-          {/* The red dot — the one colour on the screen that is not a type. */}
-          <span aria-hidden="true" style={{ width: '8px', flexShrink: 0, display: 'flex', justifyContent: 'center', paddingTop: '7px' }}>
-            {needsResponse && <span data-testid="needs-dot" style={{ width: '7px', height: '7px', borderRadius: T.radius.round, background: T.state.danger.strong, display: 'block' }} />}
-          </span>
-          <TypeGlyph type={it.type} size={15} style={{ marginTop: '2px' }} />
+          <TypeGlyph type={it.type} size={15} style={{ marginTop: '2px', color: T.ink.muted }} />
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: T.ink.primary, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
-              {it.title}
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '14px', fontWeight: 500, color: T.ink.primary, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                {it.title}
+              </span>
+              {showChip && <StatusChip item={it} />}
+              {it.looks_shipped && (
+                <span data-looks-shipped-flag style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '1px 8px', borderRadius: T.radius.pill, fontSize: '11.5px', fontWeight: 600, lineHeight: 1.6, border: `1px solid ${T.family.green.text}`, color: T.family.green.text, whiteSpace: 'nowrap' }}>
+                  <IconCheck size={11} /> Looks built
+                </span>
+              )}
             </span>
             {/* Two lines of the description — titles alone made two
                 unrelated reports read as duplicates. */}
@@ -1491,12 +1713,13 @@ export default function AdminFeedbackScreen({
               </span>
             )}
             <span style={{ display: 'block', fontSize: '12px', color: T.ink.muted, marginTop: '4px', lineHeight: 1.5, overflowWrap: 'anywhere' }}>
-              {it.submitter_name || 'Unknown'}
+              {closed
+                ? <span>{feedbackTimeAgo(it.updated_at || it.created_at)}</span>
+                : <AgeText days={feedbackAgeDays(it.created_at)} />}
+              {' · '}{it.submitter_name || 'Unknown'}
               {!franchiseMount && it.location_name ? ` · ${it.location_name}` : ''}
-              {` · ${FEEDBACK_STATUS_PLAIN[it.status] || it.status}`}
-              {when ? ` · ${when}` : ''}
               {internal ? ' · Internal' : ''}
-              {note ? ` · ${note}` : ''}
+              {note ? <> · <strong style={{ color: T.ink.secondary }}>{note}</strong></> : ''}
               {Array.isArray(it.attachments) && it.attachments.length > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', marginLeft: '8px' }}>
                   <IconPaperclip size={11} />{it.attachments.length}
@@ -1509,49 +1732,27 @@ export default function AdminFeedbackScreen({
     )
   }
 
-  // ── ONE QUEUE ───────────────────────────────────────────────────
-  // Header (count + oldest, red past fourteen days), then the type sections.
-  // The type subheading goes away when a type tab is active — every row is
-  // that type, so the label would only repeat the tab.
-  const renderQueue = (q) => {
-    const red = q.overdue
-    const ink = red ? T.state.danger.strong : T.ink.primary
-    return (
-      <section key={q.key} aria-label={q.label} style={{ paddingBottom: '6px' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '10px', padding: '16px 14px 8px', flexWrap: 'wrap' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 700, color: ink, margin: 0, display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-            {q.label}
-            <span style={{ fontSize: '13px', fontWeight: 500, color: red ? T.state.danger.strong : T.ink.muted, fontVariantNumeric: T.type.tabular }}>{q.count}</span>
-          </h3>
-          {q.key !== 'closed' && (
-            <span style={{ fontSize: '12px', color: red ? T.state.danger.strong : T.ink.muted, fontWeight: red ? 600 : 500 }}>
-              {q.oldestDays != null ? `oldest ${dayPhrase(q.oldestDays)}` : 'nothing waiting'}
-            </span>
-          )}
-        </div>
-        {q.count === 0 && (
-          <p style={{ fontSize: '13px', color: T.ink.quiet, margin: 0, padding: '0 14px 10px' }}>Nothing here.</p>
-        )}
-        {q.sections.map(s => (
-          <div key={s.type}>
-            {typeFilter === 'all' && (
-              <p data-testid="type-subheading" style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: typeColor(s.type === 'other' ? null : s.type), margin: 0, padding: '6px 14px 4px' }}>
-                {s.type === 'other' ? 'Other' : typePlural(s.type)}
-              </p>
-            )}
-            {s.items.map(renderRow)}
-          </div>
-        ))}
-      </section>
-    )
-  }
+  // ── ONE SECTION ─────────────────────────────────────────────────
+  // The tile's word in the tile's colour, its count, and the tile's own line.
+  const renderSection = (sec) => (
+    <section key={sec.key} data-section={sec.key} aria-label={sec.title} style={{ paddingBottom: '6px' }}>
+      <h3 style={{ fontSize: '14px', fontWeight: 700, color: sec.ink, margin: 0, padding: '16px 14px 8px', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+        <span data-section-title>{sec.title}</span>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.muted, fontVariantNumeric: T.type.tabular }}>{sec.items.length}</span>
+        {sec.line && <span data-section-line style={{ fontSize: '12.5px', fontWeight: 400, color: T.ink.muted }}>{sec.line}</span>}
+      </h3>
+      {sec.items.length === 0
+        ? <p style={{ fontSize: '13px', color: T.ink.quiet, margin: 0, padding: '0 14px 10px' }}>Nothing here.</p>
+        : sec.items.map(renderRow)}
+    </section>
+  )
 
-  const closedCount = grouping.closed.count
-  const nothingToShow = openShown === 0 && !(showClosed && closedCount > 0)
+  const anyFilter = !!tileFilter || scope !== 'open' || locFilter !== 'all' || whoFilter !== 'anyone' || !!userQuery.trim()
 
   return (
     <div style={{ padding: '14px 1rem 1rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
-      {/* HEADER — one open count, the same number the badge uses. */}
+      {/* HEADER — the open count (the dashboard's number). The badge is a
+          different, smaller number and says so in its own place. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: '19px', fontWeight: 500, color: T.ink.primary, margin: 0, lineHeight: 1.3 }}>Feedback</h2>
@@ -1581,19 +1782,40 @@ export default function AdminFeedbackScreen({
         )}
       </div>
 
-      {/* TYPE TABS */}
-      <TypeTabs tabs={tabs} active={typeFilter} onChange={setTypeFilter} />
+      {/* THE TILES — two groups, six tiles, each a filter. */}
+      {!loading && !error && items.length > 0 && (
+        <AdminTiles summary={tiles} active={tileFilter} onPick={(k) => { setTileFilter(k); if (k && scope === 'closed') setScope('open') }} />
+      )}
 
-      {/* Search + location — the one quiet row. */}
+      {/* THE FILTER ROW — search, open/closed, location, who has it. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 12px', margin: '10px 0 12px' }}>
         <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search name, title or description" aria-label="Search feedback" style={{ ...quietInput, cursor: 'text', flex: '1 1 200px', maxWidth: '360px' }} />
+        <select value={scope} onChange={e => { setScope(e.target.value); if (e.target.value === 'closed') setTileFilter(null) }} aria-label="Open or closed" style={quietInput}>
+          <option value="open">Open ({summary.open})</option>
+          <option value="closed">Closed ({closedTotal})</option>
+          <option value="all">Everything ({summary.total})</option>
+        </select>
         {!franchiseMount && (
           <select value={locFilter} onChange={e => setLocFilter(e.target.value)} aria-label="Location" style={quietInput}>
             <option value="all">All locations</option>
             {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         )}
+        {canTriage && (
+          <select value={whoFilter} onChange={e => setWhoFilter(e.target.value)} aria-label="Who has it" style={quietInput}>
+            <option value="anyone">Anyone has it</option>
+            <option value="mine">Mine</option>
+            <option value="nobody">Nobody yet</option>
+            {whoOptions.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        )}
+        {anyFilter && (
+          <button type="button" onClick={() => { setTileFilter(null); setScope('open'); setLocFilter('all'); setWhoFilter('anyone'); setUserQuery('') }} style={{ ...linkBtn, minHeight: '44px' }}>
+            Clear filters
+          </button>
+        )}
       </div>
+      {claimError && <p style={{ fontSize: '12.5px', color: T.state.danger.strong, margin: '0 0 10px' }}>{claimError}</p>}
 
       {/* CLUSTERS (issue 307) — ONE DARK BAR EACH, above the queues. A count,
           one plain sentence, a way in. Everything else — the impact number,
@@ -1640,48 +1862,28 @@ export default function AdminFeedbackScreen({
         </div>
       ) : items.length === 0 ? (
         <p style={{ fontSize: '13px', color: T.ink.muted, textAlign: 'center', padding: '30px 0' }}>No feedback submitted yet.</p>
+      ) : visible.length === 0 ? (
+        <p style={{ fontSize: '13px', color: T.ink.muted, textAlign: 'center', padding: '30px 0 16px' }}>
+          {summary.open === 0 && !anyFilter
+            ? 'Nothing open — everything has been answered or decided.'
+            : 'No feedback matches these filters.'}
+        </p>
       ) : (
-        <>
-          {nothingToShow ? (
-            <p style={{ fontSize: '13px', color: T.ink.muted, textAlign: 'center', padding: '30px 0 16px' }}>
-              {summary.open === 0 && typeFilter === 'all' && !userQuery.trim() && locFilter === 'all'
-                ? 'Nothing open — everything has been answered or decided.'
-                : 'No feedback matches these filters.'}
-            </p>
-          ) : (
-            /* One rounded container; the queues and their hairline rows inside. */
-            <div style={{ background: T.surface.raised, border: T.border.thin, borderRadius: '12px', overflow: 'hidden' }}>
-              {openShown > 0 && renderQueue(grouping.needs)}
-              {openShown > 0 && renderQueue(grouping.waiting)}
-              {showClosed && closedCount > 0 && renderQueue(grouping.closed)}
-            </div>
-          )}
-
-          {/* THE CLOSED LINE — quiet, grey, at the bottom. Not a queue. */}
-          {closedCount > 0 && (
-            <div style={{ textAlign: 'center', marginTop: '12px' }}>
-              <button
-                type="button"
-                onClick={() => setShowClosed(v => !v)}
-                aria-expanded={showClosed}
-                className="bee-chip-action"
-                style={{ minHeight: '44px', padding: '0 16px', background: 'none', border: 'none', color: T.ink.quiet, fontFamily: 'inherit', fontWeight: 500, cursor: 'pointer' }}
-              >
-                {showClosed ? `Hide ${closedCount} closed` : `Show ${closedCount} closed`}
-              </button>
-            </div>
-          )}
-        </>
+        /* One rounded container; the sections and their hairline rows inside. */
+        <div style={{ background: T.surface.raised, border: T.border.thin, borderRadius: '12px', overflow: 'hidden' }}>
+          {sections.filter(sec => sec.items.length > 0 || (tileFilter && sec.kind === 'tile')).map(renderSection)}
+        </div>
       )}
 
       {selectedItem && walk && (
         <AdminFeedbackDetailModal
           item={selectedItem}
-          queueLabel={TRIAGE_QUEUE_LABEL[triageQueueOf(selectedItem)]}
+          queueLabel={(() => { const t = adminTileOf(selectedItem); return t ? ADMIN_TILES.find(x => x.key === t).verb : (FEEDBACK_STATUS_PLAIN[selectedItem.status] || null) })()}
           position={walk.index + 1}
           total={walk.ids.length}
           isOwnItem={!!myId && selectedItem.user_id === myId}
           canTriage={canTriage}
+          myId={myId}
           // undefined until the analysis fetch lands (the copy button waits);
           // null once it has landed with nothing for this item.
           analysis={analyses ? (analyses.get(selectedItem.id) || null) : undefined}
@@ -1690,11 +1892,7 @@ export default function AdminFeedbackScreen({
           onPrev={goPrev}
           onNext={goNext}
           onClose={closeWalk}
-          onSaved={(updated) => {
-            // reply_email is the route's report on the send, not a column.
-            const { reply_email: _ignored, ...row } = updated
-            setItems(prev => prev.map(i => (i.id === row.id ? { ...i, ...row } : i)))
-          }}
+          onSaved={mergeRow}
         />
       )}
 

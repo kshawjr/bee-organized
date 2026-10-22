@@ -172,7 +172,11 @@ describe('the reply email names the status in the shared vocabulary', () => {
   })
 
   it('every status, moved in the same save as a reply, is named with the shared word', async () => {
-    for (const s of Object.keys(FEEDBACK_STATUS_PLAIN)) {
+    // Every status a replied item can be MOVED to. 'submitted' is not one: a
+    // replied item back at 'submitted' is Stuck, which the admin redesign made
+    // unsettable by hand (lib/beta-admin-feedback-routes.test.ts) — that case
+    // is asserted to be refused, below, rather than to email.
+    for (const s of Object.keys(FEEDBACK_STATUS_PLAIN).filter(k => k !== 'submitted')) {
       h.reset()
       direct.fn.mockClear()
       h.state.rows.hub_users = { id: 'admin-1', role: 'super_admin', location_id: null, ...PEOPLE }
@@ -182,6 +186,14 @@ describe('the reply email names the status in the shared vocabulary', () => {
       const text = (direct.fn.mock.calls[0][0] as any).text
       expect(text, s).toContain(`We've also marked it: ${FEEDBACK_STATUS_PLAIN[s]}.`)
     }
+    h.reset()
+    direct.fn.mockClear()
+    h.state.rows.hub_users = { id: 'admin-1', role: 'super_admin', location_id: null, ...PEOPLE }
+    h.state.rows.feedback_items = { ...ITEM, status: 'under_review' }
+    const refused = await patch({ status: 'submitted', admin_response: 'Some words.' })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error).toBe('stuck_is_not_settable')
+    expect(direct.fn).not.toHaveBeenCalled()
   })
 
   it('the shared words are the agreed ones', () => {

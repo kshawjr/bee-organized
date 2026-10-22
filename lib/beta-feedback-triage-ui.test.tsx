@@ -26,8 +26,9 @@
 //
 // ISSUE 233 moved several of these without removing them. Closed items are now
 // hidden behind a "Show N closed" toggle, so the tests that assert on a closed
-// row reveal it first; the badge prop is onOpenCountChange and carries the OPEN
-// count; and the detail modal's status dropdown became a row of buttons. The
+// row reveal it first (through the Open / Closed filter since the admin
+// redesign); the badge prop is onBadgeCountChange and carries the BADGE count
+// (unanswered bugs + questions); and the detail modal's status dropdown became a row of buttons. The
 // queue cards, the count reconciliation and next/previous are pinned in
 // lib/beta-feedback-queue-ui-233.test.tsx rather than duplicated here.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -78,7 +79,7 @@ const withUser = (ui: React.ReactElement, user: any = { id: 'u1', email: 'amy@bi
 
 // The three REAL prop shapes (pinned against BeeHub source below).
 const franchiseProps = { locationId: null as string | null, onReportFeedback: () => {} }
-const elevatedProps = { onOpenCountChange: () => {} }
+const elevatedProps = { onBadgeCountChange: () => {} }
 
 const rowButton = (host: Element, title: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith(title))
@@ -89,9 +90,16 @@ const locationSelect = (host: Element) =>
   [...host.querySelectorAll('select')].find(s => (s.textContent || '').includes('All locations'))
 // Closed items are hidden by default (issue 233); reveal them for the
 // assertions that are ABOUT a closed row.
+// Closed items are reached through the Open / Closed / Everything filter now
+// (the admin redesign) — there is no "Show N closed" link to click.
 const showClosed = async (host: Element) => {
-  const btn = [...host.querySelectorAll('button')].find(b => (b.textContent || '').startsWith('Show '))
-  if (btn) await click(btn)
+  const sel = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement | null
+  if (!sel) return
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+    setter.call(sel, 'all')
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
 }
 
 beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
@@ -135,9 +143,9 @@ describe('the BeeHub mount sites pass the shapes mounted in this file', () => {
     expect(BEEHUB_SRC).not.toContain('function AdminFeedbackDetailModal(')
   })
 
-  it('TWO elevated admin mounts: onOpenCountChange only — no composer, no location override', () => {
+  it('TWO elevated admin mounts: onBadgeCountChange only — no composer, no location override', () => {
     const mounts = BEEHUB_SRC.match(/<AdminFeedbackScreen[^/]*\/>/g) || []
-    const withPending = mounts.filter(m => m.includes('onOpenCountChange'))
+    const withPending = mounts.filter(m => m.includes('onBadgeCountChange'))
     expect(withPending.length).toBe(2) // SuperAdminLayout tab + legacy AdminScreen tab
     for (const m of withPending) {
       expect(m).not.toContain('onReportFeedback')
@@ -214,7 +222,7 @@ describe('franchise mount (onReportFeedback + locationId)', () => {
 // Both elevated sites pass the identical shape (pinned above), so one mount
 // exercises both — the point is that the shape they pass keeps the location
 // filter, keeps the row-meta location, and never grows a composer.
-describe('elevated admin mounts (onOpenCountChange only)', () => {
+describe('elevated admin mounts (onBadgeCountChange only)', () => {
   it('SHOWS the location filter with the locations present in the data', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
@@ -250,11 +258,18 @@ describe('elevated admin mounts (onOpenCountChange only)', () => {
     await unmount()
   })
 
-  it('reports the OPEN count for the tab badge — the one number the dashboard also shows', async () => {
-    stubFetch()
-    const onOpen = vi.fn()
-    const { unmount } = await mount(withUser(<AdminFeedbackScreen onOpenCountChange={onOpen} />))
-    expect(onOpen).toHaveBeenLastCalledWith(2) // i1 + i3 open; i2 is shipped
+  it('reports the BADGE count — unanswered bugs and questions — not the open count', async () => {
+    // i1 + i3 are unanswered bugs; i2 is shipped. Add an unanswered idea and a
+    // replied bug: both are open, and neither may move the badge.
+    stubFetch([
+      ...ITEMS,
+      { ...ITEMS[0], id: 'i4', title: 'An idea', type: 'feature' },
+      { ...ITEMS[0], id: 'i5', title: 'A replied bug', status: 'planned', admin_response: 'On it.' },
+    ])
+    const onBadge = vi.fn()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen onBadgeCountChange={onBadge} />))
+    expect(onBadge).toHaveBeenLastCalledWith(2)
+    expect(host.textContent).toContain('4 open items')
     await unmount()
   })
 })
@@ -315,7 +330,11 @@ describe('rows and the detail modal', () => {
     // STAYS OPEN now (next/previous walks the queue without reopening).
     expect(host.textContent).toContain('What they said')
     await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Close')!)
-    expect(rowButton(host, 'Login button broken')!.textContent).toContain('Building it now')
+    // The saved status is merged into the list: reopening the row shows it.
+    // (No chip on the row — an unanswered bug sits under Fix, where the
+    // section already is the status.)
+    await click(rowButton(host, 'Login button broken')!)
+    expect((host.querySelector('select[aria-label="Status"]') as HTMLSelectElement).value).toBe('in_progress')
     await unmount()
   })
 })

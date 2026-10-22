@@ -266,7 +266,8 @@ describe('triage, when the report was withdrawn mid-conversation', () => {
         setA.call(area, 'Here is what we found.')
         area.dispatchEvent(new Event('input', { bubbles: true }))
       })
-      await click(byText(host, 'Save') || byText(host, 'Save and send'))
+      // The button names who it emails now ("Save and email Ankur").
+      await click(buttons(host).find(b => /^Save( and email .+)?$/.test((b.textContent || '').trim())))
       expect(host.textContent).toContain('This report is gone')
       expect(host.textContent).toContain('no reply was sent')
       expect(host.textContent).not.toContain('Could not save — please try again')

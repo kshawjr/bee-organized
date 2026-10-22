@@ -156,10 +156,12 @@ describe('one bar renders per cluster, with the count and a sentence', () => {
     await unmount()
   })
 
-  it('the bars sit above the queues', async () => {
+  it('the bars sit above the list', async () => {
     const { host, unmount } = await screenFor()
-    const needs = host.querySelector('section[aria-label="Needs an answer"]')!
-    expect(bars(host)[0].compareDocumentPosition(needs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The first section of the list (the tiles redesign retired the queues).
+    const first = host.querySelector('section[data-section]')!
+    expect(first).toBeTruthy()
+    expect(bars(host)[0].compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await unmount()
   })
 

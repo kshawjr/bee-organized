@@ -90,6 +90,7 @@ import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"
 // 233). The badges used to fetch ?status=submitted and report 17 while the
 // screen's own header said 28; both now come from here, so they cannot drift.
 import { summarizeFeedbackQueues } from "@/lib/feedback-queues"
+import { adminBadgeCount } from "@/lib/feedback-admin-tiles"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import AdminZipCodesScreen from "@/components/admin/AdminZipCodesScreen"
 import LocationZipsPanel from "@/components/admin/LocationZipsPanel"
@@ -215,6 +216,24 @@ async function fetchFeedbackOpenCount() {
     const data = await res.json()
     if (!data || !Array.isArray(data.items)) return null
     return summarizeFeedbackQueues(data.items).open
+  } catch {
+    return null
+  }
+}
+
+// THE NAV BADGE IS NOT THE OPEN COUNT any more (the admin feedback redesign).
+// It said 40 and Leslie read forty things on fire; four were unanswered bugs.
+// It now counts people waiting on a real answer — open bugs and open questions
+// with no reply (lib/feedback-admin-tiles adminBadgeCount, the same function
+// the screen reports through onBadgeCountChange). Ideas never set it off. The
+// dashboard card above still shows the open count, labelled as such.
+async function fetchFeedbackBadgeCount() {
+  try {
+    const res = await fetch('/api/admin/feedback')
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!data || !Array.isArray(data.items)) return null
+    return adminBadgeCount(data.items)
   } catch {
     return null
   }
@@ -34517,8 +34536,8 @@ function SuperAdminLayout({
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // Feedback badge count — OPEN items, the one definition (issue 233). Fetched
-  // on mount, kept fresh by AdminFeedbackScreen's onOpenCountChange.
+  // Feedback badge count — unanswered bugs + questions (adminBadgeCount).
+  // Fetched on mount, kept fresh by AdminFeedbackScreen's onBadgeCountChange.
   const [feedbackPending, setFeedbackPending] = useState(0)
   const handleFeedbackPending = React.useCallback(n => setFeedbackPending(n), [])
   const showFeedback = role === 'super_admin' || role === 'corporate' || role === 'admin'
@@ -34531,7 +34550,7 @@ function SuperAdminLayout({
   useEffect(() => {
     if (!showFeedback) return
     let cancelled = false
-    fetchFeedbackOpenCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
+    fetchFeedbackBadgeCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
     return () => { cancelled = true }
   }, [showFeedback])
 
@@ -34801,7 +34820,7 @@ function SuperAdminLayout({
           // now, so no serif h1 here like the sibling tabs — the wrapper
           // padding shrinks to offset the screen's internal padding.
           <div style={{ padding:'14px 8px 48px' }}>
-            <AdminFeedbackScreen onOpenCountChange={handleFeedbackPending} />
+            <AdminFeedbackScreen onBadgeCountChange={handleFeedbackPending} />
           </div>
         )
 
@@ -35052,11 +35071,11 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Prime the badge count on mount so the open-feedback indicator shows before
   // the operator ever opens the Feedback tab. AdminFeedbackScreen keeps it
-  // fresh thereafter via onOpenCountChange.
+  // fresh thereafter via onBadgeCountChange.
   useEffect(() => {
     if (!showFeedbackTab) return
     let cancelled = false
-    fetchFeedbackOpenCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
+    fetchFeedbackBadgeCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
     return () => { cancelled = true }
   }, [showFeedbackTab])
   // Real Supabase locations when provided by App (super_admin/corporate
@@ -35269,7 +35288,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             locations={locations}
           />
         ) : adminTab==='feedback' ? (
-          <AdminFeedbackScreen onOpenCountChange={handleFeedbackPending} />
+          <AdminFeedbackScreen onBadgeCountChange={handleFeedbackPending} />
         ) : adminTab==='webhooks' ? (
           <AdminWebhookLogScreen />
         ) : adminTab==='notifications' ? (

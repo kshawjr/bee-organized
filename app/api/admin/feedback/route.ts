@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
       // client filter: the rows must not reach the browser at all.
       //
       // This is the ONLY owner-facing list read of feedback_items. The owner
-      // screen's header count, its four tab counts and its subtitle are all
+      // screen's subtitle and its open/closed split are all
       // derived from this response (components/feedback/OwnerFeedbackScreen
       // `counts`), so filtering here fixes every number an owner can see —
       // there is no second place to keep in step.
@@ -214,18 +214,57 @@ export async function GET(req: NextRequest) {
     for (const l of leads || []) if (l?.id && l?.name) leadNameById.set(l.id, l.name)
   }
 
+  // ── who has it: resolve assigned_to to a NAME (the admin redesign) ──
+  // Elevated callers only, and one batched lookup rather than an embed, for the
+  // same reason as the context names above: a failure here must cost the
+  // initials on the claim circle, never the list. assigned_to already rides
+  // on the row (`*`); this only adds the name the circle shows.
+  const assigneeNameById = new Map<string, string>()
+  if (isElevatedCaller) {
+    const assigneeIds = Array.from(
+      new Set(
+        rows
+          .map((r: any) => r?.assigned_to)
+          .filter((v: any): v is string => typeof v === 'string' && !!v),
+      ),
+    )
+    if (assigneeIds.length) {
+      const { data: people, error: peopleErr } = await supabaseService
+        .from('hub_users')
+        .select('id, full_name, first_name, email')
+        .in('id', assigneeIds)
+      if (peopleErr) console.warn('[admin feedback GET] assignee lookup failed:', peopleErr.message)
+      for (const p of people || []) {
+        const name = p?.full_name?.trim() || p?.first_name?.trim() || p?.email || null
+        if (p?.id && name) assigneeNameById.set(p.id, name)
+      }
+    }
+  }
+
   // Flatten the embeds into the shape the admin UI expects.
-  const items = rows.map((r: any) => ({
-    ...r,
-    submitter_name:
-      r.submitter?.full_name?.trim() ||
-      r.submitter?.first_name?.trim() ||
-      r.submitter?.email ||
-      'Unknown',
-    submitter_email: r.submitter?.email || null,
-    location_name: r.location?.name || null,
-    context_client_name: r?.context?.lead_id ? leadNameById.get(r.context.lead_id) || null : null,
-  }))
+  const items = rows.map((r: any) => {
+    const item: Record<string, any> = {
+      ...r,
+      submitter_name:
+        r.submitter?.full_name?.trim() ||
+        r.submitter?.first_name?.trim() ||
+        r.submitter?.email ||
+        'Unknown',
+      submitter_email: r.submitter?.email || null,
+      location_name: r.location?.name || null,
+      context_client_name: r?.context?.lead_id ? leadNameById.get(r.context.lead_id) || null : null,
+    }
+    if (isElevatedCaller) {
+      item.assigned_to_name = r.assigned_to ? assigneeNameById.get(r.assigned_to) || null : null
+    } else {
+      // ASSIGNMENT AND THE "LOOKS ALREADY BUILT" TICK ARE THE TEAM'S. An owner
+      // reading their own location's list gets neither — who on our side has
+      // it, and our private guess that it shipped, are not owner-facing facts.
+      delete item.assigned_to
+      delete item.looks_shipped
+    }
+    return item
+  })
 
   return NextResponse.json({ items })
 }

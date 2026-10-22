@@ -58,12 +58,12 @@ const screen = () => (
   </CurrentUserContext.Provider>
 )
 
-// A type tab is role="tab" with aria-label "<label> tab"; its text is the
-// label followed by the count.
-const tab = (host: Element, label: string) => host.querySelector(`[aria-label="${label} tab"]`) as HTMLButtonElement | null
-const tabCount = (host: Element, label: string) => {
-  const m = (tab(host, label)?.textContent || '').match(/(\d+)\s*$/)
-  return m ? Number(m[1]) : null
+// The tiles (the admin redesign) replaced the type tabs. A tile is a button
+// with data-tile="<key>" and aria-pressed; its count is [data-tile-count].
+const tile = (host: Element, key: string) => host.querySelector(`[data-tile="${key}"]`) as HTMLButtonElement | null
+const tileCount = (host: Element, key: string) => {
+  const t = tile(host, key)?.querySelector('[data-tile-count]')?.textContent
+  return t == null ? null : Number(t)
 }
 const byText = (host: Element, prefix: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith(prefix))
@@ -74,71 +74,76 @@ const rowTitles = (host: Element) =>
 
 beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
 
-describe('counts match what each tab would actually show', () => {
-  it('type counts are the real per-type totals for the OPEN items (Bugs 2, Ideas 1, Everything 3)', async () => {
+describe('counts match what each tile would actually show', () => {
+  it('tile counts are the real per-tile totals for the OPEN items (Fix 2, Decide 1, Answer 0)', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    expect(tabCount(host, 'Everything')).toBe(3)
-    expect(tabCount(host, 'Bugs')).toBe(2)   // i2, i5 — i1 is shipped
-    expect(tabCount(host, 'Ideas')).toBe(1)  // i3 — i4 is shipped
-    expect(tabCount(host, 'Questions')).toBe(0)
+    // i2 + i5 are unanswered bugs; i3 an unanswered idea; i1 and i4 shipped.
+    expect(tileCount(host, 'fix')).toBe(2)
+    expect(tileCount(host, 'decide')).toBe(1)
+    expect(tileCount(host, 'answer')).toBe(0)
+    expect(['build', 'deciding', 'stuck'].map(k => tileCount(host, k))).toEqual([0, 0, 0])
     await unmount()
   })
 
-  it('the type counts re-face when closed items are revealed', async () => {
+  it('the tile counts follow the search — they count what the list would show', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    await click(byText(host, 'Show 2 closed')!)
-    expect(tabCount(host, 'Everything')).toBe(5)
-    expect(tabCount(host, 'Bugs')).toBe(3)
-    expect(tabCount(host, 'Ideas')).toBe(2)
+    const search = host.querySelector('input[aria-label="Search feedback"]') as HTMLInputElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'Typo')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(tileCount(host, 'fix')).toBe(1)
+    expect(tileCount(host, 'decide')).toBe(0)
     await unmount()
   })
 })
 
-describe('selecting a type shows only that type', () => {
-  it('Bugs → only the open bug rows; Ideas → only the open feature row', async () => {
+describe('selecting a tile shows only that tile', () => {
+  it('Fix → only the open bug rows; Decide → only the open idea row', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
     expect(rowTitles(host).length).toBe(3)
-    await click(tab(host, 'Bugs')!)
+    await click(tile(host, 'fix')!)
     expect(rowTitles(host).sort()).toEqual(['Report page is slow', 'Typo on invoice'].sort())
-    expect(tab(host, 'Bugs')!.getAttribute('aria-selected')).toBe('true')
-    await click(tab(host, 'Ideas')!)
+    expect(tile(host, 'fix')!.getAttribute('aria-pressed')).toBe('true')
+    await click(tile(host, 'decide')!)
     expect(rowTitles(host).sort()).toEqual(['Dark mode please'])
     await unmount()
   })
 })
 
 describe('status vocabulary stays in plain words wherever it appears', () => {
-  it('rows read Looking at it / On the list as plain text, never the raw db values', async () => {
+  it('never the raw db values on the screen; the modal speaks the plain words', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
     const text = host.textContent || ''
-    expect(text).toContain('Looking at it') // under_review ×2
-    expect(text).toContain('On the list')   // planned ×1
     expect(text).not.toContain('under_review')
     expect(text).not.toContain('in_progress')
+    await click(byText(host, 'Typo on invoice')!)
+    const sel = host.querySelector('select[aria-label="Status"]') as HTMLSelectElement
+    expect(sel.options[sel.selectedIndex].textContent).toBe('Looking at it')
     await unmount()
   })
 })
 
 describe('the "Just mine" axis is gone', () => {
-  it('no Everyone / Just mine control renders; the type tabs still do', async () => {
+  it('no Everyone / Just mine control renders; the tiles do', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
     expect(byText(host, 'Just mine')).toBeUndefined()
     expect(byText(host, 'Everyone')).toBeUndefined()
-    expect(tab(host, 'Bugs')).toBeTruthy()
+    expect(tile(host, 'fix')).toBeTruthy()
     await unmount()
   })
 })
 
 describe('a zero-result combination says so clearly', () => {
-  it('Bugs + a search that matches no one → zero rows and an explicit message', async () => {
+  it('Fix + a search that matches no one → zero rows and an explicit message', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    await click(tab(host, 'Bugs')!)
+    await click(tile(host, 'fix')!)
     expect(rowTitles(host).length).toBe(2)
 
     const search = host.querySelector('input[aria-label="Search feedback"]') as HTMLInputElement

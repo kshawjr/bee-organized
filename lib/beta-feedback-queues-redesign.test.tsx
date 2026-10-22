@@ -5,15 +5,15 @@
 // Kevin could not scan the issue 233/306 screen or work it on a phone: three
 // queue cards, five filters, a colour per status and per type, and the
 // analysis + copy-prompt + draft-reply stacked inline under every row. What
-// this pins about its replacement:
+// this pinned about its replacement — and, since THE TILES REDESIGN replaced
+// the queues and the type tabs, what it pins now:
 //
-//   · TWO QUEUES in a fixed order — "Needs an answer" then "Waiting on them"
-//     — each header carrying its count and the age of its oldest item, red
-//     once that crosses fourteen days
-//   · a FIXED TYPE ORDER inside each queue: bugs, questions, ideas, hazards,
-//     decisions; longest waiting first within a type
-//   · a type tab DROPS the type subheadings
-//   · closed items are hidden until "Show N closed" is used
+//   · SIX SECTIONS in tile order (Fix, Answer, Decide, Build, Still deciding,
+//     Stuck), longest waiting first inside each; the queues' pure layer
+//     (lib/feedback-triage-groups) is still pinned below — the cluster modal
+//     reads it
+//   · a tile is a filter; age (amber past 10, red past 21) is on the row
+//   · closed items are reached through the Open / Closed filter
 //   · the modal opens, walks with the arrows (buttons AND keys), closes on
 //     Escape, and ignores the arrow keys while someone is typing
 //   · NO PILLS: no status badge, no internal pill, no coloured chip anywhere
@@ -122,7 +122,7 @@ const screenFor = (items: any[] = ITEMS, props: any = {}) => {
   stubFetch(items)
   return mount(
     <CurrentUserContext.Provider value={{ id: 'u1', email: 'kevin@bmave.com' } as any}>
-      <AdminFeedbackScreen onOpenCountChange={() => {}} {...props} />
+      <AdminFeedbackScreen onBadgeCountChange={() => {}} {...props} />
     </CurrentUserContext.Provider>,
   )
 }
@@ -132,6 +132,9 @@ const rowButton = (host: Element, title: string) =>
   buttons(host).find(b => (b.textContent || '').trim().startsWith(title))
 const openRow = (host: Element, title: string) => click(rowButton(host, title)!)
 const section = (host: Element, label: string) => host.querySelector(`section[aria-label="${label}"]`) as HTMLElement | null
+const tileSection = (host: Element, key: string) => host.querySelector(`[data-section="${key}"]`) as HTMLElement | null
+const tile = (host: Element, key: string) => host.querySelector(`[data-tile="${key}"]`) as HTMLButtonElement | null
+const sendButton = (host: Element) => buttons(host).find(b => /^Save and email /.test((b.textContent || '').trim()))
 const titlesIn = (el: Element | null, items: any[] = ITEMS) =>
   [...(el?.querySelectorAll('button') || [])]
     .map(b => items.find(i => (b.textContent || '').trim().startsWith(i.title))?.title)
@@ -210,127 +213,110 @@ describe('lib/feedback-triage-groups — whose turn is it', () => {
 
 // ─── THE LIST ─────────────────────────────────────────────────────────
 
-describe('the queues render in the right order, with types ordered inside them', () => {
-  it('Needs an answer comes before Waiting on them, and each holds the right rows', async () => {
+// Where the fixture lands under the tiles:
+//   Fix       Older bug (30d) · A hazard (4d) · Newer bug (2d)
+//   Answer    A question (6d)
+//   Decide    An idea (20d) · A decision (9d)
+//   Build     Legacy reply idea (50d)
+//   Still deciding  We asked them (40d) · They wrote back (40d)
+//   Stuck     —                      closed: A closed one
+describe('the sections render in tile order, longest waiting first inside each', () => {
+  it('each section holds the right rows, in order', async () => {
     const { host, unmount } = await screenFor()
-    const needs = section(host, 'Needs an answer')!
-    const waiting = section(host, 'Waiting on them')!
-    expect(needs).toBeTruthy()
-    expect(waiting).toBeTruthy()
-    expect(needs.compareDocumentPosition(waiting) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(titlesIn(needs)).toEqual(['Older bug', 'Newer bug', 'They wrote back', 'A question', 'An idea', 'A hazard', 'A decision'])
-    expect(titlesIn(waiting)).toEqual(['We asked them', 'Legacy reply idea'])
+    expect(titlesIn(tileSection(host, 'fix'))).toEqual(['Older bug', 'A hazard', 'Newer bug'])
+    expect(titlesIn(tileSection(host, 'answer'))).toEqual(['A question'])
+    expect(titlesIn(tileSection(host, 'decide'))).toEqual(['An idea', 'A decision'])
+    expect(titlesIn(tileSection(host, 'build'))).toEqual(['Legacy reply idea'])
+    expect(titlesIn(tileSection(host, 'deciding'))).toEqual(['We asked them', 'They wrote back'])
+    expect(tileSection(host, 'stuck')).toBeNull() // empty sections are not drawn
+    const order = [...host.querySelectorAll('[data-section]')].map(e => e.getAttribute('data-section'))
+    expect(order).toEqual(['fix', 'answer', 'decide', 'build', 'deciding'])
     await unmount()
   })
 
-  it('the type subheadings appear in the fixed order, in the type colour', async () => {
+  it('no type subheadings any more — the section is the tile', async () => {
     const { host, unmount } = await screenFor()
-    expect(subheadingsIn(section(host, 'Needs an answer'))).toEqual(['Bugs', 'Questions', 'Ideas', 'Hazards', 'Decisions'])
-    const heads = [...section(host, 'Needs an answer')!.querySelectorAll('[data-testid="type-subheading"]')] as HTMLElement[]
-    // The SHARED map (lib/feedback-types), the one System Health ships with.
-    expect(heads[0].style.color).toBe(T.family.red.text)      // bug red
-    expect(heads[1].style.color).toBe(T.family.teal.text)     // question teal
-    expect(heads[2].style.color).toBe(T.family.blue.text)     // idea blue
-    expect(heads[3].style.color).toBe(T.family.amber.text)    // hazard amber
-    expect(heads[4].style.color).toBe(T.family.purple.text)   // decision purple
+    expect(subheadingsIn(host)).toEqual([])
     await unmount()
   })
 
-  it('each header shows its count and the age of its oldest item', async () => {
+  it('each tile shows its count and the age of its oldest item', async () => {
     const { host, unmount } = await screenFor()
-    const needsHead = section(host, 'Needs an answer')!.querySelector('h3')!
-    expect(needsHead.textContent).toContain('Needs an answer')
-    expect(needsHead.textContent).toContain('7')
-    expect(section(host, 'Needs an answer')!.textContent).toContain('oldest 30 days')
-    expect(section(host, 'Waiting on them')!.querySelector('h3')!.textContent).toContain('2')
-    expect(section(host, 'Waiting on them')!.textContent).toContain('oldest 16 days')
+    expect(tile(host, 'fix')!.querySelector('[data-tile-count]')!.textContent).toBe('3')
+    expect(tile(host, 'fix')!.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 30 days old')
+    expect(tile(host, 'build')!.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 50 days old')
+    expect(tile(host, 'stuck')!.querySelector('[data-tile-oldest]')!.textContent).toBe('nothing here')
     await unmount()
   })
 
-  it('a header turns red once its oldest crosses 14 days, and not before', async () => {
+  it('age is coloured on the row — red past 21, amber past 10 — and no heading is ever red', async () => {
     const { host, unmount } = await screenFor()
-    // Both queues are overdue in the main fixture.
-    expect((section(host, 'Needs an answer')!.querySelector('h3') as HTMLElement).style.color).toBe(T.state.danger.strong)
-    await unmount()
-    const { host: h2, unmount: un2 } = await screenFor([
-      item({ id: 'a', title: 'Young', created_at: daysAgo(13), updated_at: daysAgo(13) }),
-      item({ id: 'b', title: 'Asked lately', status: 'under_review', created_at: daysAgo(13), admin_response: 'Hi', admin_response_at: daysAgo(2), replies: [teamReply(2)] }),
-    ])
-    expect((section(h2, 'Needs an answer')!.querySelector('h3') as HTMLElement).style.color).toBe(T.ink.primary)
-    expect((section(h2, 'Waiting on them')!.querySelector('h3') as HTMLElement).style.color).toBe(T.ink.primary)
-    await un2()
-  })
-
-  it('the red dot marks the rows that need a response from us, and only those', async () => {
-    const { host, unmount } = await screenFor()
-    expect(rowButton(host, 'Older bug')!.querySelector('[data-testid="needs-dot"]')).toBeTruthy()
-    expect(rowButton(host, 'They wrote back')!.querySelector('[data-testid="needs-dot"]')).toBeTruthy()
-    expect(rowButton(host, 'We asked them')!.querySelector('[data-testid="needs-dot"]')).toBeNull()
-    // Internal items have nobody waiting on a response.
-    expect(rowButton(host, 'A hazard')!.querySelector('[data-testid="needs-dot"]')).toBeNull()
+    const tone = (id: string) => host.querySelector(`[data-row="${id}"] [data-age-tone]`)!.getAttribute('data-age-tone')
+    expect(tone('bug-old')).toBe('red')     // 30 days
+    expect(tone('idea')).toBe('amber')      // 20 days
+    expect(tone('q')).toBe('plain')         // 6 days
+    for (const h of [...host.querySelectorAll('[data-section] h3')] as HTMLElement[]) {
+      expect(h.style.color).not.toBe(T.state.danger.strong)
+    }
     await unmount()
   })
 
-  it('status is plain text on the row — no badge', async () => {
+  it('the red dot is gone; the owner-wrote-back row says so in words', async () => {
     const { host, unmount } = await screenFor()
-    expect(rowButton(host, 'We asked them')!.textContent).toContain('Looking at it')
-    expect(rowButton(host, 'Legacy reply idea')!.textContent).toContain('On the list')
+    expect(host.querySelector('[data-testid="needs-dot"]')).toBeNull()
+    expect(rowButton(host, 'They wrote back')!.textContent).toContain('They replied')
+    expect(rowButton(host, 'We asked them')!.textContent).not.toContain('They replied')
+    await unmount()
+  })
+
+  it('status has shape — a chip — in the replied group only, in the shared words', async () => {
+    const { host, unmount } = await screenFor()
+    expect(host.querySelector('[data-row="asked"] [data-status-chip]')!.textContent).toBe('Looking at it')
+    expect(host.querySelector('[data-row="legacy"] [data-status-chip]')!.textContent).toBe('On the list')
+    expect(host.querySelector('[data-row="bug-old"] [data-status-chip]')).toBeNull()
     expect(host.textContent).not.toContain('under_review')
     await unmount()
   })
 })
 
-describe('a type filter drops the type subheadings', () => {
-  it('under Everything the subheadings show; under Bugs they vanish and only bugs remain', async () => {
+describe('a tile is the filter', () => {
+  it('Fix shows only the Fix rows; pressing it again shows everything', async () => {
     const { host, unmount } = await screenFor()
-    expect(subheadingsIn(host).length).toBeGreaterThan(0)
-    await click(byLabel(host, 'Bugs tab')!)
-    expect(subheadingsIn(host)).toEqual([])
-    expect(titlesIn(section(host, 'Needs an answer'))).toEqual(['Older bug', 'Newer bug', 'They wrote back'])
-    expect(titlesIn(section(host, 'Waiting on them'))).toEqual(['We asked them'])
-    // The active tab's underline is the type's colour.
-    expect((byLabel(host, 'Bugs tab') as HTMLElement).style.boxShadow).toContain(T.family.red.text)
-    await click(byLabel(host, 'Everything tab')!)
-    expect(subheadingsIn(host).length).toBeGreaterThan(0)
+    await click(tile(host, 'fix')!)
+    expect([...host.querySelectorAll('[data-section]')].map(e => e.getAttribute('data-section'))).toEqual(['fix'])
+    expect(titlesIn(host)).toEqual(['Older bug', 'A hazard', 'Newer bug'])
+    await click(tile(host, 'fix')!)
+    expect(titlesIn(host).length).toBe(9)
     await unmount()
   })
 
-  it('the tabs carry counts, and the internal-only types appear only once one exists', async () => {
+  it('the six tiles count every open item exactly once', async () => {
     const { host, unmount } = await screenFor()
-    expect(byLabel(host, 'Everything tab')!.textContent).toBe('Everything9')
-    expect(byLabel(host, 'Bugs tab')!.textContent).toBe('Bugs4')
-    expect(byLabel(host, 'Ideas tab')!.textContent).toBe('Ideas2')
-    expect(byLabel(host, 'Questions tab')!.textContent).toBe('Questions1')
-    expect(byLabel(host, 'Hazards tab')).toBeTruthy()
-    expect(byLabel(host, 'Decisions tab')).toBeTruthy()
+    const counts = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].map(k => Number(tile(host, k)!.querySelector('[data-tile-count]')!.textContent))
+    expect(counts).toEqual([3, 1, 2, 1, 2, 0])
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(9)
+    expect(host.querySelector('[role="tab"]')).toBeNull()
     await unmount()
-    const { host: h2, unmount: un2 } = await screenFor([item({ id: 'a', title: 'Just a bug', type: 'bug' })])
-    expect(byLabel(h2, 'Hazards tab')).toBeNull()
-    expect(byLabel(h2, 'Decisions tab')).toBeNull()
-    await un2()
   })
 })
 
-describe('closed items are hidden until the toggle is used', () => {
-  it('the closed row is absent on open, revealed by "Show N closed" as a third group, and hidden again', async () => {
+describe('closed items are hidden until the filter asks for them', () => {
+  const setScope = (host: Element, v: string) => selectValue(host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement, v)
+  it('the closed row is absent on open, shown under its own word for Closed or Everything, and hidden again', async () => {
     const { host, unmount } = await screenFor()
     expect(rowButton(host, 'A closed one')).toBeUndefined()
-    expect(section(host, 'Closed')).toBeNull()
-    const toggle = buttons(host).find(b => (b.textContent || '').trim() === 'Show 1 closed')!
-    expect(toggle).toBeTruthy()
-    await click(toggle)
-    expect(section(host, 'Closed')).toBeTruthy()
-    expect(titlesIn(section(host, 'Closed'))).toEqual(['A closed one'])
-    // …AFTER both live queues.
-    expect(section(host, 'Waiting on them')!.compareDocumentPosition(section(host, 'Closed')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await click(buttons(host).find(b => (b.textContent || '').trim() === 'Hide 1 closed')!)
-    expect(section(host, 'Closed')).toBeNull()
+    await setScope(host, 'all')
+    expect(titlesIn(tileSection(host, 'closed-shipped'))).toEqual(['A closed one'])
+    // …AFTER the open sections.
+    expect(tileSection(host, 'deciding')!.compareDocumentPosition(tileSection(host, 'closed-shipped')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await setScope(host, 'open')
+    expect(rowButton(host, 'A closed one')).toBeUndefined()
     await unmount()
   })
 
-  it('no toggle at all when nothing is closed', async () => {
-    const { host, unmount } = await screenFor(ITEMS.filter(i => i.id !== 'done'))
-    expect(buttons(host).some(b => (b.textContent || '').includes('closed'))).toBe(false)
+  it('no closed link at all — the filter is the only way in', async () => {
+    const { host, unmount } = await screenFor()
+    expect(buttons(host).some(b => /closed/i.test(b.textContent || ''))).toBe(false)
     await unmount()
   })
 })
@@ -343,7 +329,7 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     expect(modal(host)).toBeNull()
     await openRow(host, 'Newer bug')
     expect(modal(host)).toBeTruthy()
-    expect(modal(host)!.textContent).toContain('2 of 9 · Needs an answer')
+    expect(modal(host)!.textContent).toContain('3 of 9 · Fix')
     expect(modal(host)!.textContent).toContain('What they said')
     await unmount()
   })
@@ -355,11 +341,11 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     const next = () => byLabel(host, 'Next item') as HTMLButtonElement
     expect(prev().disabled).toBe(true)
     await click(next())
-    expect(modal(host)!.textContent).toContain('Newer bug')
+    expect(modal(host)!.textContent).toContain('A hazard')
     expect(modal(host)!.textContent).toContain('2 of 9')
     for (let n = 0; n < 7; n++) await click(next())
-    expect(modal(host)!.textContent).toContain('9 of 9 · Waiting on them')
-    expect(modal(host)!.textContent).toContain('Legacy reply idea')
+    expect(modal(host)!.textContent).toContain('9 of 9 · Still deciding')
+    expect(modal(host)!.textContent).toContain('They wrote back')
     expect(next().disabled).toBe(true)
     await click(next())
     expect(modal(host)!.textContent).toContain('9 of 9')
@@ -370,7 +356,7 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Older bug')
     await key('ArrowRight')
-    expect(modal(host)!.textContent).toContain('Newer bug')
+    expect(modal(host)!.textContent).toContain('A hazard')
     await key('ArrowLeft')
     expect(modal(host)!.textContent).toContain('Older bug')
     await key('Escape')
@@ -434,10 +420,10 @@ describe('the line under the reply box says what emails and what does not', () =
     await openRow(host, 'Newer bug')
     await selectValue(byLabel(host, 'Status') as HTMLSelectElement, 'shipped')
     expect(modal(host)!.textContent).toContain('Saving marks this Fixed and emails lynette@kc.com to tell them')
-    expect(buttons(host).some(b => (b.textContent || '').trim() === 'Save and send')).toBe(true)
+    expect(sendButton(host)?.textContent).toBe('Save and email Lynette')
     await selectValue(byLabel(host, 'Status') as HTMLSelectElement, 'answered')
     expect(modal(host)!.textContent).not.toContain('to tell them')
-    expect(buttons(host).some(b => (b.textContent || '').trim() === 'Save and send')).toBe(false)
+    expect(sendButton(host)).toBeUndefined()
     await unmount()
   })
 
@@ -461,7 +447,7 @@ describe('a save is one PATCH to the existing route', () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Newer bug')
     await typeIn(modal(host)!.querySelector('textarea') as HTMLTextAreaElement, 'Thanks — fixing it.')
-    await click(buttons(host).find(b => (b.textContent || '').trim() === 'Save and send')!)
+    await click(sendButton(host)!)
     expect(PATCHES).toEqual([{ url: '/api/admin/feedback/bug-new', body: { status: 'answered', admin_response: 'Thanks — fixing it.' } }])
     expect(OTHER_WRITES).toEqual([])
     await unmount()
@@ -538,11 +524,16 @@ describe('the corporate block renders for the team and never for an owner', () =
 describe('no pills, no shadowed globals', () => {
   const src = readFileSync('components/admin/AdminFeedbackScreen.jsx', 'utf8')
 
-  it('the status badge and the internal pill are gone from the screen', () => {
+  // The tiles redesign brought ONE pill back on purpose: status needed shape
+  // in the replied group ("plain grey text inside a run of six facts"). The
+  // pill radius appears on that chip and the looks-built flag, nowhere else.
+  it('the old badge and internal pill stay gone; the pill shape is only the status chip and the looks-built flag', () => {
     expect(src).not.toContain('FeedbackStatusBadge')
     expect(src).not.toContain('InternalPill')
     expect(src).not.toContain('QueueCard')
-    expect(src).not.toContain('T.radius.pill')
+    expect(src.match(/T\.radius\.pill/g)).toHaveLength(2)
+    expect(src).toMatch(/function StatusChip[\s\S]{0,600}T\.radius\.pill/)
+    expect(src).toMatch(/data-looks-shipped-flag[^>]*T\.radius\.pill/)
   })
 
   it('nothing in the file is named `top` — it is a window global', () => {
@@ -550,9 +541,11 @@ describe('no pills, no shadowed globals', () => {
     expect(src).not.toMatch(/\{\s*top\s*[,}]/)
   })
 
-  it('the queues come from the shared module, so the arithmetic is testable on its own', () => {
-    expect(src).toContain("from '@/lib/feedback-triage-groups'")
-    expect(src).toContain('groupFeedbackForTriage(')
+  it('the tiles come from the shared module, so the arithmetic is testable on its own', () => {
+    expect(src).toContain("from '@/lib/feedback-admin-tiles'")
+    expect(src).toContain('summarizeAdminTiles(')
+    expect(src).toContain('adminTileOf(')
+    expect(src).not.toContain('groupFeedbackForTriage(')
   })
 
   it('the type colours come from the ONE shared map, not a second one', () => {

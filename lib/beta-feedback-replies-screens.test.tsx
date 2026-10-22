@@ -174,13 +174,16 @@ describe('triage stays a work order', () => {
       }),
     ]))
     const { host, unmount } = await mount(asUser('admin-1', <AdminFeedbackScreen />))
-    // Both sit in "Needs an answer" — the unanswered one because nobody has
-    // spoken, the other because the OWNER spoke last — and the row says so.
-    const needs = host.querySelector('section[aria-label="Needs an answer"]')!
-    expect(needs.textContent).toContain('Never answered')
-    expect(needs.textContent).toContain('They wrote back')
-    expect(needs.textContent).toContain('They replied')
-    expect(host.querySelector('section[aria-label="Waiting on them"]')!.textContent).toContain('Nothing here.')
+    // The tiles redesign: the unanswered bug sits under Fix (nobody has
+    // replied). The one the owner wrote back on has a team reply and is still
+    // at submitted, so it sits under Stuck — and its row says, in bold, that
+    // the owner spoke last, so it cannot hide in the replied group.
+    expect(host.querySelector('[data-section="fix"]')!.textContent).toContain('Never answered')
+    const stuck = host.querySelector('[data-section="stuck"]')!
+    expect(stuck.textContent).toContain('They wrote back')
+    const note = [...host.querySelectorAll('[data-row="ball-ours"] strong')].map(e => e.textContent)
+    expect(note).toContain('They replied')
+    expect(host.querySelector('[data-row="quiet"]')!.textContent).not.toContain('They replied')
     await unmount()
   })
 })

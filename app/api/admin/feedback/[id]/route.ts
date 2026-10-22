@@ -1,6 +1,6 @@
 // app/api/admin/feedback/[id]/route.ts
 //
-// PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response? }.
+// PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response?, type?, assigned_to?, looks_shipped? }.
 //   A non-empty admin_response on a 'submitted' item stores 'answered' unless
 //   the body names a different status (THE REPLY FLOOR, below).
 //   - super_admin / admin: can patch any feedback item.
@@ -85,6 +85,25 @@
 //     the CHECK policing it.
 // A type change sends NO email — it is a filing correction, not news.
 //
+// ─── WHO HAS IT, AND "LOOKS ALREADY BUILT" (the admin redesign) ───────
+// Two team-only fields, both ELEVATED callers only (403 naming the field for
+// anyone else — never a silent drop):
+//   · assigned_to — a claim. The only legal values are the caller's own id
+//     (claim it) and null (release it). Nobody assigns work to somebody else
+//     from here; the circle on the row means "I have this".
+//   · looks_shipped — a boolean, a human judgement that the thing probably
+//     already shipped and nobody told the person. Never derived.
+// Neither one is news: a save that touches only these sends no email, seeds no
+// release note and moves no status. (It does bump updated_at through the
+// trigger — the stale clock in lib/feedback-queues reads that.)
+//
+// ─── STUCK IS NOT A STATUS ────────────────────────────────────────────
+// "Stuck" on the triage screen is a replied item still at 'submitted' — a
+// defect state the reply floor below exists to prevent. So a hand-set move
+// INTO 'submitted' on an item that has (or, after this save, will have) a reply
+// is refused with 400 stuck_is_not_settable. An item already at 'submitted' is
+// not moving into anything, and the reply floor's own exemptions are untouched.
+//
 // is_internal remains not patchable. Flipping an existing item's visibility is
 // still not possible through the app — deliberate; the reasoning is in the
 // issue 247 step 2 report.
@@ -101,6 +120,7 @@ import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 import { isInternalItem, withInternalFallback } from '@/lib/feedback-internal'
 import { isMissingRepliesTable } from '@/lib/feedback-replies'
 import { seedReleaseItemFromFeedback } from '@/lib/help-releases'
+import { wouldHandSetStuck } from '@/lib/feedback-admin-tiles'
 
 export const runtime = 'nodejs'
 
@@ -186,7 +206,10 @@ export async function PATCH(
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  let body: { status?: string; admin_response?: string | null; type?: string }
+  let body: {
+    status?: string; admin_response?: string | null; type?: string
+    assigned_to?: string | null; looks_shipped?: unknown
+  }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
@@ -214,6 +237,28 @@ export async function PATCH(
       )
     }
     patch.type = body.type
+  }
+
+  // The claim. Self or nobody — see the header.
+  if (body.assigned_to !== undefined) {
+    if (!isElevatedCaller) {
+      return NextResponse.json({ error: 'assignment_requires_admin' }, { status: 403 })
+    }
+    if (body.assigned_to !== null && body.assigned_to !== caller!.id) {
+      return NextResponse.json({ error: 'assign_self_or_null_only' }, { status: 400 })
+    }
+    patch.assigned_to = body.assigned_to
+  }
+
+  // The tick. A real boolean only — "true" the string is a bug upstream.
+  if (body.looks_shipped !== undefined) {
+    if (!isElevatedCaller) {
+      return NextResponse.json({ error: 'looks_shipped_requires_admin' }, { status: 403 })
+    }
+    if (typeof body.looks_shipped !== 'boolean') {
+      return NextResponse.json({ error: 'looks_shipped_must_be_boolean' }, { status: 400 })
+    }
+    patch.looks_shipped = body.looks_shipped
   }
 
   // The reply as it will be stored, and whether it is genuinely new. Both are
@@ -264,6 +309,16 @@ export async function PATCH(
     (patch.status === undefined || patch.status === 'submitted')
   ) {
     patch.status = 'answered'
+  }
+
+  // Stuck is never set by hand. After the floor, so a reply that the floor
+  // has already moved to 'answered' is not refused for having said 'submitted'.
+  if (wouldHandSetStuck({
+    fromStatus: target.status,
+    toStatus: patch.status,
+    replyAfter: 'admin_response' in patch ? patch.admin_response : target.admin_response,
+  })) {
+    return NextResponse.json({ error: 'stuck_is_not_settable' }, { status: 400 })
   }
 
   const statusChanged = patch.status !== undefined && patch.status !== target.status
@@ -367,10 +422,28 @@ export async function PATCH(
     newStatus: patch.status ?? target.status,
   })
 
+  // The claim circle needs a name, not a uuid — the same lookup the list route
+  // makes, for this one row. Never fatal. An owner/manager gets neither field.
+  const out: Record<string, any> = { ...row }
+  if (isElevatedCaller) {
+    out.assigned_to_name = null
+    if (row.assigned_to) {
+      const { data: who } = await supabaseService
+        .from('hub_users')
+        .select('full_name, first_name, email')
+        .eq('id', row.assigned_to)
+        .maybeSingle()
+      out.assigned_to_name = who?.full_name?.trim() || who?.first_name?.trim() || who?.email || null
+    }
+  } else {
+    delete out.assigned_to
+    delete out.looks_shipped
+  }
+
   // reply_email is ADDITIVE — the row shape callers already merge into their
   // list is unchanged, so a client that ignores this key behaves exactly as
   // before.
-  return NextResponse.json({ ...row, reply_email: replyEmail })
+  return NextResponse.json({ ...out, reply_email: replyEmail })
 }
 
 // The whole send decision in one place, returning a description of what

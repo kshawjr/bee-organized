@@ -6,10 +6,13 @@
 // Issue 233 replaced one flat list with three queue cards and a hidden closed
 // set. The queues redesign kept every 233 GUARANTEE and changed the shape:
 //
-//   - closed items are still HIDDEN by default, behind "Show N closed"
-//   - the three status cards became TWO queues grouped by whose turn it is
-//     ("Needs an answer" / "Waiting on them"), with a fixed type order inside
-//   - the header count still equals what the queues hold
+//   - closed items are still HIDDEN by default — behind the Open / Closed /
+//     Everything filter since the tiles redesign (the "Show N closed" link
+//     is gone)
+//   - the three status cards became TWO queues, and the queues became SIX
+//     TILES in two groups (the tiles redesign)
+//   - the header count still equals what the tiles hold; the nav badge is a
+//     different, smaller number (unanswered bugs + questions)
 //   - rows still carry the description
 //   - the context pointer still renders as "Open the record" — in the modal
 //   - a reply that never moved the status is still flagged on the row
@@ -31,13 +34,13 @@ import { T } from '@/components/hive/shared/tokens'
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
 
-// Six items. Where each lands under the redesign (viewer is u1, Ankur):
-//   n1  Snooze Button      no reply                → Needs an answer (10d, own item)
-//   n2  Client not moving  legacy reply 12d ago    → Waiting on them (12d)
-//   s1  Guide              reply, undated          → Waiting on them (since filing, 58d)
-//   s2  Bulk Update        reply, undated          → Waiting on them (58d)
-//   h1  Additional Address reply, undated          → Waiting on them (3d)
-//   c1  Archived clients   shipped                 → closed, hidden
+// Six items. Where each lands under the tiles redesign (viewer is u1, Ankur):
+//   n1  Snooze Button      idea, no reply              → Decide (10d, own item)
+//   n2  Client not moving  bug, reply, still submitted → Stuck (12d)
+//   s1  Guide              bug, reply, under_review    → Still deciding (58d)
+//   s2  Bulk Update        idea, reply, planned        → Build (58d)
+//   h1  Additional Address bug, reply, under_review    → Still deciding (3d)
+//   c1  Archived clients   shipped                     → closed, behind the filter
 const ITEMS = [
   { id: 'n1', title: 'Snooze Button', description: 'It would help to hide a client for a week.\nRight now they just sit there.', type: 'feature', status: 'submitted', user_id: 'u1', submitter_name: 'Ankur Patel', submitter_email: 'ankur@pb.com', location_id: 'loc-1', location_name: 'Palm Beach', created_at: daysAgo(10), updated_at: daysAgo(10), attachments: [] },
   { id: 'n2', title: 'Client not moving in system correctly', description: 'I put two clients in Closed Lost and they came back to my inbox.', type: 'bug', status: 'submitted', user_id: 'u2', submitter_name: 'Lynette Ewy', submitter_email: 'lynette@kc.com', location_id: 'loc-2', location_name: 'Kansas City', created_at: daysAgo(12), updated_at: daysAgo(12), admin_response: 'You can remove it from the three dots menu.', admin_response_at: daysAgo(12), attachments: [] },
@@ -88,7 +91,7 @@ const screenFor = (items: any[] = ITEMS, props: any = {}) => {
   stubFetch(items)
   return mount(
     <CurrentUserContext.Provider value={{ id: 'u1', email: 'ankur@pb.com' } as any}>
-      <AdminFeedbackScreen onOpenCountChange={props.onOpenCountChange || (() => {})} {...props} />
+      <AdminFeedbackScreen onBadgeCountChange={props.onBadgeCountChange || (() => {})} {...props} />
     </CurrentUserContext.Provider>,
   )
 }
@@ -105,6 +108,14 @@ const rowTitles = (host: Element, within: Element | null = host) =>
     .map(b => [...ITEMS, WITH_CONTEXT].find(i => (b.textContent || '').trim().startsWith(i.title))?.title)
     .filter((t): t is string => !!t)
 const section = (host: Element, label: string) => host.querySelector(`section[aria-label="${label}"]`) as HTMLElement | null
+const tileSection = (host: Element, key: string) => host.querySelector(`[data-section="${key}"]`) as HTMLElement | null
+// The Save button names who it emails ("Save and email Lynette") when it sends.
+const sendButton = (host: Element) => buttons(host).find(b => /^Save and email /.test((b.textContent || '').trim()))
+const setScope = (host: Element, value: string) => act(async () => {
+  const sel = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement
+  Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!.call(sel, value)
+  sel.dispatchEvent(new Event('change', { bubbles: true }))
+})
 const modal = (host: Element) => host.querySelector('[role="dialog"]') as HTMLElement | null
 const byLabel = (host: Element, label: string) => host.querySelector(`[aria-label="${label}"]`) as HTMLElement | null
 const pickStatus = (host: Element, value: string) => act(async () => {
@@ -124,80 +135,86 @@ async function typeReply(host: Element, text: string) {
 
 beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
 
+// Closed items are hidden by default — and reached through the Open / Closed /
+// Everything FILTER now (the tiles redesign), not a grey link at the bottom.
 describe('closed items are hidden by default', () => {
-  it('the shipped row is absent on open, and the toggle names how many are hidden', async () => {
+  it('the shipped row is absent on open, and the filter names how many are closed', async () => {
     const { host, unmount } = await screenFor()
     expect(rowTitles(host)).not.toContain('Archived clients')
     expect(rowTitles(host).length).toBe(5)
-    expect(byText(host, 'Show 1 closed')).toBeTruthy()
+    const scope = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement
+    expect([...scope.options].map(o => o.textContent)).toEqual(['Open (5)', 'Closed (1)', 'Everything (6)'])
     await unmount()
   })
 
-  it('the toggle reveals them as a third group and flips its own label', async () => {
+  it('choosing Closed shows them under their own word; there is no bottom link', async () => {
     const { host, unmount } = await screenFor()
-    await click(byText(host, 'Show 1 closed')!)
-    expect(rowTitles(host)).toContain('Archived clients')
-    expect(rowTitles(host, section(host, 'Closed'))).toEqual(['Archived clients'])
-    expect(byText(host, 'Hide 1 closed')).toBeTruthy()
+    expect(buttons(host).some(b => /(show|hide)\s+\d+\s+closed/i.test(b.textContent || ''))).toBe(false)
+    await setScope(host, 'closed')
+    expect(rowTitles(host)).toEqual(['Archived clients'])
+    expect(rowTitles(host, tileSection(host, 'closed-shipped'))).toEqual(['Archived clients'])
     await unmount()
   })
 
-  it('no toggle at all when nothing is closed — no control for an empty set', async () => {
+  it('no closed control for an empty set — the filter says Closed (0)', async () => {
     const { host, unmount } = await screenFor(ITEMS.filter(i => i.status !== 'shipped'))
-    expect(byText(host, 'Show 0 closed')).toBeUndefined()
     expect(buttons(host).some(b => (b.textContent || '').includes('closed'))).toBe(false)
+    const scope = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement
+    expect([...scope.options][1].textContent).toBe('Closed (0)')
     await unmount()
   })
 })
 
-describe('the two queues', () => {
-  it('the unanswered item needs an answer; every replied item is waiting on them', async () => {
+// The two queues became six tiles (lib/beta-admin-feedback-tiles.test.tsx
+// pins the arithmetic). Here: these six items land where they should.
+describe('the six tiles', () => {
+  it('each item lands in its tile: unanswered by type, answered by status', async () => {
     const { host, unmount } = await screenFor()
-    expect(rowTitles(host, section(host, 'Needs an answer'))).toEqual(['Snooze Button'])
-    expect(rowTitles(host, section(host, 'Waiting on them')).sort())
-      .toEqual(['Additional Address', 'Bulk Update', 'Client not moving in system correctly', 'Guide'].sort())
+    expect(rowTitles(host, tileSection(host, 'decide'))).toEqual(['Snooze Button'])
+    expect(rowTitles(host, tileSection(host, 'build'))).toEqual(['Bulk Update'])
+    expect(rowTitles(host, tileSection(host, 'stuck'))).toEqual(['Client not moving in system correctly'])
+    expect(rowTitles(host, tileSection(host, 'deciding'))).toEqual(['Guide', 'Additional Address'])
     await unmount()
   })
 
-  it('inside a queue: bugs before ideas, longest waiting first within each', async () => {
+  it('inside a section: longest waiting first', async () => {
     const { host, unmount } = await screenFor()
-    // Bugs: Guide (58d, undated reply → since filing) · Client not moving (12d) · Additional Address (3d). Then the idea.
-    expect(rowTitles(host, section(host, 'Waiting on them')))
-      .toEqual(['Guide', 'Client not moving in system correctly', 'Additional Address', 'Bulk Update'])
+    // Guide was filed 58 days ago, Additional Address 3.
+    expect(rowTitles(host, tileSection(host, 'deciding'))).toEqual(['Guide', 'Additional Address'])
     await unmount()
   })
 
-  it('each header says how many and how long the oldest has waited', async () => {
+  it('each tile says how many and how old the oldest is', async () => {
     const { host, unmount } = await screenFor()
-    expect(section(host, 'Needs an answer')!.querySelector('h3')!.textContent).toContain('1')
-    expect(section(host, 'Needs an answer')!.textContent).toContain('oldest 10 days')
-    expect(section(host, 'Waiting on them')!.querySelector('h3')!.textContent).toContain('4')
-    expect(section(host, 'Waiting on them')!.textContent).toContain('oldest 58 days')
+    const t = host.querySelector('[data-tile="deciding"]')!
+    expect(t.querySelector('[data-tile-count]')!.textContent).toBe('2')
+    expect(t.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 58 days old')
     await unmount()
   })
 
-  it('the header that has waited past 14 days is red; the other is not', async () => {
+  it('red is the AGE, never a section heading', async () => {
     const { host, unmount } = await screenFor()
-    expect((section(host, 'Waiting on them')!.querySelector('h3') as HTMLElement).style.color).toBe(T.state.danger.strong)
-    expect((section(host, 'Needs an answer')!.querySelector('h3') as HTMLElement).style.color).toBe(T.ink.primary)
+    for (const k of ['decide', 'build', 'deciding', 'stuck']) {
+      expect((tileSection(host, k)!.querySelector('h3') as HTMLElement).style.color, k).not.toBe(T.state.danger.strong)
+    }
+    expect(host.querySelector('[data-row="s1"] [data-age-tone]')!.getAttribute('data-age-tone')).toBe('red')
     await unmount()
   })
 })
 
-describe('one open count — header, queues and badge agree', () => {
-  it('the header count equals the two queues together', async () => {
+describe('the open count and the badge', () => {
+  it('the header count equals the six tiles together', async () => {
     const { host, unmount } = await screenFor()
     expect(host.textContent).toContain('5 open items · 6 in total')
-    const needs = rowTitles(host, section(host, 'Needs an answer')).length
-    const waiting = rowTitles(host, section(host, 'Waiting on them')).length
-    expect(needs + waiting).toBe(5)
+    const sum = [...host.querySelectorAll('[data-tile-count]')].reduce((n, e) => n + Number(e.textContent), 0)
+    expect(sum).toBe(5)
     await unmount()
   })
 
-  it('reports that SAME number up to the nav badge — the number the dashboard shows', async () => {
-    const onOpenCountChange = vi.fn()
-    const { unmount } = await screenFor(ITEMS, { onOpenCountChange })
-    expect(onOpenCountChange).toHaveBeenLastCalledWith(5) // not 1, the submitted-only count
+  it('the badge is NOT the open count — no unanswered bug or question here, so 0', async () => {
+    const onBadgeCountChange = vi.fn()
+    const { unmount } = await screenFor(ITEMS, { onBadgeCountChange })
+    expect(onBadgeCountChange).toHaveBeenLastCalledWith(0)
     await unmount()
   })
 })
@@ -233,10 +250,10 @@ describe('rows say what the item is', () => {
     await unmount()
   })
 
-  it('marks what needs a response with the red dot, and nothing else', async () => {
+  it('no red dot any more — the section says it needs an answer, and red is kept for age', async () => {
     const { host, unmount } = await screenFor()
-    expect(row(host, 'Snooze Button').querySelector('[data-testid="needs-dot"]')).toBeTruthy()
-    expect(row(host, 'Guide').querySelector('[data-testid="needs-dot"]')).toBeNull()
+    expect(host.querySelector('[data-testid="needs-dot"]')).toBeNull()
+    expect(rowTitles(host, tileSection(host, 'decide'))).toContain('Snooze Button')
     await unmount()
   })
 })
@@ -270,10 +287,10 @@ describe('next / previous walks the list and stops at both ends', () => {
   const prev = (host: Element) => byLabel(host, 'Previous item') as HTMLButtonElement
   const next = (host: Element) => byLabel(host, 'Next item') as HTMLButtonElement
 
-  it('counts your position, and names the queue the item sits in', async () => {
+  it('counts your position, and names the tile the item sits in', async () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Snooze Button'))
-    expect(modal(host)!.textContent).toContain('1 of 5 · Needs an answer')
+    expect(modal(host)!.textContent).toContain('1 of 5 · Decide')
     await unmount()
   })
 
@@ -281,8 +298,8 @@ describe('next / previous walks the list and stops at both ends', () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Snooze Button'))
     await click(next(host))
-    expect(modal(host)!.textContent).toContain('2 of 5 · Waiting on them')
-    expect(modal(host)!.textContent).toContain('The guide does not open') // now showing "Guide"
+    expect(modal(host)!.textContent).toContain('2 of 5 · Build')
+    expect(modal(host)!.textContent).toContain('Changing twenty clients') // now showing "Bulk Update"
     await unmount()
   })
 
@@ -351,7 +368,7 @@ describe('the detail modal', () => {
     await typeReply(host, 'Good idea — adding it.')
     expect(modal(host)!.textContent).toContain('This is your own report — saving stores the reply, but no email is sent.')
     expect(modal(host)!.textContent).not.toContain('Saving emails this to ankur@pb.com.')
-    expect(exact(host, 'Save and send')).toBeFalsy()
+    expect(sendButton(host)).toBeFalsy()
     expect(exact(host, 'Save')).toBeTruthy()
     await unmount()
   })
@@ -361,7 +378,7 @@ describe('the detail modal', () => {
     await click(row(host, 'Client not moving'))
     await typeReply(host, 'Fixed in this week release.')
     expect(modal(host)!.textContent).toContain('Saving emails this to lynette@kc.com.')
-    expect(exact(host, 'Save and send')).toBeTruthy()
+    expect(sendButton(host)?.textContent).toBe('Save and email Lynette')
     await unmount()
   })
 
@@ -373,7 +390,7 @@ describe('the detail modal', () => {
     await click(row(host, 'Client not moving'))
     await pickStatus(host, 'shipped')
     expect(modal(host)!.textContent).toContain('Saving marks this Fixed and emails lynette@kc.com to tell them')
-    expect(exact(host, 'Save and send')).toBeTruthy()
+    expect(sendButton(host)).toBeTruthy()
     // …and it must not also carry the line that says the opposite.
     expect(modal(host)!.textContent).not.toContain('Changing the type or status alone sends nothing')
     await unmount()
@@ -384,7 +401,7 @@ describe('the detail modal', () => {
     await click(row(host, 'Client not moving'))
     await pickStatus(host, 'planned')
     expect(modal(host)!.textContent).not.toContain('emails lynette@kc.com to tell them')
-    expect(exact(host, 'Save and send')).toBeFalsy()
+    expect(sendButton(host)).toBeFalsy()
     await unmount()
   })
 
@@ -393,16 +410,16 @@ describe('the detail modal', () => {
     await click(row(host, 'Snooze Button'))
     await pickStatus(host, 'shipped')
     expect(modal(host)!.textContent).toContain('This is your own report — saving marks it Fixed, and no email is sent.')
-    expect(exact(host, 'Save and send')).toBeFalsy()
+    expect(sendButton(host)).toBeFalsy()
     await unmount()
   })
 
   it('promises nothing when the item is ALREADY Fixed — the send is a transition', async () => {
     const { host, unmount } = await screenFor()
-    await click(byText(host, 'Show 1 closed')!)
+    await setScope(host, 'closed')
     await click(row(host, 'Archived clients'))
     expect(modal(host)!.textContent).not.toContain('emails lynette@kc.com to tell them')
-    expect(exact(host, 'Save and send')).toBeFalsy()
+    expect(sendButton(host)).toBeFalsy()
     await unmount()
   })
 
@@ -410,7 +427,7 @@ describe('the detail modal', () => {
     const f = stubFetch()
     const { host, unmount } = await mount(
       <CurrentUserContext.Provider value={{ id: 'u1', email: 'ankur@pb.com' } as any}>
-        <AdminFeedbackScreen onOpenCountChange={() => {}} />
+        <AdminFeedbackScreen onBadgeCountChange={() => {}} />
       </CurrentUserContext.Provider>,
     )
     await click(row(host, 'Client not moving'))

@@ -79,7 +79,7 @@ const viewer = (children: React.ReactNode) => (
 )
 const adminScreen = (items: any[] = ITEMS) => {
   stubFetch(items)
-  return mount(viewer(<AdminFeedbackScreen onOpenCountChange={() => {}} />))
+  return mount(viewer(<AdminFeedbackScreen onBadgeCountChange={() => {}} />))
 }
 const ownerScreen = (items: any[]) => {
   stubFetch(items)
@@ -105,7 +105,8 @@ const typeReply = (host: Element, text: string) => act(async () => {
   ta.dispatchEvent(new Event('input', { bubbles: true }))
 })
 const save = async (host: Element) => {
-  const b = exactBtn(host, 'Save and send') || exactBtn(host, 'Save')
+  // "Save and email <first name>" when it sends (the admin redesign names who).
+  const b = buttons(host).find(x => /^Save( and email .+)?$/.test((x.textContent || '').trim()))
   expect(b, 'no Save button').toBeTruthy()
   await click(b!)
 }
@@ -240,13 +241,16 @@ describe('every status reads the same word on every surface', () => {
   })
 
   it('the triage rows say each status in the shared word', async () => {
-    const { host, unmount } = await adminScreen(ONE_EACH)
-    const show = buttons(host).find(b => /closed/i.test(b.textContent || '') && b.hasAttribute('aria-expanded'))
-    if (show) await click(show)
+    // Status chips appear on replied and closed rows (the admin redesign —
+    // in Fix / Answer / Decide the section already is the status), so every
+    // item here carries a reply, and closed ones are revealed by the filter.
+    const { host, unmount } = await adminScreen(ONE_EACH.map(i => ({ ...i, admin_response: 'Words.', admin_response_at: daysAgo(1) })))
+    const scope = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement
+    await pick(scope, 'all')
     for (const s of ALL_STATUSES) {
-      const row = btn(host, `Item ${s}`)
-      expect(row, s).toBeTruthy()
-      expect(row!.textContent, s).toContain(` · ${FEEDBACK_STATUS_PLAIN[s]}`)
+      const chip = host.querySelector(`[data-row="s-${s}"] [data-status-chip]`)
+      expect(chip, s).toBeTruthy()
+      expect(chip!.textContent, s).toBe(FEEDBACK_STATUS_PLAIN[s])
     }
     await unmount()
   })

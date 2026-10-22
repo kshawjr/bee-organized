@@ -152,52 +152,36 @@ describe('system health never renders a falsehood', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════
-describe('the triage type chips reconcile with Everything', () => {
+// The type tabs are gone (the admin redesign); the invariant they guarded —
+// nothing goes missing between the parts and the whole — now lives on the six
+// tiles, and every type has to land in exactly one of them.
+describe('every type lands in a tile, and the tiles reconcile with the open count', () => {
   beforeEach(() => { vi.clearAllMocks() })
+  const tileCount = (el: HTMLElement, key: string) =>
+    Number(el.querySelector(`[data-tile="${key}"] [data-tile-count]`)?.textContent)
 
-  it('every type has a chip, and the chips sum to Everything', async () => {
+  it('the six tiles sum to every open item, internal-only and unknown types included', async () => {
     const el = await mount(MIXED)
-    const everything = chipCount(el, 'Everything')
-    expect(everything).toBe(7)
-
-    const bugs = chipCount(el, 'Bugs')
-    const ideas = chipCount(el, 'Ideas')
-    const questions = chipCount(el, 'Questions')
-    const decisions = chipCount(el, 'Decisions')
-    const hazards = chipCount(el, 'Hazards')
-    const other = chipCount(el, 'Other')
-
-    expect([bugs, ideas, questions, decisions, hazards, other]).toEqual([2, 1, 0, 2, 1, 1])
-    // THE INVARIANT. Before this, Bugs + Ideas was 3 against Everything's 7 and
-    // nothing on screen said where the other four went.
-    expect((bugs! + ideas! + questions! + decisions! + hazards! + other!)).toBe(everything)
+    const counts = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].map(k => tileCount(el, k))
+    // bugs + the hazard → Fix; the idea, both decisions and the unknown type → Decide.
+    expect(counts).toEqual([3, 0, 4, 0, 0, 0])
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(7)
+    expect(el.textContent).toContain('7 open items')
   })
 
-  it('the internal-only chips stay hidden until such an item exists', async () => {
-    const onlyOwnerTypes = [
-      item({ id: 'b1', type: 'bug', title: 'bug one' }),
-      item({ id: 'f1', type: 'feature', title: 'idea one' }),
-    ]
-    const el = await mount(onlyOwnerTypes)
-    expect(chipCount(el, 'Everything')).toBe(2)
-    expect(chipCount(el, 'Decisions')).toBeNull()
-    expect(chipCount(el, 'Hazards')).toBeNull()
-    expect(chipCount(el, 'Other')).toBeNull()
-    // …and the OWNER-fileable chips are always offered — Questions included,
-    // at zero, because the chip must exist before the first question arrives —
-    // and still reconcile on their own.
-    expect(chipCount(el, 'Questions')).toBe(0)
-    expect(chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')! + chipCount(el, 'Questions')!).toBe(2)
+  it('internal-only types never get a tile of their own', async () => {
+    const el = await mount(MIXED)
+    expect(el.querySelectorAll('[data-tile]').length).toBe(6)
+    for (const label of ['Decisions', 'Hazards', 'Other']) {
+      expect(chipCount(el, label), label).toBeNull()
+    }
   })
 
-  it('"Other" appears only when a row carries a type outside the four', async () => {
+  it('every known type lands somewhere — no type falls through', async () => {
     const known = FEEDBACK_TYPES.map((t, i) => item({ id: `k${i}`, type: t, title: t }))
     const el = await mount(known)
-    expect(chipCount(el, 'Other')).toBeNull()
-    expect(
-      chipCount(el, 'Bugs')! + chipCount(el, 'Ideas')! + chipCount(el, 'Questions')! +
-      chipCount(el, 'Decisions')! + chipCount(el, 'Hazards')!,
-    ).toBe(chipCount(el, 'Everything'))
+    const total = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].reduce((n, k) => n + tileCount(el, k), 0)
+    expect(total).toBe(known.length)
   })
 })
 

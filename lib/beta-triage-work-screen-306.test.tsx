@@ -164,20 +164,20 @@ describe('the order puts what matters first', () => {
     expect(rows.map(r => r.id)).toEqual(ORDER_ITEMS.map(r => r.id))
   })
 
-  // The queues redesign retired the stale card. An item nobody has answered
-  // sits in "Needs an answer" whatever its status says, and inside that queue
-  // the fixed type order holds — the header, not the row order, carries the
-  // age (both have waited since filing: 60 days, so the header is red).
-  it('unanswered under_review/planned items need an answer, in type order, with the age on the header', async () => {
+  // The tiles redesign: an item nobody has answered sits under its TYPE's
+  // tile whatever its status says — a bug under Fix, an idea under Decide —
+  // and the age is on the row itself (60 days: red).
+  it('unanswered under_review/planned items sit under their type’s tile, with the age on the row', async () => {
     const stale = [
       { ...base, id: 'sf', title: 'Stale idea', type: 'feature', status: 'planned',      created_at: daysAgo(60), updated_at: daysAgo(30) },
       { ...base, id: 'sb', title: 'Stale bug',  type: 'bug',     status: 'under_review', created_at: daysAgo(60), updated_at: daysAgo(15) },
     ]
     const { host, unmount } = await screenFor(stale)
-    const needs = host.querySelector('section[aria-label="Needs an answer"]')!
-    expect(rowTitles(needs, stale)).toEqual(['Stale bug', 'Stale idea'])
-    expect(needs.textContent).toContain('oldest 60 days')
-    expect(host.querySelector('section[aria-label="Waiting on them"]')!.textContent).toContain('Nothing here.')
+    expect(rowTitles(host.querySelector('[data-section="fix"]')!, stale)).toEqual(['Stale bug'])
+    expect(rowTitles(host.querySelector('[data-section="decide"]')!, stale)).toEqual(['Stale idea'])
+    expect(host.querySelector('[data-row="sb"] [data-age-tone]')!.getAttribute('data-age-tone')).toBe('red')
+    expect(host.querySelector('[data-row="sb"] [data-age-tone]')!.textContent).toBe('60 days old')
+    expect(host.querySelector('[data-section="build"]')).toBeNull()
     await unmount()
   })
 })
@@ -203,13 +203,18 @@ describe('"answered, unconfirmed" is derived, not stored', () => {
 
   it('an answered-but-unconfirmed row is distinct from both open and closed', async () => {
     const { host, unmount } = await screenFor(STATE_ITEMS, {})
-    await click(btn(host, 'Show ')!) // reveal the two closed rows
+    // reveal the two closed rows — through the filter, not a bottom link
+    const scope = host.querySelector('select[aria-label="Open or closed"]') as HTMLSelectElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!.call(scope, 'all')
+      scope.dispatchEvent(new Event('change', { bubbles: true }))
+    })
     expect(rowText(host, 'Answered not seen')).toContain('not seen yet')
     // Distinct from an unanswered item — which carries no reply note at all
-    // and sits under "Needs an answer"…
+    // and sits under Fix…
     expect(rowText(host, 'Waiting on us')).not.toContain('Replied')
     expect(rowText(host, 'Waiting on us')).not.toContain('not seen yet')
-    expect(host.querySelector('section[aria-label="Needs an answer"]')!.textContent).toContain('Waiting on us')
+    expect(host.querySelector('[data-section="fix"]')!.textContent).toContain('Waiting on us')
     // …and from an answered one they HAVE read.
     expect(rowText(host, 'Answered and seen')).toContain('seen')
     expect(rowText(host, 'Answered and seen')).not.toContain('not seen yet')
