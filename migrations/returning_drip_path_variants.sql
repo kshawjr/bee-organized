@@ -1,4 +1,5 @@
 -- migrations/returning_drip_path_variants.sql
+-- 2026-10-21: "enquiry" changed to "inquiry" in this file only; the live rows were corrected separately by hand-run repair SQL. This file never re-runs.
 --
 -- The returning-client sequence follows the location's two Settings answers
 -- the same way the ordinary drips do: by VARIANT, not by conditional blocks.
@@ -55,7 +56,7 @@ SELECT dp.id, 1, 0, 'email',
   'Good to hear from you again',
   $tpl$Hi {{first_name}},
 
-Thanks for getting back in touch. We've got your enquiry and someone from the {{location_name}} team will reach out shortly.
+Thanks for getting back in touch. We've got your inquiry and someone from the {{location_name}} team will reach out shortly.
 
 It's been a while since we worked together, so if anything has changed at your place, feel free to reply here and fill us in. Otherwise we'll pick up where we left off.
 
@@ -104,7 +105,7 @@ SELECT dp.id, 1, 0, 'email',
   'Good to hear from you again',
   $tpl$Hi {{first_name}},
 
-Thanks for getting back in touch. We've got your enquiry and someone from the {{location_name}} team will reach out shortly.
+Thanks for getting back in touch. We've got your inquiry and someone from the {{location_name}} team will reach out shortly.
 
 It's been a while since we worked together, so if anything has changed at your place, feel free to reply here and fill us in. Otherwise we'll pick up where we left off.
 
@@ -151,7 +152,7 @@ SELECT dp.id, 1, 0, 'email',
   'Good to hear from you again',
   $tpl$Hi {{first_name}},
 
-Thanks for getting back in touch. We've got your enquiry and someone from the {{location_name}} team will reach out shortly.
+Thanks for getting back in touch. We've got your inquiry and someone from the {{location_name}} team will reach out shortly.
 
 It's been a while since we worked together, so if anything has changed at your place, feel free to reply here and fill us in. Otherwise we'll pick up where we left off.
 

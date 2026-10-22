@@ -1,4 +1,5 @@
 -- migrations/seed_returning_drip_path.sql
+-- 2026-10-21: "enquiry" changed to "inquiry" in this file only; the live rows were corrected separately by hand-run repair SQL. This file never re-runs.
 --
 -- One master drip path, 'returning', three email steps. Enrolled by the
 -- intake when a PAST client (imported from Jobber, or with a closed
@@ -29,7 +30,7 @@ SELECT dp.id, 1, 0, 'email',
   'Good to hear from you again',
   $tpl$Hi {{first_name}},
 
-Thanks for getting back in touch. We've got your enquiry and someone from the {{location_name}} team will reach out shortly.
+Thanks for getting back in touch. We've got your inquiry and someone from the {{location_name}} team will reach out shortly.
 
 It's been a while since we worked together, so if anything has changed at your place, feel free to reply here and fill us in. Otherwise we'll pick up where we left off.
 
