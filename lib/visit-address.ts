@@ -52,14 +52,33 @@ export function pickPrimaryAddress(lead: any): (VisitAddress & { storedStreet: s
   const stored0 = clean(a0?.street || a0?.value)
   if (stored0) {
     const parts = { city: clean(a0.city), state: clean(a0.state), zip: clean(a0.zip) }
-    return { street: deriveStreet(stored0, parts), ...parts, storedStreet: stored0 }
+    return { street: visitStreet(stored0, parts), ...parts, storedStreet: stored0 }
   }
   const stored = clean(lead?.address)
   if (stored) {
     const parts = { city: clean(lead.city), state: clean(lead.state), zip: clean(lead.zip) }
-    return { street: deriveStreet(stored, parts), ...parts, storedStreet: stored }
+    return { street: visitStreet(stored, parts), ...parts, storedStreet: stored }
   }
   return null
+}
+
+// THE street, from a line that may carry its own city/state/zip tail — the
+// one way every writer strips it (the send, and the Jobber property event
+// refreshing the address list). Each parts set is tried until nothing more
+// comes off, so a tail written one way ("KS") is still stripped when the
+// parts now say it another ("Kansas"): pass the old parts as a second set.
+export function visitStreet(
+  line: unknown,
+  ...partSets: Array<{ city?: unknown; state?: unknown; zip?: unknown }>
+): string {
+  let street = clean(line)
+  for (;;) {
+    const before = street
+    for (const p of partSets) {
+      street = deriveStreet(street, { city: clean(p.city), state: clean(p.state), zip: clean(p.zip) })
+    }
+    if (street === before) return street
+  }
 }
 
 // The client's primary address the way the send route reads it

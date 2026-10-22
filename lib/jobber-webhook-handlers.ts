@@ -129,6 +129,7 @@ import { parseFormerAddresses } from './lead-address'
 import {
   planDriftAddress,
   planDestroyedProperty,
+  planListEntryRefresh,
   type JobberPropertyAddress,
 } from './property-drift'
 import {
@@ -1579,11 +1580,11 @@ async function handlePropertyCore(
   //      property is deliberately left alone — before this rule, any
   //      property event on a multi-property client overwrote the lead's
   //      address and re-pointed its link at whichever property last fired.
-  let lead: { id: string; name: string | null; stage: string | null } | null = null
+  let lead: { id: string; name: string | null; stage: string | null; addresses?: unknown } | null = null
   if (propertyNumeric) {
     const { data } = await supabaseService
       .from('leads')
-      .select('id, name, stage')
+      .select('id, name, stage, addresses')
       .eq('jobber_property_id', propertyNumeric)
       .eq('location_id', ctx.location.location_id)
       .maybeSingle()
@@ -1639,7 +1640,7 @@ async function handlePropertyCore(
   if (!lead && clientNumeric) {
     const { data } = await supabaseService
       .from('leads')
-      .select('id, name, stage, jobber_property_id')
+      .select('id, name, stage, jobber_property_id, addresses')
       .eq('jobber_client_id', clientNumeric)
       .eq('location_id', ctx.location.location_id)
       .maybeSingle()
@@ -1664,7 +1665,7 @@ async function handlePropertyCore(
         // former_addresses and updated_at — nothing else, ever.
         return await recordDriftedProperty(noun, data.id, propertyNumeric, propRec.address)
       }
-      lead = { id: data.id, name: data.name, stage: data.stage }
+      lead = { id: data.id, name: data.name, stage: data.stage, addresses: (data as any).addresses }
     }
   }
 
@@ -1692,14 +1693,30 @@ async function handlePropertyCore(
     zip:     a.postalCode || null,
     updated_at: new Date().toISOString(),
   })
+  // The address list moves with the columns — the Service entry, rebuilt from
+  // Jobber's own fields (never from addrJoined), or left alone and said so.
+  // lib/property-drift planListEntryRefresh owns the rule.
+  const listPlan = planListEntryRefresh(lead.addresses, a)
+  if (listPlan.action === 'update') patch.addresses = listPlan.addresses
   await supabaseService.from('leads').update(patch).eq('id', lead.id)
+
+  const listNote =
+    listPlan.action === 'update' ? 'address list entry updated'
+    : listPlan.reason === 'empty' ? 'no address list'
+    : listPlan.reason === 'unchanged' ? 'address list already matches'
+    : listPlan.reason === 'no_address' ? 'address list left as is (no address in Jobber)'
+    : listPlan.reason === 'no_service_entry' ? 'address list left as is (no Service entry to match)'
+    : 'address list left as is (more than one Service entry, cannot tell which)'
+  if (listPlan.action === 'skip' && (listPlan.reason === 'no_service_entry' || listPlan.reason === 'several_service_entries')) {
+    console.warn('[jobber-webhook] address list not refreshed', { leadId: lead.id, reason: listPlan.reason })
+  }
 
   return {
     processed: true,
     lead_id: lead.id,
     lead_stage: lead.stage || null,
     prev_stage: lead.stage || null,
-    note: `${noun}: synced property address to lead ${lead.id}`,
+    note: `${noun}: synced property address to lead ${lead.id}; ${listNote}`,
   }
 }
 

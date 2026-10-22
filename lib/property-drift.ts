@@ -34,6 +34,7 @@ import {
   type FormerAddress,
   type LeadAddressParts,
 } from '@/lib/lead-address'
+import { visitStreet } from '@/lib/visit-address'
 
 // The label every drift-discovered address carries. Both writers use these.
 export const DRIFT_LABEL = 'other' as const
@@ -519,4 +520,66 @@ export function describeLooseDifference(a: LooseAddress, b: LooseAddress): strin
   if (!why.length) return 'only punctuation or spacing'
   if (why.length === 1) return `only ${why[0]}`
   return `${why.slice(0, -1).join(', ')} and ${why[why.length - 1]}`
+}
+
+// ─── THE ADDRESS LIST, KEPT IN STEP WITH JOBBER ───────────────────────
+//
+// A property event on the lead's OWN property rewrites the primary address
+// columns. leads.addresses — the list Send to Jobber reads FIRST
+// (pickPrimaryAddress) — used to keep whatever Bee Hub last sent, so the next
+// send pushed the old street back (the nine rows repaired by hand, 20 Oct
+// 2026: list said "12626 Mallet Circle", Jobber and the columns "12624").
+//
+// WHICH ENTRY. Matched by role, not by text: the lead's linked property IS its
+// primary address, and the primary address's entry is the list's Service
+// entry — the same entry PATCH /api/leads/:id keeps in step. Text matching
+// would refuse exactly the drift being fixed (the old street is the one that
+// disagrees). Every list today holds one Service entry; more than one is
+// ambiguous, so it is left alone and said so, never guessed.
+//
+// FROM JOBBER'S FIELDS. The entry is built from the property's separate
+// street/city/province/postalCode, NEVER from leads.address — ~200 of those
+// lines still carry a doubled tail. The street goes through visitStreet with
+// the incoming parts AND the entry's old ones, so a tail Jobber still holds
+// comes off whether it reads "KS" or "Kansas". A blank from Jobber never
+// erases ours. Every other key on the entry (apt, label, note) rides along.
+
+export type ListRefreshSkip = 'empty' | 'no_service_entry' | 'several_service_entries' | 'no_address' | 'unchanged'
+
+export type ListRefreshPlan =
+  | { action: 'update'; index: number; addresses: any[] }
+  | { action: 'skip'; reason: ListRefreshSkip }
+
+export function planListEntryRefresh(
+  addresses: unknown,
+  address: JobberPropertyAddress | null | undefined,
+): ListRefreshPlan {
+  const list = Array.isArray(addresses) ? addresses : []
+  if (list.length === 0) return { action: 'skip', reason: 'empty' }
+  const serviceIdx = list.flatMap((e: any, i) => (e && e.type === 'Service' ? [i] : []))
+  if (serviceIdx.length === 0) return { action: 'skip', reason: 'no_service_entry' }
+  if (serviceIdx.length > 1) return { action: 'skip', reason: 'several_service_entries' }
+
+  const t = (v: unknown) => String(v ?? '').trim()
+  const a = address || {}
+  if (!t(a.street) && !t(a.city) && !t(a.province) && !t(a.postalCode)) return { action: 'skip', reason: 'no_address' }
+
+  const index = serviceIdx[0]
+  const entry = list[index]
+  const old = { city: entry.city, state: entry.state, zip: entry.zip }
+  const city = t(a.city) || t(entry.city)
+  const state = t(a.province) || t(entry.state)
+  const zip = t(a.postalCode) || t(entry.zip)
+  const street = visitStreet(t(a.street) || t(entry.street) || t(entry.value), { city, state, zip }, old)
+  const value = composeLeadAddress({ street, city, state, zip })
+
+  if (t(entry.street) === street && t(entry.city) === city && t(entry.state) === state
+      && t(entry.zip) === zip && t(entry.value) === value) {
+    return { action: 'skip', reason: 'unchanged' }
+  }
+  return {
+    action: 'update',
+    index,
+    addresses: list.map((e, i) => (i === index ? { ...e, street, city, state, zip, value } : e)),
+  }
 }
