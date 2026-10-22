@@ -12,7 +12,7 @@
 //     Stuck), longest waiting first inside each; the queues' pure layer
 //     (lib/feedback-triage-groups) is still pinned below — the cluster modal
 //     reads it
-//   · a tile is a filter; age (amber past 10, red past 21) is on the row
+//   · a tile is a filter; age (amber 30 to 59, red at 60+) is on the row
 //   · closed items are reached through the Open / Closed filter
 //   · the modal opens, walks with the arrows (buttons AND keys), closes on
 //     Escape, and ignores the arrow keys while someone is typing
@@ -243,17 +243,20 @@ describe('the sections render in tile order, longest waiting first inside each',
   it('each tile shows its count and the age of its oldest item', async () => {
     const { host, unmount } = await screenFor()
     expect(tile(host, 'fix')!.querySelector('[data-tile-count]')!.textContent).toBe('3')
-    expect(tile(host, 'fix')!.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 30 days old')
-    expect(tile(host, 'build')!.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 50 days old')
-    expect(tile(host, 'stuck')!.querySelector('[data-tile-oldest]')!.textContent).toBe('nothing here')
+    expect(tile(host, 'fix')!.querySelector('[data-tile-oldest]')!.textContent).toBe('Oldest: 30 days')
+    expect(tile(host, 'build')!.querySelector('[data-tile-oldest]')!.textContent).toBe('Oldest: 50 days')
+    // Stuck is zero here, so it renders nothing at all — no tile, no strip.
+    expect(tile(host, 'stuck')).toBeNull()
+    expect(host.querySelector('[data-stuck-strip]')).toBeNull()
     await unmount()
   })
 
-  it('age is coloured on the row — red past 21, amber past 10 — and no heading is ever red', async () => {
+  it('age is coloured on the row — amber 30 to 59, plain under 30 — and no heading wears the age red', async () => {
     const { host, unmount } = await screenFor()
     const tone = (id: string) => host.querySelector(`[data-row="${id}"] [data-age-tone]`)!.getAttribute('data-age-tone')
-    expect(tone('bug-old')).toBe('red')     // 30 days
-    expect(tone('idea')).toBe('amber')      // 20 days
+    expect(tone('bug-old')).toBe('amber')   // 30 days
+    expect(tone('legacy')).toBe('amber')    // 50 days
+    expect(tone('idea')).toBe('plain')      // 20 days
     expect(tone('q')).toBe('plain')         // 6 days
     for (const h of [...host.querySelectorAll('[data-section] h3')] as HTMLElement[]) {
       expect(h.style.color).not.toBe(T.state.danger.strong)
@@ -290,10 +293,11 @@ describe('a tile is the filter', () => {
     await unmount()
   })
 
-  it('the six tiles count every open item exactly once', async () => {
+  it('the five tiles (and Stuck, at zero) count every open item exactly once', async () => {
     const { host, unmount } = await screenFor()
-    const counts = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].map(k => Number(tile(host, k)!.querySelector('[data-tile-count]')!.textContent))
-    expect(counts).toEqual([3, 1, 2, 1, 2, 0])
+    const counts = ['fix', 'answer', 'decide', 'build', 'deciding'].map(k => Number(tile(host, k)!.querySelector('[data-tile-count]')!.textContent))
+    expect(counts).toEqual([3, 1, 2, 1, 2])
+    expect(tile(host, 'stuck')).toBeNull() // Stuck is 0: no tile, no strip
     expect(counts.reduce((a, b) => a + b, 0)).toBe(9)
     expect(host.querySelector('[role="tab"]')).toBeNull()
     await unmount()
@@ -329,7 +333,7 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     expect(modal(host)).toBeNull()
     await openRow(host, 'Newer bug')
     expect(modal(host)).toBeTruthy()
-    expect(modal(host)!.textContent).toContain('3 of 9 · Fix')
+    expect(modal(host)!.textContent).toContain('3 of 9 · Bugs')
     expect(modal(host)!.textContent).toContain('What they said')
     await unmount()
   })
@@ -344,7 +348,7 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     expect(modal(host)!.textContent).toContain('A hazard')
     expect(modal(host)!.textContent).toContain('2 of 9')
     for (let n = 0; n < 7; n++) await click(next())
-    expect(modal(host)!.textContent).toContain('9 of 9 · Still deciding')
+    expect(modal(host)!.textContent).toContain('9 of 9 · We said maybe')
     expect(modal(host)!.textContent).toContain('They wrote back')
     expect(next().disabled).toBe(true)
     await click(next())

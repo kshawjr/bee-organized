@@ -2419,10 +2419,10 @@
         "logging an internal issue"
       ],
       "lines": [
-        1389,
-        1920
+        1450,
+        1984
       ],
-      "note": "Six tiles in two groups (Fix / Answer / Decide; Build / Still deciding / Stuck) from lib/feedback-admin-tiles.ts, which also gives the nav badge its number: unanswered bugs + unanswered questions, not the open count. Claim circle (assigned_to) and the looks-built tick (looks_shipped) PATCH the [id] route. Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
+      "note": "Two groups of tiles from lib/feedback-admin-tiles.ts — Waiting to hear from us (Bugs / Questions / Ideas, raised) and Heard from us, still waiting (We said yes / We said maybe, recessed); Stuck is a red strip shown only when not zero. The same lib also gives the nav badge its number: unanswered bugs + unanswered questions, not the open count. Claim circle (assigned_to) and the looks-built tick (looks_shipped) PATCH the [id] route. Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
     },
     {
       "id": "admin.notifications",

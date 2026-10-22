@@ -160,18 +160,19 @@ describe('every type lands in a tile, and the tiles reconcile with the open coun
   const tileCount = (el: HTMLElement, key: string) =>
     Number(el.querySelector(`[data-tile="${key}"] [data-tile-count]`)?.textContent)
 
-  it('the six tiles sum to every open item, internal-only and unknown types included', async () => {
+  it('the five tiles (Stuck at zero) sum to every open item, internal-only and unknown types included', async () => {
     const el = await mount(MIXED)
-    const counts = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].map(k => tileCount(el, k))
+    const counts = ['fix', 'answer', 'decide', 'build', 'deciding'].map(k => tileCount(el, k))
     // bugs + the hazard → Fix; the idea, both decisions and the unknown type → Decide.
-    expect(counts).toEqual([3, 0, 4, 0, 0, 0])
+    expect(counts).toEqual([3, 0, 4, 0, 0])
+    expect(el.querySelector('[data-stuck-strip]')).toBeNull() // Stuck is 0
     expect(counts.reduce((a, b) => a + b, 0)).toBe(7)
     expect(el.textContent).toContain('7 open items')
   })
 
   it('internal-only types never get a tile of their own', async () => {
     const el = await mount(MIXED)
-    expect(el.querySelectorAll('[data-tile]').length).toBe(6)
+    expect(el.querySelectorAll('[data-tile]').length).toBe(5) // Stuck is a strip, not a tile
     for (const label of ['Decisions', 'Hazards', 'Other']) {
       expect(chipCount(el, label), label).toBeNull()
     }
@@ -180,7 +181,7 @@ describe('every type lands in a tile, and the tiles reconcile with the open coun
   it('every known type lands somewhere — no type falls through', async () => {
     const known = FEEDBACK_TYPES.map((t, i) => item({ id: `k${i}`, type: t, title: t }))
     const el = await mount(known)
-    const total = ['fix', 'answer', 'decide', 'build', 'deciding', 'stuck'].reduce((n, k) => n + tileCount(el, k), 0)
+    const total = ['fix', 'answer', 'decide', 'build', 'deciding'].reduce((n, k) => n + tileCount(el, k), 0)
     expect(total).toBe(known.length)
   })
 })

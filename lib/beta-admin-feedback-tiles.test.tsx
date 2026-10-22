@@ -4,7 +4,9 @@
 // lib/beta-admin-feedback-routes.test.ts).
 //
 // The badge said 40 and Leslie read forty things on fire; four were bugs
-// nobody had answered. What this file pins:
+// nobody had answered. Then Kevin could not read the tiles quickly, so the
+// plain-English pass renamed them, split the rows by look, and made Stuck a
+// strip. What this file pins:
 //   · the badge is unanswered bugs + unanswered questions, nothing else
 //   · six tiles in two groups, each the right set, mutually exclusive, summing
 //     to the open total — and clicking one filters the list to it
@@ -177,18 +179,59 @@ describe('the six tiles', () => {
     for (const c of [CLOSED_SHIP, CLOSED_ANS, CLOSED_DEC]) expect(adminTileOf(c)).toBeNull()
   })
 
-  it('the screen shows the same counts, in two labelled groups, each tile saying count · verb · what · oldest', async () => {
+  it('the screen shows the same counts, in two groups headed in sentence case, five tiles and no Stuck tile', async () => {
     const { host, unmount } = await mount(ALL)
-    for (const t of ADMIN_TILES) expect(tileCount(host, t.key), t.key).toBe(EXPECTED[t.key].length)
+    for (const t of ADMIN_TILES.filter(t => t.key !== 'stuck')) expect(tileCount(host, t.key), t.key).toBe(EXPECTED[t.key].length)
+    expect(host.querySelector('[data-tile="stuck"]')).toBeNull()
+    expect(host.querySelectorAll('[data-tile]').length).toBe(5)
     expect(host.querySelector('[data-group-count="unreplied"]')?.textContent).toBe('6')
     expect(host.querySelector('[data-group-count="replied"]')?.textContent).toBe('4')
-    expect(host.textContent).toContain('Nobody has replied')
-    expect(host.textContent).toContain('We replied')
+    const labels = [...host.querySelectorAll('[data-group-label]')].map(e => e.textContent)
+    expect(labels).toEqual(['Waiting to hear from us', 'Heard from us, still waiting'])
+    for (const l of [...host.querySelectorAll('[data-group-label]')] as HTMLElement[]) {
+      expect((l.parentElement as HTMLElement).style.textTransform).not.toBe('uppercase')
+    }
     const fix = host.querySelector('[data-tile="fix"]')!
     const parts = [...fix.children].map(c => [...c.attributes].map(a => a.name).find(n => n.startsWith('data-tile-')))
-    expect(parts).toEqual(['data-tile-count', 'data-tile-verb', 'data-tile-what', 'data-tile-oldest'])
-    expect(host.querySelector('[data-tile="answer"] [data-tile-oldest]')?.textContent).toBe('oldest 44 days old')
+    expect(parts).toEqual(['data-tile-count', 'data-tile-name', 'data-tile-what', 'data-tile-oldest'])
     expect(host.querySelector('[role="tablist"]')).toBeNull()
+    await unmount()
+  })
+
+  it('each tile renders its plain-noun label and its full-sentence description', async () => {
+    const { host, unmount } = await mount(ALL)
+    const want: Record<string, [string, string]> = {
+      fix:      ['Bugs',          'Something is broken and they are stuck with it.'],
+      answer:   ['Questions',     'They asked us something. A reply finishes it.'],
+      decide:   ['Ideas',         'They want something new. Yes, no, or not now.'],
+      build:    ['We said yes',   'Promised and not built yet.'],
+      deciding: ['We said maybe', 'We said we would look, and never came back.'],
+    }
+    for (const [key, [name, what]] of Object.entries(want)) {
+      expect(host.querySelector(`[data-tile="${key}"] [data-tile-name]`)?.textContent, key).toBe(name)
+      expect(host.querySelector(`[data-tile="${key}"] [data-tile-what]`)?.textContent, key).toBe(what)
+    }
+    for (const verb of ['Fix', 'Answer', 'Decide', 'Build', 'Still deciding']) {
+      expect([...host.querySelectorAll('[data-tile-name], [data-section-title]')].map(e => e.textContent), verb).not.toContain(verb)
+    }
+    expect(host.querySelector('[data-tile="answer"] [data-tile-oldest]')?.textContent).toBe('Oldest: 44 days')
+    await unmount()
+  })
+
+  it('the two rows look different: raised top row with its own hue and a shadow, recessed flat bottom row', async () => {
+    const { host, unmount } = await mount(ALL)
+    const top = ['fix', 'answer', 'decide'].map(k => host.querySelector(`[data-tile="${k}"]`) as HTMLElement)
+    const bottom = ['build', 'deciding'].map(k => host.querySelector(`[data-tile="${k}"]`) as HTMLElement)
+    // Each top tile its own hue: three different backgrounds, none the bottom row's.
+    const topBgs = top.map(t => t.style.background)
+    expect(new Set(topBgs).size).toBe(3)
+    for (const t of top) expect(t.getAttribute('data-tile-row')).toBe('raised')
+    // The bottom row shares ONE fill, and it is not any top tile's fill.
+    expect(bottom[0].style.background).toBe(bottom[1].style.background)
+    for (const bg of topBgs) expect(bg).not.toBe(bottom[0].style.background)
+    // Only the top row has a shadow.
+    for (const t of top) expect(t.style.boxShadow, t.getAttribute('data-tile')!).not.toMatch(/^(none|)$/)
+    for (const t of bottom) expect(['none', ''], t.getAttribute('data-tile')!).toContain(t.style.boxShadow)
     await unmount()
   })
 
@@ -197,23 +240,27 @@ describe('the six tiles', () => {
     await click(host.querySelector('[data-tile="decide"]'))
     expect(host.querySelector('[data-tile="decide"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(rowIds(host).sort()).toEqual([...EXPECTED.decide].sort())
-    await click(host.querySelector('[data-tile="stuck"]'))
-    expect(rowIds(host)).toEqual(['stuck'])
-    await click(host.querySelector('[data-tile="stuck"]'))
+    await click(host.querySelector('[data-tile="build"]'))
+    expect(rowIds(host).sort()).toEqual([...EXPECTED.build].sort())
+    await click(host.querySelector('[data-tile="build"]'))
     expect(rowIds(host).length).toBe(10)
     await unmount()
   })
 
-  it('section headings use the tile’s word and colour and the tile’s own line — no second explanation', async () => {
+  it('a section heading is the name and the count — never the description', async () => {
     const { host, unmount } = await mount(ALL)
-    for (const t of ADMIN_TILES) {
+    for (const t of ADMIN_TILES.filter(t => t.key !== 'stuck')) {
       const sec = host.querySelector(`[data-section="${t.key}"]`)!
-      const tileVerb = host.querySelector(`[data-tile="${t.key}"] [data-tile-verb]`) as HTMLElement
-      expect(sec.querySelector('[data-section-title]')?.textContent).toBe(t.verb)
-      expect((sec.querySelector('h3') as HTMLElement).style.color).toBe(tileVerb.style.color)
-      expect(sec.querySelector('[data-section-line]')?.textContent).toBe(t.what)
-      expect(sec.querySelectorAll('p').length, `${t.key}: no extra paragraph under the heading`).toBe(0)
+      const h3 = sec.querySelector('h3') as HTMLElement
+      expect(sec.querySelector('[data-section-title]')?.textContent).toBe(t.name)
+      expect(sec.querySelector('[data-section-count]')?.textContent).toBe(String(EXPECTED[t.key].length))
+      expect(h3.textContent).toBe(`${t.name}${EXPECTED[t.key].length}`)
+      expect(h3.textContent).not.toContain(t.what)
+      expect(sec.querySelector('[data-section-line]')).toBeNull()
     }
+    // The top row's sections wear their tile's ink.
+    const tileName = host.querySelector('[data-tile="fix"] [data-tile-name]') as HTMLElement
+    expect((host.querySelector('[data-section="fix"] h3') as HTMLElement).style.color).toBe(tileName.style.color)
     await unmount()
   })
 
@@ -222,6 +269,42 @@ describe('the six tiles', () => {
     for (const k of ['fix', 'answer', 'decide']) expect(host.querySelector(`[data-section="${k}"] [data-status-chip]`), k).toBeNull()
     expect(host.querySelector('[data-section="build"] [data-status-chip]')?.textContent).toBe(FEEDBACK_STATUS_PLAIN.planned)
     expect(host.querySelector('[data-section="stuck"] [data-status-chip]')?.textContent).toBe(FEEDBACK_STATUS_PLAIN.submitted)
+    await unmount()
+  })
+})
+
+// ─── 5. Stuck is a strip, not a tile ───────────────────────────────
+
+describe('Stuck is not a tile', () => {
+  it('zero Stuck renders no strip and no tile', async () => {
+    const { host, unmount } = await mount(ALL.filter(i => i.id !== 'stuck'))
+    expect(host.querySelector('[data-stuck-strip]')).toBeNull()
+    expect(host.querySelector('[data-tile="stuck"]')).toBeNull()
+    expect(host.textContent).not.toContain('nobody has answered')
+    // the bottom row is two tiles
+    expect(host.querySelectorAll('[data-tile-group="replied"] [data-tile]').length).toBe(2)
+    await unmount()
+  })
+
+  it('non-zero Stuck renders one red strip above both groups, and Show them filters to them', async () => {
+    const STUCK2 = item({ ...STUCK, id: 'stuck-2', title: 'Second stuck', created_at: daysAgo(5) })
+    const { host, unmount } = await mount([...ALL, STUCK2])
+    const strip = host.querySelector('[data-stuck-strip]') as HTMLElement
+    expect(strip).toBeTruthy()
+    expect(strip.textContent).toContain('2 have a reply but still say nobody has answered.')
+    expect(strip.textContent).toContain('Someone wrote back and the status never moved.')
+    expect(strip.style.background).toBe((host.querySelector('[data-tile="fix"]') as HTMLElement).style.background) // the red tint
+    const firstGroup = host.querySelector('[data-tile-group="unreplied"]')!
+    expect(strip.compareDocumentPosition(firstGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(host.querySelector('[data-tile="stuck"]')).toBeNull()
+    await click(strip.querySelector('[data-stuck-show]'))
+    expect(rowIds(host).sort()).toEqual(['stuck', 'stuck-2'])
+    await unmount()
+  })
+
+  it('one Stuck item reads in the singular', async () => {
+    const { host, unmount } = await mount(ALL)
+    expect(host.querySelector('[data-stuck-strip]')!.textContent).toContain('1 has a reply but still says nobody has answered.')
     await unmount()
   })
 })
@@ -329,33 +412,50 @@ describe('the looks-built tick', () => {
 // ─── 4. age ────────────────────────────────────────────────────────
 
 describe('age carries the urgency', () => {
-  it('plain to 10, amber past 10, red past 21', () => {
+  it('plain under 30, amber 30 to 59, red at 60 or more', () => {
     expect(ageTone(0)).toBe('plain')
-    expect(ageTone(10)).toBe('plain')
-    expect(ageTone(11)).toBe('amber')
-    expect(ageTone(21)).toBe('amber')
-    expect(ageTone(22)).toBe('red')
+    expect(ageTone(29)).toBe('plain')
+    expect(ageTone(30)).toBe('amber')
+    expect(ageTone(59)).toBe('amber')
+    expect(ageTone(60)).toBe('red')
     expect(ageTone(null)).toBe('plain')
   })
 
   it('on the row, at the boundaries', async () => {
-    const rows = [10, 11, 21, 22].map(d => item({ id: `age-${d}`, created_at: daysAgo(d) }))
+    const rows = [29, 30, 59, 60].map(d => item({ id: `age-${d}`, created_at: daysAgo(d) }))
     const { host, unmount } = await mount(rows)
     const tone = (id: string) => host.querySelector(`[data-row="${id}"] [data-age-tone]`)?.getAttribute('data-age-tone')
-    expect(tone('age-10')).toBe('plain')
-    expect(tone('age-11')).toBe('amber')
-    expect(tone('age-21')).toBe('amber')
-    expect(tone('age-22')).toBe('red')
-    expect(host.querySelector('[data-row="age-22"] [data-age-tone]')?.textContent).toBe('22 days old')
+    expect(tone('age-29')).toBe('plain')
+    expect(tone('age-30')).toBe('amber')
+    expect(tone('age-59')).toBe('amber')
+    expect(tone('age-60')).toBe('red')
+    expect(host.querySelector('[data-row="age-60"] [data-age-tone]')?.textContent).toBe('60 days old')
     await unmount()
   })
 
-  it('red means age and nothing else — no red dot, no red queue header', async () => {
+  it('on the tile, at the boundaries — "Oldest: N days"', async () => {
+    for (const [d, want] of [[29, 'plain'], [30, 'amber'], [59, 'amber'], [60, 'red']] as const) {
+      const { host, unmount } = await mount([item({ id: `t-${d}`, created_at: daysAgo(d) })])
+      const el = host.querySelector('[data-tile="fix"] [data-age-tone]')!
+      expect(el.getAttribute('data-age-tone'), String(d)).toBe(want)
+      expect(el.textContent).toBe(`Oldest: ${d} days`)
+      await unmount()
+    }
+  })
+
+  it('an age under 30 days is not red — on a row or a tile', async () => {
+    const { host, unmount } = await mount([item({ id: 'young', created_at: daysAgo(24) })])
+    for (const el of [...host.querySelectorAll('[data-age-tone]')] as HTMLElement[]) {
+      expect(el.getAttribute('data-age-tone')).toBe('plain')
+      expect(el.style.color).not.toBe('rgb(180, 35, 24)')
+      expect(el.style.color).not.toBe('#b42318')
+    }
+    await unmount()
+  })
+
+  it('no red dot', async () => {
     const { host, unmount } = await mount(ALL)
     expect(host.querySelector('[data-testid="needs-dot"]')).toBeNull()
-    const redSpans = [...host.querySelectorAll('[style]')].filter(e => (e as HTMLElement).style.color === 'rgb(180, 35, 24)' || (e as HTMLElement).style.color === '#b42318')
-    expect(redSpans.length, 'something on screen is old enough to be red').toBeGreaterThan(0)
-    for (const e of redSpans) expect(e.hasAttribute('data-age-tone'), (e as HTMLElement).outerHTML.slice(0, 80)).toBe(true)
     await unmount()
   })
 })

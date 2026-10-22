@@ -188,26 +188,29 @@ describe('the six tiles', () => {
     const { host, unmount } = await screenFor()
     const t = host.querySelector('[data-tile="deciding"]')!
     expect(t.querySelector('[data-tile-count]')!.textContent).toBe('2')
-    expect(t.querySelector('[data-tile-oldest]')!.textContent).toBe('oldest 58 days old')
+    expect(t.querySelector('[data-tile-oldest]')!.textContent).toBe('Oldest: 58 days')
     await unmount()
   })
 
-  it('red is the AGE, never a section heading', async () => {
+  it('age steps: 58 days is amber (30 to 59), never the strong red of 60+', async () => {
     const { host, unmount } = await screenFor()
     for (const k of ['decide', 'build', 'deciding', 'stuck']) {
       expect((tileSection(host, k)!.querySelector('h3') as HTMLElement).style.color, k).not.toBe(T.state.danger.strong)
     }
-    expect(host.querySelector('[data-row="s1"] [data-age-tone]')!.getAttribute('data-age-tone')).toBe('red')
+    expect(host.querySelector('[data-row="s1"] [data-age-tone]')!.getAttribute('data-age-tone')).toBe('amber')
+    expect(host.querySelector('[data-row="h1"] [data-age-tone]')!.getAttribute('data-age-tone')).toBe('plain')
     await unmount()
   })
 })
 
 describe('the open count and the badge', () => {
-  it('the header count equals the six tiles together', async () => {
+  it('the header count equals the five tiles plus the Stuck strip', async () => {
     const { host, unmount } = await screenFor()
     expect(host.textContent).toContain('5 open items · 6 in total')
     const sum = [...host.querySelectorAll('[data-tile-count]')].reduce((n, e) => n + Number(e.textContent), 0)
-    expect(sum).toBe(5)
+    expect(sum).toBe(4)
+    // n2 is the one Stuck item: counted on the strip, not on a tile.
+    expect(host.querySelector('[data-stuck-strip]')!.textContent).toContain('1 has a reply but still says nobody has answered.')
     await unmount()
   })
 
@@ -290,7 +293,7 @@ describe('next / previous walks the list and stops at both ends', () => {
   it('counts your position, and names the tile the item sits in', async () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Snooze Button'))
-    expect(modal(host)!.textContent).toContain('1 of 5 · Decide')
+    expect(modal(host)!.textContent).toContain('1 of 5 · Ideas')
     await unmount()
   })
 
@@ -298,7 +301,7 @@ describe('next / previous walks the list and stops at both ends', () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Snooze Button'))
     await click(next(host))
-    expect(modal(host)!.textContent).toContain('2 of 5 · Build')
+    expect(modal(host)!.textContent).toContain('2 of 5 · We said yes')
     expect(modal(host)!.textContent).toContain('Changing twenty clients') // now showing "Bulk Update"
     await unmount()
   })

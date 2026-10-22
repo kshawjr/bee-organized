@@ -35,7 +35,7 @@
 //   2026-10-22: no open item has a team thread row without admin_response.)
 //
 //   AGE is the item's age since it was filed (created_at), the number an owner
-//   would quote. Plain to 10 days, amber past 10, red past 21.
+//   would quote. Plain under 30 days, amber 30 to 59, red at 60 or more.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { isClosedFeedback, hasFeedbackReply, feedbackAgeDays } from '@/lib/feedback-queues'
@@ -43,27 +43,32 @@ import { isClosedFeedback, hasFeedbackReply, feedbackAgeDays } from '@/lib/feedb
 export type AdminTileKey = 'fix' | 'answer' | 'decide' | 'build' | 'deciding' | 'stuck'
 export type AdminGroupKey = 'unreplied' | 'replied'
 
+// THE WORDS (the plain-English pass, 2026-10-22). Plain nouns, not verbs — the
+// tile says what the pile IS ("Bugs"), not a chore ("Fix") — and one full
+// sentence each, sentence case, full stop. The KEYS are unchanged; nothing
+// below the words moved. Stuck keeps its internal name and is not a tile on
+// the screen: it is a strip that appears only when its count is not zero.
 export interface AdminTileDef {
   key: AdminTileKey
   group: AdminGroupKey
-  /** The verb — the tile's word AND its section heading. */
-  verb: string
-  /** What it is, in a few words. The tile's line and the section's one line. */
+  /** The tile's name AND its section heading. */
+  name: string
+  /** One full sentence: what is in this pile. The tile only — never repeated under the section heading. */
   what: string
 }
 
 export const ADMIN_TILES: readonly AdminTileDef[] = [
-  { key: 'fix',      group: 'unreplied', verb: 'Fix',            what: 'bugs, something is broken for them right now' },
-  { key: 'answer',   group: 'unreplied', verb: 'Answer',         what: 'questions, a reply is the whole job' },
-  { key: 'decide',   group: 'unreplied', verb: 'Decide',         what: 'ideas, say yes, no or not now' },
-  { key: 'build',    group: 'replied',   verb: 'Build',          what: 'we said yes, not built yet' },
-  { key: 'deciding', group: 'replied',   verb: 'Still deciding', what: 'we said we would look, we have not come back' },
-  { key: 'stuck',    group: 'replied',   verb: 'Stuck',          what: 'we replied but the status never moved' },
+  { key: 'fix',      group: 'unreplied', name: 'Bugs',          what: 'Something is broken and they are stuck with it.' },
+  { key: 'answer',   group: 'unreplied', name: 'Questions',     what: 'They asked us something. A reply finishes it.' },
+  { key: 'decide',   group: 'unreplied', name: 'Ideas',         what: 'They want something new. Yes, no, or not now.' },
+  { key: 'build',    group: 'replied',   name: 'We said yes',   what: 'Promised and not built yet.' },
+  { key: 'deciding', group: 'replied',   name: 'We said maybe', what: 'We said we would look, and never came back.' },
+  { key: 'stuck',    group: 'replied',   name: 'Stuck',         what: 'Someone wrote back and the status never moved.' },
 ] as const
 
-export const ADMIN_GROUPS: readonly { key: AdminGroupKey; label: string; line: string }[] = [
-  { key: 'unreplied', label: 'Nobody has replied', line: 'the owner is still waiting to hear anything' },
-  { key: 'replied',   label: 'We replied',         line: 'the owner is waiting on what we said we would do' },
+export const ADMIN_GROUPS: readonly { key: AdminGroupKey; label: string }[] = [
+  { key: 'unreplied', label: 'Waiting to hear from us' },
+  { key: 'replied',   label: 'Heard from us, still waiting' },
 ] as const
 
 export interface AdminTileItem {
@@ -151,16 +156,17 @@ export function summarizeAdminTiles(items: AdminTileItem[], now: number = Date.n
 }
 
 // ── AGE COLOUR ────────────────────────────────────────────────────────────
-// "Past" is strictly greater: 10 days is plain, 11 is amber; 21 is amber,
-// 22 is red.
+// Three steps, set for THIS backlog: at 10/21 every age on the live screen was
+// red, which made red mean nothing. Under 30 days plain, 30 to 59 amber, 60 or
+// more red — so 29 is plain, 30 amber, 59 amber, 60 red.
 export type AgeTone = 'plain' | 'amber' | 'red'
-export const AGE_AMBER_AFTER = 10
-export const AGE_RED_AFTER = 21
+export const AGE_AMBER_FROM = 30
+export const AGE_RED_FROM = 60
 
 export function ageTone(days: number | null | undefined): AgeTone {
   if (days == null) return 'plain'
-  if (days > AGE_RED_AFTER) return 'red'
-  if (days > AGE_AMBER_AFTER) return 'amber'
+  if (days >= AGE_RED_FROM) return 'red'
+  if (days >= AGE_AMBER_FROM) return 'amber'
   return 'plain'
 }
 

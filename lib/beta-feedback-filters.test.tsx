@@ -82,7 +82,10 @@ describe('counts match what each tile would actually show', () => {
     expect(tileCount(host, 'fix')).toBe(2)
     expect(tileCount(host, 'decide')).toBe(1)
     expect(tileCount(host, 'answer')).toBe(0)
-    expect(['build', 'deciding', 'stuck'].map(k => tileCount(host, k))).toEqual([0, 0, 0])
+    expect(['build', 'deciding'].map(k => tileCount(host, k))).toEqual([0, 0])
+    // Stuck is counted but is not a tile; at zero nothing renders for it.
+    expect(tile(host, 'stuck')).toBeNull()
+    expect(host.querySelector('[data-stuck-strip]')).toBeNull()
     await unmount()
   })
 

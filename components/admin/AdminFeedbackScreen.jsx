@@ -15,21 +15,24 @@
 //   questions with no reply (lib/feedback-admin-tiles adminBadgeCount,
 //   reported up through onBadgeCountChange). Ideas never set it off.
 //
-//   TWO GROUPS, SIX TILES. "Nobody has replied": Fix (bugs), Answer
-//   (questions), Decide (ideas). "We replied": Build (planned), Still deciding
-//   (under review), Stuck (replied but still at submitted — a defect state,
-//   never settable by hand). Each tile: count, verb, what it is, oldest age.
-//   A tile is a filter. The six are mutually exclusive and sum to the open
-//   total (lib/feedback-admin-tiles owns all of it).
+//   TWO GROUPS, SIX COUNTS, FIVE TILES (the plain-English pass). "Waiting
+//   to hear from us": Bugs, Questions, Ideas — raised, each tinted its own
+//   hue (red, blue, amber) with a stronger border and a soft shadow. "Heard
+//   from us, still waiting": We said yes, We said maybe — recessed, darker
+//   than the page, flat, colourless. Each tile: count, name, one full
+//   sentence, "Oldest: N days". A tile is a filter. Stuck (replied but still
+//   at submitted — a defect, never settable by hand) is counted but is not a
+//   tile: a red strip with "Show them" appears only when it is not zero. The
+//   six counts are mutually exclusive and sum to the open total
+//   (lib/feedback-admin-tiles owns the sorting; this file only presents it).
 //
-//   SECTIONS MATCH THE TILES — same word, same colour, the tile's own line.
-//   Status chips appear only in the replied group and the closed list; in
-//   Fix / Answer / Decide the section already is the status.
+//   SECTIONS MATCH THE TILES — the same name and colour, and the count. No
+//   description under the heading: the tile already said it. Status chips
+//   appear only in the replied group and the closed list.
 //
-//   AGE CARRIES THE URGENCY, on every row and tile: amber past 10 days, red
-//   past 21. Red and amber mean age and nothing else here — the old red
-//   "needs an answer" dot is gone, the type glyph on a row is neutral ink, and
-//   the tile colours avoid both.
+//   AGE: plain under 30 days, amber 30 to 59, red at 60 or more, on every row
+//   and tile. The old red "needs an answer" dot is gone and the type glyph
+//   on a row is neutral ink.
 //
 //   WHO HAS IT — a claim circle on every row (initials, or a dashed plus),
 //   a "who has it" filter beside the location filter, and the same in the
@@ -183,30 +186,44 @@ function replyNote(item, internal) {
 }
 
 // ── TILE COLOURS ──────────────────────────────────────────────
-// One family per tile; the tile, its section heading and (in the replied
-// group) the row's status chip all wear it. RED AND AMBER ARE NOT HERE: they
-// belong to AGE alone, so a red thing on this screen only ever means "old".
+// THE TWO ROWS LOOK DIFFERENT (the plain-English pass). "Waiting to hear from
+// us" is the row that needs you: each tile tinted its own hue — red Bugs,
+// blue Questions, amber Ideas — with a real border in a stronger version of
+// that hue, and a soft shadow. "Heard from us, still waiting" is parked: a
+// fill darker than the page, flat, no shadow, no colour of its own. The
+// section heading in the list wears the same ink as its tile; the replied
+// group's status chips stay neutral, like their row.
 const TILE_FAMILY = {
-  fix: 'purple', answer: 'teal', decide: 'blue',
-  build: 'green', deciding: 'quiet', stuck: 'gray',
+  fix: 'red', answer: 'blue', decide: 'amber',
+  build: 'gray', deciding: 'gray', stuck: 'red',
 }
+// The stronger edge for each raised tile — the same hue, driven darker.
+const TILE_EDGE = {
+  fix: T.state.danger.strong, answer: T.state.info.fg, decide: T.state.warning.fg,
+}
+// The recessed row's fill: a step darker than the page, still warm.
+const RECESSED_FILL = T.family.gray.bg
 const CLOSED_FAMILY = { shipped: 'green', answered: 'teal', declined: 'gray' }
 const CLOSED_ORDER = ['shipped', 'answered', 'declined']
 function tileInk(key) { return (T.family[TILE_FAMILY[key]] || T.family.gray).text }
 
 // ── AGE ───────────────────────────────────────────────────────
-// Plain to 10 days, amber past 10, red past 21 (lib/feedback-admin-tiles).
-// On every row and every tile — one question was 44 days old and nothing on
-// its row said so.
+// Plain under 30 days, amber 30 to 59, red at 60 or more
+// (lib/feedback-admin-tiles ageTone). On every row and every tile. At the old
+// 10/21 steps every age on the live screen was red, so red said nothing.
 function ageInk(tone) {
   return tone === 'red' ? T.state.danger.strong : tone === 'amber' ? T.state.warning.deep : T.ink.muted
 }
-function AgeText({ days, prefix = '' }) {
+// `oldest` is the tile's form: "Oldest: 23 days". A row says "23 days old".
+function AgeText({ days, oldest = false }) {
   if (days == null) return null
   const tone = ageTone(days)
+  const words = oldest
+    ? `Oldest: ${days <= 0 ? 'today' : dayPhrase(days)}`
+    : (days <= 0 ? 'today' : `${dayPhrase(days)} old`)
   return (
     <span data-age-tone={tone} style={{ color: ageInk(tone), fontWeight: tone === 'plain' ? 400 : 700, whiteSpace: 'nowrap' }}>
-      {prefix}{days <= 0 ? 'today' : `${dayPhrase(days)} old`}
+      {words}
     </span>
   )
 }
@@ -1335,53 +1352,97 @@ function ClusterModal({ cluster, items, analyses, onClose, onSelect }) {
 }
 
 // ── THE TILES ─────────────────────────────────────────────────
-// Two labelled groups of three. Every tile says the same four things in the
-// same order: the count, the verb, what it is, how old the oldest one is. A
-// tile is a filter toggle (aria-pressed), not a tab: pressing the lit one
-// clears it.
+// Two groups, each headed in sentence case with its count. Every tile says the
+// same four things in the same order: the count, its name, one sentence about
+// what is in it, and how old the oldest one is. A tile is a filter toggle
+// (aria-pressed): pressing the lit one clears it.
+//
+// STUCK IS NOT A TILE. A tile reading 0 spent a third of a row saying
+// nothing. It is still counted (lib/feedback-admin-tiles); when it is zero
+// nothing renders at all, and when it is not, one red strip sits above both
+// groups with a button that filters the list to them. So the bottom row is
+// two tiles, never three with a dead one.
+function StuckStrip({ count, onShow }) {
+  if (!count) return null
+  return (
+    <div data-stuck-strip role="status" style={{
+      display: 'flex', alignItems: 'center', gap: '10px 14px', flexWrap: 'wrap',
+      padding: '10px 14px', borderRadius: T.radius.control,
+      background: T.family.red.bg, border: `1px solid ${T.state.danger.strong}`,
+    }}>
+      <p style={{ margin: 0, flex: '1 1 260px', fontSize: '13.5px', lineHeight: 1.5, color: T.family.red.text }}>
+        <strong>{count} {count === 1 ? 'has a reply but still says' : 'have a reply but still say'} nobody has answered.</strong>{' '}
+        {ADMIN_TILES.find(t => t.key === 'stuck').what}
+      </p>
+      <button type="button" data-stuck-show onClick={onShow} style={{
+        minHeight: '44px', padding: '0 14px', borderRadius: T.radius.control, cursor: 'pointer',
+        background: T.state.danger.strong, color: T.ink.inverse, border: 'none',
+        fontFamily: 'inherit', fontWeight: 700, whiteSpace: 'nowrap',
+      }}>
+        Show them
+      </button>
+    </div>
+  )
+}
+
 function AdminTiles({ summary, active, onPick }) {
   return (
-    <div data-admin-tiles style={{ display: 'flex', flexDirection: 'column', gap: '14px', margin: '4px 0 14px' }}>
-      {ADMIN_GROUPS.map(g => (
-        <section key={g.key} data-tile-group={g.key} aria-label={g.label}>
-          <p style={{ margin: '0 0 6px', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.ink.primary }}>{g.label}</span>
-            <span data-group-count={g.key} style={{ fontSize: '13px', fontWeight: 700, color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>{summary.groups[g.key].count}</span>
-            <span style={{ fontSize: '12.5px', color: T.ink.muted }}>{g.line}</span>
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
-            {ADMIN_TILES.filter(t => t.group === g.key).map(t => {
-              const on = active === t.key
-              const tile = summary.tiles[t.key]
-              const ink = tileInk(t.key)
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  data-tile={t.key}
-                  aria-pressed={on}
-                  onClick={() => onPick(on ? null : t.key)}
-                  style={{
-                    textAlign: 'left', minHeight: '44px', padding: '10px 12px', cursor: 'pointer', fontFamily: 'inherit',
-                    background: on ? (T.family[TILE_FAMILY[t.key]] || T.family.gray).bg : T.surface.raised,
-                    border: on ? `1.5px solid ${ink}` : T.border.thin, borderRadius: T.radius.control,
-                    display: 'flex', flexDirection: 'column', gap: '2px',
-                  }}
-                >
-                  <span data-tile-count style={{ fontSize: '22px', fontWeight: 700, color: ink, lineHeight: 1.1, fontVariantNumeric: T.type.tabular }}>{tile.count}</span>
-                  <span data-tile-verb style={{ fontSize: '14px', fontWeight: 700, color: ink }}>{t.verb}</span>
-                  <span data-tile-what style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.4 }}>{t.what}</span>
-                  <span data-tile-oldest style={{ fontSize: '12px', marginTop: '2px' }}>
-                    {tile.oldestDays == null
-                      ? <span style={{ color: T.ink.quiet }}>nothing here</span>
-                      : <AgeText days={tile.oldestDays} prefix="oldest " />}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      ))}
+    <div data-admin-tiles style={{ display: 'flex', flexDirection: 'column', gap: '16px', margin: '4px 0 14px' }}>
+      <StuckStrip count={summary.tiles.stuck.count} onShow={() => onPick('stuck')} />
+      {ADMIN_GROUPS.map(g => {
+        const raised = g.key === 'unreplied'
+        return (
+          <section key={g.key} data-tile-group={g.key} aria-label={g.label}>
+            <h3 style={{ margin: '0 0 8px', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', fontSize: '15px', fontWeight: 600, color: T.ink.primary }}>
+              <span data-group-label>{g.label}</span>
+              <span data-group-count={g.key} style={{ fontSize: '15px', fontWeight: 700, color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>{summary.groups[g.key].count}</span>
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+              {ADMIN_TILES.filter(t => t.group === g.key && t.key !== 'stuck').map(t => {
+                const on = active === t.key
+                const tile = summary.tiles[t.key]
+                const fam = T.family[TILE_FAMILY[t.key]] || T.family.gray
+                const ink = raised ? fam.text : T.ink.primary
+                const surface = raised
+                  ? {
+                      background: fam.bg,
+                      border: `${on ? 2.5 : 1.5}px solid ${TILE_EDGE[t.key]}`,
+                      boxShadow: T.shadow.card,
+                    }
+                  : {
+                      background: RECESSED_FILL,
+                      border: on ? `2px solid ${T.ink.primary}` : '1px solid transparent',
+                      boxShadow: 'none',
+                    }
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    data-tile={t.key}
+                    data-tile-row={raised ? 'raised' : 'recessed'}
+                    aria-pressed={on}
+                    onClick={() => onPick(on ? null : t.key)}
+                    style={{
+                      textAlign: 'left', minHeight: '44px', padding: '12px 14px', cursor: 'pointer', fontFamily: 'inherit',
+                      borderRadius: T.radius.control, display: 'flex', flexDirection: 'column', gap: '3px',
+                      ...surface,
+                    }}
+                  >
+                    <span data-tile-count style={{ fontSize: '24px', fontWeight: 700, color: ink, lineHeight: 1.1, fontVariantNumeric: T.type.tabular }}>{tile.count}</span>
+                    <span data-tile-name style={{ fontSize: '15px', fontWeight: 700, color: ink }}>{t.name}</span>
+                    <span data-tile-what style={{ fontSize: '13px', color: T.ink.secondary, lineHeight: 1.45 }}>{t.what}</span>
+                    <span data-tile-oldest style={{ fontSize: '12.5px', marginTop: '2px' }}>
+                      {tile.oldestDays == null
+                        ? <span style={{ color: T.ink.muted }}>Nothing here.</span>
+                        : <AgeText days={tile.oldestDays} oldest />}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -1530,13 +1591,13 @@ export default function AdminFeedbackScreen({
       for (const t of ADMIN_TILES) {
         if (tileFilter && tileFilter !== t.key) continue
         const rows = scoped.filter(i => adminTileOf(i) === t.key).sort(byAgeOldest)
-        out.push({ key: t.key, kind: 'tile', title: t.verb, line: t.what, ink: tileInk(t.key), group: t.group, items: rows })
+        out.push({ key: t.key, kind: 'tile', title: t.name, ink: t.group === 'unreplied' ? tileInk(t.key) : T.ink.primary, group: t.group, items: rows })
       }
     }
     if (showClosed) {
       for (const st of CLOSED_ORDER) {
         const rows = scoped.filter(i => i.status === st).sort(byRecent)
-        out.push({ key: `closed-${st}`, kind: 'closed', title: FEEDBACK_STATUS_PLAIN[st], line: null, ink: (T.family[CLOSED_FAMILY[st]] || T.family.gray).text, items: rows })
+        out.push({ key: `closed-${st}`, kind: 'closed', title: FEEDBACK_STATUS_PLAIN[st], ink: (T.family[CLOSED_FAMILY[st]] || T.family.gray).text, items: rows })
       }
     }
     return out
@@ -1733,13 +1794,14 @@ export default function AdminFeedbackScreen({
   }
 
   // ── ONE SECTION ─────────────────────────────────────────────────
-  // The tile's word in the tile's colour, its count, and the tile's own line.
+  // The tile's name in the tile's colour, and the count. NOTHING ELSE: the
+  // tile just above already said what is in it, and saying it twice was the
+  // old screen's problem.
   const renderSection = (sec) => (
     <section key={sec.key} data-section={sec.key} aria-label={sec.title} style={{ paddingBottom: '6px' }}>
       <h3 style={{ fontSize: '14px', fontWeight: 700, color: sec.ink, margin: 0, padding: '16px 14px 8px', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
         <span data-section-title>{sec.title}</span>
-        <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.muted, fontVariantNumeric: T.type.tabular }}>{sec.items.length}</span>
-        {sec.line && <span data-section-line style={{ fontSize: '12.5px', fontWeight: 400, color: T.ink.muted }}>{sec.line}</span>}
+        <span data-section-count style={{ fontSize: '13px', fontWeight: 500, color: T.ink.muted, fontVariantNumeric: T.type.tabular }}>{sec.items.length}</span>
       </h3>
       {sec.items.length === 0
         ? <p style={{ fontSize: '13px', color: T.ink.quiet, margin: 0, padding: '0 14px 10px' }}>Nothing here.</p>
@@ -1787,22 +1849,24 @@ export default function AdminFeedbackScreen({
         <AdminTiles summary={tiles} active={tileFilter} onPick={(k) => { setTileFilter(k); if (k && scope === 'closed') setScope('open') }} />
       )}
 
-      {/* THE FILTER ROW — search, open/closed, location, who has it. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 12px', margin: '10px 0 12px' }}>
-        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search name, title or description" aria-label="Search feedback" style={{ ...quietInput, cursor: 'text', flex: '1 1 200px', maxWidth: '360px' }} />
-        <select value={scope} onChange={e => { setScope(e.target.value); if (e.target.value === 'closed') setTileFilter(null) }} aria-label="Open or closed" style={quietInput}>
+      {/* THE FILTER ROW — one row that wraps cleanly. Search takes whatever
+          room is left; the three pickers keep their natural width; "Clear
+          filters" is a member of the row, not a link floating after it. */}
+      <div data-filter-row style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', margin: '10px 0 12px' }}>
+        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search name, title or description" aria-label="Search feedback" style={{ ...quietInput, cursor: 'text', flex: '1 1 240px', minWidth: 0 }} />
+        <select value={scope} onChange={e => { setScope(e.target.value); if (e.target.value === 'closed') setTileFilter(null) }} aria-label="Open or closed" style={{ ...quietInput, flex: '0 0 auto' }}>
           <option value="open">Open ({summary.open})</option>
           <option value="closed">Closed ({closedTotal})</option>
           <option value="all">Everything ({summary.total})</option>
         </select>
         {!franchiseMount && (
-          <select value={locFilter} onChange={e => setLocFilter(e.target.value)} aria-label="Location" style={quietInput}>
+          <select value={locFilter} onChange={e => setLocFilter(e.target.value)} aria-label="Location" style={{ ...quietInput, flex: '0 0 auto' }}>
             <option value="all">All locations</option>
             {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         )}
         {canTriage && (
-          <select value={whoFilter} onChange={e => setWhoFilter(e.target.value)} aria-label="Who has it" style={quietInput}>
+          <select value={whoFilter} onChange={e => setWhoFilter(e.target.value)} aria-label="Who has it" style={{ ...quietInput, flex: '0 0 auto' }}>
             <option value="anyone">Anyone has it</option>
             <option value="mine">Mine</option>
             <option value="nobody">Nobody yet</option>
@@ -1810,7 +1874,7 @@ export default function AdminFeedbackScreen({
           </select>
         )}
         {anyFilter && (
-          <button type="button" onClick={() => { setTileFilter(null); setScope('open'); setLocFilter('all'); setWhoFilter('anyone'); setUserQuery('') }} style={{ ...linkBtn, minHeight: '44px' }}>
+          <button type="button" data-clear-filters onClick={() => { setTileFilter(null); setScope('open'); setLocFilter('all'); setWhoFilter('anyone'); setUserQuery('') }} style={{ ...quietInput, flex: '0 0 auto', background: 'transparent', color: T.accent.fg, fontWeight: 600 }}>
             Clear filters
           </button>
         )}
@@ -1878,7 +1942,7 @@ export default function AdminFeedbackScreen({
       {selectedItem && walk && (
         <AdminFeedbackDetailModal
           item={selectedItem}
-          queueLabel={(() => { const t = adminTileOf(selectedItem); return t ? ADMIN_TILES.find(x => x.key === t).verb : (FEEDBACK_STATUS_PLAIN[selectedItem.status] || null) })()}
+          queueLabel={(() => { const t = adminTileOf(selectedItem); return t ? ADMIN_TILES.find(x => x.key === t).name : (FEEDBACK_STATUS_PLAIN[selectedItem.status] || null) })()}
           position={walk.index + 1}
           total={walk.ids.length}
           isOwnItem={!!myId && selectedItem.user_id === myId}
