@@ -114,11 +114,13 @@ describe('a new reply sends', () => {
 
   it('names the new status only when it moved in the same save', async () => {
     await patch({ status: 'planned', admin_response: 'Queued for next week.' })
-    expect((direct.fn.mock.calls[0][0] as any).text).toContain('Planned')
+    expect((direct.fn.mock.calls[0][0] as any).text).toContain('On the list')
 
+    // An item ALREADY past 'submitted' — on a submitted one the reply floor
+    // moves the status to Answered, which is a move and is named.
     direct.fn.mockClear()
-    h.state.rows.feedback_items = { ...ITEM }
-    await patch({ status: 'submitted', admin_response: 'Looking into it.' })
+    h.state.rows.feedback_items = { ...ITEM, status: 'planned' }
+    await patch({ status: 'planned', admin_response: 'Looking into it.' })
     const text = (direct.fn.mock.calls[0][0] as any).text
     expect(text).not.toContain("We've also marked it")
   })

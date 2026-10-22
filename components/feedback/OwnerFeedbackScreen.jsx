@@ -72,7 +72,7 @@ import { FeedbackAttachmentList } from '@/components/feedback/feedbackShared'
 // — "are they still waiting?" — without a second copy of the comparison. This
 // screen's isUnreadReply keeps its own two clauses (a reply exists, and it is
 // MINE) and delegates only the timestamp test.
-import { isReplyUnseen, hasFeedbackReply } from '@/lib/feedback-queues'
+import { isReplyUnseen, hasFeedbackReply, FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 // The conversation thread (feedback_replies) plus the legacy single-reply
 // merge, and the "may THIS viewer write back?" rule. One home for both — the
 // triage modal renders the same thread from the same builder.
@@ -83,32 +83,26 @@ import { buildFeedbackThread, ownerCanReply } from '@/lib/feedback-replies'
 // delete has no such gate (lib/feedback-edit).
 import { ownerCanEdit, ownerCanDelete } from '@/lib/feedback-edit'
 
-// ── THE FOUR PLAIN WORDS ──────────────────────────────────────
-// Six database statuses, four words an owner would actually use. The mapping
-// is not one-to-one and that is deliberate:
+// ── STATUS COLOURS ────────────────────────────────────────────
+// The WORDS are not here: every status label comes from FEEDBACK_STATUS_PLAIN
+// (lib/feedback-queues), the one vocabulary the triage screen, the reply email
+// and every card share. This map holds only the chip family per status.
 //
-//   in_progress → "Planned", not "Being looked at". Both of the middle words
-//   are claims about what happens next: "Being looked at" means we have not
-//   decided, "Planned" means we have. in_progress means we are already
-//   building it, so "Being looked at" would walk it BACKWARDS. "Planned"
-//   understates how far along it is; it does not misstate the direction.
-//
-//   declined → "Not planned" is a FIFTH word the mockup does not show, and it
-//   has to exist. The alternative is letting a declined item wear one of the
-//   other four, and the only one it could plausibly wear is "Fixed" — telling
-//   someone we fixed a thing we decided not to do. One production item is
-//   declined today, so this is a live case, not a hypothetical.
+//   declined → "Not planned" has to exist as its own word: the alternative is
+//   a declined item wearing another status's word, and the only one it could
+//   plausibly wear is "Fixed" — telling someone we fixed a thing we decided
+//   not to do.
 const OWNER_STATUS = {
-  submitted:    { label: 'Sent',            family: 'quiet' },
-  under_review: { label: 'Being looked at', family: 'amber' },
-  planned:      { label: 'Planned',         family: 'blue'  },
-  in_progress:  { label: 'Planned',         family: 'blue'  },
+  submitted:    { family: 'quiet' },
+  under_review: { family: 'amber' },
+  planned:      { family: 'blue'  },
+  in_progress:  { family: 'blue'  },
   // The happy ending for a question (legal on any type): resolved with words,
   // nothing shipped. Teal, not Fixed's green — both read as "done well", but
   // "Answered" must never imply something was broken and repaired.
-  answered:     { label: 'Answered',        family: 'teal'  },
-  shipped:      { label: 'Fixed',           family: 'green' },
-  declined:     { label: 'Not planned',     family: 'gray'  },
+  answered:     { family: 'teal'  },
+  shipped:      { family: 'green' },
+  declined:     { family: 'gray'  },
 }
 const FALLBACK_STATUS = OWNER_STATUS.submitted
 
@@ -190,6 +184,7 @@ export function unreadSentence(items) {
 // ── status pill ───────────────────────────────────────────────
 function StatePill({ status }) {
   const conf = OWNER_STATUS[status] || FALLBACK_STATUS
+  const label = FEEDBACK_STATUS_PLAIN[status] || FEEDBACK_STATUS_PLAIN.submitted
   const fam = T.family[conf.family] || T.family.quiet
   return (
     <span style={{
@@ -197,7 +192,7 @@ function StatePill({ status }) {
       borderRadius: T.radius.pill, whiteSpace: 'nowrap',
       background: fam.bg, color: fam.text,
     }}>
-      {conf.label}
+      {label}
     </span>
   )
 }

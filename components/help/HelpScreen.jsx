@@ -117,7 +117,7 @@ export function AskStrip({ crumbs, onAsk, stripRef = null }) {
           ❓ Ask a question
         </button>
         <button type="button" onClick={() => ask('feature')} data-help-door="feature" style={{ minHeight: '46px', padding: '10px 14px', background: T.surface.raised, color: T.ink.primary, border: T.border.control, borderRadius: T.radius.inset, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
-          ✨ Suggest a feature
+          ✨ Share an idea
         </button>
       </div>
     </div>

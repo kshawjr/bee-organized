@@ -274,7 +274,7 @@ describe('the queues render in the right order, with types ordered inside them',
   it('status is plain text on the row — no badge', async () => {
     const { host, unmount } = await screenFor()
     expect(rowButton(host, 'We asked them')!.textContent).toContain('Looking at it')
-    expect(rowButton(host, 'Legacy reply idea')!.textContent).toContain('Planned')
+    expect(rowButton(host, 'Legacy reply idea')!.textContent).toContain('On the list')
     expect(host.textContent).not.toContain('under_review')
     await unmount()
   })
@@ -400,7 +400,7 @@ describe('the modal opens, walks with the arrows, and closes on escape', () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Newer bug')
     const status = byLabel(host, 'Status') as HTMLSelectElement
-    expect([...status.options].map(o => o.textContent)).toEqual(['New', 'Looking at it', 'Planned', 'In progress', 'Answered', 'Fixed', 'Not planned'])
+    expect([...status.options].map(o => o.textContent)).toEqual(['With the team', 'Looking at it', 'On the list', 'Building it now', 'Answered', 'Fixed', 'Not planned'])
     const type = byLabel(host, 'Type') as HTMLSelectElement
     expect([...type.options].map(o => o.textContent)).toEqual(['Bug', 'Idea', 'Question'])
     const h2 = modal(host)!.querySelector('h2') as HTMLElement
@@ -453,12 +453,16 @@ describe('the line under the reply box says what emails and what does not', () =
 // ─── THE WRITE — one PATCH, the existing shape ────────────────────────
 
 describe('a save is one PATCH to the existing route', () => {
-  it('a reply rides admin_response with the status; nothing else is written', async () => {
+  // This test used to pin { status: 'submitted', admin_response } — the modal
+  // echoing back the status it opened with, which is the bug that left four
+  // replied items at "With the team". A reply on a submitted item now moves
+  // the dropdown to Answered, and that is what is sent.
+  it('a reply rides admin_response, and moves a submitted item to answered; nothing else is written', async () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Newer bug')
     await typeIn(modal(host)!.querySelector('textarea') as HTMLTextAreaElement, 'Thanks — fixing it.')
     await click(buttons(host).find(b => (b.textContent || '').trim() === 'Save and send')!)
-    expect(PATCHES).toEqual([{ url: '/api/admin/feedback/bug-new', body: { status: 'submitted', admin_response: 'Thanks — fixing it.' } }])
+    expect(PATCHES).toEqual([{ url: '/api/admin/feedback/bug-new', body: { status: 'answered', admin_response: 'Thanks — fixing it.' } }])
     expect(OTHER_WRITES).toEqual([])
     await unmount()
   })
@@ -472,13 +476,13 @@ describe('a save is one PATCH to the existing route', () => {
     await unmount()
   })
 
-  it('a type change alone sends type with the status, and no reply', async () => {
+  it('a type change alone sends type only — no status echoed back, and no reply', async () => {
     const { host, unmount } = await screenFor()
     await openRow(host, 'Newer bug')
     await selectValue(byLabel(host, 'Type') as HTMLSelectElement, 'question')
     expect(modal(host)!.textContent).toContain('Nobody is emailed about a refiling')
     await click(buttons(host).find(b => (b.textContent || '').trim() === 'Save')!)
-    expect(PATCHES).toEqual([{ url: '/api/admin/feedback/bug-new', body: { status: 'submitted', type: 'question' } }])
+    expect(PATCHES).toEqual([{ url: '/api/admin/feedback/bug-new', body: { type: 'question' } }])
     await unmount()
   })
 

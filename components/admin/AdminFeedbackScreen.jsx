@@ -76,7 +76,7 @@ import {
 // The type vocabulary (issue 247 step 2). Labels and the known-value
 // predicate only — the write validators live in their routes.
 import {
-  INTERNAL_ONLY_TYPES, FEEDBACK_TYPE_TAB_LABEL, FEEDBACK_TYPE_CHIP_STYLE, isKnownFeedbackType,
+  INTERNAL_ONLY_TYPES, FEEDBACK_TYPE_TAB_LABEL, FEEDBACK_TYPE_CHIP_STYLE, FEEDBACK_TYPE_WORD, isKnownFeedbackType,
 } from '@/lib/feedback-types'
 // The status vocabulary and the attachment list live in feedbackShared; the
 // open-count arithmetic lives in lib/feedback-queues, shared with the nav
@@ -114,8 +114,8 @@ const TYPE_COLOR_FALLBACK = T.family.gray.text
 const TYPE_ICON = {
   bug: IconBug, feature: IconBulb, question: IconMessage, decision: IconSelector, hazard: IconAlertTriangle,
 }
-// Singular words for the modal; the plural tab labels come from the lib.
-const TYPE_WORD = { bug: 'Bug', feature: 'Idea', question: 'Question', decision: 'Decision', hazard: 'Hazard' }
+// Singular and plural type words both come from the lib — one vocabulary.
+const TYPE_WORD = FEEDBACK_TYPE_WORD
 
 function typeColor(type) { return TYPE_COLOR[String(type || '')] || TYPE_COLOR_FALLBACK }
 function typeWord(type) {
@@ -154,8 +154,10 @@ function dayPhrase(days) {
 // makes. No second status path exists, here or anywhere.
 //
 // `emails` mirrors the route's rule 2/2a: moving INTO shipped announces itself
-// (issue 236); declined and planned say nothing without a written sentence
-// (rule 2b). Mirrored so the confirmation can say how much mail a click sends.
+// (issue 236); declined, planned and answered say nothing without a written
+// sentence (rule 2b; answered is a middle-free status move like the others —
+// only Fixed announces itself). Mirrored so the confirmation can say how much
+// mail a click sends.
 const VERDICTS = [
   { key: 'not_real', label: 'Not real',       status: 'declined', emails: false,
     done: 'Marked not planned' },
@@ -163,6 +165,8 @@ const VERDICTS = [
     done: 'Marked fixed' },
   { key: 'keep',     label: 'Real — keep it', status: 'planned',  emails: false,
     done: 'Marked planned' },
+  { key: 'answered', label: 'Answered',       status: 'answered', emails: false,
+    done: 'Marked answered' },
 ]
 
 // ── WHERE THE CONVERSATION STANDS, in plain words ─────────────
@@ -173,7 +177,7 @@ const VERDICTS = [
 // end to open them.
 function replyNote(item, internal) {
   if (!internal && awaitingTeamReply(item)) return 'They replied'
-  if (isAnsweredButUnmoved(item)) return 'Replied, still marked New'
+  if (isAnsweredButUnmoved(item)) return `Replied, still marked ${FEEDBACK_STATUS_PLAIN.submitted}`
   if (!hasFeedbackReply(item)) return null
   if (internal) return 'Replied'
   if (isAwaitingConfirmation(item)) return 'Replied · not seen yet'
@@ -423,7 +427,7 @@ function VerdictBar({ count, armed, emailCount, applying, canAsk, onArm, onCommi
 // is a property of POST /api/admin/feedback, not a checkbox anyone here can
 // get wrong. The location tag is how an internal item lines up with a report
 // an owner files later; step 1 excludes internal rows from owner reads.
-const TYPE_COMPOSE_LABEL = { bug: 'Bug', feature: 'Idea', decision: 'Decision', hazard: 'Hazard' }
+const TYPE_COMPOSE_LABEL = FEEDBACK_TYPE_WORD
 const TYPE_COMPOSE_HINT = {
   bug: 'Something is broken.',
   feature: 'Something that would make the work easier.',
@@ -596,6 +600,14 @@ function AdminFeedbackDetailModal({
   const [status, setStatus]     = useState(item.status)
   const [itemType, setItemType] = useState(item.type)
   const [response, setResponse] = useState('')
+  // THE REPLY MOVES THE STATUS. Writing back to an item still "With the team"
+  // answers it — but four items once sat at that status with a reply on them,
+  // because Save wrote the dropdown's untouched starting value straight back.
+  // So while the admin has not touched the dropdown, typing a reply moves it
+  // to Answered (and emptying the reply moves it back). Once they pick a
+  // status by hand, `statusTouched` is set and the reply never moves it again.
+  const [statusTouched, setStatusTouched] = useState(false)
+  const [autoMoved, setAutoMoved]         = useState(false)
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
   const [result, setResult]     = useState(null)
@@ -606,6 +618,8 @@ function AdminFeedbackDetailModal({
   // draft reply follows you.
   useEffect(() => {
     setStatus(item.status)
+    setStatusTouched(false)
+    setAutoMoved(false)
     setItemType(item.type)
     setResponse('')
     setError(null)
@@ -629,6 +643,24 @@ function AdminFeedbackDetailModal({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, onPrev, onNext, position, total])
 
+  // Every way text reaches the reply box (typing, "Use this draft") goes
+  // through here, so the status rule cannot be bypassed by one of them.
+  function writeReply(text) {
+    setResponse(text)
+    // Same scope as the route's reply floor: a team reply to someone else.
+    // A note on your own item, or an owner's note on their location's item,
+    // answers nothing.
+    if (!canTriage || isOwnItem || statusTouched || item.status !== 'submitted') return
+    const hasText = String(text || '').trim().length > 0
+    setStatus(hasText ? 'answered' : item.status)
+    setAutoMoved(hasText)
+  }
+  function pickStatus(next) {
+    setStatus(next)
+    setStatusTouched(true)
+    setAutoMoved(false)
+  }
+
   const canChangeType = canTriage && ['bug', 'feature', 'question'].includes(item.type)
   const typeChanged = canChangeType && itemType !== item.type
   const dirty = status !== item.status || typeChanged || response.trim().length > 0
@@ -647,8 +679,12 @@ function AdminFeedbackDetailModal({
     try {
       // admin_response is only SENT when something was typed — a status-only
       // save must never blank an existing reply, and must never re-send it.
-      // type is sent only when actually changed.
-      const body = { status }
+      // type is sent only when actually changed. status is sent only when it
+      // moved or was picked by hand: echoing back the value the modal opened
+      // with is how a reply once left items at "With the team", and it would
+      // also undo a status someone else set while this modal sat open.
+      const body = {}
+      if (status !== item.status || statusTouched) body.status = status
       if (typeChanged) body.type = itemType
       if (response.trim()) body.admin_response = response.trim()
       const res = await fetch(`/api/admin/feedback/${item.id}`, {
@@ -662,7 +698,12 @@ function AdminFeedbackDetailModal({
       }
       const updated = await res.json()
       // The modal STAYS OPEN — the arrows exist for an uninterrupted pass.
+      // The dropdown follows what the server stored (its reply floor may
+      // have moved the status even when nobody here did).
       setResponse('')
+      if (updated.status) setStatus(updated.status)
+      setStatusTouched(false)
+      setAutoMoved(false)
       setResult(updated.reply_email ?? { sent: false, skipped: 'no_reply_written' })
       onSaved(updated)
     } catch (e) {
@@ -815,9 +856,9 @@ function AdminFeedbackDetailModal({
               <label style={fieldLabel} htmlFor="fb-type">Type</label>
               {canChangeType ? (
                 <select id="fb-type" aria-label="Type" value={itemType} onChange={e => setItemType(e.target.value)} style={{ ...control, cursor: 'pointer', color: typeColor(itemType), fontWeight: 600 }}>
-                  <option value="bug">Bug</option>
-                  <option value="feature">Idea</option>
-                  <option value="question">Question</option>
+                  {['bug', 'feature', 'question'].map(t => (
+                    <option key={t} value={t}>{FEEDBACK_TYPE_WORD[t]}</option>
+                  ))}
                 </select>
               ) : (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '44px', fontSize: '15px', fontWeight: 600, color: typeColor(item.type) }}>
@@ -827,16 +868,26 @@ function AdminFeedbackDetailModal({
             </div>
             <div style={{ flex: '1 1 160px', minWidth: 0 }}>
               <label style={fieldLabel} htmlFor="fb-status">Status</label>
-              <select id="fb-status" aria-label="Status" value={status} onChange={e => setStatus(e.target.value)} style={{ ...control, cursor: 'pointer' }}>
+              <select id="fb-status" aria-label="Status" value={status} onChange={e => pickStatus(e.target.value)} style={{ ...control, cursor: 'pointer' }}>
                 {FEEDBACK_STATUS_ORDER.map(s => (
                   <option key={s} value={s}>{FEEDBACK_STATUS_PLAIN[s]}</option>
                 ))}
               </select>
             </div>
           </div>
+          {autoMoved && (
+            <p data-status-moved style={{ fontSize: '12.5px', color: T.ink.muted, marginTop: '-8px', lineHeight: 1.5 }}>
+              Status moved to {FEEDBACK_STATUS_PLAIN.answered} because you wrote a reply. Change it above if that is wrong.
+            </p>
+          )}
+          {canTriage && !isOwnItem && statusTouched && status === 'submitted' && item.status === 'submitted' && response.trim() && (
+            <p data-status-floor style={{ fontSize: '12.5px', color: T.ink.muted, marginTop: '-8px', lineHeight: 1.5 }}>
+              A replied item cannot stay at {FEEDBACK_STATUS_PLAIN.submitted} — saving stores it as {FEEDBACK_STATUS_PLAIN.answered}.
+            </p>
+          )}
           {typeChanged && (
             <p style={{ fontSize: '12.5px', color: T.ink.muted, marginTop: '-8px', lineHeight: 1.5 }}>
-              Saving refiles this as {itemType === 'feature' ? 'an idea' : `a ${itemType}`}. Nobody is emailed about a refiling.
+              Saving refiles this as {itemType === 'feature' ? 'an' : 'a'} {FEEDBACK_TYPE_WORD[itemType].toLowerCase()}. Nobody is emailed about a refiling.
             </p>
           )}
 
@@ -868,7 +919,7 @@ function AdminFeedbackDetailModal({
             <textarea
               id="fb-reply"
               value={response}
-              onChange={e => setResponse(e.target.value)}
+              onChange={e => writeReply(e.target.value)}
               rows={4}
               placeholder="Write back in plain words — they will read this in an email."
               style={{ ...control, outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
@@ -916,7 +967,7 @@ function AdminFeedbackDetailModal({
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px' }}>
                   <button
                     type="button"
-                    onClick={() => setResponse(draft.text || '')}
+                    onClick={() => writeReply(draft.text || '')}
                     style={{
                       display: 'inline-flex', alignItems: 'center', minHeight: '40px', padding: '0 14px',
                       borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised,
@@ -1281,9 +1332,9 @@ export default function AdminFeedbackScreen({
   const hasUnknownType = useMemo(() => items.some(i => !isKnownFeedbackType(i.type)), [items])
   const tabs = [
     { key: 'all',      label: 'Everything', count: countType('all') },
-    { key: 'bug',      label: 'Bugs',       count: countType('bug'),      color: TYPE_COLOR.bug },
-    { key: 'feature',  label: 'Ideas',      count: countType('feature'),  color: TYPE_COLOR.feature },
-    { key: 'question', label: 'Questions',  count: countType('question'), color: TYPE_COLOR.question },
+    { key: 'bug',      label: FEEDBACK_TYPE_TAB_LABEL.bug,      count: countType('bug'),      color: TYPE_COLOR.bug },
+    { key: 'feature',  label: FEEDBACK_TYPE_TAB_LABEL.feature,  count: countType('feature'),  color: TYPE_COLOR.feature },
+    { key: 'question', label: FEEDBACK_TYPE_TAB_LABEL.question, count: countType('question'), color: TYPE_COLOR.question },
     ...INTERNAL_ONLY_TYPES
       .filter(t => presentTypes.has(t))
       .map(t => ({ key: t, label: FEEDBACK_TYPE_TAB_LABEL[t], count: countType(t), color: TYPE_COLOR[t] })),

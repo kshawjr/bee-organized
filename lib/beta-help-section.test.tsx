@@ -192,7 +192,7 @@ describe('the ask strip', () => {
     expect(onAsk).toHaveBeenLastCalledWith({ type: 'question', about: 'Help', context: { origin: 'help_ask_strip', screen: 'Help' } })
 
     await click(host.querySelector('[data-help-section="s1"]'))
-    await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Suggest a feature')) || null)
+    await click(Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Share an idea')) || null)
     expect(onAsk).toHaveBeenLastCalledWith({ type: 'feature', about: 'Getting started', context: { origin: 'help_ask_strip', screen: 'Help', help_entry_id: 's1' } })
 
     await click(host.querySelector('[data-help-item-row="i1"]'))

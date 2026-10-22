@@ -85,9 +85,9 @@ afterEach(() => { vi.restoreAllMocks() })
 // ─── the doors ────────────────────────────────────────────────────────
 
 describe('the three doors', () => {
-  it('are Report a bug · Ask a question · Suggest a feature, in that order', () => {
+  it('are Report a bug · Ask a question · Share an idea, in that order', () => {
     expect(INTAKE_DOORS.map(d => [d.type, d.label])).toEqual([
-      ['bug', 'Report a bug'], ['question', 'Ask a question'], ['feature', 'Suggest a feature'],
+      ['bug', 'Report a bug'], ['question', 'Ask a question'], ['feature', 'Share an idea'],
     ])
   })
 

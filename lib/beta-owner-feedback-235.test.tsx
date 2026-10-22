@@ -122,12 +122,14 @@ afterEach(() => { vi.restoreAllMocks() })
 describe('an owner gets no write controls at all', () => {
   it('no status control anywhere — not the triage words, not the plain ones as buttons', async () => {
     const { host, unmount } = await mountScreen()
-    // The triage vocabulary is gone entirely.
-    for (const w of ['under_review', 'in_progress', 'Looking at it', 'Not planned yet', 'Save and send']) {
+    // The database values and the triage controls are gone entirely. (The
+    // status WORDS are now one vocabulary shared with triage, so "Looking at
+    // it" is a word both sides see — what an owner never gets is a control.)
+    for (const w of ['under_review', 'in_progress', 'Not planned yet', 'Save and send']) {
       expect(host.textContent).not.toContain(w)
     }
     // And the plain words that DO appear are never operable controls.
-    for (const w of ['Sent', 'Being looked at', 'Planned', 'Fixed']) {
+    for (const w of ['With the team', 'Looking at it', 'On the list', 'Fixed']) {
       expect(byText(host, w)).toBeFalsy()
     }
     await unmount()
@@ -194,12 +196,12 @@ describe('the reply renders as text, as the body of the card', () => {
     await unmount()
   })
 
-  it('shows the four plain words, never the database ones', async () => {
+  it('shows the plain words, never the database ones', async () => {
     const { host, unmount } = await mountScreen()
     // The open vocabulary is on the landing tab…
-    expect(host.textContent).toContain('Being looked at')
-    expect(host.textContent).toContain('Planned')
-    expect(host.textContent).toContain('Sent')
+    expect(host.textContent).toContain('Looking at it')
+    expect(host.textContent).toContain('On the list')
+    expect(host.textContent).toContain('With the team')
     // …and the finished word is one tab away (issue 236 moved it there).
     await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
     expect(host.textContent).toContain('Fixed')

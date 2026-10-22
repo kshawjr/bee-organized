@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────────────────────
 // The guided intake — design A. Replaces the one-title-one-box Submit form.
 //
-//   door     What is this? — Report a bug · Ask a question · Suggest a
-//            feature. Skipped when the opener already chose (the Help ask
+//   door     What is this? — Report a bug · Ask a question · Share an
+//            idea. Skipped when the opener already chose (the Help ask
 //            strip, the record menus).
 //   1 · 2 · 3  one question per screen, the questions change with the type
 //            (lib/feedback-intake.ts). Progress bar on every screen.

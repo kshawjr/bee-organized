@@ -1,6 +1,8 @@
 // app/api/admin/feedback/[id]/route.ts
 //
 // PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response? }.
+//   A non-empty admin_response on a 'submitted' item stores 'answered' unless
+//   the body names a different status (THE REPLY FLOOR, below).
 //   - super_admin / admin: can patch any feedback item.
 //   - owner / manager: can patch ONLY items belonging to their own location,
 //     and ONLY items that are not internal (issue 247 step 1 — an internal item
@@ -234,6 +236,34 @@ export async function PATCH(
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'no_fields_to_update' }, { status: 400 })
+  }
+
+  // ─── THE REPLY FLOOR ────────────────────────────────────────────────
+  // A reply answers an item nobody had answered. When this save writes a
+  // non-empty reply to an item still at 'submitted', and the body did not name
+  // some OTHER status, the item is stored 'answered'. An explicit 'submitted'
+  // counts as not naming one: that is exactly what the old triage modal sent
+  // (it echoed back the status it opened with), and it is what a stale or
+  // forged request would send — four items sat at "With the team" with a reply
+  // on them that way. An explicit status past 'submitted' is honoured as sent;
+  // an item already past 'submitted' is never moved by a reply alone.
+  //
+  // Only a TEAM reply to SOMEONE ELSE answers anything. An owner/manager
+  // writing on their own location's item, or anyone writing on an item they
+  // filed themselves (an owner has added a note to his own report this way;
+  // Kevin annotates his own internal items), is adding a note — moving that
+  // to a closed status would end the item for the person still waiting on it.
+  //
+  // Set BEFORE answeredNow is computed below, so the What's new seed still
+  // fires on this transition exactly as it does for a hand-picked Answered.
+  if (
+    isElevatedCaller &&
+    target.user_id !== caller!.id &&
+    patch.admin_response &&
+    target.status === 'submitted' &&
+    (patch.status === undefined || patch.status === 'submitted')
+  ) {
+    patch.status = 'answered'
   }
 
   const statusChanged = patch.status !== undefined && patch.status !== target.status

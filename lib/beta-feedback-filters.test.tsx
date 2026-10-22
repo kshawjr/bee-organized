@@ -111,12 +111,12 @@ describe('selecting a type shows only that type', () => {
 })
 
 describe('status vocabulary stays in plain words wherever it appears', () => {
-  it('rows read Looking at it / Planned as plain text, never the raw db values', async () => {
+  it('rows read Looking at it / On the list as plain text, never the raw db values', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
     const text = host.textContent || ''
     expect(text).toContain('Looking at it') // under_review ×2
-    expect(text).toContain('Planned')       // planned ×1
+    expect(text).toContain('On the list')   // planned ×1
     expect(text).not.toContain('under_review')
     expect(text).not.toContain('in_progress')
     await unmount()

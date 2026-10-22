@@ -9,22 +9,24 @@ import React, { useState } from 'react'
 // the reply email can speak the same words as the UI — an API route cannot
 // import this 'use client' file. Re-exported below, so every existing importer
 // of FEEDBACK_STATUS_PLAIN from here keeps working and there is still one home.
-import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
+import { FEEDBACK_STATUS_PLAIN, feedbackStatusWord } from '@/lib/feedback-queues'
 // The conversation thread + the "does this item invite a reply?" rule — the
 // same builders the owner screen and the triage modal use, so all three
 // surfaces render one history from one definition.
 import { buildFeedbackThread, threadInvitesReply } from '@/lib/feedback-replies'
 
+// Chip COLOURS per status. No words here — the label comes from
+// FEEDBACK_STATUS_PLAIN (lib/feedback-queues), the one status vocabulary.
 const FEEDBACK_STATUS_CONF = {
-  submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' },
-  under_review: { label:'Under Review', color:'#0C447C', bg:'#E6F1FB' },
-  planned:      { label:'Planned',      color:'#3C3489', bg:'#EEEDFE' },
-  in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' },
+  submitted:    { color:'#085041', bg:'#E1F5EE' },
+  under_review: { color:'#0C447C', bg:'#E6F1FB' },
+  planned:      { color:'#3C3489', bg:'#EEEDFE' },
+  in_progress:  { color:'#633806', bg:'#FAEEDA' },
   // The teal pair (T.family.teal) — a happy ending like Fixed, but the
   // conversational one: resolved with words, nothing shipped.
-  answered:     { label:'Answered',     color:'#03403C', bg:'#E3EEEC' },
-  shipped:      { label:'Shipped',      color:'#27500A', bg:'#EAF3DE' },
-  declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' },
+  answered:     { color:'#03403C', bg:'#E3EEEC' },
+  shipped:      { color:'#27500A', bg:'#EAF3DE' },
+  declined:     { color:'#444441', bg:'#F1EFE8' },
 }
 const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','answered','shipped','declined']
 
@@ -48,7 +50,7 @@ function feedbackTimeAgo(iso) {
 function FeedbackStatusBadge({ status }) {
   const conf = FEEDBACK_STATUS_CONF[status] || FEEDBACK_STATUS_CONF.submitted
   // Chip color stays the stored-status family; the label reads in plain words.
-  const label = FEEDBACK_STATUS_PLAIN[status] || conf.label
+  const label = feedbackStatusWord(status || 'submitted')
   return (
     <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500, lineHeight:1.5, color:conf.color, background:conf.bg, whiteSpace:'nowrap' }}>
       {label}

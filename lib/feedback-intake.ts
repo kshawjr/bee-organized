@@ -42,7 +42,7 @@ export type IntakeQuestion = {
 export const INTAKE_DOORS: Array<{ type: IntakeType; icon: string; label: string; blurb: string }> = [
   { type: 'bug',      icon: '🐛', label: 'Report a bug',       blurb: 'Something isn’t working the way it should.' },
   { type: 'question', icon: '❓', label: 'Ask a question',     blurb: 'You want to know how to do something.' },
-  { type: 'feature',  icon: '✨', label: 'Suggest a feature',  blurb: 'Something that would make the work easier.' },
+  { type: 'feature',  icon: '✨', label: 'Share an idea',      blurb: 'Something that would make the work easier.' },
 ]
 
 export function isIntakeType(t: unknown): t is IntakeType {

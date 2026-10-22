@@ -62,6 +62,19 @@ export function isInternalOnlyType(type: unknown): boolean {
   return (INTERNAL_ONLY_TYPES as readonly string[]).includes(String(type ?? ''))
 }
 
+// Singular — what ONE item of this type is called, on every screen: the
+// owner's door ("Share an idea"), the triage dropdown, the modal, the
+// composer. 'feature' is "Idea" everywhere; the stored value stays 'feature'.
+// Before this the same type read "Suggest a feature" at the owner's door,
+// "Ideas" on the admin tab and "Idea" in the admin dropdown.
+export const FEEDBACK_TYPE_WORD: Record<string, string> = {
+  bug: 'Bug',
+  feature: 'Idea',
+  question: 'Question',
+  decision: 'Decision',
+  hazard: 'Hazard',
+}
+
 // Plural, for the triage type filter chips. 'feature' reads as "Ideas" there —
 // the established word on that screen since issue 126.
 export const FEEDBACK_TYPE_TAB_LABEL: Record<string, string> = {

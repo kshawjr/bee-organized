@@ -315,7 +315,7 @@ describe('rows and the detail modal', () => {
     // STAYS OPEN now (next/previous walks the queue without reopening).
     expect(host.textContent).toContain('What they said')
     await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Close')!)
-    expect(rowButton(host, 'Login button broken')!.textContent).toContain('In progress')
+    expect(rowButton(host, 'Login button broken')!.textContent).toContain('Building it now')
     await unmount()
   })
 })

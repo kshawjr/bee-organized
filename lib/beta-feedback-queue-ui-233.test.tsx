@@ -227,7 +227,7 @@ describe('rows say what the item is', () => {
 
   it('flags a reply that never moved the status — the one that keeps ringing the badge', async () => {
     const { host, unmount } = await screenFor()
-    expect(row(host, 'Client not moving').textContent).toContain('Replied, still marked New')
+    expect(row(host, 'Client not moving').textContent).toContain('Replied, still marked With the team')
     // A normally-answered item just says so.
     expect(row(host, 'Guide').textContent).toContain('Replied')
     await unmount()
@@ -329,7 +329,7 @@ describe('the detail modal', () => {
     const { host, unmount } = await screenFor()
     await click(row(host, 'Snooze Button'))
     const sel = byLabel(host, 'Status') as HTMLSelectElement
-    expect([...sel.options].map(o => o.textContent)).toEqual(['New', 'Looking at it', 'Planned', 'In progress', 'Answered', 'Fixed', 'Not planned'])
+    expect([...sel.options].map(o => o.textContent)).toEqual(['With the team', 'Looking at it', 'On the list', 'Building it now', 'Answered', 'Fixed', 'Not planned'])
     expect(host.textContent).not.toContain('under_review')
     // No row of status buttons any more.
     expect(exact(host, 'Looking at it')).toBeUndefined()

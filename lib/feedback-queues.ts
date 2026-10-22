@@ -43,19 +43,35 @@
 
 export const FEEDBACK_STALE_DAYS = 14
 
-// Plain-English status labels (issue 126's owner-facing vocabulary). They live
-// HERE, in a server-safe module, because the reply email needs them too and
-// components/feedback/feedbackShared.jsx is a 'use client' file an API route
-// must not import. feedbackShared re-exports this map, so there is still
-// exactly one home for the words — this one.
+// THE STATUS WORDS — the ONE map. What the owner, the admin, the reply email
+// and every card call a status. Nothing else in the codebase may turn a status
+// into words: the owner screen, the triage screen and feedbackShared's badge
+// all read their labels from here (they keep their own COLOURS, never their own
+// words). Before this there were three maps and they disagreed — the same
+// submitted item read "Sent" to the owner and "New" to the admin, and
+// planned/in_progress both read "Planned" to the owner.
+//
+// It lives HERE, in a server-safe module, because the reply email needs it too
+// and components/feedback/feedbackShared.jsx is a 'use client' file an API
+// route must not import. feedbackShared re-exports it for its old importers.
+//
+//   in_progress reads differently from planned on purpose: "On the list" is a
+//   promise about later, "Building it now" is a claim about today.
 export const FEEDBACK_STATUS_PLAIN: Record<string, string> = {
-  submitted: 'New',
+  submitted: 'With the team',
   under_review: 'Looking at it',
-  planned: 'Planned',
-  in_progress: 'In progress',
+  planned: 'On the list',
+  in_progress: 'Building it now',
   answered: 'Answered',
   shipped: 'Fixed',
   declined: 'Not planned',
+}
+
+// A status as words, for any caller. An unknown value renders itself rather
+// than borrowing another status's word.
+export function feedbackStatusWord(status: unknown): string {
+  const key = String(status ?? '')
+  return FEEDBACK_STATUS_PLAIN[key] || key
 }
 
 // Terminal statuses. A decision was made; the item is off the books.
