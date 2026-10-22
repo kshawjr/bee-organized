@@ -302,6 +302,20 @@ describe('Source "Owner Request" matches ignoring case', () => {
       expect(body.outcome).toBe('reply_written')
     })
 
+  // ClickUp's documented Get Task shape for a drop_down (new_drop_down: true)
+  // is the option's orderindex as a NUMBER — "value": 2 in their reference —
+  // not the option uuid and not an object.
+  it('the documented shape — the option orderindex as a number — is read as Owner Request', async () => {
+    const { body } = await moved(taskWith('shipped', { source: 0 as any, reply: 'Done.' }))
+    expect(body.outcome).toBe('reply_written')
+  })
+
+  it.each([[1, 'Internal'], [2, 'Idea']])('orderindex %i (%s) triggers nothing', async (idx) => {
+    const { body } = await moved(taskWith('shipped', { source: idx as any, reply: 'internal chatter' }))
+    expect(body.outcome).toBe('not_owner_request')
+    expect(itemWrites()).toEqual([])
+  })
+
   it('the create picks the board\'s "Owner Request" option', async () => {
     h.state.row = { id: ITEM_ID, clickup_task_id: null }
     const client = makeClient()

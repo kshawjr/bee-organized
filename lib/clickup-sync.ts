@@ -227,8 +227,10 @@ export type InboundOutcome =
 const fieldText = (f: ClickUpField | undefined): string | null => {
   if (!f || f.value == null || f.value === '') return null
   if (f.type === 'drop_down') {
-    // Task reads return a drop_down value as the option's orderindex (older
-    // payloads) or its id; accept either.
+    // ClickUp's Get Task reference returns a drop_down value as the option's
+    // orderindex, a NUMBER ("value": 2), even with new_drop_down: true. The
+    // option uuid is what a write sends; accept it on read too. Any other
+    // shape finds no option and reads as no Source — which triggers nothing.
     const opt = (f.type_config?.options || []).find(o => o.id === f.value || String(o.orderindex) === String(f.value))
     return opt?.name ?? null
   }
