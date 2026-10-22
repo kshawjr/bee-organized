@@ -9,7 +9,9 @@
 //        gate). The menu item was removed as redundant.
 //      · Mark as Closed Lost → any OPEN engagement; NEVER on a closed one
 //        (so it can't leak onto a Closed Won).
-//      · Reopen → Closed Lost ONLY (never Won — settled money out of scope).
+//      · Reopen → Closed Lost ONLY.
+//      · Undo won → Closed Won ONLY, through a dialog whose confirm stays
+//        disabled until a reason is typed; the reason rides the POST body.
 //
 //   B) INSTANT REFLECTION w/ ROLLBACK (the reopen bug): a reopen updates
 //      the panel immediately (no manual refresh) and hands the freshly-open
@@ -51,11 +53,13 @@ const client = (over: any = {}) => ({
 let panelPayload: any = null
 let reopenResult: { ok: boolean; body: any } = { ok: true, body: { reopened: true, stage: 'Estimate', prev_stage: 'Closed Lost' } }
 let reopenPosts: string[] = []
+let reopenBodies: any[] = []
 const fetchMock = vi.fn(async (url: any, init?: any) => {
   const u = String(url)
   const method = init?.method
   if (method === 'POST' && /\/api\/engagements\/[^/]+\/reopen$/.test(u)) {
     reopenPosts.push(u)
+    reopenBodies.push(init?.body === undefined ? undefined : JSON.parse(init.body))
     return { ok: reopenResult.ok, status: reopenResult.ok ? 200 : 409, json: async () => reopenResult.body } as any
   }
   if (method === 'PATCH') return { ok: true, json: async () => ({ id: 'e-1', stage: JSON.parse(init.body).stage }) } as any
@@ -74,6 +78,7 @@ beforeEach(() => {
   panelPayload = null
   reopenResult = { ok: true, body: { reopened: true, stage: 'Estimate', prev_stage: 'Closed Lost' } }
   reopenPosts = []
+  reopenBodies = []
   fetchMock.mockClear()
   vi.stubGlobal('fetch', fetchMock)
   vi.stubGlobal('localStorage', lsMock)
@@ -131,7 +136,7 @@ describe('··· menu — conditional visibility (Won never in menu; Lost open-o
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
   })
 
-  it('Closed WON: NO Lost, NO Reopen — but the always-present "Report a problem" keeps a usable ··· (#131b; Lost/Reopen still cannot leak onto Won)', async () => {
+  it('Closed WON: Undo won, NO Lost, NO plain Reopen — plus the always-present "Report a problem" (#131b)', async () => {
     const { container } = await mountPanel(eng({ stage: 'Closed Won', closed_reason: 'won' }), emptyChildren())
     // The trigger renders now that a non-mutating report item is always present.
     expect(recordTrigger(container)).toBeTruthy()
@@ -139,12 +144,14 @@ describe('··· menu — conditional visibility (Won never in menu; Lost open-o
     expect(menuItem('Report a problem with this engagement')).toBeTruthy()
     expect(menuItem('Mark as Closed Lost')).toBeFalsy()
     expect(menuItem('Reopen')).toBeFalsy()
+    expect(menuItem('Undo won')).toBeTruthy()
   })
 
-  it('Closed LOST: Reopen only — no Won, no Lost', async () => {
+  it('Closed LOST: Reopen only — no Won, no Lost, no Undo won', async () => {
     const { container } = await mountPanel(eng({ stage: 'Closed Lost', closed_reason: 'lost_no_response' }), emptyChildren())
     await openMenu(container)
     expect(menuItem('Reopen')).toBeTruthy()
+    expect(menuItem('Undo won')).toBeFalsy()
     expect(menuItem('Mark as Closed Won')).toBeFalsy()
     expect(menuItem('Mark as Closed Lost')).toBeFalsy()
   })
@@ -153,6 +160,57 @@ describe('··· menu — conditional visibility (Won never in menu; Lost open-o
     const { container } = await mountPanel(eng({ stage: 'Estimate' }), emptyChildren())
     await openMenu(container)
     expect(menuItem('Reopen')).toBeFalsy()
+    expect(menuItem('Undo won')).toBeFalsy()
+  })
+})
+
+// ── C) undo a Closed Won — reason first ───────────────────────
+describe('undo won — asks why before it fires', () => {
+  const CLOSED_WON = eng({ stage: 'Closed Won', closed_reason: 'won', total_invoiced: 900, total_paid: 900 })
+  const confirmBtn = () => document.querySelector('[data-bee-undo-won-confirm]') as HTMLButtonElement | null
+  const reasonBox = () => document.querySelector('[data-bee-undo-won-reason]') as HTMLTextAreaElement | null
+  const type = async (el: HTMLTextAreaElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => { setter.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+
+  it('opens a dialog that says where the deal goes; confirm is disabled until a reason is typed; nothing is sent before', async () => {
+    const { container } = await mountPanel(CLOSED_WON, { ...emptyChildren(), invoices: paidInvoices() })
+    await openMenu(container)
+    await fire(menuItem('Undo won')!)
+    expect(document.querySelector('[data-bee-undo-won-summary]')?.textContent).toContain('Final Processing')
+    expect(document.querySelector('[data-bee-undo-won-summary]')?.textContent).toContain('won list')
+    expect(confirmBtn()!.disabled).toBe(true)
+    await fire(confirmBtn()!)
+    expect(reopenPosts).toHaveLength(0)
+    await type(reasonBox()!, '   ')
+    expect(confirmBtn()!.disabled).toBe(true)
+    await type(reasonBox()!, 'Wrong client')
+    expect(confirmBtn()!.disabled).toBe(false)
+  })
+
+  it('confirming sends the reason and moves the panel to the derived stage', async () => {
+    reopenResult = { ok: true, body: { reopened: true, stage: 'Final Processing', prev_stage: 'Closed Won' } }
+    const { container, onChanged, setToast } = await mountPanel(CLOSED_WON, { ...emptyChildren(), invoices: paidInvoices() })
+    await openMenu(container)
+    await fire(menuItem('Undo won')!)
+    await type(reasonBox()!, '  Wrong client  ')
+    await fire(confirmBtn()!)
+    await settle()
+    expect(reopenPosts).toHaveLength(1)
+    expect(reopenBodies[0]).toEqual({ reason: 'Wrong client' })
+    expect(onChanged).toHaveBeenCalledWith('e-1', { stage: 'Final Processing' })
+    expect(setToast).toHaveBeenCalledWith({ kind: 'success', msg: 'Reopened · Final Processing' })
+    expect(confirmBtn()).toBeNull()   // dialog closed
+  })
+
+  it('a Lost reopen still sends no body (no reason asked)', async () => {
+    const { container } = await mountPanel(eng({ stage: 'Closed Lost', closed_reason: 'lost_no_response' }), emptyChildren())
+    await openMenu(container)
+    await fire(menuItem('Reopen')!)
+    await settle()
+    expect(reopenPosts).toHaveLength(1)
+    expect(reopenBodies[0]).toBeUndefined()
   })
 })
 

@@ -1,6 +1,7 @@
 // app/api/engagements/[id]/reopen/route.ts
 //
-// POST /api/engagements/:id/reopen — RESURRECT a Closed LOST engagement.
+// POST /api/engagements/:id/reopen — RESURRECT a Closed Lost engagement,
+// or UNDO a Closed Won one.
 //
 // Option B (re-derive): reopening does NOT restore a stored pre-close
 // stage and never an arbitrary default — it clears the terminal fields
@@ -18,9 +19,21 @@
 // engagement never stopped them, so reopen has nothing to un-stop there;
 // the lead's Activate-Drips / drip-resume control remains the drip path.
 //
-// SCOPE: Closed LOST only. Closed Won is settled money and stays out of
-// scope (409). Server-validated exactly like the stage/junk hardening —
-// browser gates aren't enforcement; every rule is re-checked here.
+// SCOPE: the two terminal stages. Server-validated exactly like the
+// stage/junk hardening — browser gates aren't enforcement; every rule is
+// re-checked here.
+//
+// UNDO WON (2026-10-21). An owner who closed a deal won by mistake can take
+// it back, at any age, but THE REASON IS MANDATORY: body.reason, trimmed,
+// or 400 close_reason_required before any write. The reason goes on the
+// stage_change touchpoint and the sync_log line — never closed_note, which
+// the patch clears with the rest of the close. Derivation runs with
+// closeWonOnDone: false: a genuinely won deal (finished job, every invoice
+// paid) would otherwise re-derive straight back to Closed Won and the undo
+// would be a silent no-op. With the flag off it rests at Final Processing;
+// a deal with no jobs and no invoices falls through to Request. Money
+// columns (total_invoiced / total_paid / balance_owing) are not touched.
+// A Lost undo needs no reason and derives exactly as it always has.
 //
 // Auth mirrors the sibling engagement routes: logged-in hub_user;
 // super_admin/admin any location, everyone else scoped to their own
@@ -74,18 +87,29 @@ export async function POST(
   const roBlock = await readOnlyWriteBlock(hubUser, engagement.location_uuid)
   if (roBlock) return roBlock
 
-  // Closed LOST only — enforced server-side, never trusting the UI.
-  if (engagement.stage === 'Closed Won') {
+  // Terminal stages only — enforced server-side, never trusting the UI.
+  const wasWon = engagement.stage === 'Closed Won'
+  if (!wasWon && engagement.stage !== 'Closed Lost') {
     return NextResponse.json(
-      { error: 'reopen_won_out_of_scope', message: 'Closed Won engagements are settled money — reopening is out of scope', current: engagement.stage },
+      { error: 'reopen_requires_closed_lost', message: 'Only a closed engagement can be reopened', current: engagement.stage },
       { status: 409 },
     )
   }
-  if (engagement.stage !== 'Closed Lost') {
-    return NextResponse.json(
-      { error: 'reopen_requires_closed_lost', message: 'Only a Closed Lost engagement can be reopened', current: engagement.stage },
-      { status: 409 },
-    )
+
+  // A Won undo has to record why — this is the floor, not the dialog.
+  let reason = ''
+  if (wasWon) {
+    const body = await req.json().catch(() => null)
+    reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
+    if (!reason) {
+      return NextResponse.json(
+        {
+          error: 'close_reason_required',
+          message: 'Undoing a won deal has to record why',
+        },
+        { status: 400 },
+      )
+    }
   }
 
   // Re-derive from the actual records (live mode — the webhook/drift
@@ -101,7 +125,7 @@ export async function POST(
     quotes: quotesRes.data ?? [],
     jobs: jobsRes.data ?? [],
     invoices: invoicesRes.data ?? [],
-  }, { mode: 'live' })
+  }, wasWon ? { mode: 'live', closeWonOnDone: false } : { mode: 'live' })
 
   const nowIso = new Date().toISOString()
   // Set exactly what live derivation produced: for the common reopen
@@ -124,7 +148,8 @@ export async function POST(
   // touches the column.
   const wasWrittenOff = engagement.closed_reason === WRITTEN_OFF
   if (wasWrittenOff) patch.written_off_amount = null
-  const fromLabel = wasWrittenOff ? 'Written off' : 'Closed Lost'
+  const fromLabel = wasWon ? 'Closed Won' : wasWrittenOff ? 'Written off' : 'Closed Lost'
+  const reasonSuffix = reason ? ` — ${reason}` : ''
 
   const { error: updateError } = await supabaseService
     .from('engagements')
@@ -141,7 +166,7 @@ export async function POST(
     location_uuid: engagement.location_uuid,
     engagement_id: id,
     kind: 'stage_change',
-    label: `Reopened: ${fromLabel} → ${derived.stage}`,
+    label: `Reopened: ${fromLabel} → ${derived.stage}${reasonSuffix}`,
     user_id: hubUser.id,
     occurred_at: nowIso,
   })
@@ -159,13 +184,13 @@ export async function POST(
     status: 'success',
     message:
       `[engagement:reopen] ${fromLabel} → ${derived.stage} (re-derived from records) ` +
-      `for client ${engagement.client_id}`,
+      `for client ${engagement.client_id}${reasonSuffix}`,
   })
 
   return NextResponse.json({
     id,
     reopened: true,
     stage: derived.stage,
-    prev_stage: 'Closed Lost',
+    prev_stage: engagement.stage,
   })
 }

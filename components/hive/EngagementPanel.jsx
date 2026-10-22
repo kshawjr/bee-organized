@@ -89,6 +89,7 @@ import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
 import WriteOffWizard from './shared/WriteOffWizard'
+import UndoWonWizard, { UNDO_WON_ACTION } from './shared/UndoWonWizard'
 import { invoicesSettled, closedFieldsFrom } from './shared/closeEngagement'
 import { engagementStageLabel, isWrittenOff, WRITTEN_OFF_STYLE_KEY, WRITE_OFF_ACTION, WRITE_OFF_HINT } from './shared/writtenOff'
 import { finalProcessingCase, finalProcessingExplainer, FINAL_PROCESSING_LEAD, OWING_CLOSE_ACTION } from './shared/finalProcessing'
@@ -272,7 +273,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const reminder = useRecordReminder(engagementId ? { key: 'engagement_id', id: engagementId } : null)
   // The ··· masthead menu drives the close-out wizards (Won/Lost) and
   // Reopen — the standalone action-bar Close… button was retired here.
-  const [wizard, setWizard] = useState(null) // null | 'won' | 'lost' | 'won-over-balance' | 'write-off'
+  const [wizard, setWizard] = useState(null) // null | 'won' | 'lost' | 'won-over-balance' | 'write-off' | 'undo-won'
   // Terminal-close celebration (§C motion) — 'won' | 'lost' | null, fired
   // AFTER a commit lands so it never celebrates a move that didn't persist.
   const [celebrate, setCelebrate] = useState(null)
@@ -522,11 +523,15 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     setTimeout(onClose, hold)
   }
 
-  // Reopen (resurrect) — Closed Lost only; the server route re-derives the
-  // correct open stage from the records. Keeps the panel open on the
-  // freshly-derived open stage (nurture/terminal fields cleared).
-  async function reopenEngagement() {
-    if (!eng || eng.stage !== 'Closed Lost') return
+  // Reopen (resurrect) a Closed Lost, or undo a Closed Won — the server
+  // route re-derives the correct open stage from the records. Keeps the
+  // panel open on the freshly-derived open stage (nurture/terminal fields
+  // cleared). A Won undo carries the owner's reason (UndoWonWizard); the
+  // route refuses it without one.
+  async function reopenEngagement(reason) {
+    if (!eng || !isTerminal(eng.stage)) return
+    if (eng.stage === 'Closed Won' && !reason) return
+    setWizard(null)
     setBusy(true)
     // OPTIMISTIC: leave the closed state immediately (ClosedSummary hides,
     // the Reopen item drops) so the click feels instant. We do NOT fabricate
@@ -536,7 +541,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     // in. On failure this optimistic flag rolls back and the row stays Lost.
     setReopening(true)
     try {
-      const res = await fetch(`/api/engagements/${engagementId}/reopen`, { method: 'POST' })
+      const res = await fetch(`/api/engagements/${engagementId}/reopen`, reason
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }
+        : { method: 'POST' })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       // Commit the derived open stage; ClosedSummary hides for any open
@@ -563,7 +570,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       })
       setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
     } catch (e) {
-      // ROLLBACK: the write never landed — stay Closed Lost, tell the truth.
+      // ROLLBACK: the write never landed — stay closed, tell the truth.
       setToast({ kind: 'error', msg: `Reopen failed: ${e.message}` })
     } finally {
       setReopening(false)
@@ -605,7 +612,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // Masthead ··· menu items — grows with more record actions later.
   // Visibility rules (beta-record-menu-visibility pin):
   //   Lost   → any OPEN (non-terminal) engagement; never on a closed one
-  //   Reopen → Closed Lost only (never Won — settled money is out of scope)
+  //   Reopen   → Closed Lost (no reason asked)
+  //   Undo won → Closed Won, through UndoWonWizard: the owner must say why
+  //              before it fires (the reopen route enforces the same).
+  //              No age limit.
   // Close Won is NOT a menu item — the visible "Ready to close — Mark won"
   // button (canCloseWon gate, below) is the SOLE path to Close Won.
   // While a reopen is in flight the closed actions drop optimistically.
@@ -616,8 +626,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     reminderMenuItem(reminder),
     // Always present once the record has loaded — non-mutating, so it rides
     // read-only surfaces too (everyone can report a problem). It also means the
-    // menu is never empty: a Closed Won engagement (no Lost/Reopen) now still
-    // has a usable "···". Hands an ID-ONLY context up to BeeHub's feedback modal
+    // menu is never empty, read-only surfaces included. Hands an ID-ONLY context up to BeeHub's feedback modal
     // (kind 'engagement' + ids/stage — NO client name, deal title, or
     // financials; lib/feedback-context.ts re-sanitizes server-side). The deal
     // title only pre-fills the human-facing title field, an editable free-text.
@@ -642,7 +651,8 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     // Mutating close-out actions stay behind the read-only gate.
     ...(!readOnly ? [
       !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
-      eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
+      eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: () => reopenEngagement() },
+      eng.stage === 'Closed Won' && !reopening && { key: 'undo-won', label: UNDO_WON_ACTION, icon: <IconClock size={15} />, onClick: () => setWizard('undo-won') },
       // The owing override, second entry point. The inline control below was
       // too quiet to find — 61 engagements qualify and about $192k reads as
       // owed — so it is offered here as well.
@@ -1383,6 +1393,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           onCancel={() => setWizard(null)}
           onClosed={onWizardClosed}
           setToast={setToast}
+        />
+      )}
+      {wizard === 'undo-won' && eng && (
+        <UndoWonWizard
+          isMobile={isMobile}
+          onCancel={() => setWizard(null)}
+          onConfirm={reopenEngagement}
         />
       )}
       {wizard === 'write-off' && eng && (

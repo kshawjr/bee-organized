@@ -2,9 +2,9 @@
 //
 // POST /api/engagements/:id/reopen — RESURRECT a Closed Lost engagement
 // (Part 4, option B: re-derive). The route:
-//   1) Closed LOST only — Closed Won is out of scope (409
-//      reopen_won_out_of_scope), open stages rejected (409
-//      reopen_requires_closed_lost); both BEFORE any write.
+//   1) Closed Lost or Closed Won only — open stages rejected (409
+//      reopen_requires_closed_lost) BEFORE any write. A Won undo needs a
+//      reason (400 close_reason_required, no write); a Lost undo does not.
 //   2) Re-derives the correct OPEN stage from the actual child records
 //      via live-mode deriveEngagementStage — a live quote and no job ⇒
 //      Estimate (the pinned case), NOT a stored pre-close stage nor a
@@ -72,8 +72,14 @@ const armChildren = (children: { sr?: any; quotes?: any[]; jobs?: any[]; invoice
   h.enqueue('invoices', children.invoices ?? [])
 }
 
-const post = (id: string) =>
-  POST(new Request(`http://test/api/engagements/${id}/reopen`, { method: 'POST' }), { params: Promise.resolve({ id }) })
+const post = (id: string, body?: any) =>
+  POST(
+    new Request(`http://test/api/engagements/${id}/reopen`, {
+      method: 'POST',
+      ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+    }),
+    { params: Promise.resolve({ id }) },
+  )
 
 const engagementUpdate = () =>
   h.state.calls.find(c => c.table === 'engagements' && c.ops.some(([m]) => m === 'update'))
@@ -81,15 +87,7 @@ const updatePayload = () => engagementUpdate()?.ops.find(([m]) => m === 'update'
 
 beforeEach(() => { h.reset(); vi.clearAllMocks() })
 
-describe('scope: Closed Lost only', () => {
-  it('Closed Won is out of scope (409, no write)', async () => {
-    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }))
-    const res = await post('e1')
-    expect(res.status).toBe(409)
-    expect((await res.json()).error).toBe('reopen_won_out_of_scope')
-    expect(engagementUpdate()).toBeUndefined()
-  })
-
+describe('scope: terminal stages only', () => {
   it('an OPEN engagement cannot be reopened (409, no write)', async () => {
     arm(ENG({ stage: 'Estimate', closed_reason: null }))
     const res = await post('e1')
@@ -144,6 +142,127 @@ describe('re-derive from records (option B)', () => {
     h.enqueue('leads', { location_id: 'loc1', name: 'Pat' })
     const res = await post('e1')
     expect((await res.json()).stage).toBe('Job in Progress')
+  })
+})
+
+// A genuinely won deal: a finished job and every invoice paid. Live
+// derivation with its default closeWonOnDone would hand back Closed Won —
+// the undo must not be a silent no-op.
+const WON_CHILDREN = {
+  jobs: [{ status: 'completed', completed_at: '2026-09-01T12:00:00Z' }],
+  invoices: [{ status: 'paid', total: 500, paid_amount: 500, paid_at: '2026-09-05T12:00:00Z', issued_at: '2026-09-02T12:00:00Z' }],
+}
+const armWrites = () => {
+  h.enqueue('engagements', null)                 // the update
+  h.enqueue('touchpoints', null)                 // stage_change trail
+  h.enqueue('leads', { location_id: 'loc1', name: 'Pat' })
+}
+const touchpointInsert = () =>
+  h.state.calls.find(c => c.table === 'touchpoints')?.ops.find(([m]) => m === 'insert')?.[1][0]
+const lastSyncLog = () => {
+  const logged = (writeSyncLog as any).mock.calls.map((c: any) => c[0])
+  return logged[logged.length - 1]
+}
+
+describe('undo Closed Won', () => {
+  it('REGRESSION: a won deal with a reason lands on Final Processing, not back on Closed Won', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }), 'owner', 'loc-uuid-1')
+    armChildren(WON_CHILDREN)
+    armWrites()
+    const res = await post('e1', { reason: 'Marked won on the wrong client' })
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    expect(j.reopened).toBe(true)
+    expect(j.stage).toBe('Final Processing')
+    expect(j.prev_stage).toBe('Closed Won')
+    const p = updatePayload()
+    expect(p.stage).toBe('Final Processing')
+    expect(p.closed_at).toBeNull()
+    expect(p.closed_reason).toBeNull()
+    expect(p.closed_note).toBeNull()        // the reason is NOT stored here
+    // Money columns untouched.
+    expect(p).not.toHaveProperty('total_invoiced')
+    expect(p).not.toHaveProperty('total_paid')
+    expect(p).not.toHaveProperty('balance_owing')
+  })
+
+  it('no reason ⇒ 400 close_reason_required and nothing is written', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }))
+    const res = await post('e1')
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('close_reason_required')
+    expect(engagementUpdate()).toBeUndefined()
+    expect(h.state.calls.find(c => c.table === 'touchpoints')).toBeUndefined()
+    expect(writeSyncLog).not.toHaveBeenCalled()
+  })
+
+  it('a whitespace-only reason is no reason (400, nothing written)', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }))
+    const res = await post('e1', { reason: '   ' })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('close_reason_required')
+    expect(engagementUpdate()).toBeUndefined()
+  })
+
+  it('an accidentally-won deal with no jobs and no invoices lands on Request', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }))
+    armChildren({})
+    armWrites()
+    const res = await post('e1', { reason: 'Dragged by mistake' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).stage).toBe('Request')
+    expect(updatePayload().stage).toBe('Request')
+  })
+
+  it('the touchpoint and sync_log lines carry the reason', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }))
+    armChildren(WON_CHILDREN)
+    armWrites()
+    await post('e1', { reason: '  Client disputed the last visit  ' })
+    const tp = touchpointInsert()
+    expect(tp.kind).toBe('stage_change')
+    expect(tp.label).toContain('Closed Won → Final Processing')
+    expect(tp.label).toContain('Client disputed the last visit')
+    expect(lastSyncLog().message).toContain('Client disputed the last visit')
+    expect(lastSyncLog().message).toContain('Closed Won → Final Processing')
+  })
+
+  it('lite_user is refused on a Won undo', async () => {
+    h.enqueue('hub_users', { id: 'u1', role: 'lite_user', location_id: 'loc-uuid-1' })
+    const res = await post('e1', { reason: 'x' })
+    expect(res.status).toBe(403)
+    expect(engagementUpdate()).toBeUndefined()
+  })
+
+  it('an owner at another location is refused on a Won undo', async () => {
+    arm(ENG({ stage: 'Closed Won', closed_reason: 'won' }), 'owner', 'other-loc')
+    const res = await post('e1', { reason: 'x' })
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('forbidden_wrong_location')
+    expect(engagementUpdate()).toBeUndefined()
+  })
+})
+
+describe('undo Closed Lost — unchanged', () => {
+  it('needs no reason and re-derives as before', async () => {
+    arm(ENG({ stage: 'Closed Lost' }), 'owner', 'loc-uuid-1')
+    armChildren({ quotes: [{ status: 'sent', sent_at: new Date().toISOString() }] })
+    armWrites()
+    const res = await post('e1')
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    expect(j.stage).toBe('Estimate')
+    expect(j.prev_stage).toBe('Closed Lost')
+    expect(touchpointInsert().label).toBe('Reopened: Closed Lost → Estimate')
+  })
+
+  it('Lost path keeps live derivation exactly as before (paid-in-full records ⇒ Closed Won)', async () => {
+    arm(ENG({ stage: 'Closed Lost' }))
+    armChildren(WON_CHILDREN)
+    armWrites()
+    const res = await post('e1')
+    expect(res.status).toBe(200)
+    expect((await res.json()).stage).toBe('Closed Won')
   })
 })
 
