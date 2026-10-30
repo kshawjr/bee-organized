@@ -225,7 +225,11 @@ describe('the retired sender toggle no longer renders on Emails', () => {
   // keeps only who is told.
   it('hosts the per-type editor, and New leads no longer does', async () => {
     await mount('emails')
-    expect(container.querySelector('#sender [data-handler-row]') || container.querySelector('#sender')!.textContent!.includes('Who handles what')).toBeTruthy()
+    // The section's "By kind of job" heading names the editor; the editor is
+    // there whether or not this location has job types yet.
+    const sender = container.querySelector('#sender')!
+    expect(sender.textContent).toContain('By kind of job')
+    expect(sender.querySelector('[data-handler-row]') || /Who handles it|No job types are configured yet/.test(sender.textContent!)).toBeTruthy()
     await mount('newleads')
     const txt = bodyText()
     expect(txt).not.toContain('Who handles it')

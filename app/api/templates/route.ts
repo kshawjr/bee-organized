@@ -65,6 +65,22 @@ async function attachUsage(rows: any[]) {
   }
 }
 
+// Admin-only: each location's own template carries its location's name.
+//
+// The library (components/BeeHub.jsx MasterTemplatesEditor) used to name a
+// location only from a `locations` list its mount passed in. Admin → Content
+// passes one; Settings → Emails (2026-10-30) mounted it with none, so all 26
+// location templates grouped under "Unknown location" though every one
+// points at a real, active location. The name now travels with the row, so
+// the library can't depend on where it is mounted. Display only, non-fatal.
+async function attachLocationNames(rows: any[]) {
+  const ids = Array.from(new Set(rows.map(r => r.location_uuid).filter(Boolean)))
+  if (!ids.length) return
+  const { data } = await supabaseService.from('locations').select('id, name').in('id', ids)
+  const name = new Map((data ?? []).map((l: any) => [l.id, l.name]))
+  for (const r of rows) if (r.location_uuid) r.location_name = name.get(r.location_uuid) ?? null
+}
+
 export async function GET() {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -110,6 +126,11 @@ export async function GET() {
       await attachUsage(templates)
     } catch (e: any) {
       console.error('[/api/templates GET] usage attach failed:', e?.message || e)
+    }
+    try {
+      await attachLocationNames(templates)
+    } catch (e: any) {
+      console.error('[/api/templates GET] location names failed:', e?.message || e)
     }
   }
 

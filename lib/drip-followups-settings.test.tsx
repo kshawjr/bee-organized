@@ -121,20 +121,21 @@ describe('FollowupsSwitch', () => {
 
   it('switching off is confirmed first, quoting how many it stops and that they will not resume', async () => {
     const onSetOff = await mountSwitch({ off: false, inFlight: 12, busy: false, err: '' })
-    expect(container.textContent).toContain('The first email and the welcome always go')
-    await click('Switch off emails after the first one')
+    expect(container.textContent).toContain('The first thank-you and the welcome always go')
+    await click('Switch off follow-ups')
     expect(onSetOff).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Stop all follow-ups?')
     expect(container.textContent).toContain('12 people')
     expect(container.textContent).toContain('stop where they are')
-    expect(container.textContent).toContain('Anyone stopped now won’t pick up again.')
+    expect(container.textContent).toContain('Anyone stopped now won’t pick up again')
     await click('Switch them off')
     expect(onSetOff).toHaveBeenCalledWith(true)
   })
 
-  it('when off, it says nobody resumes, and turning back on needs no confirm', async () => {
+  it('when off, it says only the first emails go, and turning back on needs no confirm', async () => {
     const onSetOff = await mountSwitch({ off: true, inFlight: 0, busy: false, err: '' })
-    expect(container.textContent).toContain('anyone already stopped stays stopped')
-    await click('Turn them back on')
+    expect(container.textContent).toContain('Every other email below is switched off.')
+    await click('Switch follow-ups back on')
     expect(onSetOff).toHaveBeenCalledWith(false)
   })
 })

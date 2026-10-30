@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { comboboxes, comboValue, pickOption } from './emails-test-helpers'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -100,20 +101,13 @@ const mountSection = async (cfg: any = CFG(), ok = true) => {
 }
 
 const row = (label: string) => container.querySelector(`[data-handler-row="${label}"]`) as HTMLElement
-const selects = (label: string) =>
-  Array.from(row(label).querySelectorAll('select')) as HTMLSelectElement[]
+// The design's dropdowns (ESelect) — buttons with role="combobox".
+const selects = (label: string) => comboboxes(row(label))
 const handlerSelect = (label: string) => selects(label)[0]
 const sendsAsSelect = (label: string) => selects(label)[1]
 const writes = () => calls.filter(c => c.method !== 'GET')
 
-const change = async (el: HTMLSelectElement, value: string) => {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
-    setter.call(el, value)
-    el.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await act(async () => {})
-}
+const change = (el: HTMLElement, value: string) => pickOption(el, value, act as any)
 
 const type = async (el: HTMLInputElement, value: string) => {
   await act(async () => {
@@ -159,12 +153,12 @@ describe('the two questions are asked as equals', () => {
     const txt = row('Moving/Relocation').textContent || ''
     expect(txt).toContain('moving@beeorganized-kc.com')
     expect(txt).toContain('carol@beeorganized-kc.com')
-    expect(sendsAsSelect('Moving/Relocation').value).toBe('custom')
+    expect(comboValue(sendsAsSelect('Moving/Relocation'))).toBe('custom')
   })
 
   it('a person-mode row shows the handler and their own address', async () => {
     await mountSection()
-    expect(sendsAsSelect('Home or Office Organizing').value).toBe('person')
+    expect(comboValue(sendsAsSelect('Home or Office Organizing'))).toBe('person')
     expect(row('Home or Office Organizing').textContent).toContain('lynette@beeorganized-kc.com')
   })
 
@@ -180,7 +174,7 @@ describe('the two questions are asked as equals', () => {
 
   it('controls are capped, never stretched', async () => {
     await mountSection()
-    for (const s of Array.from(container.querySelectorAll('select')) as HTMLSelectElement[]) {
+    for (const s of Array.from(container.querySelectorAll('[data-eselect]')) as HTMLElement[]) {
       expect(s.style.maxWidth, 'each select carries an explicit cap').toBeTruthy()
     }
   })

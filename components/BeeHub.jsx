@@ -42,7 +42,8 @@ import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, 
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
-  EmailsFonts, EmailStatusPanel, EmailsJumpNav, ESection, EField, EBtn, ETag, ET, EF, EmailStyleSection, EmailDetailsSection,
+  EmailsFonts, EmailStatusPanel, EmailsJumpNav, ESection, EField, EBtn, ETag, ET, EF, ER, ESHADOW, alpha, EmailStyleSection, EmailDetailsSection,
+  ESelect, EDialog, ENote, ERadioCard, eBtnStyle, eInputStyle, eTextareaStyle, eLabelStyle, eHintStyle,
   EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
   goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
 } from "@/components/settings/EmailsScreen"
@@ -18446,84 +18447,70 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
 // per row is Read, and it opens a modal that navigates the group it belongs to.
 function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason, blockedReason, sending = true, locationId = null, preview = null, cfg = {} }) {
   const row = rows[index]
+  // Escape is EDialog's; the arrows step through the group.
   React.useEffect(() => {
     const onKey = e => {
-      if (e.key === 'Escape') onClose()
       if (e.key === 'ArrowLeft' && index > 0) onStep(index - 1)
       if (e.key === 'ArrowRight' && index < rows.length - 1) onStep(index + 1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, rows.length, onClose, onStep])
+  }, [index, rows.length, onStep])
   if (!row) return null
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'5px 11px', font:'inherit', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer' }
-  const dim = { ...btn, opacity:0.35, cursor:'default' }
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:60 }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Read: ${row.subject}`}
-        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)' }}>
-          <div style={{ display:'flex', gap:'7px' }}>
-            <button onClick={() => onStep(index - 1)} disabled={index === 0} style={index === 0 ? dim : btn}>← Previous</button>
-            <button onClick={() => onStep(index + 1)} disabled={index === rows.length - 1} style={index === rows.length - 1 ? dim : btn}>Next →</button>
-          </div>
-          <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{row.when} · {index + 1} of {rows.length}</span>
-          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'19px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>✕</button>
-        </div>
-        <div style={{ padding:'20px 24px 22px' }}>
-          {/* issue 240 step 9a — the pause reason and the reset-disabled reason
-              are independent. A row can be both, and neither suppresses the
-              other, so they render as separate lines. */}
-          {blockedReason && (
-            <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'12px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.55 }}>
-              Not sending — {blockedReason}. It will start again on its own once that's filled in.
-            </div>
-          )}
-          {row.wording === 'yours' && (
-            <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'15px', fontSize:'13px', color:'#8a6a0e', display:'flex', gap:'9px', alignItems:'center', flexWrap:'wrap' }}>
-              <span>You've changed this one.</span>
-              {/* issue 240 step 9b — the REASON is not gated on onReset. It used
-                  to be, which meant a step with no master counterpart (an added
-                  one) showed neither the control nor an explanation: it just
-                  silently lacked reset, which is the thing we said we would
-                  never do. Reason first, control only when there is one. */}
-              {resetBlockedReason
-                ? <span title={resetBlockedReason} style={{ marginLeft:'auto', opacity:0.6, fontSize:'12px', lineHeight:1.45 }}>Can't undo this — {resetBlockedReason}</span>
-                : onReset
-                  ? <button onClick={onReset} style={{ marginLeft:'auto', background:'none', border:'none', color:'#8a6a0e', textDecoration:'underline', cursor:'pointer', font:'inherit', fontSize:'12.5px', padding:0, whiteSpace:'nowrap' }}>Put the Bee Organized wording back</button>
-                  : null}
-            </div>
-          )}
-          {/* 2026-10-30 — the email exactly as it goes: this location's
-              style, real rate, links and phone, a sample client, the
-              signature. Without the screen's preview context (tests, a read-
-              only mount) it falls back to the wording as typed. */}
-          {row.contentMissing ? (
-            <div style={{ background:'#fdf6e3', border:'1px solid rgba(212,160,70,0.3)', borderRadius:'10px', padding:'16px 18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-              We can't show this one. It points at a template whose wording we couldn't load, so anything shown here might not be what actually sends.
-            </div>
-          ) : preview ? (
-            <EmailFrame html={previewEmailHtml({ row, style: preview.style, values: preview.values, cfg, signature: preview.signature })} />
-          ) : (
-            <>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
-              <h2 style={{ fontSize:'19px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:'0 0 16px' }}>{row.subject || <span style={{ color:'#b0c0bc' }}>No subject</span>}</h2>
-              <div style={{ background:'#fbfaf7', border:'1px solid rgba(26,46,43,0.10)', borderRadius:'10px', padding:'19px 21px', fontSize:'14px', lineHeight:1.65, color:'#4a5f5b', whiteSpace:'pre-line' }}>{row.body}</div>
-              <p style={{ marginTop:'12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.6 }}>
-                The bits in braces get filled in for each person — <code style={{ background:'#efede6', borderRadius:'5px', padding:'2px 7px', fontFamily:'ui-monospace,Menlo,monospace', fontSize:'12px', color:'#1a2e2b' }}>{'{{first_name}}'}</code> becomes their first name.
-              </p>
-            </>
-          )}
-          {preview && !row.contentMissing && <SendTestBar locationId={locationId} row={row} sending={sending} />}
-        </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3' }}>
-          <button onClick={onClose} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action }}>Close</button>
-          {onEdit && (
-            <button onClick={onEdit} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action, background:'#1a2e2b', color:'white', border:'none' }}>Edit this email</button>
-          )}
-        </div>
+    <EDialog label={`Read: ${row.subject}`} eyebrow={`${row.when} · ${index + 1} of ${rows.length}`}
+      title={row.subject || 'No subject'} onClose={onClose}
+      footer={<>
+        <EBtn onClick={onClose}>Close</EBtn>
+        {onEdit && <EBtn variant="primary" onClick={onEdit}>Edit this email</EBtn>}
+      </>}>
+      <div style={{ marginBottom:'12px', display:'flex', gap:'8px' }}>
+        <EBtn size="sm" onClick={() => onStep(index - 1)} disabled={index === 0}>← Previous</EBtn>
+        <EBtn size="sm" onClick={() => onStep(index + 1)} disabled={index === rows.length - 1}>Next →</EBtn>
       </div>
-    </div>
+      {/* issue 240 step 9a — the pause reason and the reset-disabled reason
+          are independent. A row can be both, and neither suppresses the
+          other, so they render as separate lines. */}
+      {blockedReason && (
+        <ENote tone="warning" style={{ marginBottom:'12px' }}>
+          Not sending — {blockedReason}. It will start again on its own once that's filled in.
+        </ENote>
+      )}
+      {row.wording === 'yours' && (
+        <ENote tone="gold" style={{ marginBottom:'12px', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+          <span>You've changed this one.</span>
+          {/* issue 240 step 9b — the REASON is not gated on onReset. It used
+              to be, which meant a step with no master counterpart (an added
+              one) showed neither the control nor an explanation: it just
+              silently lacked reset, which is the thing we said we would
+              never do. Reason first, control only when there is one. */}
+          {resetBlockedReason
+            ? <span title={resetBlockedReason} style={{ marginLeft:'auto', color:ET.mutedFg, lineHeight:1.45 }}>Can't undo this — {resetBlockedReason}</span>
+            : onReset
+              ? <EBtn variant="link" onClick={onReset} style={{ marginLeft:'auto', fontSize:'12px' }}>Put the Bee Organized wording back</EBtn>
+              : null}
+        </ENote>
+      )}
+      {/* 2026-10-30 — the email exactly as it goes: this location's
+          style, real rate, links and phone, a sample client, the
+          signature. Without the screen's preview context (tests, a read-
+          only mount) it falls back to the wording as typed. */}
+      {row.contentMissing ? (
+        <ENote tone="warning">
+          We can't show this one. It points at a template whose wording we couldn't load, so anything shown here might not be what actually sends.
+        </ENote>
+      ) : preview ? (
+        <EmailFrame html={previewEmailHtml({ row, style: preview.style, values: preview.values, cfg, signature: preview.signature })} />
+      ) : (
+        <>
+          <div style={{ background:ET.background, border:`1px solid ${ET.border}`, borderRadius:ER.lg, padding:'16px 20px', fontFamily:EF.body, fontSize:'14px', lineHeight:1.65, color:ET.ink, whiteSpace:'pre-line' }}>{row.body}</div>
+          <p style={{ margin:'12px 0 0', fontSize:'12px', color:ET.mutedFg, lineHeight:1.6 }}>
+            The bits in braces get filled in for each person — <code style={{ background:ET.muted, borderRadius:ER.sm, padding:'2px 6px', fontSize:'12px', color:ET.foreground }}>{'{{first_name}}'}</code> becomes their first name.
+          </p>
+        </>
+      )}
+      {preview && !row.contentMissing && <SendTestBar locationId={locationId} row={row} sending={sending} />}
+    </EDialog>
   )
 }
 
@@ -18542,50 +18529,39 @@ export function EmailTemplateEditor({ row, onCancel, onSave }) {
   const [err, setErr] = React.useState('')
   const changed = subject !== (row.subject || '') || body !== (row.body || '') ||
     buttonText !== (row.buttonText || '') || buttonLink !== (row.buttonLink || '')
-  const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'9px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }
+  const save = async () => {
+    setErr('')
+    // issue 316 — same checks as the drip step editor: a blank
+    // body/subject would commit, then hold at send time
+    // (no_body_source / missing_subject) — refuse here where the
+    // owner can see why. This rail is email-only.
+    if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
+    if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
+    setBusy(true)
+    try { await onSave(subject, body, { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }) }
+    catch (e) { setErr(String(e?.message || e)); setBusy(false) }
+  }
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:70 }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit this email"
-        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Editing · {row.when}</div>
-        <div style={{ padding:'20px 24px 22px' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
-          <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...field, marginBottom:'14px', fontWeight:600 }} />
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Message</p>
-          {/* The body is CONTENT — it may use the width. */}
-          <textarea value={body} onChange={e => setBody(e.target.value)} {...tags.bind(() => body, setBody)}
-            style={{ width:'100%', minHeight:'200px', padding:'16px 18px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'10px', font:'inherit', fontSize:'14px', lineHeight:1.65, resize:'vertical', background:'white', color:'#1a2e2b' }} />
-          <p style={{ marginTop:'10px', fontSize:'12px', color:'#8a9e9a' }}>The bits in braces get filled in for each person.</p>
-          <div style={{ marginTop:'10px' }}>
-            <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
-          </div>
-          <div style={{ marginTop:'14px' }}>
-            <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
-          </div>
-          {err && <p style={{ marginTop:'8px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
-        </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
-          <button onClick={onCancel} disabled={busy} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }}>Cancel</button>
-          <button
-            onClick={async () => {
-              setErr('')
-              // issue 316 — same checks as the drip step editor: a blank
-              // body/subject would commit, then hold at send time
-              // (no_body_source / missing_subject) — refuse here where the
-              // owner can see why. This rail is email-only.
-              if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
-              if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
-              setBusy(true)
-              try { await onSave(subject, body, { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }) }
-              catch (e) { setErr(String(e?.message || e)); setBusy(false) }
-            }}
-            disabled={busy || !changed}
-            style={{ background: (busy || !changed) ? '#c3cfcc' : '#1a2e2b', border:'none', borderRadius:'9px', padding:'9px 17px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'white', cursor:(busy || !changed) ? 'not-allowed' : 'pointer', maxWidth:CONTROL_W.action }}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+    <EDialog label="Edit this email" eyebrow={row.when} title="Change wording" onClose={busy ? null : onCancel}
+      footer={<>
+        <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
+        <EBtn variant="primary" onClick={save} disabled={busy || !changed}>{busy ? 'Saving…' : 'Save'}</EBtn>
+      </>}>
+      <label style={eLabelStyle}>Subject</label>
+      <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...eInputStyle, marginBottom:'12px' }} />
+      <label style={eLabelStyle}>Message</label>
+      {/* The body is CONTENT — it may use the width. */}
+      <textarea value={body} onChange={e => setBody(e.target.value)} {...tags.bind(() => body, setBody)}
+        rows={8} style={{ ...eTextareaStyle, minHeight:'200px', fontFamily:EF.body, color:ET.ink }} />
+      <p style={eHintStyle}>The bits in braces get filled in for each person.</p>
+      <div style={{ marginTop:'12px' }}>
+        <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
       </div>
-    </div>
+      <div style={{ marginTop:'16px' }}>
+        <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
+      </div>
+      {err && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
+    </EDialog>
   )
 }
 
@@ -18712,65 +18688,55 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
   const valid = val.trim() !== '' && Number.isInteger(count) && count >= 0 && n >= minDay
   const tooSoon = val.trim() !== '' && Number.isInteger(count) && count >= 0 && n < minDay
   const eff = timingChangeEffect(steps, row.order, n)
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="When this sends"
-        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>When this sends · {row.subject || 'this email'}</div>
-        <div style={{ padding:'20px 24px 22px' }}>
-          <p style={{ margin:'0 0 4px', fontSize:'14px', fontWeight:600, color:'#323B35' }}>When it goes out</p>
-          {/* A count and a unit — small controls. They do not stretch. */}
-          <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px', fontSize:'14px' }}>
-            <span style={{ color:'#737970' }}>Send it</span>
-            <input type="number" min={0} max={999} step={1} value={val} aria-label="How long to wait"
-              onChange={e => setVal(e.target.value)}
-              style={{ width:'80px', padding:'6px 8px', textAlign:'center', border:`1.5px solid ${tooSoon ? '#c0554e' : 'rgba(26,46,43,0.14)'}`, borderRadius:'8px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }} />
-            <select value={unit} aria-label="Wait measured in" onChange={e => setUnit(e.target.value)}
-              style={{ padding:'6px 8px', border:'1.5px solid rgba(26,46,43,0.14)', borderRadius:'8px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }}>
-              {TIMING_UNITS.map(u => <option key={u.v} value={u.v}>{u.label}</option>)}
-            </select>
-            <span style={{ color:'#737970' }}>after {row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
-          </div>
-          {valid && <p style={{ margin:'8px 0 0', fontSize:'12px', color:'#737970' }}>
-            That’s day {n}.{formatTiming({ immediate:false, n:count, unit }) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
-          </p>}
-          {tooSoon && (
-            <p style={{ fontSize:'12.5px', color:'#c0554e', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
-              That’s the same day as the one before it, or earlier — so this would go out straight away, on top of the last one. It needs to be day {minDay} or later.
-            </p>
-          )}
-          {!tooSoon && (
-            <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
-              {eff.followerCount > 0
-                ? <>The emails after this one keep the days they already have — the next stays on day {eff.nextFollowerDay}. Only the wait before it changes.</>
-                : <>This is the last email in the sequence.</>}
-            </p>
-          )}
-
-          {/* Live, per path row, same shape as 9b. */}
-          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-            {ownsPath ? (
-              liveLeadCount > 0
-                ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. The email each of them is already waiting for keeps the date it was given — this changes the timing of the ones after that.</>
-                : <>Nobody is partway through this sequence at the moment, so this affects people who come in from now on.</>
-            ) : (
-              <>Nobody partway through this sequence is affected — they finish on the shared version they started on.
-              <br /><br />
-              Changing the timing also means this sequence stops following Bee Organized’s. If they change the standard wording or timing later, yours won’t change with it. <b>That can’t be undone.</b></>
-            )}
-          </div>
-          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+    <EDialog label="When this sends" eyebrow={row.when} title={row.subject || 'this email'} onClose={busy ? null : onCancel}
+      footer={<>
+        <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
+        <EBtn variant="primary" onClick={() => onConfirm(n, unit)} disabled={busy || !valid}>{busy ? 'Saving…' : 'Save'}</EBtn>
+      </>}>
+      <div style={{ borderRadius:ER.lg, border:`1px solid ${ET.border}`, padding:'12px' }}>
+        <p style={{ margin:'0 0 4px', fontSize:'14px', fontWeight:600, color:ET.foreground }}>When it goes out</p>
+        {/* A count and a unit — small controls. They do not stretch. */}
+        <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px', fontSize:'14px' }}>
+          <span style={{ color:ET.mutedFg }}>Send it</span>
+          <input type="number" min={0} max={999} step={1} value={val} aria-label="How long to wait"
+            onChange={e => setVal(e.target.value)}
+            style={{ ...eInputStyle, width:'80px', textAlign:'center', background:ET.card, ...(tooSoon ? { borderColor:ET.destructive } : null) }} />
+          <ESelect value={unit} ariaLabel="Wait measured in" onChange={setUnit} style={{ width:'120px' }}
+            options={TIMING_UNITS.map(u => ({ value: u.v, label: u.label }))} />
+          <span style={{ color:ET.mutedFg }}>after {row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
         </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
-          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={() => onConfirm(n, unit)} disabled={busy || !valid}
-            style={{ ...btn, background: (busy || !valid) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !valid) ? 'not-allowed' : 'pointer' }}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+        {valid && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.mutedFg }}>
+          That’s day {n}.{formatTiming({ immediate:false, n:count, unit }) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
+        </p>}
+        {tooSoon && (
+          <p style={{ fontSize:'12px', color:ET.destructive, margin:'8px 0 0', lineHeight:1.55 }}>
+            That’s the same day as the one before it, or earlier — so this would go out straight away, on top of the last one. It needs to be day {minDay} or later.
+          </p>
+        )}
+        {!tooSoon && (
+          <p style={{ fontSize:'12px', color:ET.mutedFg, margin:'8px 0 0', lineHeight:1.55 }}>
+            {eff.followerCount > 0
+              ? <>The emails after this one keep the days they already have — the next stays on day {eff.nextFollowerDay}. Only the wait before it changes.</>
+              : <>This is the last email in the sequence.</>}
+          </p>
+        )}
       </div>
-    </div>
+
+      {/* Live, per path row, same shape as 9b. */}
+      <ENote tone="warning" style={{ marginTop:'16px' }}>
+        {ownsPath ? (
+          liveLeadCount > 0
+            ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. The email each of them is already waiting for keeps the date it was given — this changes the timing of the ones after that.</>
+            : <>Nobody is partway through this sequence at the moment, so this affects people who come in from now on.</>
+        ) : (
+          <>Nobody partway through this sequence is affected — they finish on the shared version they started on.
+          <br /><br />
+          Changing the timing also means this sequence stops following Bee Organized’s. If they change the standard wording or timing later, yours won’t change with it. <b>That can’t be undone.</b></>
+        )}
+      </ENote>
+      {err && <p style={{ margin:'10px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
+    </EDialog>
   )
 }
 
@@ -18796,66 +18762,58 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
   const offerable = React.useMemo(() => offerableStartingTemplates(templates), [templates])
   const pos = appendedStepPosition(steps)
   const chosen = offerable.find(t => t.dbId === pick) || null
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
-  const card = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, borderRadius:'11px', padding:'12px 14px', marginBottom:'8px', cursor:'pointer', background: on ? '#fafcfb' : 'white', maxWidth:CONTROL_W.field, textAlign:'left', width:'100%', font:'inherit', fontFamily:'inherit' })
+  // The radio option card's shape (ERadioCard), two lines tall.
+  const card = on => ({ display:'block', width:'100%', boxSizing:'border-box', marginBottom:'8px', textAlign:'left', cursor:'pointer', fontFamily:EF.ui,
+    border:`1px solid ${on ? ET.primary : ET.border}`, borderRadius:ER.lg, padding:'8px 12px', background: on ? ET.sageSoft : ET.card, color:ET.foreground })
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add another email"
-        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Add another email</div>
-        <div style={{ padding:'20px 24px 22px' }}>
-          <p style={{ fontSize:'14px', color:'#1a2e2b', margin:'0 0 4px', lineHeight:1.55 }}>
-            It goes at the <b>end</b> of the sequence, {pos.delay_days} days after someone first gets in touch — {ADD_STEP_INTERVAL_DAYS} days after the last one.
-          </p>
-          <p style={{ fontSize:'12.5px', color:'#8a9e9a', margin:'0 0 16px', lineHeight:1.55 }}>
-            You can change when it sends later. It can’t be slotted in between the others.
-          </p>
+    <EDialog label="Add another email" title="Add another email" onClose={busy ? null : onCancel}
+      footer={<>
+        <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
+        <EBtn variant="primary" onClick={() => onConfirm(pick === 'blank' ? null : chosen)} disabled={busy}>{busy ? 'Adding…' : 'Add this email'}</EBtn>
+      </>}>
+      <p style={{ fontSize:'14px', color:ET.foreground, margin:'0 0 4px', lineHeight:1.55 }}>
+        It goes at the <b>end</b> of the sequence, {pos.delay_days} days after someone first gets in touch — {ADD_STEP_INTERVAL_DAYS} days after the last one.
+      </p>
+      <p style={{ fontSize:'12px', color:ET.mutedFg, margin:'0 0 16px', lineHeight:1.55 }}>
+        You can change when it sends later. It can’t be slotted in between the others.
+      </p>
 
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 8px' }}>Start from</p>
-          <button onClick={() => setPick('blank')} style={card(pick === 'blank')}>
-            <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>A blank email</b>
-            <span style={{ fontSize:'12.5px', color:'#4a5f5b' }}>Write it yourself.</span>
-          </button>
-          {offerable.map(t => (
-            <button key={t.dbId} onClick={() => setPick(t.dbId)} style={card(pick === t.dbId)}>
-              <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</b>
-              <span style={{ fontSize:'12.5px', color:'#4a5f5b' }}>{(t.subject || '').slice(0, 80)}</span>
-            </button>
-          ))}
-          {offerable.length === 0 && (
-            <p style={{ fontSize:'12.5px', color:'#8a9e9a', margin:'0 0 12px', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
-              There aren’t any ready-made emails to start from yet. New ones will show up here as they’re written.
-            </p>
-          )}
-          {chosen && (
-            <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
-              This stays linked to the Bee Organized version — if they improve the wording, yours updates too. It isn’t a copy. Editing it yourself breaks that link.
-            </p>
-          )}
+      <p style={{ ...eLabelStyle, marginBottom:'8px' }}>Start from</p>
+      <button type="button" aria-pressed={pick === 'blank'} data-ehover={pick === 'blank' ? undefined : 'muted'} onClick={() => setPick('blank')} style={card(pick === 'blank')}>
+        <b style={{ display:'block', fontSize:'14px', fontWeight:600 }}>A blank email</b>
+        <span style={{ fontSize:'12px', color:ET.mutedFg }}>Write it yourself.</span>
+      </button>
+      {offerable.map(t => (
+        <button key={t.dbId} type="button" aria-pressed={pick === t.dbId} data-ehover={pick === t.dbId ? undefined : 'muted'} onClick={() => setPick(t.dbId)} style={card(pick === t.dbId)}>
+          <b style={{ display:'block', fontSize:'14px', fontWeight:600 }}>{t.name}</b>
+          <span style={{ fontSize:'12px', color:ET.mutedFg }}>{(t.subject || '').slice(0, 80)}</span>
+        </button>
+      ))}
+      {offerable.length === 0 && (
+        <p style={{ fontSize:'12px', color:ET.mutedFg, margin:'0 0 12px', lineHeight:1.55 }}>
+          There aren’t any ready-made emails to start from yet. New ones will show up here as they’re written.
+        </p>
+      )}
+      {chosen && (
+        <p style={{ fontSize:'12px', color:ET.mutedFg, margin:'8px 0 0', lineHeight:1.55 }}>
+          This stays linked to the Bee Organized version — if they improve the wording, yours updates too. It isn’t a copy. Editing it yourself breaks that link.
+        </p>
+      )}
 
-          {/* The two truths. Computed live, never baked in. */}
-          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-            {ownsPath ? (
-              liveLeadCount > 0
-                ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. They’ll get this new email too, when they reach the end.</>
-                : <>Nobody is partway through this sequence at the moment, so this will only go to people who come in from now on.</>
-            ) : (
-              <>Nobody partway through this sequence will get this one — they’ll finish on the shared version they started on.
-              <br /><br />
-              Adding your own email also means this sequence stops following Bee Organized’s. If they improve the standard wording later, yours won’t change with it. <b>That can’t be undone.</b></>
-            )}
-          </div>
-          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
-        </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
-          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={() => onConfirm(pick === 'blank' ? null : chosen)} disabled={busy}
-            style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor: busy ? 'not-allowed' : 'pointer' }}>
-            {busy ? 'Adding…' : 'Add this email'}
-          </button>
-        </div>
-      </div>
-    </div>
+      {/* The two truths. Computed live, never baked in. */}
+      <ENote tone="warning" style={{ marginTop:'16px' }}>
+        {ownsPath ? (
+          liveLeadCount > 0
+            ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. They’ll get this new email too, when they reach the end.</>
+            : <>Nobody is partway through this sequence at the moment, so this will only go to people who come in from now on.</>
+        ) : (
+          <>Nobody partway through this sequence will get this one — they’ll finish on the shared version they started on.
+          <br /><br />
+          Adding your own email also means this sequence stops following Bee Organized’s. If they improve the standard wording later, yours won’t change with it. <b>That can’t be undone.</b></>
+        )}
+      </ENote>
+      {err && <p style={{ margin:'10px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
+    </EDialog>
   )
 }
 
@@ -18871,19 +18829,17 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
   const paused = !!row.paused
   const waiting = sending && !paused && !blockedReason && needs.length > 0
   const off = !sending || paused || !!blockedReason
-  const gold = '#C89A56', muted = '#737970', warn = '#9A6A20'
-  const btn = { display:'inline-flex', alignItems:'center', gap:'6px', borderRadius:'8px', padding:'6px 12px', fontSize:'14px', fontWeight:500, fontFamily:"'Lato', system-ui, sans-serif", cursor:'pointer', whiteSpace:'nowrap', background:'#FFFFFF', color:'#323B35', border:'1px solid #E3E4DC' }
-  const ghost = { ...btn, background:'transparent', border:'1px solid transparent' }
+  const gold = ET.gold, muted = ET.mutedFg, warn = ET.warning
   return (
-    <li data-email-row={row.key} style={{ position:'relative', listStyle:'none', borderRadius:'12px', border:`1px solid ${waiting ? 'rgba(154,106,32,0.5)' : '#E3E4DC'}`, background: waiting ? 'rgba(250,240,218,0.4)' : '#FFFFFF', padding:'16px', opacity: off ? 0.6 : 1, fontFamily:"'Lato', system-ui, sans-serif" }}>
-      <span aria-hidden style={{ position:'absolute', left:'-27px', top:'20px', height:'12px', width:'12px', borderRadius:'999px', border:'2px solid #FFFFFF', boxSizing:'border-box', background: waiting ? warn : off ? muted : gold }} />
+    <li data-email-row={row.key} style={{ position:'relative', listStyle:'none', borderRadius:ER.xl, border:`1px solid ${waiting ? alpha(ET.warning, 0.5) : ET.border}`, background: waiting ? alpha(ET.warningSoft, 0.4) : ET.card, padding:'16px', opacity: off ? 0.6 : 1, fontFamily:EF.ui }}>
+      <span aria-hidden style={{ position:'absolute', left:'-27px', top:'20px', height:'12px', width:'12px', borderRadius:'999px', border:`2px solid ${ET.card}`, boxSizing:'border-box', background: waiting ? warn : off ? muted : gold }} />
       <div style={{ display:'flex', flexWrap:'wrap', gap:'12px' }}>
         <div style={{ width:'112px', flexShrink:0 }}>
           {/* issue 240 step 10 — the clock ONLY where the timing is really
               data. The welcome (24h) and the closed-job pair (90/365) are
               code constants and read as plain text. */}
           {onEditTiming && row.timingIsData && !timingLocked
-            ? <button onClick={onEditTiming} title="Change when this goes out" style={{ margin:'0 -4px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:'6px', padding:'0 4px', background:'none', border:'none', textAlign:'left', fontSize:'14px', fontWeight:600, color:gold, cursor:'pointer', fontFamily:'inherit' }}>{row.when} <svg aria-hidden width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity:0.4 }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg></button>
+            ? <button onClick={onEditTiming} title="Change when this goes out" data-ehover="muted" style={{ margin:'0 -4px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:ER.md, padding:'0 4px', background:'none', border:'none', textAlign:'left', fontSize:'14px', fontWeight:600, color:gold, cursor:'pointer', fontFamily:'inherit' }}>{row.when} <svg aria-hidden width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity:0.4 }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg></button>
             : <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:gold }}>{row.when}</p>}
           {timingLocked && <p style={{ margin:0, fontSize:'11px', color:muted }}>Fixed — automatic reply</p>}
           {!timingLocked && lockedReason && <p style={{ margin:0, fontSize:'11px', color:muted }}>Always sent</p>}
@@ -18891,14 +18847,11 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
         </div>
         <div style={{ flex:'1 1 220px', minWidth:0 }}>
           <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px' }}>
-            <p style={{ margin:0, fontWeight:600, color:'#323B35' }}>{row.subject || 'No subject'}</p>
-            <span style={{ display:'inline-flex', whiteSpace:'nowrap', borderRadius:'999px', padding:'2px 8px', fontSize:'11px', fontWeight:600,
-              background: row.wording === 'yours' ? '#EAF3F1' : '#F8EEDD', color: row.wording === 'yours' ? '#1E3B38' : warn }}>
-              {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
-            </span>
+            <p style={{ margin:0, fontWeight:600, color:ET.foreground }}>{row.subject || 'No subject'}</p>
+            <ETag tone={row.wording === 'yours' ? 'own' : 'shared'}>{row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}</ETag>
           </div>
-          <p style={{ margin:'2px 0 0', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', fontFamily:"'Arvo', Georgia, serif", fontSize:'12px', color:muted }}>
-            {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
+          <p style={{ margin:'2px 0 0', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', fontFamily:EF.body, fontSize:'12px', color:muted }}>
+            {row.contentMissing ? <span style={{ color:ET.warning }}>We couldn't load this one's wording.</span> : row.firstLine}
           </p>
           {lockedReason && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{lockedReason}</p>}
           {paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Paused — no client gets this one until you start it again.</p>}
@@ -18910,10 +18863,10 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
           )}
         </div>
         <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap' }}>
-          <button onClick={onRead} style={btn}>Read</button>
-          {onEdit && <button onClick={onEdit} style={btn}>Edit</button>}
-          {onPause && <button onClick={onPause} aria-label={paused ? 'Start again' : 'Pause'} style={ghost}>{paused ? '▶ Start' : '⏸ Pause'}</button>}
-          {onRemove && <button onClick={onRemove} style={{ ...ghost, color:'#B4412F' }}>Remove</button>}
+          <EBtn size="sm" onClick={onRead}>Read</EBtn>
+          {onEdit && <EBtn size="sm" onClick={onEdit}>Edit</EBtn>}
+          {onPause && <EBtn size="sm" variant="ghost" onClick={onPause} aria-label={paused ? 'Start again' : 'Pause'}>{paused ? '▶ Start' : '⏸ Pause'}</EBtn>}
+          {onRemove && <EBtn size="sm" variant="dangerGhost" onClick={onRemove}>Remove</EBtn>}
         </div>
       </div>
     </li>
@@ -18935,57 +18888,54 @@ export function isAlwaysSentFirstEmail(row) {
 }
 // With the switch off, every sequence email after the first reads as not
 // sending, for the same reason, on every row.
-export const FOLLOWUPS_OFF_ROW_REASON = 'you’ve switched off emails after the first one'
+export const FOLLOWUPS_OFF_ROW_REASON = 'you’ve switched off follow-up emails'
 export function followupsOffReasonFor(row, followupsOff) {
   return followupsOff && row?.rail === 'drip' && Number(row.order) > 1 ? FOLLOWUPS_OFF_ROW_REASON : null
 }
 
-// The switch. One setting per location, above the list it governs.
+// The switch. One setting per location, above the list it governs — the
+// design's "Follow-up emails" box (2026-10-30 follow-up: the export's copy
+// and shape; the box turns amber while follow-ups are off).
 //   state  { off, inFlight, busy, err } — null while loading
-// Switching OFF is confirmed first, quoting the live count of people it will
-// stop. Switching back ON needs no confirm: it stops nothing and revives no one.
+// Switching OFF is confirmed first, in place of the button. Switching back ON
+// needs no confirm: it stops nothing and revives no one.
+//
+// One line the export never had is kept in the confirm: how many people are
+// partway through, and that they don't pick up again. It is the consequence
+// an owner can't undo (lib/drip-followups.ts — a stopped drip stays stopped).
 export function FollowupsSwitch({ state, onSetOff }) {
   const [confirming, setConfirming] = React.useState(false)
   if (!state) return null
   const { off, inFlight, busy, err } = state
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'8px 14px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor: busy ? 'not-allowed' : 'pointer', maxWidth:CONTROL_W.action }
   const people = n => `${n} ${n === 1 ? 'person' : 'people'}`
   return (
-    <div role="group" aria-label="Emails after the first one" style={{ background:'white', borderRadius:'11px', padding:'14px 16px', margin:'0 12px 16px' }}>
-      <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px' }}>
-        Emails after the first one: {off ? 'off' : 'on'}
-      </b>
-      <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'0 0 10px', lineHeight:1.55, maxWidth:CONTROL_W.field }}>
-        {off
-          ? <>New enquiries get the first email and the welcome, then nothing else. Turning this back on only affects people who get in touch from then on — anyone already stopped stays stopped.</>
-          : <>Everything in the list below sends. The first email and the welcome always go, whatever you choose here.</>}
-      </p>
-      {!confirming && (
-        <button disabled={busy} style={btn}
-          onClick={() => off ? onSetOff(false) : setConfirming(true)}>
-          {busy ? 'Saving…' : off ? 'Turn them back on' : 'Switch off emails after the first one'}
-        </button>
-      )}
-      {confirming && (
-        <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-          {inFlight == null
-            ? <>Anyone partway through a sequence here will stop where they are — nothing more goes to them.</>
-            : inFlight > 0
-              ? <>Right now <b>{people(inFlight)}</b> {inFlight === 1 ? 'is' : 'are'} partway through. They’ll stop where they are — nothing more goes to them.</>
-              : <>Nobody is partway through right now.</>}
-          {' '}New enquiries will get the first email and the welcome, then nothing.
-          <br /><br />
-          If you turn this back on later, it only affects people who get in touch after that. <b>Anyone stopped now won’t pick up again.</b>
-          <div style={{ display:'flex', gap:'8px', marginTop:'12px', flexWrap:'wrap' }}>
-            <button style={btn} disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-            <button disabled={busy} onClick={async () => { await onSetOff(true); setConfirming(false) }}
-              style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none' }}>
-              {busy ? 'Saving…' : 'Switch them off'}
-            </button>
-          </div>
+    <div role="group" aria-label="Follow-up emails" data-followups-box={off ? 'off' : 'on'} data-estack
+      style={{ marginBottom:'20px', display:'flex', alignItems:'center', gap:'12px', borderRadius:ER.xl, padding:'16px', fontFamily:EF.ui,
+        border:`1px solid ${off ? alpha(ET.warning, 0.5) : ET.border}`, background: off ? ET.warningSoft : ET.card }}>
+      <div style={{ flex:1, minWidth:0 }}>
+        <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:ET.foreground }}>Follow-up emails: {off ? 'off' : 'on'}</p>
+        <p style={{ margin:'2px 0 0', fontSize:'12px', color:ET.mutedFg, lineHeight:1.5 }}>
+          {off
+            ? 'Only the first thank-you and the welcome are going out. Every other email below is switched off.'
+            : 'Everything in the list below sends. The first thank-you and the welcome always go, whatever you choose here.'}
+        </p>
+        {err && <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
+      </div>
+      {confirming ? (
+        <div role="alertdialog" aria-label="Stop all follow-ups?" style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px', fontSize:'14px' }}>
+          <span style={{ fontWeight:600, color:ET.foreground }}>Stop all follow-ups?</span>
+          <EBtn variant="danger" disabled={busy} onClick={async () => { await onSetOff(true); setConfirming(false) }}>{busy ? 'Saving…' : 'Switch them off'}</EBtn>
+          <EBtn disabled={busy} onClick={() => setConfirming(false)}>Keep sending</EBtn>
+          <p style={{ flexBasis:'100%', margin:0, fontSize:'12px', color:ET.mutedFg, lineHeight:1.5 }}>
+            {inFlight > 0
+              ? <>{people(inFlight)} partway through will stop where they are. </>
+              : inFlight === 0 ? <>Nobody is partway through right now. </> : <>Anyone partway through stops where they are. </>}
+            Anyone stopped now won’t pick up again if you switch back on.
+          </p>
         </div>
-      )}
-      {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+      ) : off
+        ? <EBtn variant="primary" disabled={busy} onClick={() => onSetOff(false)}>{busy ? 'Saving…' : 'Switch follow-ups back on'}</EBtn>
+        : <EBtn disabled={busy} onClick={() => setConfirming(true)}>Switch off follow-ups</EBtn>}
     </div>
   )
 }
@@ -18993,32 +18943,22 @@ export function FollowupsSwitch({ state, onSetOff }) {
 // Remove one email: confirmed, because it changes what people partway through
 // receive. It is reversible (Put back), and the copy says so.
 export function RemoveEmailModal({ row, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
-      <div role="dialog" aria-modal="true" aria-label="Remove this email"
-        style={{ maxWidth:'560px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Remove this email</div>
-        <div style={{ padding:'20px 24px 22px' }}>
-          <p style={{ fontSize:'14px', color:'#1a2e2b', margin:'0 0 8px', lineHeight:1.55 }}>
-            <b>{row?.subject || 'This email'}</b> won’t send any more. It stays in your list, marked Removed, and you can put it back any time.
-          </p>
-          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'14px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-            {ownsPath && liveLeadCount > 0
-              ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>
-              : <>Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>}
-          </div>
-          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
-        </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
-          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={onConfirm} disabled={busy}
-            style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor: busy ? 'not-allowed' : 'pointer' }}>
-            {busy ? 'Removing…' : 'Remove it'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <EDialog label="Remove this email" title="Remove this email" onClose={busy ? null : onCancel}
+      footer={<>
+        <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
+        <EBtn variant="danger" onClick={onConfirm} disabled={busy}>{busy ? 'Removing…' : 'Remove it'}</EBtn>
+      </>}>
+      <p style={{ fontSize:'14px', color:ET.foreground, margin:0, lineHeight:1.55 }}>
+        <b>{row?.subject || 'This email'}</b> won’t send any more. It stays in your list, marked Removed, and you can put it back any time.
+      </p>
+      <ENote tone="warning" style={{ marginTop:'12px' }}>
+        {ownsPath && liveLeadCount > 0
+          ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>
+          : <>Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>}
+      </ENote>
+      {err && <p style={{ margin:'10px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
+    </EDialog>
   )
 }
 
@@ -19184,8 +19124,17 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-// The design's "Moving clients" box (export EmailList), wired to the real
-// sequences. Its radio is a SETTING; the Showing pills below it are a view.
+// The design's "Moving clients" box (export EmailList :517-533), wired to the
+// real sequences: two radio option cards — a SETTING. Choosing "the same"
+// while they are separate is confirmed inline first.
+//
+// Below it, separately, which list is on screen — a VIEW that writes nothing.
+// Shown in BOTH modes, unlike the design: "same" means the same promises
+// (rate, link), but the moving emails keep their own wording — four locations
+// have edited theirs — and this is the only way to see and edit it (issue 240
+// step 7b). Drawn as the export library's tabs (ui/tabs.tsx: a muted track,
+// the chosen one raised on the card colour), not as pills, so it reads as a
+// way of looking at the list and not as a second setting.
 function MovingClientsChoice({ moving, view, onView }) {
   const [confirmSame, setConfirmSame] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
@@ -19196,54 +19145,55 @@ function MovingClientsChoice({ moving, view, onView }) {
     setBusy(false)
     if (p) setProblem(p); else setConfirmSame(false)
   }
-  const ui = "'Lato', system-ui, sans-serif"
-  const btn = primary => ({ borderRadius:'8px', padding:'6px 12px', fontSize:'14px', fontWeight:500, fontFamily:ui, cursor:'pointer', border: primary ? 'none' : '1px solid #E3E4DC', background: primary ? '#1E3B38' : '#FFFFFF', color: primary ? '#FAF9F5' : '#323B35' })
   return (
-    <div data-moving-choice style={{ marginBottom:'24px', borderRadius:'12px', border:'1px solid #E3E4DC', padding:'16px', fontFamily:ui }}>
-      <p style={{ margin:0, fontSize:'14px', fontWeight:600 }}>Moving clients</p>
+    <div style={{ marginBottom:'24px', fontFamily:EF.ui }}>
       {/* Read-only mounts (view-as, no real location) get the view only. */}
-      {moving && <div role="radiogroup" aria-label="Moving clients" style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
-        {[{ v: true, l: 'Get the same emails as organizing clients' }, { v: false, l: 'Get their own set of emails' }].map(o => {
-          const on = moving.same === o.v
-          return (
-            <button key={String(o.v)} type="button" role="radio" aria-checked={on} disabled={busy}
-              onClick={() => { if (on) return; if (o.v) setConfirmSame(true); else choose(false) }}
-              style={{ flex:'1 1 240px', display:'flex', alignItems:'center', gap:'8px', borderRadius:'8px', border:`1px solid ${on ? '#1E3B38' : '#E3E4DC'}`, background: on ? '#EAF3F1' : '#FFFFFF', padding:'8px 12px', textAlign:'left', fontSize:'14px', fontWeight: on ? 600 : 400, fontFamily:ui, cursor:'pointer' }}>
-              <span aria-hidden style={{ height:'16px', width:'16px', flexShrink:0, borderRadius:'999px', boxSizing:'border-box', border: on ? '5px solid #1E3B38' : '2px solid #E3E4DC' }} />{o.l}
-            </button>
-          )
-        })}
-      </div>}
-      {confirmSame && (
-        <div role="alertdialog" style={{ marginTop:'12px', borderRadius:'8px', border:'1px solid rgba(154,106,32,0.5)', background:'#FAF0DA', padding:'12px', fontSize:'14px' }}>
-          <p style={{ margin:0, fontWeight:600 }}>Replace the moving emails?</p>
-          <p style={{ margin:'2px 0 0', color:'rgba(50,59,53,0.8)' }}>Moving clients will get the same emails as organizing clients from now on. Anyone partway through keeps the emails they started on, and any wording you changed only in the moving emails is kept, just not used.</p>
-          <div style={{ marginTop:'8px', display:'flex', gap:'8px' }}>
-            <button type="button" disabled={busy} onClick={() => choose(true)} style={btn(true)}>{busy ? 'Saving…' : 'Yes, use the same'}</button>
-            <button type="button" disabled={busy} onClick={() => setConfirmSame(false)} style={btn(false)}>Keep them separate</button>
+      {moving && (
+        <div data-moving-choice style={{ marginBottom:'16px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, padding:'16px' }}>
+          <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:ET.foreground }}>Moving clients</p>
+          <div role="radiogroup" aria-label="Moving clients" style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
+            {[{ v: true, l: 'Get the same emails as organizing clients' }, { v: false, l: 'Get their own set of emails' }].map(o => {
+              const on = moving.same === o.v
+              return (
+                <ERadioCard key={String(o.v)} on={on} disabled={busy}
+                  onClick={() => { if (on) return; if (o.v) setConfirmSame(true); else choose(false) }}>
+                  {o.l}
+                </ERadioCard>
+              )
+            })}
           </div>
+          {confirmSame && (
+            <div role="alertdialog" aria-label="Replace the moving emails?" style={{ marginTop:'12px', borderRadius:ER.lg, border:`1px solid ${alpha(ET.warning, 0.5)}`, background:ET.warningSoft, padding:'12px', fontSize:'14px' }}>
+              <p style={{ margin:0, fontWeight:600, color:ET.foreground }}>Replace the moving emails?</p>
+              <p style={{ margin:'2px 0 0', color:alpha(ET.foreground, 0.8) }}>Moving clients will get the same emails as organizing clients from now on. Anyone partway through keeps the emails they started on, and any wording you changed only in the moving emails is kept, just not used.</p>
+              <div style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
+                <EBtn variant="primary" disabled={busy} onClick={() => choose(true)}>{busy ? 'Saving…' : 'Yes, use the same'}</EBtn>
+                <EBtn disabled={busy} onClick={() => setConfirmSame(false)}>Keep them separate</EBtn>
+              </div>
+            </div>
+          )}
+          {problem && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {problem}</p>}
         </div>
       )}
-      {problem && <p style={{ margin:'8px 0 0', fontSize:'12px', color:'#B4412F' }}>⚠ {problem}</p>}
-      {/* Shown in BOTH modes, unlike the design: "same" means the same
-          promises (rate, link), but the moving emails keep their own wording
-          — four locations have edited theirs — and this is the only way to
-          see and edit it (issue 240 step 7b). */}
-      {(
-        <div style={{ marginTop:'12px', display:'flex', alignItems:'center', gap:'8px', fontSize:'14px', flexWrap:'wrap' }}>
-          <span style={{ color:'#737970' }}>Showing:</span>
-          {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
-            <button key={k} type="button" onClick={() => onView(k)}
-              style={{ borderRadius:'999px', padding:'4px 12px', border:'none', background: view === k ? '#1E3B38' : '#F2F2EE', color: view === k ? '#FAF9F5' : '#323B35', fontSize:'14px', cursor:'pointer', fontFamily:ui }}>
-              {label}
-            </button>
-          ))}
+      <div data-email-view style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap', fontSize:'14px' }}>
+        <span style={{ color:ET.mutedFg }}>Showing</span>
+        <div role="tablist" aria-label="Which emails are showing" style={{ display:'inline-flex', alignItems:'center', height:'36px', boxSizing:'border-box', padding:'4px', borderRadius:ER.md, background:ET.muted }}>
+          {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => {
+            const on = view === k
+            return (
+              <button key={k} type="button" role="tab" aria-selected={on} onClick={() => onView(k)}
+                style={{ height:'28px', boxSizing:'border-box', padding:'0 12px', borderRadius:ER.sm, border:'none', fontSize:'14px', fontWeight:500, fontFamily:EF.ui, cursor:'pointer',
+                  background: on ? ET.card : 'transparent', color: on ? ET.foreground : ET.mutedFg, boxShadow: on ? ESHADOW.btn : 'none' }}>
+                {label}
+              </button>
+            )
+          })}
         </div>
-      )}
+        <span style={{ color:ET.mutedFg }}>emails</span>
+      </div>
     </div>
   )
 }
-
 export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null, moving = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
   // 2026-10-30 design: groups fold (only the first open at first), and show
@@ -19343,18 +19293,18 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
     return (
       <div style={{ marginBottom:'32px' }}>
         <button type="button" aria-expanded={groupOpen} onClick={() => setCollapsed(x => ({ ...x, [id]: groupOpen }))}
-          style={{ display:'flex', width:'100%', alignItems:'flex-start', gap:'12px', borderRadius:'12px', border:'1px solid #E3E4DC', background:'#FFFFFF', padding:'12px', textAlign:'left', cursor:'pointer', marginBottom: groupOpen ? '12px' : 0, fontFamily:"'Lato', system-ui, sans-serif" }}>
+          data-ehover="muted" style={{ display:'flex', width:'100%', alignItems:'flex-start', gap:'12px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, background:ET.card, padding:'12px', textAlign:'left', cursor:'pointer', color:ET.foreground, marginBottom: groupOpen ? '12px' : 0, fontFamily:EF.ui }}>
           <div style={{ minWidth:0, flex:1 }}>
-            <h3 style={{ margin:0, fontSize:'16px', fontWeight:700, color:'#323B35', fontFamily:"'Lato', system-ui, sans-serif" }}>{title} <span style={{ fontWeight:400, color:'#737970' }}>· {count}</span></h3>
-            {note && <p style={{ margin:0, fontSize:'12px', color:'#737970' }}>{note}</p>}
+            <h3 style={{ margin:0, fontSize:'16px', fontWeight:700, color:ET.foreground, fontFamily:EF.ui }}>{title} <span style={{ fontWeight:400, color:ET.mutedFg }}>· {count}</span></h3>
+            {note && <p style={{ margin:0, fontSize:'12px', color:ET.mutedFg }}>{note}</p>}
           </div>
-          <span aria-hidden style={{ marginTop:'4px', color:'#737970', transform: groupOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
+          <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop:'2px', flexShrink:0, color:ET.mutedFg, transform: groupOpen ? 'rotate(180deg)' : 'none' }}><path d="m6 9 6 6 6-6" /></svg>
         </button>
         {groupOpen && <>
           {live.length === 0
-            ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
+            ? <div style={{ background:ET.card, border:`1px solid ${ET.border}`, borderRadius:ER.xl, padding:'16px', fontSize:'14px', color:ET.mutedFg }}>Nothing here yet.</div>
             : (
-              <ol style={{ position:'relative', margin:'0 0 0 8px', padding:'0 0 0 20px', borderLeft:'2px solid rgba(168,201,196,0.6)', display:'flex', flexDirection:'column', gap:'8px' }}>
+              <ol style={{ position:'relative', margin:'0 0 0 8px', padding:'0 0 0 20px', borderLeft:`2px solid ${alpha(ET.sage, 0.6)}`, display:'flex', flexDirection:'column', gap:'8px' }}>
                 {shown.map(r => {
                   const i = rows.indexOf(r)
                   return (
@@ -19375,19 +19325,19 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
             )}
           {live.length > SHOW && (
             <button type="button" onClick={() => setExpanded(x => ({ ...x, [id]: !isOpen }))}
-              style={{ margin:'8px 0 0 28px', display:'flex', width:'calc(100% - 28px)', alignItems:'center', justifyContent:'center', gap:'8px', borderRadius:'12px', border:'2px dashed rgba(200,154,86,0.5)', background:'rgba(248,238,221,0.5)', padding:'12px 16px', fontSize:'14px', fontWeight:600, color:'#323B35', cursor:'pointer', fontFamily:"'Lato', system-ui, sans-serif" }}>
+              style={{ margin:'8px 0 0 28px', display:'flex', width:'calc(100% - 28px)', alignItems:'center', justifyContent:'center', gap:'8px', borderRadius:ER.xl, border:`2px dashed ${alpha(ET.gold, 0.5)}`, background:alpha(ET.goldSoft, 0.5), padding:'12px 16px', fontSize:'14px', fontWeight:600, color:ET.foreground, cursor:'pointer', fontFamily:EF.ui }}>
               {isOpen ? 'Show fewer ⌃' : `More — ${hidden} more ${hidden === 1 ? 'email' : 'emails'} in this group ⌄`}
             </button>
           )}
           {removedRows.length > 0 && (
-            <div style={{ margin:'8px 0 0 28px', borderRadius:'8px', background:'#F2F2EE', padding:'12px', fontSize:'12px', fontFamily:"'Lato', system-ui, sans-serif" }}>
+            <div style={{ margin:'8px 0 0 28px', borderRadius:ER.lg, background:ET.muted, padding:'12px', fontSize:'12px', fontFamily:EF.ui }}>
               <p style={{ margin:0, fontWeight:600 }}>Removed from this group</p>
               <ul style={{ listStyle:'none', margin:'6px 0 0', padding:0, display:'flex', flexDirection:'column', gap:'6px' }}>
                 {removedRows.map(r => (
                   <li key={r.key} data-removed-row={r.key} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                    <span style={{ minWidth:0, flex:1, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', color:'#737970' }}>{r.when} · {r.subject}</span>
+                    <span style={{ minWidth:0, flex:1, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', color:ET.mutedFg }}>{r.when} · {r.subject}</span>
                     {actions && actions.restore && rowCanBeRemoved(r) && (
-                      <button type="button" onClick={() => actions.restore(r)} style={{ flexShrink:0, borderRadius:'8px', border:'1px solid #E3E4DC', background:'#FFFFFF', padding:'4px 10px', fontSize:'12px', cursor:'pointer', fontFamily:'inherit' }}>Bring back</button>
+                      <EBtn size="sm" onClick={() => actions.restore(r)} style={{ flexShrink:0 }}>Bring back</EBtn>
                     )}
                   </li>
                 ))}
@@ -19395,10 +19345,9 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
             </div>
           )}
           {add && (
-            <button type="button" onClick={add}
-              style={{ margin:'8px 0 0 28px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:'8px', border:'1px dashed #E3E4DC', background:'transparent', padding:'6px 12px', fontSize:'14px', color:'#737970', cursor:'pointer', fontFamily:"'Lato', system-ui, sans-serif" }}>
+            <EBtn variant="ghost" onClick={add} style={{ margin:'8px 0 0 28px', border:`1px dashed ${ET.input}`, color:ET.mutedFg }}>
               + Add an email here
-            </button>
+            </EBtn>
           )}
         </>}
       </div>
@@ -19407,13 +19356,12 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
 
   const allRows = [...withNotes, ...returning, ...afterJob]
   const ownCount = allRows.filter(r => r.wording === 'yours').length
-  const pill = { display:'inline-flex', alignItems:'center', gap:'4px', whiteSpace:'nowrap', borderRadius:'999px', padding:'2px 8px', fontSize:'11px', fontWeight:600 }
   return (
-    <div style={{ fontFamily:"'Lato', system-ui, sans-serif" }}>
+    <div style={{ fontFamily:EF.ui }}>
       {/* Ownership summary (2026-10-30 design). */}
       <div style={{ marginBottom:'20px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
-        <span style={{ ...pill, background:'#F8EEDD', color:'#9A6A20' }}>🐝 {allRows.length - ownCount} use Bee Organized wording</span>
-        <span style={{ ...pill, background:'#EAF3F1', color:'#1E3B38' }}>{ownCount} in your own words</span>
+        <ETag tone="shared">🐝 {allRows.length - ownCount} use Bee Organized wording</ETag>
+        <ETag tone="own">{ownCount} in your own words</ETag>
       </div>
       {/* "Moving clients" (2026-10-30 follow-up) — the design's choice,
           made real. SAME: one set of switches writes both sequences. THEIR
@@ -20065,23 +20013,16 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
     } finally { setAddBusy(false) }
   }
 
-  // Capped and left, never stretched (CONTROL_W, issue 240 step 4).
-  const sel = {
-    width:'100%', maxWidth:CONTROL_W.select, minWidth:'160px',
-    padding:'8px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)',
-    background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'13px',
-    fontWeight:600, cursor:'pointer',
-  }
+  // Capped and left, never stretched (CONTROL_W, issue 240 step 4). The
+  // dropdowns are the Emails screen's (ESelect, 2026-10-30 follow-up).
+  const selBox = { width:'240px', maxWidth:CONTROL_W.select, minWidth:'160px' }
+  // Caption above each of the two per-type questions. They are equals, so they
+  // are labelled identically — neither reads as the other's exception.
+  const hLabel = { ...eLabelStyle, fontSize:'12px' }
   const fieldStyle = {
     width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px',
     border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px',
     fontFamily:'inherit', color:'#1a2e2b', outline:'none',
-  }
-  // Caption above each of the two per-type questions. They are equals, so they
-  // are labelled identically — neither reads as the other's exception.
-  const qLabel = {
-    display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a',
-    textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 4px 2px',
   }
   const PARENTS = [
     { key:'general', label:'Organizing' },
@@ -20108,82 +20049,80 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
 
       {only !== 'recipients' && <>
       {/* ── 1 · WHO HANDLES WHAT ─────────────────────────────────────────── */}
-      <CommsLabel>Who handles what</CommsLabel>
-      <div style={{ margin:'0 12px' }}>
+      {/* On Settings → Emails (only="handlers") the section's own "By kind of
+          job" heading names this, and the rows take the screen's design
+          (2026-10-30 follow-up): its fields, its dropdown, its buttons. */}
+      {only !== 'handlers' && <CommsLabel>Who handles what</CommsLabel>}
+      <div style={{ margin:'0 12px', fontFamily:EF.ui }}>
         {groups.length === 0 ? (
-          <div style={{ borderRadius:'12px', background:'white', padding:'14px', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>No job types are configured yet.</p>
+          <div style={{ borderRadius:ER.xl, background:ET.card, border:`1px solid ${ET.border}`, padding:'16px' }}>
+            <p style={{ margin:0, fontSize:'14px', color:ET.mutedFg }}>No job types are configured yet.</p>
           </div>
         ) : PARENTS.map(parent => {
           const rows = groups.filter(g => g.drip_category === parent.key)
           if (!rows.length) return null
           return (
             <div key={parent.key} style={{ marginBottom:'14px' }}>
-              <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:'0 0 6px 2px' }}>{parent.label}</p>
-              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
+              <p style={{ fontSize:'12px', fontWeight:700, color:ET.mutedFg, textTransform:'uppercase', letterSpacing:'0.08em', margin:'0 0 8px' }}>{parent.label}</p>
+              <div style={{ borderRadius:ER.xl, overflow:'visible', border:`1px solid ${ET.border}` }}>
                 {rows.map((g, i) => {
                   const h = handlerFor(g.label)
                   const editing = senderEdit?.label === g.label
                   const handlerPerson = h ? people.find(p => p.id === h.source_user_id) : null
                   return (
                     <div key={g.label} data-handler-row={g.label}
-                      style={{ background:'white', padding:'13px 14px', borderTop: i ? '0.5px solid rgba(26,46,43,0.07)' : 'none' }}>
+                      style={{ background:ET.card, padding:'16px', borderTop: i ? `1px solid ${ET.border}` : 'none', borderRadius: rows.length === 1 ? ER.xl : i === 0 ? `${ER.xl} ${ER.xl} 0 0` : i === rows.length - 1 ? `0 0 ${ER.xl} ${ER.xl}` : 0 }}>
                       <div style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-start', gap:'12px' }}>
                         <div style={{ flex:'1 1 160px', minWidth:0 }}>
-                          <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{g.label}</p>
-                          <p style={{ fontSize:'11px', color:'#b0c0bc' }}>on your website form</p>
+                          <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:ET.foreground }}>{g.label}</p>
+                          <p style={{ margin:0, fontSize:'12px', color:ET.mutedFg }}>on your website form</p>
                         </div>
                         {/* The two questions, asked side by side and captioned.
                             Neither is the exception to the other. */}
                         <div style={{ flex:'0 1 auto', display:'flex', flexWrap:'wrap', gap:'12px' }}>
                           <div>
-                            <label style={qLabel} htmlFor={`h-${g.label}`}>Who handles it</label>
-                            <select
+                            <label style={hLabel} htmlFor={`h-${g.label}`}>Who handles it</label>
+                            <ESelect
                               id={`h-${g.label}`}
-                              aria-label={`Who handles ${g.label}`}
+                              ariaLabel={`Who handles ${g.label}`}
                               value={h?.source_user_id || ''}
                               disabled={readOnly || busy===`h:${g.label}`}
-                              onChange={ev => pickHandler(g.label, ev.target.value)}
-                              style={sel}>
-                              <option value="">The location owner</option>
-                              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
+                              onChange={v => pickHandler(g.label, v)}
+                              style={selBox}
+                              options={[{ value:'', label:'The location owner' }, ...people.map(p => ({ value:p.id, label:p.name }))]} />
                           </div>
                           <div>
-                            <label style={qLabel} htmlFor={`s-${g.label}`}>What it sends as</label>
-                            <select
+                            <label style={hLabel} htmlFor={`s-${g.label}`}>What it sends as</label>
+                            <ESelect
                               id={`s-${g.label}`}
-                              aria-label={`What ${g.label} sends as`}
+                              ariaLabel={`What ${g.label} sends as`}
                               value={h ? (h.sender_is_custom ? 'custom' : 'person') : ''}
                               disabled={readOnly || !h || busy===`s:${g.label}`}
-                              onChange={ev => {
-                                if (ev.target.value === 'custom') openSenderEditor(g.label, h)
+                              muted={!h}
+                              onChange={v => {
+                                if (v === 'custom') openSenderEditor(g.label, h)
                                 else { setSenderEdit(null); saveSenderIdentity(g.label, { sender_is_custom:false }) }
                               }}
-                              style={{ ...sel, ...(h ? null : { cursor:'default', color:'#8a9e9a' }) }}>
-                              {h
-                                ? <>
-                                    <option value="person">{handlerPerson?.name || h.sender_name} &mdash; their own address</option>
-                                    <option value="custom">A different name and address</option>
-                                  </>
-                                : <option value="">Your location&apos;s sending address</option>}
-                            </select>
+                              style={selBox}
+                              options={h
+                                ? [{ value:'person', label:`${handlerPerson?.name || h.sender_name} — their own address` },
+                                   { value:'custom', label:'A different name and address' }]
+                                : [{ value:'', label:'Your location\'s sending address' }]} />
                             {h && !h.sender_is_custom && (
-                              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'3px', maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>{h.sender_email}</p>
+                              <p style={{ ...eHintStyle, maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>{h.sender_email}</p>
                             )}
                             {h?.sender_is_custom && !editing && (
-                              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'3px', maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>
+                              <p style={{ ...eHintStyle, maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>
                                 {h.sender_name} &lt;{h.sender_email}&gt;
                                 {h.sender_reply_to ? <> &middot; replies to {h.sender_reply_to}</> : null}
                                 {' '}
-                                <button type="button" onClick={() => openSenderEditor(g.label, h)} disabled={readOnly}
-                                  style={{ background:'none', border:'none', padding:0, font:'inherit', fontSize:'11px', color:'#1a2e2b', textDecoration:'underline', cursor: readOnly ? 'default' : 'pointer' }}>
+                                <EBtn variant="link" onClick={() => openSenderEditor(g.label, h)} disabled={readOnly} style={{ fontSize:'12px' }}>
                                   Edit
-                                </button>
+                                </EBtn>
                               </p>
                             )}
                             {h?.domain_warning && (
-                              <p style={{ fontSize:'10px', color:'#b45309', marginTop:'3px', maxWidth:CONTROL_W.select }}>
+                              <p style={{ ...eHintStyle, color:ET.warning, maxWidth:CONTROL_W.select }}>
                                 This address is on a different domain to your sending address, so it may not deliver.
                               </p>
                             )}
@@ -20193,49 +20132,47 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
 
                       {editing && (
                         <div data-sender-editor={g.label}
-                          style={{ marginTop:'12px', paddingTop:'12px', borderTop:'0.5px solid rgba(26,46,43,0.07)', display:'flex', flexWrap:'wrap', gap:'10px', alignItems:'flex-end' }}>
+                          style={{ marginTop:'12px', paddingTop:'12px', borderTop:`1px solid ${ET.border}`, display:'flex', flexWrap:'wrap', gap:'12px', alignItems:'flex-end' }}>
                           <div>
-                            <label style={qLabel} htmlFor={`sn-${g.label}`}>Name on the email</label>
+                            <label style={hLabel} htmlFor={`sn-${g.label}`}>Name on the email</label>
                             <input id={`sn-${g.label}`} type="text" value={senderEdit.sender_name}
                               placeholder="Bee Organized Moving"
                               onChange={ev => setSenderEdit(s => ({ ...s, sender_name: ev.target.value }))}
-                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                              style={{ ...eInputStyle, width:'220px', maxWidth:'100%' }} />
                           </div>
                           <div>
-                            <label style={qLabel} htmlFor={`se-${g.label}`}>Sends from</label>
+                            <label style={hLabel} htmlFor={`se-${g.label}`}>Sends from</label>
                             <input id={`se-${g.label}`} type="email" value={senderEdit.sender_email}
                               placeholder="moving@beeorganized-kc.com"
                               onChange={ev => setSenderEdit(s => ({ ...s, sender_email: ev.target.value }))}
-                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                              style={{ ...eInputStyle, width:'220px', maxWidth:'100%' }} />
                           </div>
                           <div>
-                            <label style={qLabel} htmlFor={`sr-${g.label}`}>Replies go to</label>
+                            <label style={hLabel} htmlFor={`sr-${g.label}`}>Replies go to</label>
                             <input id={`sr-${g.label}`} type="email" value={senderEdit.sender_reply_to}
                               placeholder="carol@beeorganized.com"
                               onChange={ev => setSenderEdit(s => ({ ...s, sender_reply_to: ev.target.value }))}
-                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                              style={{ ...eInputStyle, width:'220px', maxWidth:'100%' }} />
                           </div>
                           <div style={{ display:'flex', gap:'8px' }}>
-                            <button type="button" disabled={busy===`s:${g.label}`}
+                            <EBtn variant="primary" disabled={busy===`s:${g.label}`}
                               onClick={() => saveSenderIdentity(g.label, {
                                 sender_is_custom: true,
                                 sender_name: senderEdit.sender_name.trim(),
                                 sender_email: senderEdit.sender_email.trim(),
                                 sender_reply_to: senderEdit.sender_reply_to.trim() || null,
-                              })}
-                              style={{ background:'#1a2e2b', color:'white', border:'none', borderRadius:'8px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', maxWidth:CONTROL_W.action }}>
+                              })}>
                               Save
-                            </button>
-                            <button type="button" onClick={() => { setSenderEdit(null); setSenderErr('') }}
-                              style={{ background:'white', color:'#1a2e2b', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', maxWidth:CONTROL_W.action }}>
+                            </EBtn>
+                            <EBtn onClick={() => { setSenderEdit(null); setSenderErr('') }}>
                               Cancel
-                            </button>
+                            </EBtn>
                           </div>
-                          <p style={{ flexBasis:'100%', fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:0, maxWidth:CONTROL_W.field }}>
+                          <p style={{ ...eHintStyle, flexBasis:'100%', margin:0, maxWidth:CONTROL_W.field }}>
                             Replies go to a person even though the email comes from the mailbox. Leave it blank and
                             replies follow your location&apos;s reply-to address instead.
                           </p>
-                          {senderErr && <p style={{ flexBasis:'100%', fontSize:'11px', color:'#c96a6a', margin:0 }}>{senderErr}</p>}
+                          {senderErr && <p style={{ flexBasis:'100%', fontSize:'12px', color:ET.destructive, margin:0 }}>⚠ {senderErr}</p>}
                         </div>
                       )}
                     </div>
@@ -20248,7 +20185,7 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
         {/* The fallback, stated rather than implied. This is the whole of the
             retired split_* flags' meaning, said per type instead of per
             location. */}
-        <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:'0 0 4px 2px' }}>
+        <p style={{ ...eHintStyle, margin:'0 0 4px' }}>
           New leads of a job type are assigned to whoever handles it. Anything you leave on{' '}
           <strong style={{ fontWeight:600 }}>The location owner</strong> — and any lead that doesn&apos;t match a
           job type — comes to the owner. What a job type <em>sends as</em> is a separate choice: the person who
@@ -24378,7 +24315,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             : [{ key: 'organizing', label: 'Organizing clients', ...answersOf(settings.paths.generalDefault) },
                { key: 'moving', label: 'Moving clients', ...answersOf(settings.paths.moveDefault) }] }
           return (
-          <div style={{ background:ET.background, paddingBottom:'24px' }}>
+          <div data-emails-ui style={{ background:ET.background, paddingBottom:'24px' }}>
             <EmailsFonts />
             <div style={{ maxWidth:'896px', margin:'0 auto', padding:'24px 16px', display:'flex', flexDirection:'column', gap:'24px', fontFamily:EF.ui, color:ET.foreground }}>
               <header style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-end', justifyContent:'space-between', gap:'16px' }}>
@@ -24417,7 +24354,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                       onSave={v => { const p = replyToProblem(v); return p ? Promise.resolve(p) : emailsSaveLocation('replyToEmail', v) }} />
                   </div>
                 </div>
-                <h3 style={{ margin:'28px 0 8px', fontSize:'14px', fontWeight:600, fontFamily:EF.ui }}>By kind of job</h3>
+                <h3 style={{ margin:'28px 0 8px', fontSize:'14px', fontWeight:600, color:ET.foreground, fontFamily:EF.ui }}>By kind of job</h3>
                 <div style={{ margin:'0 -12px' }}>
                   <NewLeadsSection realLocId={realLocId} readOnly={false} only="handlers" />
                 </div>
@@ -24440,7 +24377,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
               <ESection id="emails" eyebrow="The emails" title="Every email a client can receive"
                 intro="They go out on their own, in this order. Tap the day on any email to change when it goes out.">
-                {realLocId && <div style={{ margin:'0 -12px 20px' }}><FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} /></div>}
+                {realLocId && <FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} />}
                 <EmailsList
                   followupsOff={followupsOffNow}
                   pathSteps={pathSteps}
@@ -24465,9 +24402,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   moved in from Admin → Content (where it also still lives —
                   same rows, same editor, same route). */}
               {corporate && (
-                <ESection id="masters" corporate eyebrow="Bee Organized versions" title="The wording every location starts with"
+                // Starts folded (2026-10-30 follow-up): 26 location templates
+                // under 12 headings made the page scroll a very long way.
+                <ESection id="masters" corporate collapsible defaultOpen={false} eyebrow="Bee Organized versions" title="The wording every location starts with"
                   intro="Changes here reach every location using Bee Organized wording straight away.">
-                  <MasterTemplatesEditor />
+                  <MasterTemplatesEditor design />
                 </ESection>
               )}
             </div>
@@ -32858,7 +32797,10 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist,
 // master template library. Lives in Admin/Corp → Content tab. Edits here
 // propagate live to every drip path step that still references a master
 // (no copy semantics).
-export function MasterTemplatesEditor({ locations = [] }) {
+//   design  true on Settings → Emails (2026-10-30 follow-up): the screen's
+//           tokens, tags and buttons, and no header of its own — the
+//           section names it. Admin → Content keeps its own look.
+export function MasterTemplatesEditor({ locations = [], design = false }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -32950,7 +32892,11 @@ export function MasterTemplatesEditor({ locations = [] }) {
   // scopes and get two live colours; out-of-service is the absence of one.
   const RETIRED = { color:'#6b7c79', bg:'rgba(107,124,121,0.12)' }
 
-  const locName = id => (locations.find(l => l.id === id) || {}).name || null
+  // A location's name: the row's own (the route attaches it for admins), else
+  // the list a mount passed in. Settings → Emails passes no list — reading
+  // only the list is what grouped every location under "Unknown location".
+  const rowLocName = new Map(rows.filter(r => r.location_uuid && r.location_name).map(r => [r.location_uuid, r.location_name]))
+  const locName = id => rowLocName.get(id) || (locations.find(l => l.id === id) || {}).name || null
   const byId = new Map(rows.map(r => [r.id, r]))
   const masterName = id => (byId.get(id) || {}).name || null
 
@@ -33022,12 +32968,17 @@ export function MasterTemplatesEditor({ locations = [] }) {
     // a retired template still says so when it is read on its own.
     const retired = isRetired(tpl)
     return (
-      <div key={tpl.id} style={{ background: retired ? '#fbfbfa' : 'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+      <div key={tpl.id} data-template-row={tpl.id} style={{ background: retired ? (design ? ET.band : '#fbfbfa') : (design ? ET.card : 'white'), borderBottom: i < group.length - 1 ? `1px solid ${design ? ET.border : 'rgba(0,0,0,0.05)'}` : 'none' }}>
         <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px', opacity: retired ? 0.72 : 1 }}>
           <div style={{ width:'36px', height:'36px', borderRadius:'9px', background: retired ? 'rgba(107,124,121,0.09)' : `${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px', flexWrap:'wrap' }}>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', textDecoration: retired ? 'line-through' : 'none' }}>{tpl.name}</p>
+              <p style={{ fontSize: design ? '14px' : '13px', fontWeight: design ? 600 : 700, color: design ? ET.foreground : '#1a2e2b', textDecoration: retired ? 'line-through' : 'none' }}>{tpl.name}</p>
+              {design ? <>
+                {retired && <ETag>⊘ Retired</ETag>}
+                {isMaster ? <ETag tone="corporate">Bee Organized version</ETag> : <ETag tone="own">{locName(tpl.location_uuid) || 'Unknown location'}</ETag>}
+                {tpl.legacy_id && <span style={{ fontSize:'12px', color:ET.mutedFg }}>· {tpl.legacy_id}</span>}
+              </> : <>
               {retired && <span style={{ fontSize:'10px', color:RETIRED.color, background:RETIRED.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>⊘ RETIRED</span>}
               {isMaster ? (
                 <span style={{ fontSize:'10px', color:MASTER.color, background:MASTER.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>🏢 MASTER</span>
@@ -33035,8 +32986,9 @@ export function MasterTemplatesEditor({ locations = [] }) {
                 <span style={{ fontSize:'10px', color:CUSTOM.color, background:CUSTOM.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>📍 {(locName(tpl.location_uuid) || 'Unknown location').toUpperCase()}</span>
               )}
               {tpl.legacy_id && <span style={{ fontSize:'10px', color:'#8a9e9a' }}>· {tpl.legacy_id}</span>}
+              </>}
             </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            <p style={{ fontSize: design ? '12px' : '11px', color: design ? ET.mutedFg : '#8a9e9a', fontFamily: design ? EF.body : undefined, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
               {tpl.type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
             </p>
             {fromName && (
@@ -33045,7 +32997,9 @@ export function MasterTemplatesEditor({ locations = [] }) {
             {isMaster && (usageCount > 0 ? (
               <button
                 onClick={()=>toggleUsage(tpl.id)}
-                style={{ marginTop:'5px', padding:'2px 9px', background:'rgba(15,118,110,0.07)', border:'1px solid rgba(15,118,110,0.2)', borderRadius:'20px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:MASTER.color, cursor:'pointer' }}
+                style={design
+                  ? { marginTop:'6px', padding:0, background:'none', border:'none', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:ET.primary, textDecoration:'underline', textUnderlineOffset:'2px', cursor:'pointer' }
+                  : { marginTop:'5px', padding:'2px 9px', background:'rgba(15,118,110,0.07)', border:'1px solid rgba(15,118,110,0.2)', borderRadius:'20px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:MASTER.color, cursor:'pointer' }}
               >
                 {expanded ? '▾' : '▸'} Used in {usageCount} {usageCount === 1 ? 'sequence' : 'sequences'}
               </button>
@@ -33060,6 +33014,13 @@ export function MasterTemplatesEditor({ locations = [] }) {
               </div>
             )}
           </div>
+          {design ? (
+          <div style={{ display:'flex', gap:'6px', flexShrink:0, flexWrap:'wrap' }}>
+            <EBtn size="sm" onClick={()=>setPreviewing(tpl)}>Preview</EBtn>
+            {isMaster && <EBtn size="sm" onClick={()=>setEditing({ tpl })}>Edit</EBtn>}
+            {isMaster && !tpl.legacy_id && <EBtn size="sm" variant="dangerGhost" onClick={()=>deleteMaster(tpl)}>Delete</EBtn>}
+          </div>
+          ) : (
           <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
             <button onClick={()=>setPreviewing(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
             {isMaster && (
@@ -33069,6 +33030,7 @@ export function MasterTemplatesEditor({ locations = [] }) {
               <button onClick={()=>deleteMaster(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
             )}
           </div>
+          )}
         </div>
       </div>
     )
@@ -33083,9 +33045,9 @@ export function MasterTemplatesEditor({ locations = [] }) {
       return (
         <div key={type} style={{ marginBottom:'14px' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
-            <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
+            <p style={{ fontSize: design ? '12px' : '11px', fontWeight:700, color: design ? ET.mutedFg : '#8a9e9a', textTransform:'uppercase', letterSpacing: design ? '0.08em' : '0.6px' }}>{tc.icon} {tc.label}</p>
           </div>
-          <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+          <div style={design ? { borderRadius:ER.xl, overflow:'hidden', border:`1px solid ${ET.border}` } : { borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
             {group.map((tpl, i) => renderRow(tpl, i, group))}
           </div>
         </div>
@@ -33126,7 +33088,8 @@ export function MasterTemplatesEditor({ locations = [] }) {
             <button
               onClick={()=>toggleRetired(key)}
               aria-expanded={open}
-              style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', maxWidth:CONTROL_W.field, padding:'8px 11px', background: open ? RETIRED.bg : 'white', border:`1px solid ${open ? 'transparent' : 'rgba(0,0,0,0.1)'}`, borderRadius:'9px', fontFamily:'inherit', fontSize:'11px', fontWeight:700, color:RETIRED.color, cursor:'pointer', textAlign:'left', textTransform:'uppercase', letterSpacing:'0.6px' }}
+              data-ehover={design ? 'muted' : undefined}
+              style={design ? { ...eBtnStyle('outline', 'sm'), color:ET.mutedFg } : { display:'flex', alignItems:'center', gap:'8px', width:'100%', maxWidth:CONTROL_W.field, padding:'8px 11px', background: open ? RETIRED.bg : 'white', border:`1px solid ${open ? 'transparent' : 'rgba(0,0,0,0.1)'}`, borderRadius:'9px', fontFamily:'inherit', fontSize:'11px', fontWeight:700, color:RETIRED.color, cursor:'pointer', textAlign:'left', textTransform:'uppercase', letterSpacing:'0.6px' }}
             >
               <span style={{ fontSize:'10px' }}>{open ? '▾' : '▸'}</span>
               <span>⊘ Retired</span>
@@ -33144,6 +33107,12 @@ export function MasterTemplatesEditor({ locations = [] }) {
 
   // Scope section header — coloured accent bar + label + count.
   function scopeHeader(label, scope, count) {
+    if (design) return (
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px' }}>
+        <p style={{ margin:0, fontSize:'16px', fontWeight:700, color:ET.foreground }}>{label.replace(/^\S+ /, '')}</p>
+        <ETag>{count}</ETag>
+      </div>
+    )
     return (
       <div style={{ display:'flex', alignItems:'center', gap:'9px', marginBottom:'12px', paddingBottom:'6px', borderBottom:`2px solid ${scope.bg}` }}>
         <span style={{ width:'4px', height:'18px', borderRadius:'2px', background:scope.color }} />
@@ -33160,7 +33129,26 @@ export function MasterTemplatesEditor({ locations = [] }) {
   ]
 
   return (
-    <div style={{ padding:'14px 1.25rem 32px' }}>
+    <div style={{ padding: design ? 0 : '14px 1.25rem 32px', fontFamily: design ? EF.ui : undefined }}>
+      {design ? (
+        <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:'12px', marginBottom:'16px' }}>
+          {!loading && !err ? (
+            <div role="tablist" aria-label="Which templates" style={{ display:'inline-flex', alignItems:'center', height:'36px', boxSizing:'border-box', padding:'4px', borderRadius:ER.md, background:ET.muted }}>
+              {[['all', 'All', rows.length], ['masters', 'Bee Organized versions', masters.length], ['customs', 'Locations’ own', customs.length]].map(([key, label, count]) => {
+                const on = scopeFilter === key
+                return (
+                  <button key={key} type="button" role="tab" aria-selected={on} onClick={()=>setScopeFilter(key)}
+                    style={{ height:'28px', padding:'0 12px', borderRadius:ER.sm, border:'none', fontSize:'14px', fontWeight:500, fontFamily:EF.ui, cursor:'pointer', whiteSpace:'nowrap',
+                      background: on ? ET.card : 'transparent', color: on ? ET.foreground : ET.mutedFg, boxShadow: on ? ESHADOW.btn : 'none' }}>
+                    {label} ({count})
+                  </button>
+                )
+              })}
+            </div>
+          ) : <span />}
+          <EBtn variant="primary" size="sm" onClick={()=>setEditing('new')}>+ New Master</EBtn>
+        </div>
+      ) : <>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
         <div>
           <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📧 Templates · All Locations</p>
@@ -33185,8 +33173,9 @@ export function MasterTemplatesEditor({ locations = [] }) {
           })}
         </div>
       )}
+      </>}
 
-      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading templates…</p>}
+      {loading && <p style={{ fontSize:'12px', color: design ? ET.mutedFg : '#8a9e9a' }}>Loading templates…</p>}
       {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load templates: {err}</p>}
 
       {!loading && !err && (
@@ -33435,42 +33424,35 @@ export function DripPathStepEditor({ step, onSave, onClose }) {
     }
   }
 
+  // 2026-10-30 follow-up — the Emails screen's dialog (EDialog), the
+  // design's fields. Also the corporate master step editor's.
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'12px' }}>
-      <div onClick={(e)=>e.stopPropagation()} style={{ background:'white', borderRadius:'12px', maxWidth:'640px', width:'100%', maxHeight:'90vh', overflow:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
-        <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Edit Step {step.step_order}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
-        </div>
-        <div style={{ padding:'14px 18px', display:'grid', gap:'12px' }}>
-          <label style={{ display:'block' }}>
-            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Subject</span>
-            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)}
-              style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-          </label>
-          <label style={{ display:'block' }}>
-            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Body</span>
-            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14} {...tags.bind(() => body, setBody)}
-              style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', lineHeight:1.5, resize:'vertical' }} />
-          </label>
-          <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
-          <label style={{ display:'block' }}>
-            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Delay (days after the lead comes in)</span>
-            <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)}
-              style={{ width:'120px', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'4px' }}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</p>
-          </label>
-          <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
-          {localErr && <p style={{ fontSize:'12px', color:'#ef4444' }}>{localErr}</p>}
-        </div>
-        <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-          <button onClick={onClose} disabled={saving} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Cancel</button>
-          <button onClick={handleSave} disabled={saving} style={{ padding:'8px 16px', background:saving?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:saving?'wait':'pointer' }}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+    <EDialog label={`Edit step ${step.step_order}`} eyebrow={`Step ${step.step_order}`} title="Change wording" onClose={saving ? null : onClose}
+      footer={<>
+        <EBtn onClick={onClose} disabled={saving}>Cancel</EBtn>
+        <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</EBtn>
+      </>}>
+      <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
+      <div style={{ display:'grid', gap:'12px' }}>
+        <label style={{ display:'block' }}>
+          <span style={eLabelStyle}>Subject</span>
+          <input type="text" value={subject} onChange={e=>setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={eInputStyle} />
+        </label>
+        <label style={{ display:'block' }}>
+          <span style={eLabelStyle}>Message</span>
+          <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14} {...tags.bind(() => body, setBody)}
+            style={{ ...eTextareaStyle, fontFamily:EF.body, color:ET.ink }} />
+        </label>
+        <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
+        <label style={{ display:'block' }}>
+          <span style={eLabelStyle}>Delay (days after the lead comes in)</span>
+          <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />
+          <span style={eHintStyle}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</span>
+        </label>
+        <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
+        {localErr && <p style={{ margin:0, fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </div>
-    </div>
+    </EDialog>
   )
 }
 

@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { pickOption } from './emails-test-helpers'
 import { EmailsList, TimingEditModal, timingFloorFor, timingMinFor, timingChangeEffect } from '@/components/BeeHub'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -192,8 +193,8 @@ describe('the editor refuses a value that would send straight away', () => {
   it('3 months is day 90, handed back with its unit', async () => {
     const props = await mountModal()
     await setVal('3')
-    const sel = container.querySelector('select[aria-label="Wait measured in"]') as HTMLSelectElement
-    await act(async () => { sel.value = 'months'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    const sel = container.querySelector('[role="combobox"][aria-label="Wait measured in"]') as HTMLElement
+    await pickOption(sel, 'months', act as any)
     expect(container.textContent).toContain('That’s day 90.')
     await act(async () => { saveBtn().click() })
     expect(props.onConfirm).toHaveBeenCalledWith(90, 'months')
@@ -202,10 +203,10 @@ describe('the editor refuses a value that would send straight away', () => {
   it('the floor applies to the days a unit adds up to, not the number typed', async () => {
     await mountModal()          // predecessor is day 5, so the floor is day 6
     await setVal('1')
-    const sel = container.querySelector('select[aria-label="Wait measured in"]') as HTMLSelectElement
-    await act(async () => { sel.value = 'days'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    const sel = container.querySelector('[role="combobox"][aria-label="Wait measured in"]') as HTMLElement
+    await pickOption(sel, 'days', act as any)
     expect(saveBtn().disabled).toBe(true)          // day 1 — too soon
-    await act(async () => { sel.value = 'months'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    await pickOption(sel, 'months', act as any)
     expect(saveBtn().disabled).toBe(false)         // 1 month = day 30 — fine
   })
 

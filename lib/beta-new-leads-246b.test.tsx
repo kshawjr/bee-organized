@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { comboValue, pickOption } from './emails-test-helpers'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -441,12 +442,12 @@ describe('the New leads section', () => {
     // 246 step 2 fused these into one choice; 296 separates them again, because
     // a job type very commonly sends from a shared mailbox while a person still
     // works the lead. Four types × two questions.
-    expect(container.querySelectorAll('select').length).toBe(8)
+    expect(container.querySelectorAll('[role="combobox"]').length).toBe(8)
   })
 
   it('the handler selects are capped and sit left, never stretched', async () => {
     await mountSection()
-    for (const s of Array.from(container.querySelectorAll('select')) as HTMLSelectElement[]) {
+    for (const s of Array.from(container.querySelectorAll('[data-eselect]')) as HTMLElement[]) {
       expect(s.style.maxWidth, 'each select carries an explicit cap').toBeTruthy()
     }
   })
@@ -459,17 +460,16 @@ describe('the New leads section', () => {
 
   it('shows the current handler as the selected option', async () => {
     await mountSection()
-    const sel = container.querySelector('[data-handler-row="Moving/Relocation"] select') as HTMLSelectElement
-    expect(sel.value).toBe('u-carol')
-    const other = container.querySelector('[data-handler-row="Other"] select') as HTMLSelectElement
-    expect(other.value).toBe('')     // no handler → the owner
+    const sel = container.querySelector('[data-handler-row="Moving/Relocation"] [role="combobox"]') as HTMLElement
+    expect(comboValue(sel)).toBe('u-carol')
+    const other = container.querySelector('[data-handler-row="Other"] [role="combobox"]') as HTMLElement
+    expect(comboValue(other)).toBe('')     // no handler → the owner
   })
 
   it('picking a handler POSTs exactly that one type', async () => {
     await mountSection()
-    const sel = container.querySelector('[data-handler-row="Other"] select') as HTMLSelectElement
-    sel.value = 'u-carol'
-    await act(async () => { sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    const sel = container.querySelector('[data-handler-row="Other"] [role="combobox"]') as HTMLElement
+    await pickOption(sel, 'u-carol', act as any)
     const post = calls.find(c => c.method === 'POST' && c.url.includes('project-type-senders'))
     expect(post).toBeTruthy()
     expect(post!.body.project_types).toEqual(['Other'])
@@ -478,9 +478,8 @@ describe('the New leads section', () => {
 
   it('clearing a handler DELETEs that type — no master toggle involved', async () => {
     await mountSection()
-    const sel = container.querySelector('[data-handler-row="Moving/Relocation"] select') as HTMLSelectElement
-    sel.value = ''
-    await act(async () => { sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    const sel = container.querySelector('[data-handler-row="Moving/Relocation"] [role="combobox"]') as HTMLElement
+    await pickOption(sel, '', act as any)
     const del = calls.find(c => c.method === 'DELETE')
     expect(del!.body.project_types).toEqual(['Moving/Relocation'])
     // The retired flags must never be flipped from this screen.
