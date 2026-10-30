@@ -117,6 +117,7 @@ import { broadcastLeadMoved } from '@/lib/realtime-broadcast'
 import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 import { queryLeadMatches, classifyLeadMatches } from '@/components/hive/shared/clientMatch'
 import { attachResubmission } from '@/lib/enquiry-resubmission'
+import { isClosedLocation } from '@/lib/location-close'
 
 // Who is moving the lead. hubUserId is stamped on the transfer touchpoint
 // (user_id); role is re-checked with isAdmin before anything is read.
@@ -177,6 +178,10 @@ export async function transferLead(args: {
   // loc_other is the holding pen, never a transfer target.
   if (dest.location_id === 'loc_other') {
     return { status: 400, body: { error: 'cannot_transfer_to_loc_other' } }
+  }
+  // A closed location has no people to work a lead (lib/location-close).
+  if (isClosedLocation(dest.lifecycle_status)) {
+    return { status: 400, body: { error: 'destination_closed' } }
   }
   if (dest.id === existing.location_uuid) {
     return { status: 400, body: { error: 'already_at_destination' } }

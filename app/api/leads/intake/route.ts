@@ -49,6 +49,7 @@ import {
 import { attachResubmission, type ResubmissionArgs } from '@/lib/enquiry-resubmission'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
 import { routeByZip, zipDecides, routeLogToken, type ZipRouteDecision } from '@/lib/zip-routing'
+import { isClosedLocation, OTHER_SLUG } from '@/lib/location-close'
 import { phoneForWrite } from '@/lib/phone'
 import { recordPhoneNote } from '@/lib/phone-note'
 
@@ -276,14 +277,25 @@ export async function POST(req: NextRequest) {
   const routeSlug: string = zipRoute ? zipRoute.slug : sentSlug!
   // Rides on every row from here (success and error): what the zip chose,
   // what the website sent, and whether the zip overruled it.
-  const zipRouteLogToken = routeLogToken(zipRoute, sentSlug)
+  let zipRouteLogToken = routeLogToken(zipRoute, sentSlug)
 
   // Slug lives in locations.location_id (Zoho-style ID, used as slug across repo).
-  const { data: location, error: locErr } = await supabaseService
-    .from('locations')
-    .select('id, name, location_id, lifecycle_status')
-    .eq('location_id', routeSlug)
-    .maybeSingle()
+  const lookupLocation = (slug: string) =>
+    supabaseService
+      .from('locations')
+      .select('id, name, location_id, lifecycle_status')
+      .eq('location_id', slug)
+      .maybeSingle()
+  let { data: location, error: locErr } = await lookupLocation(routeSlug)
+
+  // A CLOSED location takes no new leads (lib/location-close). The zip path
+  // can't reach one — routing sends anything not active/onboarding to Other —
+  // but a lead with NO zip goes where the website says, and the website keeps
+  // a closed franchise's page. Send it to Other, and say so on the log row.
+  if (!locErr && location && isClosedLocation(location.lifecycle_status)) {
+    zipRouteLogToken += ` sent_loc_closed=${location.location_id}`
+    ;({ data: location, error: locErr } = await lookupLocation(OTHER_SLUG))
+  }
 
   if (locErr) {
     await logIntake({

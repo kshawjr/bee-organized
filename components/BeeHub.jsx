@@ -96,6 +96,7 @@ import { adminBadgeCount } from "@/lib/feedback-admin-tiles"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import AdminZipCodesScreen from "@/components/admin/AdminZipCodesScreen"
 import LocationZipsPanel from "@/components/admin/LocationZipsPanel"
+import LocationClosePanel from "@/components/admin/LocationClosePanel"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // The compact, Home-sized cut of System Health — stands in for the operational
 // Home when an elevated user is viewing 'All Locations'. Reads the SAME
@@ -28143,6 +28144,10 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
               same question as Quick info, not a billing or settings detail.
               Corporate edits here; the server decides (can_edit). */}
           <LocationZipsPanel locationId={currentLoc.id} />
+
+          {/* Close this location — super_admin only (the panel returns null for
+              anyone else; the routes refuse them too). Dry run first. */}
+          <LocationClosePanel locationId={currentLoc.id} role={role} />
 
           {/* Owners — up to two claimed owners (primary + co-owner), any
               pending owner invite, and an invite CTA while under the cap.

@@ -18,6 +18,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { isClosedLocation } from '@/lib/location-close'
 
 export const runtime = 'nodejs'
 
@@ -50,7 +51,10 @@ export async function GET() {
     )
   }
 
-  const rows = locations ?? []
+  // A closed location is never a destination (lib/location-close); the
+  // transfer itself refuses one too. Filtered here, not in the query, so a
+  // NULL lifecycle_status is not dropped by a SQL `<>`.
+  const rows = (locations ?? []).filter((l) => !isClosedLocation(l.lifecycle_status))
 
   // Batch the owner-name lookup rather than N per-location resolver calls —
   // this is a cosmetic label, so the earliest role='owner' hub_users row per
