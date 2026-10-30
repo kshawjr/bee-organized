@@ -339,6 +339,14 @@ export default function NewClientSheet({
       }),
     })
     const json = await res.json().catch(() => ({}))
+    // The server's own duplicate check (29 Oct 2026) refused: one existing
+    // record matches on email or phone. Carry it out so the sheet can show it.
+    if (res.status === 409 && json?.error === 'duplicate_client' && json?.existing?.id) {
+      const err = new Error('duplicate_client')
+      err.existing = json.existing
+      err.matchedOn = json.matched_on
+      throw err
+    }
     if (!res.ok || !json?.lead) throw new Error(json?.error || `HTTP ${res.status}`)
     return json
   }
@@ -421,7 +429,20 @@ export default function NewClientSheet({
         setToast({ kind: 'error', msg: dripNotStartedToast(drip) })
       }
     } catch (e) {
-      setErrorMsg(String(e?.message || e))
+      if (e?.existing) {
+        // Same frame the browser-side gate opens: the existing record, with
+        // "Open client profile". The server refuses every retry, so this is
+        // where the create ends.
+        setForceNew(false)
+        setDbMatch({
+          person: { id: e.existing.id, name: e.existing.name || 'Existing client', outreachTimeline: [] },
+          matchedOn: e.matchedOn === 'phone' ? 'phone' : e.matchedOn === 'email' ? 'email' : 'email and phone',
+          matchedValue: e.matchedOn === 'phone' ? maskPhone(effPhone) : maskEmail(effEmail),
+        })
+        setToast({ kind: 'error', msg: 'A matching client already exists — showing them instead' })
+      } else {
+        setErrorMsg(String(e?.message || e))
+      }
     } finally {
       setBusy(false)
     }

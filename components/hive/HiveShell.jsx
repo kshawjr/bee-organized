@@ -1120,6 +1120,9 @@ export default function HiveShell({
             setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))
             onOpenClient(id, { replace: true })
           }}
+          // The duplicate notice's link — a real open (pushes history, so Back
+          // returns to the copy), not the chevron walk above.
+          onOpenClient={(id) => openClient(id)}
           people={patchedPeople}
           locationUsers={locationUsers}
           onClose={() => { setOverlay(null); onCloseRecord() }}

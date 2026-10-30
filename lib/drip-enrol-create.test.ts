@@ -20,7 +20,7 @@ const h = vi.hoisted(() => {
     const call: Call = { table, ops: [] }
     state.calls.push(call)
     const b: any = {}
-    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'or', 'not', 'is', 'in', 'order', 'limit']) {
+    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'or', 'not', 'is', 'in', 'ilike', 'range', 'order', 'limit']) {
       b[m] = (...args: any[]) => { call.ops.push([m, args]); return b }
     }
     b.single = () => Promise.resolve(resp)
@@ -64,6 +64,8 @@ const post = (body: any) =>
 const primeCreate = () => {
   h.enqueue('hub_users', { id: 'u1', role: 'super_admin', location_id: null })
   h.enqueue('locations', { id: 'loc-test', location_id: 'loc_test', name: 'Test Location' })
+  // The create's duplicate check (29 Oct 2026) reads leads first: a name-only lookup, no match.
+  h.enqueue('leads', [])
   h.enqueue('leads', { id: 'lead-new', name: 'Test Fornat', assigned_to: 'owner-1' })
 }
 

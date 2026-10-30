@@ -16,6 +16,17 @@
 // Legacy callers that omit startDrip fall back to the historical skip_drip
 // default-ON drip behavior. The X-API-Key webhook route /api/leads/intake is
 // SEPARATE and unchanged — it always fires all three automatically.
+//
+// DUPLICATE CHECK (29 Oct 2026): this door had none — the only thing between
+// a user and a second copy was the create form's own lookup, which runs in
+// the browser and lets the create through when its query fails. Now checked
+// here, in the same clientMatch vocabulary intake uses, scoped to the target
+// location. The difference from intake: a person is present, so a SOLID
+// match (one record on email or phone) is REFUSED with 409 duplicate_client
+// and the existing record's id + name, for the form to open instead — never
+// merged behind their back. An in-question or name-only match still creates,
+// flagged possible_duplicate_of like intake. A failed check degrades to the
+// plain create: losing a real client is worse than a duplicate.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -33,6 +44,7 @@ import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
 import { normalizeLeadSource } from '@/lib/lead-source'
 import { phoneForWrite } from '@/lib/phone'
 import { recordPhoneNote } from '@/lib/phone-note'
+import { queryLeadMatches, classifyLeadMatches } from '@/components/hive/shared/clientMatch'
 
 export const runtime = 'nodejs'
 
@@ -185,11 +197,63 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ─── Insert ──────────────────────────────────────────────────
-  const now = new Date().toISOString()
   // Universal phone shape (lib/phone.ts); a second number or words go to a
   // note on the lead, written after the insert.
   const phoneW = phoneForWrite(body.phone)
+  const email = (body.email || '').trim() || null
+
+  // ─── Duplicate check (see header) ────────────────────────────
+  // Matched on what will be STORED: the kept phone, not a two-number string
+  // whose digits run together.
+  let possibleDuplicateIds: string[] = []
+  const dedupWarnings: string[] = []
+  try {
+    const strongRows = await queryLeadMatches(supabaseService, {
+      email,
+      phone: phoneW.value,
+      locationUuid: location.id,
+    })
+    // (cast: the JS module's inferred return is a union TS won't narrow)
+    const verdict = classifyLeadMatches(strongRows, { email, phone: phoneW.value }) as {
+      tier: 'solid' | 'in_question' | 'none'
+      match?: any
+      matchedOn?: string
+      matchIds?: string[]
+    }
+    if (verdict.tier === 'solid') {
+      return NextResponse.json(
+        {
+          error: 'duplicate_client',
+          existing: { id: verdict.match.id, name: verdict.match.name ?? null },
+          matched_on: verdict.matchedOn ?? null,
+        },
+        { status: 409 },
+      )
+    }
+    if (verdict.tier === 'in_question') {
+      possibleDuplicateIds = verdict.matchIds ?? []
+    } else {
+      // Name-only: never refuses, only flags. ilike with escaped wildcards =
+      // case-blind exact match on the stored name (the intake rule).
+      const nameEsc = composedName.replace(/[\\%_]/g, (m) => `\\${m}`)
+      const { data: nameRows, error: nameErr } = await supabaseService
+        .from('leads')
+        .select('id, name')
+        .eq('location_uuid', location.id)
+        .ilike('name', nameEsc)
+        .not('is_junk', 'is', true)
+        .range(0, 999)
+      if (nameErr) throw new Error(nameErr.message)
+      possibleDuplicateIds = (nameRows || []).map((r: { id: string }) => r.id)
+    }
+  } catch (err: any) {
+    console.error('[leads] duplicate check failed — creating without it', err)
+    dedupWarnings.push(`dedup_match_failed: ${err?.message || String(err)}`)
+    possibleDuplicateIds = []
+  }
+
+  // ─── Insert ──────────────────────────────────────────────────
+  const now = new Date().toISOString()
   const insertPayload: Record<string, any> = {
     location_id:   location.location_id,
     location_uuid: location.id,
@@ -197,7 +261,7 @@ export async function POST(req: NextRequest) {
     name:          composedName,
     first_name:    firstName || null,
     last_name:     lastName  || null,
-    email:         (body.email || '').trim() || null,
+    email,
     phone:         phoneW.value,
     // Same tidy-up as the website door: google → Google, ig → Instagram;
     // anything else stays as typed.
@@ -215,6 +279,7 @@ export async function POST(req: NextRequest) {
     request_details:   body.request_details || null,
     notes:             body.notes || null,
     stage,
+    ...(possibleDuplicateIds.length ? { possible_duplicate_of: possibleDuplicateIds } : {}),
     created_at: now,
     updated_at: now,
   }
@@ -283,6 +348,21 @@ export async function POST(req: NextRequest) {
     await recordPhoneNote({ leadId: lead.id, locationUuid: location.id, original: phoneW.note, kept: phoneW.value })
   }
 
+  // Flagged: leave the same human-readable trace intake does.
+  if (possibleDuplicateIds.length > 0) {
+    await supabaseService.from('touchpoints').insert({
+      lead_id:       lead.id,
+      location_uuid: location.id,
+      kind:          'system',
+      method:        'system',
+      label:         'Possible duplicate — matched an existing client when created',
+      notes:         `Suspected match: ${possibleDuplicateIds.join(', ')}`,
+      status:        'done',
+      occurred_at:   now,
+      user_id:       null,
+    })
+  }
+
   // ─── Opt-in notifications (manual create only) ────────────────
   // The create form offers three INDEPENDENT, default-OFF actions. Each
   // fires ONLY when selected, each reuses the SAME function the webhook
@@ -292,7 +372,7 @@ export async function POST(req: NextRequest) {
   // matches the pre-notification manual behavior. This is opt-in ONLY;
   // /api/leads/intake (website/webhook) always fires all three and is
   // untouched.
-  const warnings: string[] = []
+  const warnings: string[] = [...dedupWarnings]
 
   // Base URL for the "open this lead" deep-links — same fallback chain the
   // intake path uses (proxy-fronted override → site url → request origin).

@@ -37,7 +37,7 @@ const h = vi.hoisted(() => {
     const call: Call = { table, ops: [] }
     state.calls.push(call)
     const b: any = {}
-    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'or', 'not', 'is', 'in', 'order', 'limit']) {
+    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'or', 'not', 'is', 'in', 'ilike', 'range', 'order', 'limit']) {
       b[m] = (...args: any[]) => { call.ops.push([m, args]); return b }
     }
     b.single = () => Promise.resolve(resp)
@@ -97,6 +97,8 @@ describe('issue 153 — manual create assignee fallback', () => {
   it('FALLBACK: a null assigned_to resolves to the location owner (via location_owner)', async () => {
     h.enqueue('hub_users', { id: 'u1', role: 'owner', location_id: 'loc-uuid-1' }) // auth
     h.enqueue('locations', { id: 'loc-uuid-1', location_id: 'kc', name: 'KC' })
+    // The create's duplicate check (29 Oct 2026) reads leads first: a name-only lookup, no match.
+    h.enqueue('leads', [])
     h.enqueue('leads', { id: 'lead-1', name: 'Jane', assigned_to: 'owner-1' })       // insert
 
     const res = await post({
@@ -118,6 +120,8 @@ describe('issue 153 — manual create assignee fallback', () => {
     h.enqueue('hub_users', { id: 'u1', role: 'owner', location_id: 'loc-uuid-1' }) // auth
     h.enqueue('locations', { id: 'loc-uuid-1', location_id: 'kc', name: 'KC' })
     h.enqueue('hub_users', { id: 'picked-user', location_id: 'loc-uuid-1' })         // assignee validation
+    // The create's duplicate check (29 Oct 2026) reads leads first: a name-only lookup, no match.
+    h.enqueue('leads', [])
     h.enqueue('leads', { id: 'lead-1', name: 'Jane', assigned_to: 'picked-user' })   // insert
 
     const res = await post({
@@ -137,6 +141,8 @@ describe('issue 153 — manual create assignee fallback', () => {
     ownerMock.mockResolvedValueOnce(null as any)
     h.enqueue('hub_users', { id: 'u1', role: 'owner', location_id: 'loc-uuid-1' }) // auth
     h.enqueue('locations', { id: 'loc-uuid-1', location_id: 'kc', name: 'KC' })
+    // The create's duplicate check (29 Oct 2026) reads leads first: a name-only lookup, no match.
+    h.enqueue('leads', [])
     h.enqueue('leads', { id: 'lead-1', name: 'Jane', assigned_to: null })            // insert
 
     const res = await post({

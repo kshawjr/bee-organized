@@ -19,6 +19,7 @@ import { factsFromRows } from '@/lib/enquiry-exit'
 import { isLocationSendSettingProblem } from '@/lib/sender-domain'
 import { DRIP_ENROL_KIND, isDripEnrolReason, type DripEnrolReason } from '@/lib/drip-enrol-outcome'
 import { resolveDripCategory } from '@/lib/stage-emails'
+import { duplicateIdsOf, resolveDuplicateOf } from '@/components/hive/shared/duplicateFlag'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
@@ -52,7 +53,7 @@ export async function GET(
   // retry drops it while migrations/lead_former_addresses.sql is pending —
   // the profile must never 500 over a column that only adds history.
   const PROFILE_COLS =
-    'id, name, first_name, last_name, company, email, phone, address, city, state, zip, address_label, address_label_note, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, inbox_dismissed_at, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type, import_source, jobber_request_id, jobber_job_id, is_junk, drip_last_send_status, drip_last_send_error'
+    'id, name, first_name, last_name, company, email, phone, address, city, state, zip, address_label, address_label_note, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, inbox_dismissed_at, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type, import_source, jobber_request_id, jobber_job_id, is_junk, drip_last_send_status, drip_last_send_error, possible_duplicate_of'
   let { data: lead, error: leadError } = await supabaseService
     .from('leads')
     .select(`${PROFILE_COLS}, former_addresses`)
@@ -90,7 +91,17 @@ export async function GET(
         .maybeSingle()
     : Promise.resolve({ data: null } as { data: { id: string, name: string } | null })
 
-  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes, dripRes] = await Promise.all([
+  // "This may be a duplicate of …" — possible_duplicate_of is a JSONB ARRAY of
+  // lead ids, resolved to names here so the card can say who and link to
+  // them. Junk rows are fetched on purpose (the card says "in the bin"); a row
+  // that no longer exists comes back as 'gone'. Capped: the import has written
+  // 17 on one row, never anything near this.
+  const duplicateIds = duplicateIdsOf(lead.possible_duplicate_of, id).slice(0, 50)
+  const duplicatesQuery = duplicateIds.length
+    ? supabaseService.from('leads').select('id, name, is_junk, location_uuid').in('id', duplicateIds)
+    : Promise.resolve({ data: [] as any[], error: null })
+
+  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes, dripRes, duplicatesRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, closed_note, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
@@ -128,7 +139,16 @@ export async function GET(
     // lead_drip_progress only, so without this the Preferences panel reads
     // "active" on a dead sequence. Small: one row per drip_path per lead.
     supabaseService.from('lead_drip_progress').select('stopped_at, stopped_reason, completed_at, created_at').eq('lead_id', id),
+    duplicatesQuery,
   ])
+
+  // Another location's record is not this viewer's to name (owners are scoped
+  // to their own location); it reads as 'gone' rather than leaking a name. A
+  // failed lookup leaves the notice up with no names — never a 500.
+  const duplicate_of = resolveDuplicateOf(
+    duplicateIds,
+    ((duplicatesRes as any)?.data ?? []).filter((r: any) => isAdmin(hubUser.role) || r.location_uuid === hubUser.location_id),
+  )
 
   // Effective nurture-drip state for PreferencesBlock. A live row (neither
   // stopped nor completed — includes paused, which the leads.paused flag
@@ -336,6 +356,7 @@ export async function GET(
       location_name: locRes.data?.name ?? null,
       referred_by_name: referrerRes.data?.name ?? null,
       referred_by_missing: referredByMissing,
+      duplicate_of,
       assigned_to_name: lead.assigned_to ? (authorById[lead.assigned_to] ?? null) : null,
       // #112 — nurture-drip terminal state (see derivation above).
       // #243 — plus the never-enrolled state that used to hide inside the

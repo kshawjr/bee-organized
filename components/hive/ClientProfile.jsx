@@ -87,6 +87,7 @@ import { DISPOSITIONS, DISPOSITION_GROUPS, TRANSFER_MENU, confirmPrompt, CONFIRM
 import { canTransferLeads, transferBlockFor, TRANSFER_BLOCK_COPY } from '@/lib/lead-transfer-rule'
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
 import { telHref } from '@/lib/phone'
+import DuplicateNotice from './shared/DuplicateNotice'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -105,7 +106,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, onEngagementFounded = () => {}, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
+export default function ClientProfile({ clientId, people = [], currentUserId = null, currentUserRole = null, onClose, onOpenEngagement = () => {}, onSendToJobber = null, onEngagementFounded = () => {}, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, onOpenClient = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -1268,6 +1269,11 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
           Shown on read-only seats too: a reminder is personal and changes
           nothing about the client. */}
       <RecordReminderList ctl={reminder} inlineSetter={!actionBar} />
+
+      {/* Possible duplicate — leads.possible_duplicate_of, resolved to names by
+          the profile route. Shown wherever the card opens (Inbox, client list,
+          deep link): taking a copy off the Inbox only hid it from the Inbox. */}
+      <DuplicateNotice items={c?.duplicate_of} onOpen={onOpenClient} />
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
           Owing / Last touch. Owing spans ALL engagements incl. closed
