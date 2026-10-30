@@ -19291,16 +19291,21 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
     const shown = isOpen ? live : live.slice(0, SHOW)
     const hidden = live.length - shown.length
     return (
-      <div style={{ marginBottom:'32px' }}>
-        <button type="button" aria-expanded={groupOpen} onClick={() => setCollapsed(x => ({ ...x, [id]: groupOpen }))}
-          data-ehover="muted" style={{ display:'flex', width:'100%', alignItems:'flex-start', gap:'12px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, background:ET.card, padding:'12px', textAlign:'left', cursor:'pointer', color:ET.foreground, marginBottom: groupOpen ? '12px' : 0, fontFamily:EF.ui }}>
-          <div style={{ minWidth:0, flex:1 }}>
-            <h3 style={{ margin:0, fontSize:'16px', fontWeight:700, color:ET.foreground, fontFamily:EF.ui }}>{title} <span style={{ fontWeight:400, color:ET.mutedFg }}>· {count}</span></h3>
-            {note && <p style={{ margin:0, fontSize:'12px', color:ET.mutedFg }}>{note}</p>}
-          </div>
-          <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop:'2px', flexShrink:0, color:ET.mutedFg, transform: groupOpen ? 'rotate(180deg)' : 'none' }}><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-        {groupOpen && <>
+      <div style={{ marginBottom:'32px', minWidth:0 }}>
+        {/* The export's group header (EmailList :552): the whole header is
+            one button — border, 14px corners, muted on hover, a chevron that
+            turns — inside the heading, so it is both a heading and a fold. */}
+        <h3 style={{ margin: groupOpen ? '0 0 12px' : 0, fontSize:'inherit', fontWeight:'inherit' }}>
+          <button type="button" aria-expanded={groupOpen} aria-controls={`email-group-${id}`} data-fold-header onClick={() => setCollapsed(x => ({ ...x, [id]: groupOpen }))}
+            data-ehover="muted" style={{ display:'flex', width:'100%', boxSizing:'border-box', alignItems:'flex-start', gap:'12px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, background:ET.card, padding:'12px', textAlign:'left', cursor:'pointer', color:ET.foreground, fontFamily:EF.ui }}>
+            <span style={{ display:'block', minWidth:0, flex:1 }}>
+              <span style={{ display:'block', fontSize:'16px', fontWeight:700, color:ET.foreground, fontFamily:EF.ui }}>{title} <span style={{ fontWeight:400, color:ET.mutedFg }}>· {count}</span></span>
+              {note && <span style={{ display:'block', fontSize:'12px', fontWeight:400, color:ET.mutedFg }}>{note}</span>}
+            </span>
+            <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop:'2px', flexShrink:0, color:ET.mutedFg, transform: groupOpen ? 'rotate(180deg)' : 'none', transition:'transform 150ms' }}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        </h3>
+        {groupOpen && <div id={`email-group-${id}`}>
           {live.length === 0
             ? <div style={{ background:ET.card, border:`1px solid ${ET.border}`, borderRadius:ER.xl, padding:'16px', fontSize:'14px', color:ET.mutedFg }}>Nothing here yet.</div>
             : (
@@ -19349,7 +19354,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
               + Add an email here
             </EBtn>
           )}
-        </>}
+        </div>}
       </div>
     )
   }
@@ -20015,7 +20020,9 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
 
   // Capped and left, never stretched (CONTROL_W, issue 240 step 4). The
   // dropdowns are the Emails screen's (ESelect, 2026-10-30 follow-up).
-  const selBox = { width:'240px', maxWidth:CONTROL_W.select, minWidth:'160px' }
+  // Full width on a phone, 224px from 640px (the export's sm:w-56) — the
+  // width is the question's (EMAILS_CSS [data-handler-q]); this only caps it.
+  const selBox = { maxWidth:CONTROL_W.select }
   // Caption above each of the two per-type questions. They are equals, so they
   // are labelled identically — neither reads as the other's exception.
   const hLabel = { ...eLabelStyle, fontSize:'12px' }
@@ -20079,8 +20086,8 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
                         </div>
                         {/* The two questions, asked side by side and captioned.
                             Neither is the exception to the other. */}
-                        <div style={{ flex:'0 1 auto', display:'flex', flexWrap:'wrap', gap:'12px' }}>
-                          <div>
+                        <div data-handler-qs style={{ flex:'0 1 auto', display:'flex', flexWrap:'wrap', gap:'12px' }}>
+                          <div data-handler-q>
                             <label style={hLabel} htmlFor={`h-${g.label}`}>Who handles it</label>
                             <ESelect
                               id={`h-${g.label}`}
@@ -20091,7 +20098,7 @@ export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
                               style={selBox}
                               options={[{ value:'', label:'The location owner' }, ...people.map(p => ({ value:p.id, label:p.name }))]} />
                           </div>
-                          <div>
+                          <div data-handler-q>
                             <label style={hLabel} htmlFor={`s-${g.label}`}>What it sends as</label>
                             <ESelect
                               id={`s-${g.label}`}
@@ -23722,7 +23729,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>All settings</span>
         </button>
 
-      <div style={{ display:'grid', gap:'0' }}>
+      {/* minmax(0, 1fr), not the implicit `auto` track (2026-10-30): a grid
+          item's min-width is auto, so the one column grew to the widest thing
+          inside a section — the Emails screen's five Look cards — and pushed
+          the page past the right edge, where html/body overflow-x:hidden cut
+          it off with no way to scroll to it. */}
+      <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1fr)', gap:'0' }}>
 
         {!sectionAllowed ? (
           <div style={{ padding:'40px 24px', textAlign:'center' }}>
@@ -24315,9 +24327,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             : [{ key: 'organizing', label: 'Organizing clients', ...answersOf(settings.paths.generalDefault) },
                { key: 'moving', label: 'Moving clients', ...answersOf(settings.paths.moveDefault) }] }
           return (
-          <div data-emails-ui style={{ background:ET.background, paddingBottom:'24px' }}>
+          <div data-emails-ui style={{ background:ET.background, minWidth:0 }}>
             <EmailsFonts />
-            <div style={{ maxWidth:'896px', margin:'0 auto', padding:'24px 16px', display:'flex', flexDirection:'column', gap:'24px', fontFamily:EF.ui, color:ET.foreground }}>
+            {/* The export's column: centred, 896px at most, 16px sides on a
+                phone and 32px from 640px (EMAILS_CSS [data-emails-page]). */}
+            <div data-emails-page style={{ maxWidth:'896px', minWidth:0, margin:'0 auto', boxSizing:'border-box', display:'flex', flexDirection:'column', gap:'24px', fontFamily:EF.ui, color:ET.foreground }}>
               <header style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-end', justifyContent:'space-between', gap:'16px' }}>
                 <div>
                   <h1 style={{ margin:0, fontSize:'30px', fontWeight:300, color:ET.foreground, fontFamily:EF.heading }}>Emails</h1>
@@ -33133,7 +33147,7 @@ export function MasterTemplatesEditor({ locations = [], design = false }) {
       {design ? (
         <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:'12px', marginBottom:'16px' }}>
           {!loading && !err ? (
-            <div role="tablist" aria-label="Which templates" style={{ display:'inline-flex', alignItems:'center', height:'36px', boxSizing:'border-box', padding:'4px', borderRadius:ER.md, background:ET.muted }}>
+            <div role="tablist" aria-label="Which templates" style={{ display:'inline-flex', alignItems:'center', maxWidth:'100%', overflowX:'auto', height:'36px', boxSizing:'border-box', padding:'4px', borderRadius:ER.md, background:ET.muted }}>
               {[['all', 'All', rows.length], ['masters', 'Bee Organized versions', masters.length], ['customs', 'Locations’ own', customs.length]].map(([key, label, count]) => {
                 const on = scopeFilter === key
                 return (

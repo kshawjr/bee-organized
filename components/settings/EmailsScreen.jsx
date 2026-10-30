@@ -74,8 +74,9 @@ export const EF = {
 // dialog that becomes a bottom sheet on a phone. Scoped to [data-emails-ui]
 // so nothing else in Bee Hub changes.
 const EMAILS_CSS = `
-[data-emails-ui] :is(button,input,select,textarea,a,[tabindex]):focus-visible{outline:none!important;box-shadow:0 0 0 1px ${ET.gold}!important}
-[data-emails-ui] [data-efield]:focus-within{box-shadow:0 0 0 1px ${ET.gold}!important}
+[data-emails-ui] :is(button,input,select,textarea,a,[tabindex]):focus-visible{outline:none!important;box-shadow:0 0 0 2px ${ET.gold}!important}
+[data-emails-ui] [data-efield]:focus-within{box-shadow:0 0 0 2px ${ET.gold}!important}
+[data-emails-ui] [data-ehover="brand"]:not(:disabled):hover{background-color:${alpha(ET.sage, 0.8)}!important}
 [data-emails-ui] :is(button,input,select,textarea):disabled{opacity:.5!important;cursor:not-allowed!important}
 [data-emails-ui] [data-ehover="muted"]:not(:disabled):hover{background-color:${ET.muted}!important}
 [data-emails-ui] [data-ehover="secondary"]:not(:disabled):hover{background-color:${alpha(ET.secondary, 0.8)}!important}
@@ -86,6 +87,16 @@ const EMAILS_CSS = `
 [data-edialog]{position:fixed;z-index:81;left:50%;top:50%;transform:translate(-50%,-50%);width:640px;max-width:calc(100vw - 32px);max-height:92vh;overflow-y:auto;box-sizing:border-box;background:${ET.card};border-radius:${ER.xxl};padding:24px;box-shadow:${ESHADOW.dialog}}
 @media (max-width:639px){[data-edialog]{left:0;right:0;bottom:0;top:auto;transform:none;width:auto;max-width:none;border-radius:${ER.xxl} ${ER.xxl} 0 0;padding:20px}}
 @media (max-width:639px){[data-estack]{flex-direction:column!important;align-items:stretch!important}}
+[data-emails-page]{padding:24px 16px}
+@media (min-width:640px){[data-emails-page]{padding:40px 32px}}
+[data-jumpnav]{margin:0 -16px;padding:8px 16px}
+@media (min-width:640px){[data-jumpnav]{margin:0 -32px;padding:8px 32px}}
+[data-look-row]{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -4px;padding:0 4px 8px}
+[data-look-row]>*{flex:0 0 160px;scroll-snap-align:start}
+@media (min-width:640px){[data-look-row]{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow-x:visible}[data-look-row]>*{flex:none}}
+[data-emails-ui] [data-handler-q]{flex:1 1 100%;min-width:0}
+[data-emails-ui] [data-handler-qs]{flex:1 1 100%;min-width:0}
+@media (min-width:640px){[data-emails-ui] [data-handler-q]{flex:0 0 224px}[data-emails-ui] [data-handler-qs]{flex:0 1 auto}}
 `
 
 // The export's three web fonts and the CSS above. A plain <link> and <style>
@@ -104,24 +115,30 @@ export function EmailsFonts() {
 //   field    36px · 8px · 1px input · 0 12px · 14px
 //   select   the field's shape, a chevron on the right; its panel 8px with a
 //            1px border, items 6px with 6px 32px 6px 8px padding
+//
+// CORRECTED 2026-10-30 (Kevin): the export's OWN button on this screen, not
+// the component library's — 10px corners, height from 6px × 12px padding,
+// 14px/500, no shadow, a 2px gold focus ring (EMAILS_CSS). `sm` is the
+// export's `text-xs` override. `brand` is sage on ink, 8px × 16px.
 export function eBtnStyle(variant = 'outline', size = 'default') {
   const small = size === 'sm'
   const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px', boxSizing:'border-box',
-    height: small ? '32px' : '36px', padding: small ? '0 12px' : '0 16px', borderRadius:ER.md,
-    fontSize: small ? '12px' : '14px', fontWeight:500, fontFamily:EF.ui, lineHeight:1, whiteSpace:'nowrap',
+    padding:'6px 12px', borderRadius:ER.lg,
+    fontSize: small ? '12px' : '14px', fontWeight:500, fontFamily:EF.ui, lineHeight: small ? '16px' : '20px', whiteSpace:'nowrap',
     cursor:'pointer', border:'1px solid transparent', textDecoration:'none' }
   const v = {
-    primary:     { background:ET.primary, color:ET.primaryFg, boxShadow:ESHADOW.btn },
-    secondary:   { background:ET.secondary, color:ET.foreground, boxShadow:ESHADOW.field },
-    outline:     { background:ET.background, color:ET.foreground, border:`1px solid ${ET.input}`, boxShadow:ESHADOW.field },
+    primary:     { background:ET.primary, color:ET.primaryFg },
+    secondary:   { background:ET.secondary, color:ET.foreground },
+    outline:     { background:ET.card, color:ET.foreground, border:`1px solid ${ET.border}` },
     ghost:       { background:'transparent', color:ET.foreground },
-    danger:      { background:ET.destructive, color:'#FFFFFF', boxShadow:ESHADOW.field },
+    danger:      { background:ET.destructive, color:'#FFFFFF' },
     dangerGhost: { background:'transparent', color:ET.destructive },
-    link:        { background:'transparent', color:ET.primary, height:'auto', padding:0, textDecoration:'underline', textUnderlineOffset:'2px' },
+    brand:       { background:ET.sage, color:ET.ink, padding:'8px 16px' },
+    link:        { background:'transparent', color:ET.primary, padding:0, border:'none', textDecoration:'underline', textUnderlineOffset:'2px' },
   }[variant] || {}
   return { ...base, ...v }
 }
-const HOVER = { primary:'solid', danger:'solid', secondary:'secondary', outline:'muted', ghost:'muted', dangerGhost:'muted', link:'link' }
+const HOVER = { primary:'solid', danger:'solid', secondary:'secondary', outline:'muted', ghost:'muted', dangerGhost:'muted', brand:'brand', link:'link' }
 
 // `secondary` was this file's white bordered button before the exact tokens
 // arrived; that look is the library's `outline`, so it maps there.
@@ -130,10 +147,12 @@ export function EBtn({ variant = 'outline', size = 'default', style, children, .
   return <button type="button" data-ehover={HOVER[v]} {...p} style={{ ...eBtnStyle(v, size), ...style }}>{children}</button>
 }
 
+// The export's Field: 10px corners, its border colour, card fill, 8px × 12px,
+// 14px text (corrected 2026-10-30 — the export wins over the earlier table).
 export const eInputStyle = {
-  display:'block', width:'100%', height:'36px', boxSizing:'border-box', padding:'0 12px',
-  borderRadius:ER.md, border:`1px solid ${ET.input}`, background:'transparent', boxShadow:ESHADOW.field,
-  fontSize:'14px', fontFamily:EF.ui, color:ET.foreground, outline:'none',
+  display:'block', width:'100%', boxSizing:'border-box', padding:'8px 12px',
+  borderRadius:ER.lg, border:`1px solid ${ET.border}`, background:ET.card,
+  fontSize:'14px', lineHeight:'20px', fontFamily:EF.ui, color:ET.foreground, outline:'none',
 }
 export const eTextareaStyle = { ...eInputStyle, height:'auto', minHeight:'60px', padding:'8px 12px', lineHeight:1.55, resize:'vertical' }
 export const eLabelStyle = { display:'block', marginBottom:'4px', fontSize:'14px', fontWeight:600, color:ET.foreground, fontFamily:EF.ui }
@@ -178,7 +197,7 @@ export function ESelect({ id, value, options, onChange, ariaLabel, disabled = fa
         aria-label={ariaLabel} disabled={disabled} data-value={value ?? ''}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show() } }}
-        style={{ ...eInputStyle, display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px', textAlign:'left', cursor:'pointer', background:ET.card,
+        style={{ ...eInputStyle, display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px', paddingRight:'12px', textAlign:'left', cursor:'pointer', background:ET.card,
           color: current && !muted ? ET.foreground : ET.mutedFg }}>
         <span style={{ minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{current ? current.label : placeholder}</span>
         <Chevron />
@@ -323,30 +342,43 @@ export function CorporateTag() {
 
 // The export's Section: 18px corners, 20px padding (24px is its desktop
 // step-up), a dashed corporate-blue border on the corporate-only one.
-//   collapsible  the heading becomes the fold; `defaultOpen` false starts it
-//                shut (the corporate library — 26 templates, 12 headings)
+//   collapsible  the whole header becomes the fold — the export's group
+//                header button (EmailList :552): full width, 14px corners,
+//                1px border, 12px padding, muted on hover, a chevron that
+//                turns. `defaultOpen` false starts it shut (the corporate
+//                library — 26 templates, 12 headings).
 export function ESection({ id, eyebrow, title, intro, right, children, corporate, collapsible = false, defaultOpen = true }) {
   const [open, setOpen] = React.useState(defaultOpen)
   const shut = collapsible && !open
-  const heading = (
-    <div>
-      <p style={{ margin:'0 0 4px', display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.14em', color:ET.gold, fontFamily:EF.ui }}>{eyebrow}{corporate && <CorporateTag />}</p>
-      <h2 style={{ margin:0, fontSize:'20px', fontWeight:300, color:ET.foreground, fontFamily:EF.heading }}>{title}</h2>
-      {intro && <p style={{ margin:'4px 0 0', maxWidth:'672px', fontFamily:EF.body, fontSize:'13px', lineHeight:1.6, color:ET.mutedFg }}>{intro}</p>}
-    </div>
-  )
+  const eyebrowStyle = { margin:'0 0 4px', display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.14em', color:ET.gold, fontFamily:EF.ui }
+  const titleStyle = { margin:0, fontSize:'20px', fontWeight:300, color:ET.foreground, fontFamily:EF.heading }
+  const introStyle = { margin:'4px 0 0', maxWidth:'672px', fontFamily:EF.body, fontSize:'13px', lineHeight:1.6, color:ET.mutedFg }
   return (
     <section id={id} data-section-open={collapsible ? String(open) : undefined}
-      style={{ scrollMarginTop:'112px', borderRadius:ER.xxl, border:`1px ${corporate ? 'dashed' : 'solid'} ${corporate ? alpha(ET.corporate, 0.3) : ET.border}`, background:ET.card, padding:'20px' }}>
-      <div style={{ marginBottom: shut ? 0 : '20px', display:'flex', flexWrap:'wrap', alignItems:'flex-start', justifyContent:'space-between', gap:'12px' }}>
-        {heading}
-        {right}
-        {collapsible && (
-          <EBtn size="sm" aria-expanded={open} aria-controls={`${id}-body`} onClick={() => setOpen(o => !o)}>
-            {open ? 'Hide' : 'Show'}<Chevron up={open} />
-          </EBtn>
-        )}
-      </div>
+      style={{ scrollMarginTop:'112px', borderRadius:ER.xxl, border:`1px ${corporate ? 'dashed' : 'solid'} ${corporate ? alpha(ET.corporate, 0.3) : ET.border}`, background:ET.card, padding:'20px', minWidth:0 }}>
+      {collapsible ? (
+        <h2 style={{ margin: shut ? 0 : '0 0 20px', fontSize:'inherit', fontWeight:'inherit' }}>
+          <button type="button" aria-expanded={open} aria-controls={`${id}-body`} data-fold-header data-ehover="muted" onClick={() => setOpen(o => !o)}
+            style={{ display:'flex', width:'100%', boxSizing:'border-box', alignItems:'flex-start', gap:'12px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, background:ET.card, padding:'12px', textAlign:'left', cursor:'pointer', color:ET.foreground, fontFamily:EF.ui }}>
+            <span style={{ minWidth:0, flex:1, display:'block' }}>
+              <span style={eyebrowStyle}>{eyebrow}{corporate && <CorporateTag />}</span>
+              <span style={{ ...titleStyle, display:'block' }}>{title}</span>
+              {intro && <span style={{ ...introStyle, display:'block' }}>{intro}</span>}
+            </span>
+            <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ marginTop:'4px', flexShrink:0, color:ET.mutedFg, transform: open ? 'rotate(180deg)' : 'none', transition:'transform 150ms' }}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        </h2>
+      ) : (
+        <div style={{ marginBottom:'20px', display:'flex', flexWrap:'wrap', alignItems:'flex-start', justifyContent:'space-between', gap:'12px' }}>
+          <div style={{ minWidth:0 }}>
+            <p style={eyebrowStyle}>{eyebrow}{corporate && <CorporateTag />}</p>
+            <h2 style={titleStyle}>{title}</h2>
+            {intro && <p style={introStyle}>{intro}</p>}
+          </div>
+          {right}
+        </div>
+      )}
       {!shut && <div id={`${id}-body`}>{children}</div>}
     </section>
   )
@@ -469,7 +501,7 @@ export function EmailStatusPanel({ sending, locationName, fromEmail, held, activ
 export function EmailsJumpNav({ corporate }) {
   const items = [['sender', 'Sending'], ['details', 'Your details'], ['style', 'Look'], ['signature', 'Signature'], ['emails', 'The emails'], ...(corporate ? [['masters', 'Bee Organized versions']] : [])]
   return (
-    <nav aria-label="On this page" style={{ position:'sticky', top:0, zIndex:30, display:'flex', gap:'4px', overflowX:'auto', borderBottom:`1px solid ${ET.border}`, background:alpha(ET.background, 0.95), padding:'8px 4px', backdropFilter:'blur(6px)' }}>
+    <nav aria-label="On this page" data-jumpnav style={{ position:'sticky', top:0, zIndex:30, display:'flex', gap:'4px', overflowX:'auto', borderBottom:`1px solid ${ET.border}`, background:alpha(ET.background, 0.95), backdropFilter:'blur(6px)' }}>
       {items.map(([id, l]) => (
         <a key={id} href={`#${id}`} onClick={e => { e.preventDefault(); const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }) }}
           style={{ flexShrink:0, borderRadius:'999px', padding:'4px 12px', fontSize:'14px', color:ET.mutedFg, textDecoration:'none', fontFamily:EF.ui }}>{l}</a>
@@ -535,7 +567,9 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false 
   return (
     <ESection id="style" eyebrow="Look" title="How your emails look"
       intro="Pick one look for every email you send. Your logo, colours and wording stay the same — only the button changes. Most locations keep Soft.">
-      <div role="radiogroup" aria-label="Email look" style={{ display:'grid', gridAutoFlow:'column', gridAutoColumns:'minmax(150px, 1fr)', gap:'12px', overflowX:'auto', paddingBottom:'8px' }}>
+      {/* Layout is EMAILS_CSS [data-look-row]: a snap-scrolling row of 160px
+          cards on a phone, five equal columns from 640px (export StyleSection). */}
+      <div role="radiogroup" aria-label="Email look" data-look-row>
         {EMAIL_STYLES.map(s => {
           const on = current === s.id
           return (
