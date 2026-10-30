@@ -206,10 +206,14 @@ describe('the two sequences are independent', () => {
       masterSteps: { 'organizing-a': ORG, 'moving-c': MOV },
       generalDefault: 'organizing-a', moveDefault: 'moving-c',
     })
-    expect(text()).toContain('told your hourly rate')          // a
+    // 2026-10-30 follow-up: the read-back sentence is gone (the Your details
+    // switches show each sequence's answers — lib/beta-variant-switches.test.tsx).
+    // The list itself must still show each sequence as it is.
+    expect(text()).toContain('ORG ONE')
+    expect(text()).not.toContain('MOV ONE')
     await act(async () => { btn('Moving').click() })
-    expect(text()).toContain('talked through on the call')     // c
-    expect(text()).not.toContain('told your hourly rate')
+    expect(text()).toContain('MOV ONE')
+    expect(text()).not.toContain('ORG ONE')
   })
 
   it('the builder takes a path key, not "the organizing one"', () => {

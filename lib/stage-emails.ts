@@ -33,7 +33,7 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { buildCanSpamFooter } from './marketing-unsubscribe'
-import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
+import { extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 import { resolveLocationTemplateFork } from './template-fork'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -340,33 +340,17 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // customized body referencing an unfilled token holds rather than sends broken.
   const fork = await resolveLocationTemplateFork(master.id, lead.location_uuid)
 
-  // The owner's email settings and this template's button (2026-10-30,
-  // lib/email-send-options.ts). These follow-ups are not "always sends": with
-  // "I don't show rates" / "I don't use booking links", one that needs the
-  // rate / a link is SKIPPED — cancelled with the reason, never retried.
+  // The location's look and new booking links, and this template's button
+  // (2026-10-30, lib/email-send-options.ts).
   const emailOptions = locationEmailOptionsFromRow(loc as Record<string, unknown>)
   // The owner's own copy carries its own button; otherwise the master's.
   const tplExtras = extrasFromRow((fork ?? master) as Record<string, unknown>)
-  const switched = applyEmailSwitches({
-    alwaysSends: false,
-    options: emailOptions,
-    subject: fork?.subject ?? master.subject,
-    body: (fork?.body ?? master.body) ?? '',
-    buttonLink: tplExtras.buttonLink,
-  })
-  if (switched.action === 'skip') {
-    await supabaseService
-      .from('scheduled_stage_emails')
-      .update({ cancelled_at: new Date().toISOString(), cancelled_reason: switched.reason })
-      .eq('id', row.id)
-    return { sent: false, error: switched.reason }
-  }
   const tpl = {
-    subject: switched.subject,
-    body: switched.body,
+    subject: fork?.subject ?? master.subject,
+    body: fork?.body ?? master.body,
     name: master.name,
   }
-  const buttonLinkSource = switched.buttonLink
+  const buttonLinkSource = tplExtras.buttonLink
   const guardTpl = { subject: tpl.subject, body: buttonLinkSource ? `${tpl.body}\n${buttonLinkSource}` : tpl.body }
 
   // Owners — resolve the location's DESIGNATED primary owner (Phase 2 co-owner

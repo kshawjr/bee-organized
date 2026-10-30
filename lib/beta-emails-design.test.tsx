@@ -7,8 +7,6 @@
 //   • Pause is offered where Remove is — never on the first email
 //   • the Look picker shows five real emails, Soft marked Default, and saves
 //     the pick to the location
-//   • the two switches save to the location, and with rates off the rate
-//     field is hidden
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -76,12 +74,12 @@ const selectedLoc = {
   timezone: 'America/Los_Angeles', assessmentType: 'in-person', smsEnabled: false, jobberConnected: false,
   jobberAccountId: null, crmStatus: 'active', sendFromName: 'Bee Organized Seattle', sendFromEmail: 'seattle@x.com', replyToEmail: 'seattle@x.com',
 }
-const SETTINGS = { settings: { style: 'soft', showsHourlyRate: true, usesBookingLinks: true, discoveryBookingLink: null, virtualBookingLink: null }, ready: { style: true, switches: true, links: true } }
+const SETTINGS = { settings: { style: 'soft', discoveryBookingLink: null, virtualBookingLink: null }, ready: { style: true, links: true } }
 let fetchMock: ReturnType<typeof vi.fn>
 const mountScreen = async () => {
   fetchMock = vi.fn(async (url: string, opts?: any) => {
     if (String(url).endsWith('/email-settings') && opts?.method === 'PATCH') {
-      return { ok: true, status: 200, json: async () => ({ ok: true, settings: { ...SETTINGS.settings, ...(JSON.parse(opts.body).shows_hourly_rate === false ? { showsHourlyRate: false } : {}), ...(JSON.parse(opts.body).email_style ? { style: JSON.parse(opts.body).email_style } : {}) } }) }
+      return { ok: true, status: 200, json: async () => ({ ok: true, settings: { ...SETTINGS.settings, ...(JSON.parse(opts.body).email_style ? { style: JSON.parse(opts.body).email_style } : {}) } }) }
     }
     if (String(url).endsWith('/email-settings')) return { ok: true, status: 200, json: async () => SETTINGS }
     return { ok: true, status: 200, json: async () => ({}) }
@@ -111,14 +109,4 @@ describe('Look', () => {
   })
 })
 
-describe('Your details — the two switches', () => {
-  it('"I share my hourly rate" off saves it, and hides the rate field', async () => {
-    await mountScreen()
-    expect(container.querySelector('#field-rate')).toBeTruthy()
-    const sw = Array.from(container.querySelectorAll('#details [role="switch"]')).find(b => b.textContent?.includes('I share my hourly rate')) as HTMLElement
-    await act(async () => { sw.click() })
-    await act(async () => {})
-    expect(settingsPatches()).toEqual([{ shows_hourly_rate: false }])
-    expect(container.querySelector('#field-rate')).toBeNull()
-  })
-})
+// The two switches are pinned in lib/beta-variant-switches.test.tsx.

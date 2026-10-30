@@ -153,23 +153,21 @@ describe('Texts & scripts is untouched — call scripts still fully editable', (
 describe('the write inventory — every one still has a path', () => {
   const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
 
-  it('1. persistDefault survives AND still has a live caller', () => {
-    expect(beehub).toContain('async function persistDefault(')
-    // Its callers were the tiles' radios, the tiles' two-question selector, and
-    // 9c's confirmVariant. The first two are gone; if the third had gone too
-    // the function would be dead and setting a variant impossible.
-    const callers = beehub.match(/await persistDefault\(/g) || []
-    expect(callers.length, 'persistDefault call sites').toBeGreaterThanOrEqual(2)
-    expect(beehub).toContain("await persistDefault('generalDefault'")
-    expect(beehub).toContain("await persistDefault('moveDefault'")
+  // 2026-10-30 follow-up: the variant is set by the Emails screen's two
+  // switches (emailsSetVariant), which replaced 9c's modal. It must still be
+  // possible to set it, and to set both sequences together.
+  it('1. setting the variant still has a live path', () => {
+    expect(beehub).toContain('async function emailsSetVariant(')
+    expect(beehub).toContain("variant={variantSwitches} onVariant={realLocId ? emailsSetVariant : null}")
+    expect(beehub).toContain("await writeDefault('generalDefault', pair.generalDefault)")
+    expect(beehub).toContain("await writeDefault('moveDefault', pair.moveDefault)")
   })
 
-  it('1b. and it writes BOTH defaults, never one alone', () => {
-    const at = beehub.indexOf('async function confirmVariant')
-    expect(at, 'confirmVariant').toBeGreaterThan(-1)
-    const body = beehub.slice(at, at + 2500)
-    expect(body).toContain("persistDefault('generalDefault'")
-    expect(body).toContain("persistDefault('moveDefault'")
+  it('1b. in "same" mode one switch writes both; a split is never merged without the owner choosing it', () => {
+    const at = beehub.indexOf('async function emailsSetVariant(')
+    const body = beehub.slice(at, beehub.indexOf('\n  }\n', at))
+    expect(body).toContain("if (which !== 'moving') { await writeDefault('generalDefault'")
+    expect(body).toContain("if (which !== 'organizing' && settings.paths.moveDefault) { await writeDefault('moveDefault'")
   })
 
   it('2+3. creating and deleting an email template is corporate’s, and still exists', () => {

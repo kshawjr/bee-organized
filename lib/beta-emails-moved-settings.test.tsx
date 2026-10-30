@@ -54,6 +54,12 @@ const OK = async (url: any, opts: any) => {
     const body = JSON.parse(opts.body)
     return { ok: true, status: 200, json: async () => ({ ok: true, location: body }) } as any
   }
+  // A location on the b variants (shares its rate, books by link), so the
+  // rate and the in-home link fields are both on screen (2026-10-30
+  // follow-up: the fields follow the location's variant).
+  if (String(url) === `/api/locations/${LOC_UUID}/drip-paths`) {
+    return { ok: true, status: 200, json: async () => ({ paths: [], default_drip_path: 'organizing-b', default_move_drip_path: 'moving-b' }) } as any
+  }
   return { ok: true, status: 200, json: async () => ({}) } as any
 }
 const fetchMock = vi.fn(OK)
@@ -113,7 +119,9 @@ describe('Settings → Emails → Your details: the moved fields persist to thei
       expect(fieldFor(f.label).textContent).toContain('Saved')
     })
 
-    it(`"${f.label}" view-as (non-UUID locId) → refused in words, NO fetch`, async () => {
+    // (View-as never reads the location's sequences, so it shows the default
+    // a-variant: no booking link field to test there.)
+    if (f.column !== 'calendar_link') it(`"${f.label}" view-as (non-UUID locId) → refused in words, NO fetch`, async () => {
       await mount(selectedLoc({ id: 'loc_demo_slug' }))
       fetchMock.mockClear()
       await typeAndLeave(f.label, f.value)
@@ -128,7 +136,7 @@ describe('Settings → Emails → Your details: the moved fields persist to thei
         if (String(url).startsWith('/api/locations/') && opts?.method === 'PATCH') {
           return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any
         }
-        return { ok: true, json: async () => ({}) } as any
+        return OK(url, opts)
       })
       await typeAndLeave(f.label, f.value)
       expect(patches()).toHaveLength(1)

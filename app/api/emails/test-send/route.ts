@@ -13,7 +13,6 @@
 //
 // WHAT IT IS: the same email a client would get, built by the same pieces the
 // real senders use, in the same order —
-//   lib/email-send-options  applyEmailSwitches (rates / links off)
 //   lib/rate-guard + lib/booking-link  the hold guards
 //   lib/resend              renderTemplate, then sendEmail (same From,
 //                           reply-to and Resend call as a real send)
@@ -34,8 +33,8 @@
 // placeholder address (it does nothing if clicked) — the footer still shows,
 // so the owner sees the email as sent.
 //
-// An email that would be HELD or SKIPPED at this location is not sent; the
-// answer says why, in the owner's words.
+// An email that would be HELD at this location is not sent; the answer says
+// why, in the owner's words.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -44,7 +43,7 @@ import { isAdmin } from '@/lib/auth'
 import { renderTemplate, sendEmail, type RenderContext } from '@/lib/resend'
 import { blockedOnMissingRate } from '@/lib/rate-guard'
 import { blockedOnMissingBookingLink, resolveOwnerBookingLink } from '@/lib/booking-link'
-import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from '@/lib/email-send-options'
+import { extrasFromRow, locationEmailOptionsFromRow } from '@/lib/email-send-options'
 import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from '@/lib/drip-email-layout'
 import { hasSignatureTag } from '@/lib/email-signature'
 import { resolveEmailSignature } from '@/lib/email-signature-resolve'
@@ -64,7 +63,6 @@ type Source = {
   body: string
   buttonText: string | null
   buttonLink: string | null
-  alwaysSends: boolean
   render: 'drip' | 'welcome' | 'stage'
   templateKey: string | null
 }
@@ -123,7 +121,6 @@ export async function POST(req: NextRequest) {
       body: (step as any).body ?? tpl?.body ?? '',
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
-      alwaysSends: (step as any).step_order <= 1,
       render: 'drip',
       templateKey: null,
     }
@@ -143,26 +140,13 @@ export async function POST(req: NextRequest) {
       body: fork?.body ?? (master as any).body ?? '',
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
-      alwaysSends: key === 'welcome',
       render: key === 'welcome' ? 'welcome' : 'stage',
       templateKey: key,
     }
   }
   if (!source) return NextResponse.json({ error: 'email_required' }, { status: 400 })
 
-  // ── the owner's switches (same rule as the real senders) ───────────────
-  const switched = applyEmailSwitches({
-    alwaysSends: source.alwaysSends,
-    options,
-    subject: source.subject,
-    body: source.body,
-    buttonLink: source.buttonLink,
-  })
-  if (switched.action === 'skip') {
-    return refuse('skipped', switched.reason === 'rate_not_shown'
-      ? 'This email is skipped at your location because you don’t show an hourly rate, so no client gets it.'
-      : 'This email is skipped at your location because clients don’t book through a link, so no client gets it.')
-  }
+  const switched = { subject: source.subject, body: source.body, buttonLink: source.buttonLink }
   const guardBody = switched.buttonLink ? `${switched.body}\n${switched.buttonLink}` : switched.body
 
   // ── who it's from, who signs, what the links resolve to ────────────────

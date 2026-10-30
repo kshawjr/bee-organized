@@ -14,7 +14,6 @@ import { join } from 'node:path'
 import {
   buildBrandedDripHtml, buildBrandedDripText, buildBrandedShellHtml, EMAIL_STYLES, normalizeEmailStyle,
 } from './drip-email-layout'
-import { stripTaggedSentences, applyEmailSwitches, RATE_TAG, BOOKING_LINK_TAGS } from './email-switches'
 import { renderWelcomeEmailContent } from './welcome-email'
 import { renderStageEmailContent } from './stage-emails'
 import { timingFromStored, timingToStored, formatTiming, timingLabel } from './email-timing'
@@ -141,33 +140,6 @@ describe('the text half matches the HTML', () => {
     const h = buildBrandedDripHtml(BODY, { ...ctx, button: { label: 'x', href: 'javascript:alert(1)' } })
     expect(h).not.toContain('javascript:')
     expect(h).not.toContain('target="_blank"')
-  })
-})
-
-describe('"I don’t show rates" / "I don’t use booking links" — the sentence rule', () => {
-  const MASTER = 'Following the assessment, we\'ll be able to provide an estimate of time and associated costs. Our rate starts at {{rate_per_hour}} per hour per Bee. We will source and bring recommended products.'
-  it('takes the price sentence out of the first email and the paragraph still reads', () => {
-    expect(stripTaggedSentences(MASTER, [RATE_TAG])).toBe('Following the assessment, we\'ll be able to provide an estimate of time and associated costs. We will source and bring recommended products.')
-  })
-  it('a paragraph that was only the price goes, with its blank line', () => {
-    expect(stripTaggedSentences('Hi,\n\nOur rate is {{rate_per_hour}}.\n\nThanks', [RATE_TAG])).toBe('Hi,\n\nThanks')
-  })
-  it('a dot inside a link or a price never splits a sentence', () => {
-    expect(stripTaggedSentences('See beeorganized.com today. Our rate is {{rate_per_hour}}.', [RATE_TAG])).toBe('See beeorganized.com today.')
-  })
-  it('only the first email (and the welcome) are rewritten; any other is skipped', () => {
-    const opts = { showsHourlyRate: false, usesBookingLinks: true }
-    expect(applyEmailSwitches({ alwaysSends: false, options: opts, subject: 's', body: MASTER, buttonLink: null })).toEqual({ action: 'skip', reason: 'rate_not_shown' })
-    expect(applyEmailSwitches({ alwaysSends: true, options: opts, subject: 's', body: MASTER, buttonLink: null })).toMatchObject({ action: 'send', changed: true })
-  })
-  it('with both switches on, nothing changes', () => {
-    const d = applyEmailSwitches({ alwaysSends: false, options: { showsHourlyRate: true, usesBookingLinks: true }, subject: 's', body: MASTER, buttonLink: '{{booking_link}}' })
-    expect(d).toEqual({ action: 'send', subject: 's', body: MASTER, buttonLink: '{{booking_link}}', changed: false })
-  })
-  it('links off: the first email loses its booking sentence AND its link button', () => {
-    const d = applyEmailSwitches({ alwaysSends: true, options: { showsHourlyRate: true, usesBookingLinks: false }, subject: 's', body: 'Hi.\n\nBook here ({{booking_link}}). Talk soon.', buttonLink: '{{booking_link}}' })
-    expect(d).toMatchObject({ action: 'send', body: 'Hi.\n\nTalk soon.', buttonLink: null })
-    expect(BOOKING_LINK_TAGS).toContain('{{discovery_booking_link}}')
   })
 })
 

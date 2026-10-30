@@ -39,7 +39,7 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { buildCanSpamFooter } from './marketing-unsubscribe'
-import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
+import { extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 import { resolveLocationTemplateFork } from './template-fork'
 // Type-only: erased at build, so it adds no runtime cycle (drip-lifecycle
 // imports this file; the value import below stays dynamic for that reason).
@@ -295,27 +295,16 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // email), and the rate / booking-link holds run against this `tpl` — so a
   // customized body can neither strip the footer nor ship an unfilled token.
   const fork = await resolveLocationTemplateFork(master.id, loc.id)
-  // The owner's email settings and this template's button (2026-10-30,
-  // lib/email-send-options.ts). The welcome ALWAYS sends (Kevin's ruling), so
-  // "I don't show rates" / "I don't use booking links" only ever take the
-  // price / link sentence OUT of it — they never skip it.
+  // The location's look and new booking links, and this template's button
+  // (2026-10-30, lib/email-send-options.ts).
   const emailOptions = locationEmailOptionsFromRow(loc as Record<string, unknown>)
   // The owner's own copy carries its own button; otherwise the master's.
   const tplExtras = extrasFromRow((fork ?? master) as Record<string, unknown>)
-  const switched = applyEmailSwitches({
-    alwaysSends: true,
-    options: emailOptions,
-    subject: fork?.subject ?? master.subject,
-    body: (fork?.body ?? master.body) ?? '',
-    buttonLink: tplExtras.buttonLink,
-  })
-  // alwaysSends: true never yields 'skip'; the narrowing is for the compiler.
-  if (switched.action === 'skip') return { sent: false, error: switched.reason }
   const tpl = {
-    subject: switched.subject,
-    body: switched.body,
+    subject: fork?.subject ?? master.subject,
+    body: fork?.body ?? master.body,
   }
-  const buttonLinkSource = switched.buttonLink
+  const buttonLinkSource = tplExtras.buttonLink
   const guardTpl = { subject: tpl.subject, body: buttonLinkSource ? `${tpl.body}\n${buttonLinkSource}` : tpl.body }
 
   // RATE GUARD: template quotes {{rate_per_hour}} but the location has no

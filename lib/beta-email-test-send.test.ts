@@ -7,7 +7,7 @@
 //   • it is the real email: the location's chosen style, its real rate and
 //     links, through the same sendEmail a client email takes
 //   • it touches no client: no lead, no drip progress, no timeline
-//   • an email that would be held or skipped is not sent; the answer says why
+//   • an email that would be held is not sent; the answer says why
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const h = vi.hoisted(() => {
@@ -135,18 +135,11 @@ describe('it touches no client', () => {
   })
 })
 
-describe('held or skipped is not sent', () => {
+describe('held is not sent', () => {
   it('waiting on a rate → refused, in words', async () => {
     const res = await run({ locationId: LOC, stepId: 'st-2' }, { location: { ...loc, rate_per_hour: null } })
     expect(res.status).toBe(409)
     expect((await res.json()).message).toContain('waiting on your hourly rate')
-    expect(sendEmailMock).not.toHaveBeenCalled()
-  })
-
-  it('skipped because the location doesn’t show rates → refused, in words', async () => {
-    const res = await run({ locationId: LOC, stepId: 'st-2' }, { location: { ...loc, shows_hourly_rate: false } })
-    expect(res.status).toBe(409)
-    expect((await res.json()).message).toContain('don’t show an hourly rate')
     expect(sendEmailMock).not.toHaveBeenCalled()
   })
 })

@@ -6,8 +6,6 @@
 // emails (lib/stage-emails.ts) — and the test send all apply the same rules.
 //
 //   locations.email_style          the look (lib/drip-email-layout.ts)
-//   locations.shows_hourly_rate    false = "I don't show rates"
-//   locations.uses_booking_links   false = "I don't use booking links"
 //   locations.discovery_booking_link / virtual_booking_link
 //                                  {{discovery_booking_link}} / {{virtual_booking_link}}
 //   drip_path_steps.is_paused      Pause one email
@@ -19,34 +17,24 @@
 // missing value reads as today's behaviour (Soft, rates shown, links used, not
 // paused, no button). Nothing here can stop a send that works today.
 //
-// THE RATE AND LINK SWITCHES — Kevin, 2026-10-30:
-//   An email that ALWAYS sends (drip step 1, the welcome) is never skipped:
-//   with rates off it goes out with the price sentence taken out; with links
-//   off, with the booking-link sentence taken out and no button that needs a
-//   link. Any OTHER email that quotes the rate / asks for a booking link is
-//   SKIPPED — passed over, the client moves on — never HELD. Held (waiting for
-//   the owner to fill something in) stays exactly as it is today for a
-//   location that has the switch ON and the value blank.
+// WHETHER A LOCATION QUOTES ITS RATE OR USES A BOOKING LINK is not here: it is
+// the location's sequence variant (default_drip_path / default_move_drip_path,
+// a–d), set by the two switches on Settings → Emails → Your details.
 //
 // Deliberately free of lib/resend.ts imports: sender tests mock resend
 // wholesale, and these rules must stay real under those mocks.
 
 import { supabaseService } from './supabase-service'
 import { normalizeEmailStyle, type EmailStyle } from './drip-email-layout'
-export * from './email-switches'
 
 export type LocationEmailOptions = {
   style: EmailStyle
-  showsHourlyRate: boolean
-  usesBookingLinks: boolean
   discoveryBookingLink: string | null
   virtualBookingLink: string | null
 }
 
 export const DEFAULT_LOCATION_EMAIL_OPTIONS: LocationEmailOptions = {
   style: 'soft',
-  showsHourlyRate: true,
-  usesBookingLinks: true,
   discoveryBookingLink: null,
   virtualBookingLink: null,
 }
@@ -55,13 +43,11 @@ function cleanText(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-// Only an explicit false switches something off. NULL / missing is ON.
+// A missing column reads as today: Soft, no new links.
 export function locationEmailOptionsFromRow(row: Record<string, unknown> | null | undefined): LocationEmailOptions {
   if (!row) return { ...DEFAULT_LOCATION_EMAIL_OPTIONS }
   return {
     style: normalizeEmailStyle(row.email_style),
-    showsHourlyRate: row.shows_hourly_rate !== false,
-    usesBookingLinks: row.uses_booking_links !== false,
     discoveryBookingLink: cleanText(row.discovery_booking_link),
     virtualBookingLink: cleanText(row.virtual_booking_link),
   }

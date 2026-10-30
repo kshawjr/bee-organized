@@ -108,8 +108,10 @@ describe('every modal SettingsScreen mounts has a live mount AND a live trigger'
   // The pinned list. Auto-discovery alone cannot catch a DELETED mount — the
   // pattern simply stops matching and the loop gets shorter — which is exactly
   // how TemplatePreviewModal went missing. This list is the tripwire for that.
+  // TwoQuestionsModal RETIRED 2026-10-30 — the Emails screen's two switches
+  // ask the same questions (emailsSetVariant). Removed from this list on
+  // purpose; lib/beta-variant-switches.test.tsx pins that nothing reaches it.
   const EXPECTED = [
-    'TwoQuestionsModal',
     'TimingEditModal',
     'AddEmailModal',
     // Remove one email after the first (lib/drip-followups.ts, 2026-09-30).

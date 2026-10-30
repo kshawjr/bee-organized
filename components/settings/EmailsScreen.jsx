@@ -15,7 +15,6 @@
 import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
 import { SIGNATURE_MARKER } from '@/lib/email-signature'
-import { applyEmailSwitches, BOOKING_LINK_TAGS } from '@/lib/email-switches'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 
 // ── Tokens (export src/styles.css :root) ──────────────────────────────────
@@ -87,15 +86,11 @@ export const FIELD_ID = {
 const blank = (v) => v == null || String(v).trim() === ''
 
 // Which blank details hold this row back — the same rules as the send-time
-// guards (lib/rate-guard.ts, lib/booking-link.ts), after the owner's switches
-// (lib/email-switches.ts) have taken out what they take out.
+// guards (lib/rate-guard.ts, lib/booking-link.ts).
 //   cfg { ratePerHour, ownerBookingLink, locationCalendarLink,
-//         discoveryBookingLink, virtualBookingLink,
-//         showsHourlyRate, usesBookingLinks }
+//         discoveryBookingLink, virtualBookingLink }
 export function rowNeeds(row, cfg = {}) {
-  const switched = rowAfterSwitches(row, cfg)
-  if (switched.skipped) return []
-  const src = `${switched.subject}\n${switched.body}\n${switched.buttonLink}`
+  const src = `${row?.subject ?? ''}\n${row?.body ?? ''}\n${row?.buttonLink ?? ''}`
   const out = []
   if (src.includes('{{rate_per_hour}}') && blank(cfg.ratePerHour)) out.push('rate')
   if (src.includes('{{discovery_booking_link}}') && blank(cfg.discoveryBookingLink)) out.push('discoveryBooking')
@@ -103,27 +98,6 @@ export function rowNeeds(row, cfg = {}) {
   if (src.includes('{{virtual_booking_link}}') && blank(cfg.virtualBookingLink)) out.push('virtualBooking')
   if (src.includes('{{owner_booking_link}}') && blank(cfg.ownerBookingLink)) out.push('ownerBooking')
   return out
-}
-
-// The owner's two switches applied to a row: { skipped: 'rate_not_shown' |
-// 'booking_links_not_used' | null, subject, body, buttonLink }. The first
-// email and the welcome always send (they lose a sentence instead).
-export function rowAfterSwitches(row, cfg = {}) {
-  const alwaysSends = (row?.rail === 'drip' && Number(row.order) === 1) || row?.rail === 'welcome'
-  const d = applyEmailSwitches({
-    alwaysSends,
-    options: { showsHourlyRate: cfg.showsHourlyRate !== false, usesBookingLinks: cfg.usesBookingLinks !== false },
-    subject: row?.subject ?? '',
-    body: row?.body ?? '',
-    buttonLink: row?.buttonLink || null,
-  })
-  if (d.action === 'skip') return { skipped: d.reason, subject: row?.subject ?? '', body: row?.body ?? '', buttonLink: row?.buttonLink || '' }
-  return { skipped: null, subject: d.subject ?? '', body: d.body, buttonLink: d.buttonLink || '' }
-}
-
-export const asksForLink = (row) => {
-  const src = `${row?.subject ?? ''}\n${row?.body ?? ''}\n${row?.buttonLink ?? ''}`
-  return BOOKING_LINK_TAGS.some((t) => src.includes(t))
 }
 
 // ── Small primitives (export "small primitives") ──────────────────────────
@@ -379,10 +353,10 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false 
 
 // ── Previewing one email exactly as it would go ───────────────────────────
 // Fill the tags the way a send does, with this location's real values and a
-// sample client; take out what the owner's switches take out; wrap in the
-// location's style with the subject as heading and the email's button.
-export function previewEmailHtml({ row, style, values, cfg, signature = null }) {
-  const sw = rowAfterSwitches(row, cfg)
+// sample client; wrap in the location's style with the subject as heading
+// and the email's button.
+export function previewEmailHtml({ row, style, values, signature = null }) {
+  const sw = { subject: row?.subject ?? '', body: row?.body ?? '', buttonLink: row?.buttonLink || '' }
   const fill = (text, marker) => String(text || '').replace(/\{\{(\w+)\}\}/g, (m, k) => {
     if (k === 'signature') return marker ? SIGNATURE_MARKER : ''
     const v = values[k]
@@ -435,27 +409,99 @@ export function SendTestBar({ locationId, row, sending }) {
 
 // ── Your details (export DetailsSection) ──────────────────────────────────
 // The rate, the in-home link (calendar_link) and the reviews link save through
-// PATCH /api/locations/[id] as they always did; the two switches and the two
-// new links through PATCH /api/locations/[id]/email-settings.
-//   counts   { rate, discoveryBooking, booking, virtualBooking, reviews } —
-//            how many of this location's emails use each
-//   waiting  { rate, discoveryBooking, booking, virtualBooking } — how many
-//            are held for it right now
-export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, ready, counts, waiting, linkOnlyCount, nothingWaiting, onSaveLocation, onSaveOption }) {
-  const usesRates = options.showsHourlyRate !== false
-  const usesLinks = options.usesBookingLinks !== false
+// PATCH /api/locations/[id] as they always did; the two new links through
+// PATCH /api/locations/[id]/email-settings.
+//
+// THE TWO SWITCHES ARE THE SEQUENCE VARIANT (Kevin, 2026-10-30 follow-up).
+// "I share my hourly rate" and "Clients book through a link" are the two
+// questions that pick a location's sequences — a (rate, reply), b (rate,
+// link), c (no rate, reply), d (no rate, link) — stored as default_drip_path /
+// default_move_drip_path. No column of their own: they READ the location's
+// current variant and a flip WRITES the variant, exactly as the retired
+// "two questions" modal did (components/BeeHub.jsx emailsSetVariant).
+//
+// THE GUARD IS THE SWITCH'S OWN. Turning a switch ON when its prerequisite
+// is blank (no rate / no booking link) does NOT save. The switch opens a
+// field for the missing value; only once that is saved does the variant
+// change. Otherwise the location would land on a variant whose every email is
+// held — loc_carmel's state (variantPrerequisiteMissing).
+//
+//   variant   { split, sequences: [{ key: 'both'|'organizing'|'moving', label, rate, link }] }
+//   onVariant(key, { rate?, link? }, known) → Promise<problem|null>
+//             known: values just saved here, so the guard sees them at once
+//   counts    { rate, discoveryBooking, booking, virtualBooking, reviews }
+//   waiting   { rate, discoveryBooking, booking, virtualBooking }
+export function VariantSwitch({ label, on, need, haveValue, onText, offText, disabled, onTurn, onSaveValue, testId }) {
+  const [asking, setAsking] = React.useState(false)
+  const [value, setValue] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const [problem, setProblem] = React.useState(null)
+  const flip = async (next) => {
+    setProblem(null)
+    if (next && !haveValue) { setAsking(true); return }      // ask first, save nothing
+    setBusy(true)
+    const p = await onTurn(next, {})
+    setBusy(false)
+    if (p) setProblem(p)
+  }
+  const confirm = async () => {
+    const v = value.trim()
+    if (!v) return
+    setBusy(true); setProblem(null)
+    const p1 = await onSaveValue(v)
+    if (p1) { setBusy(false); setProblem(p1); return }
+    const p2 = await onTurn(true, need === 'rate' ? { ratePerHour: v } : { locationCalendarLink: v })
+    setBusy(false)
+    if (p2) { setProblem(p2); return }
+    setAsking(false); setValue('')
+  }
+  const what = need === 'rate' ? 'your hourly rate' : 'your booking link'
+  return (
+    <div data-variant-switch={testId}>
+      <UseToggle label={label} on={on} disabled={disabled || busy} onChange={flip} onText={onText} offText={offText} />
+      {asking && !on && (
+        <div role="group" aria-label={`Add ${what}`} style={{ marginTop:'8px', borderRadius:'12px', border:'1px solid rgba(154,106,32,0.5)', background:ET.warningSoft, padding:'12px', fontFamily:EF.ui }}>
+          <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:ET.foreground }}>
+            {need === 'rate' ? 'Your hourly rate' : 'Your booking link'}
+            <input autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder={need === 'rate' ? '$85' : 'https://calendly.com/…'}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirm() } }}
+              style={{ display:'block', marginTop:'6px', width:'100%', borderRadius:'8px', border:`1px solid ${ET.border}`, background:ET.card, padding:'8px 12px', fontSize:'14px', fontFamily:EF.ui, boxSizing:'border-box' }} />
+          </label>
+          <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.</p>
+          <div style={{ marginTop:'8px', display:'flex', gap:'8px' }}>
+            <EBtn variant="primary" disabled={!value.trim() || busy} onClick={confirm}>{busy ? 'Saving…' : 'Turn it on'}</EBtn>
+            <EBtn onClick={() => { setAsking(false); setValue(''); setProblem(null) }}>Cancel</EBtn>
+          </div>
+        </div>
+      )}
+      {problem && <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.destructive, fontFamily:EF.ui }}>⚠ {problem}</p>}
+    </div>
+  )
+}
+
+export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, ready, counts, waiting, nothingWaiting, onSaveLocation, onSaveOption, variant, onVariant }) {
+  const seqs = (variant && variant.sequences) || []
+  const usesRates = seqs.some(q => q.rate)
+  const usesLinks = seqs.some(q => q.link)
   const prob = (k) => (waiting[k] ? `${waiting[k]} ${waiting[k] === 1 ? 'email is' : 'emails are'} waiting for this` : undefined)
   const used = (k, extra = '') => `Used in ${counts[k] || 0} email${counts[k] === 1 ? '' : 's'}${extra}`
+  const canSwitch = !!onVariant
   return (
     <ESection id="details" eyebrow="Your details" title="What your emails mention"
       intro="These are written into your emails for you. If one is blank, the emails that need it are skipped.">
-      <div style={{ marginBottom:'20px', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'12px' }}>
-        <UseToggle label="I share my hourly rate" on={usesRates} disabled={!ready.switches} onChange={v => onSaveOption({ shows_hourly_rate: v })}
-          onText="Your rate is written into the first email." offText="No rate is mentioned. The first email still goes out, without the price line." />
-        <UseToggle label="Clients book through a link" on={usesLinks} disabled={!ready.switches} onChange={v => onSaveOption({ uses_booking_links: v })}
-          onText="Emails include your booking links." offText={`Clients reply to book instead. The ${linkOnlyCount} ${linkOnlyCount === 1 ? 'email that only shares' : 'emails that only share'} a link ${linkOnlyCount === 1 ? 'is' : 'are'} skipped.`} />
-      </div>
-      {!ready.switches && notSetUpNote('Turning these off')}
+      {seqs.map(q => (
+        <div key={q.key} data-variant-seq={q.key} style={{ marginBottom:'20px' }}>
+          {q.label && <p style={{ margin:'0 0 8px', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:ET.mutedFg, fontFamily:EF.ui }}>{q.label}</p>}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'12px' }}>
+            <VariantSwitch testId={`${q.key}-rate`} label="I share my hourly rate" on={q.rate} need="rate" haveValue={!blank(rate)} disabled={!canSwitch}
+              onTurn={(v, known) => onVariant(q.key, { rate: v }, known)} onSaveValue={v => onSaveLocation('rate', v)}
+              onText="Your rate is written into the first email." offText="No rate is mentioned. The first email still goes out, without the price line." />
+            <VariantSwitch testId={`${q.key}-link`} label="Clients book through a link" on={q.link} need="link" haveValue={!blank(calendarLink)} disabled={!canSwitch}
+              onTurn={(v, known) => onVariant(q.key, { link: v }, known)} onSaveValue={v => onSaveLocation('booking', v)}
+              onText="Emails include your booking links." offText="Clients reply to book instead — your emails ask them to reply rather than click a link." />
+          </div>
+        </div>
+      ))}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'16px' }}>
         {usesRates && <EField id="field-rate" label="Hourly rate" value={rate || ''} placeholder="$85" problem={prob('rate')} hint={used('rate')} onSave={v => onSaveLocation('rate', v)} />}
         <EField id="field-reviews" label="Google Reviews link" value={reviewsLink || ''} placeholder="https://g.page/…" hint={used('reviews')} onSave={v => onSaveLocation('reviews', v)} />

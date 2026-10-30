@@ -20,7 +20,6 @@
 //   * enrolment PINS the path row, so a switch is future-only
 //   * a fork is orphaned by a switch, never deleted, and returns if you
 //     switch back — 9 of 20 active locations run a forked default
-import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -28,8 +27,7 @@ import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import {
-  EmailsList, TwoQuestionsModal,
-  variantPairFor, variantPrerequisiteMissing, variantSentence,
+  variantPairFor, variantPrerequisiteMissing,
   pathStyleFromAnswers, answersFromPathStyle, styleFromPathKey,
   BOOKING_REPLY, BOOKING_ONLINE, RATE_IN_EMAIL, RATE_ON_CALL,
 } from '@/components/BeeHub'
@@ -121,166 +119,9 @@ describe('the prerequisite rule', () => {
   })
 })
 
-describe('the sentence reads back what is set', () => {
-  it('says both halves, either way round', () => {
-    expect(variantSentence(BOOKING_ONLINE, RATE_IN_EMAIL)).toContain('told your hourly rate')
-    expect(variantSentence(BOOKING_ONLINE, RATE_IN_EMAIL)).toContain('book a time themselves')
-    expect(variantSentence(BOOKING_REPLY, RATE_ON_CALL)).toContain('talked through on the call')
-    expect(variantSentence(BOOKING_REPLY, RATE_ON_CALL)).toContain('reply to you')
-  })
-})
-
-// ───────────── the modal ─────────────
-describe('the modal collects what an answer needs before it will save', () => {
-  const mount = async (over: any = {}) => {
-    const props = {
-      answers: { booking: BOOKING_REPLY, rate: RATE_ON_CALL },
-      cfg: { ratePerHour: '', locationCalendarLink: '', generalDefault: 'organizing-c', moveDefault: 'moving-c' },
-      ownsPathKeys: [], liveLeadCount: 0, busy: false, err: '',
-      onCancel: vi.fn(), onConfirm: vi.fn(), ...over,
-    }
-    await act(async () => { root.render(<TwoQuestionsModal {...props} />) })
-    return props
-  }
-  const byText = (t: string) => Array.from(container.querySelectorAll('button')).find(b => b.textContent === t) as HTMLButtonElement
-  const save = () => byText('Save')
-  const inputs = () => Array.from(container.querySelectorAll('input')) as HTMLInputElement[]
-  const type = async (el: HTMLInputElement, v: string) => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-    await act(async () => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) })
-  }
-
-  it('answering yes to the rate reveals the field and blocks save until filled', async () => {
-    await mount()
-    await act(async () => { byText('Yes, put it in the email').click() })
-    expect(inputs().length).toBe(1)
-    expect(save().disabled).toBe(true)
-    expect(container.textContent).toContain('We need this before those emails can send')
-    await type(inputs()[0], '95')
-    expect(save().disabled).toBe(false)
-  })
-
-  it('answering yes to the link blocks save until filled', async () => {
-    await mount()
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(save().disabled).toBe(true)
-    await type(inputs()[0], 'https://cal.example/me')
-    expect(save().disabled).toBe(false)
-  })
-
-  it('a rate-quoting variant cannot be chosen without a rate — loc_carmel is this bug, live', async () => {
-    await mount()
-    await act(async () => { byText('Yes, put it in the email').click() })
-    await act(async () => { save().click() })
-    expect(save().disabled).toBe(true)   // never fired
-  })
-
-  it('answering no needs nothing and saves straight away', async () => {
-    const props = await mount({ cfg: { ratePerHour: '', locationCalendarLink: '', generalDefault: 'organizing-a', moveDefault: 'moving-a' },
-      answers: { booking: BOOKING_REPLY, rate: RATE_IN_EMAIL } })
-    await act(async () => { byText('No, I cover it on the call').click() })
-    expect(save().disabled).toBe(false)
-    await act(async () => { save().click() })
-    expect(props.onConfirm).toHaveBeenCalled()
-    expect(props.onConfirm.mock.calls[0][0]).toBe(BOOKING_REPLY)
-    expect(props.onConfirm.mock.calls[0][1]).toBe(RATE_ON_CALL)
-  })
-
-  it('says it replaces all three emails in BOTH sequences', async () => {
-    await mount()
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(container.textContent).toContain('replaces all three emails, in both sequences')
-  })
-
-  it('states the live lead consequence — they finish what they started', async () => {
-    await mount({ liveLeadCount: 12 })
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(container.textContent).toContain('12 people')
-    expect(container.textContent).toContain('carry on with the emails they started on')
-  })
-
-  it('with nobody mid-sequence it says so instead of quoting a number', async () => {
-    await mount({ liveLeadCount: 0 })
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(container.textContent).toContain('Nobody is partway through')
-  })
-
-  it('warns a location with edits that its wording is parked, not deleted', async () => {
-    await mount({ ownsPathKeys: ['organizing-c', 'moving-c'], liveLeadCount: 0 })
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(container.textContent).toContain('aren’t deleted')
-    expect(container.textContent).toContain('come back if you switch back')
-  })
-
-  it('says nothing about forks when there are none', async () => {
-    await mount({ ownsPathKeys: [] })
-    await act(async () => { byText('Yes, they book themselves').click() })
-    expect(container.textContent).not.toContain('aren’t deleted')
-  })
-})
-
-// ───────────── the sentence on the list ─────────────
-describe('the Emails list carries the sentence and its Change link', () => {
-  const mount = async (over: any = {}) => {
-    const props = {
-      pathSteps: { 'organizing-b': STEPS }, masterSteps: { 'organizing-b': STEPS }, templates: [],
-      generalDefault: 'organizing-b', moveDefault: 'moving-b', sendConfig: {},
-      // issue 240 step 7b — the prop is a RESOLVER now, so the sentence can
-      // describe whichever sequence the toggle is showing.
-      variantAnswersFor: (key: string) => answersFromPathStyle(styleFromPathKey(key)),
-      actions: { edit: vi.fn(), reset: vi.fn(), add: vi.fn(), editTiming: vi.fn(), changeVariant: vi.fn() },
-      ...over,
-    }
-    await act(async () => { root.render(<EmailsList {...props} />) })
-    await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
-    return props
-  }
-
-  it('reads back the current variant as one sentence', async () => {
-    await mount()
-    expect(container.textContent).toContain('told your hourly rate')
-    expect(container.textContent).toContain('book a time themselves')
-  })
-
-  it('offers exactly one Change link, and it calls out', async () => {
-    const props = await mount()
-    const link = Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Change how this works')
-    expect(link.length).toBe(1)
-    await act(async () => { link[0].click() })
-    expect(props.actions.changeVariant).toHaveBeenCalled()
-  })
-
-  it('a read-only mount shows the sentence but no Change link', async () => {
-    await mount({ actions: null })
-    expect(container.textContent).toContain('told your hourly rate')
-    expect(Array.from(container.querySelectorAll('button')).some(b => b.textContent === 'Change how this works')).toBe(false)
-  })
-})
-
-// ───────────── the write ─────────────
-describe('the write sets both defaults and reuses the existing field paths', () => {
-  const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-  const handler = beehub.slice(
-    beehub.indexOf('async function confirmVariant('),
-    beehub.indexOf("  // ─── issue 240 step 10 — edit a drip step's timing ───"))
-
-  it('writes BOTH defaults, never one alone', () => {
-    expect(handler).toContain("persistDefault('generalDefault', pair.generalDefault)")
-    expect(handler).toContain("persistDefault('moveDefault', pair.moveDefault)")
-  })
-
-  it('reuses My Location’s existing write paths rather than inventing new ones', () => {
-    expect(handler).toContain('persistRatePerHour(values.rate)')
-    expect(handler).toContain("persistLocationField('bookingLink', 'calendar_link'")
-  })
-
-  it('refuses the write if a prerequisite is still missing after collection', () => {
-    expect(handler).toContain('variantPrerequisiteMissing')
-    expect(handler).toContain('if (still.length) throw')
-  })
-
-  it('does not touch step wording or timing', () => {
-    expect(handler).not.toContain('commitSteps')
-    expect(handler).not.toContain('delay_days')
-  })
-})
+// The sentence, the modal, the list's Change link and confirmVariant were
+// RETIRED 2026-10-30: the Emails screen's two switches ask the same two
+// questions and write the same variant. Their behaviour — reading the real
+// variant, writing it, the split, and the guard as the switch's own — is
+// pinned in lib/beta-variant-switches.test.tsx. The shared mapping and the
+// prerequisite rule above are unchanged and still pinned here.

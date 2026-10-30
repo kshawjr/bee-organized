@@ -43,8 +43,8 @@ import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
   EmailsFonts, EmailStatusPanel, EmailsJumpNav, ESection, EField, EBtn, ETag, ET, EF, EmailStyleSection, EmailDetailsSection,
-  EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds, rowAfterSwitches,
-  asksForLink, goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields,
+  EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
+  goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields,
 } from "@/components/settings/EmailsScreen"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
@@ -18633,9 +18633,10 @@ export function styleFromPathKey(pathKey) {
 }
 
 // Organizing and moving are MIRRORS — same tags, same days, same subjects,
-// differing only in wording. One answer pair sets both, and they must never
-// diverge: a lead's project_type picks which sequence it enters, not which
-// promises it gets.
+// differing only in wording. One answer pair names the matching letter for
+// both. A location MAY run them on different answers ("Moving clients get
+// their own set", 2026-10-30 — loc_kc is organizing-a / moving-c); then each
+// sequence is written on its own (SettingsScreen emailsSetVariant).
 export function variantPairFor(booking, rate) {
   return pathKeysFromStyle(pathStyleFromAnswers(booking, rate))
 }
@@ -18653,93 +18654,12 @@ export function variantPrerequisiteMissing(booking, rate, cfg) {
   return out
 }
 
-// The sentence, and the modal behind its Change link. Not a settings form:
-// two questions, read back as one line an owner can check at a glance.
-export function variantSentence(booking, rate) {
-  const r = rate === RATE_IN_EMAIL
-    ? 'Your clients are told your hourly rate'
-    : 'Your rate is talked through on the call, not written in the email'
-  const b = booking === BOOKING_ONLINE
-    ? 'and they can book a time themselves from a link'
-    : 'and they reply to you to arrange a time'
-  return `${r}, ${b}.`
-}
-
-export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, busy, err, onCancel, onConfirm }) {
-  const [bookingA, setBookingA] = React.useState(answers.booking || BOOKING_REPLY)
-  const [rateA, setRateA] = React.useState(answers.rate || RATE_ON_CALL)
-  const [rate, setRate] = React.useState(cfg.ratePerHour || '')
-  const [link, setLink] = React.useState(cfg.locationCalendarLink || '')
-  const missing = variantPrerequisiteMissing(bookingA, rateA, { ratePerHour: rate, locationCalendarLink: link })
-  const pair = variantPairFor(bookingA, rateA)
-  const changed = pair.generalDefault !== cfg.generalDefault || pair.moveDefault !== cfg.moveDefault
-  const ok = missing.length === 0
-  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
-  const opt = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, background: on ? '#fafcfb' : 'white', borderRadius:'10px', padding:'10px 15px', font:'inherit', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', textAlign:'left' })
-  const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid #e4d5a8', borderRadius:'8px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }
-  return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="How these emails work"
-        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
-        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>How these emails work</div>
-        <div style={{ padding:'20px 24px 22px' }}>
-
-          <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'0 0 9px' }}>Do you tell clients your hourly rate?</p>
-          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
-            <button onClick={() => setRateA(RATE_IN_EMAIL)} style={opt(rateA === RATE_IN_EMAIL)}>Yes, put it in the email</button>
-            <button onClick={() => setRateA(RATE_ON_CALL)} style={opt(rateA === RATE_ON_CALL)}>No, I cover it on the call</button>
-          </div>
-          {rateA === RATE_IN_EMAIL && (
-            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginBottom:'16px' }}>
-              <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your hourly rate</label>
-              <input value={rate} onChange={e => setRate(e.target.value)} placeholder="95" style={field} />
-              <p style={{ margin:'8px 0 0', fontSize:'12.5px', color:'#6b5310', lineHeight:1.5 }}>
-                {String(rate).trim() ? 'This appears in the first email.' : 'We need this before those emails can send — the rate is written into them, so without it they wait.'}
-              </p>
-            </div>
-          )}
-
-          <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'12px 0 9px' }}>Do you have a booking link clients can use?</p>
-          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
-            <button onClick={() => setBookingA(BOOKING_ONLINE)} style={opt(bookingA === BOOKING_ONLINE)}>Yes, they book themselves</button>
-            <button onClick={() => setBookingA(BOOKING_REPLY)} style={opt(bookingA === BOOKING_REPLY)}>No, they reply to me</button>
-          </div>
-          {bookingA === BOOKING_ONLINE && (
-            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px' }}>
-              <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your booking link</label>
-              <input value={link} onChange={e => setLink(e.target.value)} placeholder="calendly.com/your-name" style={field} />
-              <p style={{ margin:'8px 0 0', fontSize:'12.5px', color:'#6b5310', lineHeight:1.5 }}>
-                {String(link).trim() ? 'The emails link straight to this.' : 'We need this before those emails can send — they ask people to click it, so without it they wait.'}
-              </p>
-            </div>
-          )}
-
-          {changed && (
-            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
-              <b>This replaces all three emails, in both sequences.</b> The organizing and moving versions change together — they say the same things in different words, and they stay in step.
-              <br /><br />
-              {liveLeadCount > 0
-                ? <>The <b>{liveLeadCount} {liveLeadCount === 1 ? 'person' : 'people'}</b> partway through right now carry on with the emails they started on. Only people who come in from now on get the new set.</>
-                : <>Nobody is partway through at the moment, so this affects people who come in from now on.</>}
-              {ownsPathKeys.length > 0 && (
-                <><br /><br />You’ve reworded {ownsPathKeys.length === 1 ? 'one of these sequences' : 'these sequences'} before. Those edits aren’t deleted — they stay with the set you’re leaving, and come back if you switch back to it. They just won’t be in use.</>
-              )}
-            </div>
-          )}
-          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
-        </div>
-        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
-          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={() => onConfirm(bookingA, rateA, { rate, link })} disabled={busy || !ok}
-            style={{ ...btn, background:(busy || !ok) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !ok) ? 'not-allowed' : 'pointer' }}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-          {!ok && <span style={{ fontSize:'12.5px', color:'#8a6a0e' }}>Fill in the {missing.includes('rate') ? 'rate' : ''}{missing.length === 2 ? ' and ' : ''}{missing.includes('link') ? 'booking link' : ''} first, or answer no.</span>}
-        </div>
-      </div>
-    </div>
-  )
-}
+// The sentence ("Your clients are told your hourly rate, and …") and the
+// TwoQuestionsModal behind its "Change how this works" link were RETIRED
+// 2026-10-30. The Emails screen's two switches ask the same two questions and
+// write the same variant (SettingsScreen emailsSetVariant), with the guard
+// above as their own behaviour: turning one on with its value blank asks for
+// the value instead of saving.
 
 // ─── issue 240 step 10 — timing ───
 //
@@ -18959,12 +18879,11 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
 // here: it waits at the bottom of its group with "Bring back" (EmailsList).
 //   needs     blank details holding this row back (rowNeeds) — "Not sending —
 //             add …", a link that jumps to the field
-//   skipped   'rate_not_shown' | 'booking_links_not_used' — the owner's switch
 //   blockedReason  the follow-ups switch's sentence, when that is why
-function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, needs = [], skipped = null, sending = true, onPause = null, onRemove = null, lockedReason = null, timingLocked = false }) {
+function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, needs = [], sending = true, onPause = null, onRemove = null, lockedReason = null, timingLocked = false }) {
   const paused = !!row.paused
-  const waiting = sending && !paused && !skipped && !blockedReason && needs.length > 0
-  const off = !sending || paused || !!skipped || !!blockedReason
+  const waiting = sending && !paused && !blockedReason && needs.length > 0
+  const off = !sending || paused || !!blockedReason
   const gold = '#C89A56', muted = '#737970', warn = '#9A6A20'
   const btn = { display:'inline-flex', alignItems:'center', gap:'6px', borderRadius:'8px', padding:'6px 12px', fontSize:'14px', fontWeight:500, fontFamily:"'Lato', system-ui, sans-serif", cursor:'pointer', whiteSpace:'nowrap', background:'#FFFFFF', color:'#323B35', border:'1px solid #E3E4DC' }
   const ghost = { ...btn, background:'transparent', border:'1px solid transparent' }
@@ -18995,9 +18914,6 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
             {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
           </p>
           {lockedReason && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{lockedReason}</p>}
-          {skipped && !paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{skipped === 'rate_not_shown'
-            ? 'Skipped — you don’t show an hourly rate. Switch it on in Your details to send this.'
-            : 'Skipped — you don’t use booking links. Switch it on in Your details to send this.'}</p>}
           {paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Paused — no client gets this one until you start it again.</p>}
           {blockedReason && !paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Not sending — {blockedReason}.</p>}
           {waiting && (
@@ -19158,12 +19074,8 @@ const LOCATION_BOOKING_TAGS = ['{{book_assessment_link}}', '{{booking_link}}']
 const isBlank = v => v == null || String(v).trim() === ''
 
 export function emailRowBlockers(row, cfg = {}) {
-  // 2026-10-30 — the owner's switches come first, exactly as at send time: a
-  // skipped row isn't held, and a first email with rates off has lost its
-  // price sentence, so it can't be held for the rate (lib/email-switches.ts).
-  const switched = rowAfterSwitches(row, cfg)
-  if (switched.skipped) return []
-  const source = `${switched.subject}\n${switched.body}\n${switched.buttonLink}`
+  // 2026-10-30 — the button's link counts too: it is guarded at send time.
+  const source = `${row?.subject ?? ''}\n${row?.body ?? ''}\n${row?.buttonLink ?? ''}`
   const out = []
   // Mirrors blockedOnMissingRate.
   if (source.includes(RATE_TAG) && isBlank(cfg.ratePerHour)) {
@@ -19285,7 +19197,67 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null }) {
+// The design's "Moving clients" box (export EmailList), wired to the real
+// sequences. Its radio is a SETTING; the Showing pills below it are a view.
+function MovingClientsChoice({ moving, view, onView }) {
+  const [confirmSame, setConfirmSame] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [problem, setProblem] = React.useState(null)
+  const choose = async same => {
+    setBusy(true); setProblem(null)
+    const p = await moving.onChoose(same)
+    setBusy(false)
+    if (p) setProblem(p); else setConfirmSame(false)
+  }
+  const ui = "'Lato', system-ui, sans-serif"
+  const btn = primary => ({ borderRadius:'8px', padding:'6px 12px', fontSize:'14px', fontWeight:500, fontFamily:ui, cursor:'pointer', border: primary ? 'none' : '1px solid #E3E4DC', background: primary ? '#1E3B38' : '#FFFFFF', color: primary ? '#FAF9F5' : '#323B35' })
+  return (
+    <div data-moving-choice style={{ marginBottom:'24px', borderRadius:'12px', border:'1px solid #E3E4DC', padding:'16px', fontFamily:ui }}>
+      <p style={{ margin:0, fontSize:'14px', fontWeight:600 }}>Moving clients</p>
+      {/* Read-only mounts (view-as, no real location) get the view only. */}
+      {moving && <div role="radiogroup" aria-label="Moving clients" style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
+        {[{ v: true, l: 'Get the same emails as organizing clients' }, { v: false, l: 'Get their own set of emails' }].map(o => {
+          const on = moving.same === o.v
+          return (
+            <button key={String(o.v)} type="button" role="radio" aria-checked={on} disabled={busy}
+              onClick={() => { if (on) return; if (o.v) setConfirmSame(true); else choose(false) }}
+              style={{ flex:'1 1 240px', display:'flex', alignItems:'center', gap:'8px', borderRadius:'8px', border:`1px solid ${on ? '#1E3B38' : '#E3E4DC'}`, background: on ? '#EAF3F1' : '#FFFFFF', padding:'8px 12px', textAlign:'left', fontSize:'14px', fontWeight: on ? 600 : 400, fontFamily:ui, cursor:'pointer' }}>
+              <span aria-hidden style={{ height:'16px', width:'16px', flexShrink:0, borderRadius:'999px', boxSizing:'border-box', border: on ? '5px solid #1E3B38' : '2px solid #E3E4DC' }} />{o.l}
+            </button>
+          )
+        })}
+      </div>}
+      {confirmSame && (
+        <div role="alertdialog" style={{ marginTop:'12px', borderRadius:'8px', border:'1px solid rgba(154,106,32,0.5)', background:'#FAF0DA', padding:'12px', fontSize:'14px' }}>
+          <p style={{ margin:0, fontWeight:600 }}>Replace the moving emails?</p>
+          <p style={{ margin:'2px 0 0', color:'rgba(50,59,53,0.8)' }}>Moving clients will get the same emails as organizing clients from now on. Anyone partway through keeps the emails they started on, and any wording you changed only in the moving emails is kept, just not used.</p>
+          <div style={{ marginTop:'8px', display:'flex', gap:'8px' }}>
+            <button type="button" disabled={busy} onClick={() => choose(true)} style={btn(true)}>{busy ? 'Saving…' : 'Yes, use the same'}</button>
+            <button type="button" disabled={busy} onClick={() => setConfirmSame(false)} style={btn(false)}>Keep them separate</button>
+          </div>
+        </div>
+      )}
+      {problem && <p style={{ margin:'8px 0 0', fontSize:'12px', color:'#B4412F' }}>⚠ {problem}</p>}
+      {/* Shown in BOTH modes, unlike the design: "same" means the same
+          promises (rate, link), but the moving emails keep their own wording
+          — four locations have edited theirs — and this is the only way to
+          see and edit it (issue 240 step 7b). */}
+      {(
+        <div style={{ marginTop:'12px', display:'flex', alignItems:'center', gap:'8px', fontSize:'14px', flexWrap:'wrap' }}>
+          <span style={{ color:'#737970' }}>Showing:</span>
+          {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => onView(k)}
+              style={{ borderRadius:'999px', padding:'4px 12px', border:'none', background: view === k ? '#1E3B38' : '#F2F2EE', color: view === k ? '#FAF9F5' : '#323B35', fontSize:'14px', cursor:'pointer', fontFamily:ui }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null, moving = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
   // 2026-10-30 design: groups fold (only the first open at first), and show
   // three rows until "More" is pressed.
@@ -19324,11 +19296,6 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   const setView = onViewChange || setViewLocal
   const activePathKey = view === 'moving' ? moveDefault : generalDefault
   const hasMoving = !!moveDefault
-
-  // The sentence reads back the variant of the sequence being SHOWN. Reading
-  // back organizing while moving is on screen would be a lie for loc_kc, the
-  // one location whose letters differ (organizing-a / moving-c).
-  const activeAnswers = variantAnswersFor ? variantAnswersFor(activePathKey) : null
 
   // The returning-client group follows the ORGANIZING answers (generalDefault's
   // letter), not the toggle: it is one sequence, and a past client's enquiry
@@ -19403,12 +19370,10 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
               <ol style={{ position:'relative', margin:'0 0 0 8px', padding:'0 0 0 20px', borderLeft:'2px solid rgba(168,201,196,0.6)', display:'flex', flexDirection:'column', gap:'8px' }}>
                 {shown.map(r => {
                   const i = rows.indexOf(r)
-                  const sw = rowAfterSwitches(r, sendConfig)
                   return (
                     <EmailRow key={r.key} row={r}
                       sending={sending}
                       blockedReason={followupsOffReasonFor(r, followupsOff)}
-                      skipped={sw.skipped}
                       needs={rowNeeds(r, sendConfig)}
                       timingLocked={r.rail === 'drip' && Number(r.order) === 1}
                       lockedReason={lockedReasonFor(r, id)}
@@ -19463,37 +19428,15 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
         <span style={{ ...pill, background:'#F8EEDD', color:'#9A6A20' }}>🐝 {allRows.length - ownCount} use Bee Organized wording</span>
         <span style={{ ...pill, background:'#EAF3F1', color:'#1E3B38' }}>{ownCount} in your own words</span>
       </div>
-      {/* issue 240 step 7b — the sequence toggle, a VIEW that writes nothing.
-          Shown only when moving clients really have their own sequence. */}
-      {(hasMoving || activeAnswers) && (
-        <div style={{ marginBottom:'24px', borderRadius:'12px', border:'1px solid #E3E4DC', padding:'16px' }}>
-          <p style={{ margin:0, fontSize:'14px', fontWeight:600 }}>Moving clients</p>
-          {/* issue 240 step 9c — the two questions, as ONE sentence with a
-              Change link. The only way left to choose what clients receive. */}
-          {activeAnswers && (
-            <div style={{ marginTop:'8px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
-              <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#323B35', margin:0, lineHeight:1.55, fontFamily:"'Arvo', Georgia, serif" }}>{variantSentence(activeAnswers.booking, activeAnswers.rate)}</p>
-              {actions && actions.changeVariant && (
-                <button onClick={actions.changeVariant}
-                  style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#323B35', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
-                  Change how this works
-                </button>
-              )}
-            </div>
-          )}
-          {hasMoving && (
-            <div style={{ marginTop:'12px', display:'flex', alignItems:'center', gap:'8px', fontSize:'14px', flexWrap:'wrap' }}>
-              <span style={{ color:'#737970' }}>Showing:</span>
-              {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
-                <button key={k} onClick={() => { setView(k); setOpen(null) }}
-                  style={{ borderRadius:'999px', padding:'4px 12px', border:'none', background: view === k ? '#1E3B38' : '#F2F2EE', color: view === k ? '#FAF9F5' : '#323B35', fontSize:'14px', cursor:'pointer', fontFamily:'inherit' }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* "Moving clients" (2026-10-30 follow-up) — the design's choice,
+          made real. SAME: one set of switches writes both sequences. THEIR
+          OWN: each sequence has its own switches (Your details) and the
+          Showing toggle — a VIEW, it writes nothing — picks which list is on
+          screen. A location whose two sequences already differ is "their
+          own", and going back to "same" is confirmed first: it replaces the
+          moving set with the organizing one.
+            moving  { same, onChoose(same) → Promise<problem|null> } */}
+      {hasMoving && <MovingClientsChoice moving={moving} view={view} onView={k => { setView(k); setOpen(null) }} />}
       <Group id="new" title="When someone new gets in touch"
         count={withNotes.length}
         note="Counted from the day their enquiry arrives."
@@ -22725,72 +22668,100 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // point — so the confirm modal states it, not just the standing banner.
   // proceed(steps) receives the steps the mutation should build on: the
   // location's own rows when they exist, else the freshly-cloned copy.
-  // ─── issue 240 step 9c — set the variant from the two answers ───
+  // ─── the variant, from the two switches (2026-10-30 follow-up) ───
   //
-  // WHAT THIS REPLACES: the sequence tiles' radios and two-question selector,
-  // retired in step 11. They were persistDefault's only other callers, so this
-  // is now the sole way an owner chooses what their clients receive.
+  // WHAT THIS REPLACES: the "two questions" modal (issue 240 step 9c), retired
+  // because the Emails screen's two switches ask the same two things. One
+  // control, the design's face on the existing mechanism:
+  //   "I share my hourly rate"      ↔ rate    RATE_IN_EMAIL / RATE_ON_CALL
+  //   "Clients book through a link" ↔ booking BOOKING_ONLINE / BOOKING_REPLY
+  // read from and written to default_drip_path / default_move_drip_path via
+  // the ONE shared mapping (pathStyleFromAnswers → pathKeysFromStyle).
   //
   // ENROLMENT IS PINNED. startDripForLead resolves the path at enrolment and
   // stores drip_path_id on lead_drip_progress; nothing re-resolves it. So a
   // variant switch is FUTURE-ONLY — leads already in a sequence finish the one
-  // they started. The confirmation says exactly that.
+  // they started.
   //
   // A FORK IS NOT LOST. Resolution is (location_uuid, path_key) -> fork, else
   // master by path_key. Switching away leaves the fork row untouched; it is
-  // orphaned, not deleted, and switching back resumes using it. 9 of 20 active
-  // locations currently run at least one forked default, so this is the common
-  // case, not an edge one.
-  const [variantState, setVariantState] = useState(null)
+  // orphaned, not deleted, and switching back resumes using it.
+  //
+  // ORGANIZING AND MOVING CAN DIFFER, AND STAY DIFFERENT. The modal wrote one
+  // answer to both, silently merging any split (four locations run one —
+  // loc_kc is organizing-a / moving-c). Now:
+  //   same       (the two letters match) — a switch writes both, as before
+  //   their own  (the letters differ, or the owner chose it) — each sequence
+  //              has its own switches and writes only its own default
+  // A split location ALWAYS loads as "their own"; only the owner's explicit,
+  // confirmed "use the same" ever merges it (emailsChooseMovingSame).
+  const [movingOwnChosen, setMovingOwnChosen] = useState(false)
+  const variantLetter = key => styleFromPathKey(key).replace('path-', '')
+  const variantSplit = !!settings.paths.moveDefault && !!settings.paths.generalDefault &&
+    variantLetter(settings.paths.moveDefault) !== variantLetter(settings.paths.generalDefault)
+  const movingSame = !variantSplit && !movingOwnChosen
 
-  async function openVariantQuestions() {
-    const key = settings.paths.generalDefault
-    let liveLeadCount = 0
-    try {
-      if (dbPaths[key]?.id) {
-        const res = await fetch(`/api/drip-paths/${dbPaths[key].id}/active-lead-count`)
-        if (res.ok) liveLeadCount = (await res.json())?.count ?? 0
-      }
-    } catch { /* unknown, not zero */ }
-    const ownsPathKeys = [settings.paths.generalDefault, settings.paths.moveDefault]
-      .filter(k => k && dbPaths[k])
-    setVariantState({ liveLeadCount, ownsPathKeys, busy: false, err: '' })
+  // Writes ONE default and says whether it landed (persistDefault logs and
+  // swallows; a switch must not show a position the server refused).
+  async function writeDefault(sectionKey, pathKey) {
+    const fieldKey = sectionKey === 'moveDefault' ? 'default_move' : 'default'
+    const res = await fetch(`/api/locations/${realLocId}/drip-paths`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [fieldKey]: pathKey }),
+    })
+    if (!res.ok) throw new Error('that did not save')
   }
 
-  async function confirmVariant(booking, rateAnswer, values) {
-    setVariantState(st => ({ ...st, busy: true, err: '' }))
+  // which: 'both' | 'organizing' | 'moving'.  patch: { rate?, link? } booleans.
+  // known: a rate / link the switch has JUST saved, which settings state may
+  // not show yet. Returns a problem in words, or null.
+  async function emailsSetVariant(which, patch, known = {}) {
+    if (!realLocId) return 'You’re viewing this location — open the real location to change it.'
+    const fromKey = which === 'moving' ? settings.paths.moveDefault : settings.paths.generalDefault
+    const cur = answersFromPathStyle(styleFromPathKey(fromKey))
+    const booking = 'link' in patch ? (patch.link ? BOOKING_ONLINE : BOOKING_REPLY) : (cur.booking || BOOKING_REPLY)
+    const rate = 'rate' in patch ? (patch.rate ? RATE_IN_EMAIL : RATE_ON_CALL) : (cur.rate || RATE_ON_CALL)
+    // The guard (loc_carmel): never land on a variant whose emails would all
+    // be held. The switch asks for the value first; this is the backstop.
+    const missing = variantPrerequisiteMissing(booking, rate, {
+      ratePerHour: known.ratePerHour ?? settings.location.ratePerHour,
+      locationCalendarLink: known.locationCalendarLink ?? settings.location.bookingLink,
+    })
+    if (missing.length) return missing.includes('rate') ? 'Add your hourly rate first.' : 'Add your booking link first.'
+    const pair = variantPairFor(booking, rate)
     try {
-      // Collect the prerequisite FIRST, through the existing My Location write
-      // paths — persistRatePerHour and persistLocationField('bookingLink',
-      // 'calendar_link', …) — rather than inventing a second way to set them.
-      const before = variantPrerequisiteMissing(booking, rateAnswer, {
-        ratePerHour: settings.location.ratePerHour,
-        locationCalendarLink: settings.location.bookingLink,
-      })
-      if (before.includes('rate')) await persistRatePerHour(values.rate)
-      if (before.includes('link')) await persistLocationField('bookingLink', 'calendar_link', values.link, 'booking link')
-
-      // Refuse the write outright if a prerequisite is still missing. This is
-      // the guard that would have stopped loc_carmel landing on a rate-quoting
-      // variant with no rate — both its sequences are held today, sending
-      // nothing, and nothing in the product says so.
-      const still = variantPrerequisiteMissing(booking, rateAnswer, {
-        ratePerHour: before.includes('rate') ? values.rate : settings.location.ratePerHour,
-        locationCalendarLink: before.includes('link') ? values.link : settings.location.bookingLink,
-      })
-      if (still.length) throw new Error('that needs a rate or a booking link first')
-
-      // BOTH defaults, together, from the ONE shared resolver.
-      const pair = variantPairFor(booking, rateAnswer)
-      await persistDefault('generalDefault', pair.generalDefault)
-      await persistDefault('moveDefault', pair.moveDefault)
-      setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: pair.generalDefault, moveDefault: pair.moveDefault } }))
-      setDefaultPathId(pair.generalDefault)
-      setDefaultMovePathId(pair.moveDefault)
+      const next = { ...settings.paths }
+      if (which !== 'moving') { await writeDefault('generalDefault', pair.generalDefault); next.generalDefault = pair.generalDefault }
+      if (which !== 'organizing' && settings.paths.moveDefault) { await writeDefault('moveDefault', pair.moveDefault); next.moveDefault = pair.moveDefault }
+      setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: next.generalDefault, moveDefault: next.moveDefault } }))
+      setDefaultPathId(next.generalDefault)
+      if (next.moveDefault) setDefaultMovePathId(next.moveDefault)
       await loadLocationPaths()
-      setVariantState(null)
+      return null
     } catch (e) {
-      setVariantState(st => st && ({ ...st, busy: false, err: 'Could not save that: ' + (e?.message || e) }))
+      return 'Could not save that: ' + (e?.message || e)
+    }
+  }
+
+  // "Moving clients get the same emails / their own set".
+  //   their own → no write; each sequence just gets its own switches.
+  //   same      → (confirmed in the list) moving takes organizing's letter.
+  async function emailsChooseMovingSame(same) {
+    if (!same) { setMovingOwnChosen(true); return null }
+    if (!realLocId) return 'You’re viewing this location — open the real location to change it.'
+    try {
+      const letter = variantLetter(settings.paths.generalDefault)
+      if (variantSplit && letter) {
+        const pathKey = pathKeysFromStyle(`path-${letter}`).moveDefault
+        await writeDefault('moveDefault', pathKey)
+        setSettings(s => ({ ...s, paths: { ...s.paths, moveDefault: pathKey } }))
+        setDefaultMovePathId(pathKey)
+        await loadLocationPaths()
+      }
+      setMovingOwnChosen(false)
+      return null
+    } catch (e) {
+      return 'Could not save that: ' + (e?.message || e)
     }
   }
 
@@ -22977,15 +22948,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // booking links (app/api/locations/[id]/email-settings). `ready` says which
   // migrations have run; until one has, its control says so rather than fail.
   const [emailSettings, setEmailSettings] = useState({
-    settings: { style:'soft', showsHourlyRate:true, usesBookingLinks:true, discoveryBookingLink:null, virtualBookingLink:null },
-    ready: { style:false, switches:false, links:false },
+    settings: { style:'soft', discoveryBookingLink:null, virtualBookingLink:null },
+    ready: { style:false, links:false },
   })
   useEffect(() => {
     if (!realLocId || activeSection !== 'emails') return
     let cancelled = false
     fetch(`/api/locations/${realLocId}/email-settings`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => { if (!cancelled && j?.settings) setEmailSettings({ settings: j.settings, ready: j.ready || { style:false, switches:false, links:false } }) })
+      .then(j => { if (!cancelled && j?.settings) setEmailSettings({ settings: j.settings, ready: j.ready || { style:false, links:false } }) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [realLocId, activeSection])
@@ -23204,25 +23175,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setStepContentEditor(null)
   }
 
-  // Persist a default selection to the location row in DB.
-  async function persistDefault(sectionKey, pathId) {
-    if (!realLocId) return
-    const fieldKey = sectionKey === 'moveDefault' ? 'default_move' : 'default'
-    try {
-      const res = await fetch(`/api/locations/${realLocId}/drip-paths`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [fieldKey]: pathId }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(()=>({}))
-        console.error('default save failed', j)
-      }
-    } catch (e) {
-      console.error('default save threw', e)
-    }
-  }
+  // persistDefault (logged and swallowed a failed write) was retired 2026-10-30;
+  // the variant switches write through writeDefault, which reports failure.
 
   // Persist the hourly rate to locations.rate_per_hour. Unlike the legacy
   // local-only SettingsEditRows, this one MUST reach the DB: a blank rate
@@ -24382,8 +24336,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             locationCalendarLink: settings.location.bookingLink,
             discoveryBookingLink: es.discoveryBookingLink,
             virtualBookingLink: es.virtualBookingLink,
-            showsHourlyRate: es.showsHourlyRate,
-            usesBookingLinks: es.usesBookingLinks,
           }
           // Every row the status and the details count across — the
           // organizing sequence, the returning one, the job follow-ups.
@@ -24392,7 +24344,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             return [...newLead, ...returning, ...afterJob].filter(r => !r.removed)
           })()
           const followupsOffNow = !!followupsState?.off
-          const sendingRows = statusRows.filter(r => !r.paused && !followupsOffReasonFor(r, followupsOffNow) && !rowAfterSwitches(r, sendCfg).skipped)
+          const sendingRows = statusRows.filter(r => !r.paused && !followupsOffReasonFor(r, followupsOffNow))
           const heldByNeed = {}
           for (const r of sendingRows) for (const n of rowNeeds(r, sendCfg)) (heldByNeed[n] = heldByNeed[n] || []).push(r.subject || 'No subject')
           const held = Object.entries(heldByNeed).map(([need, subjects]) => ({ need, subjects }))
@@ -24427,6 +24379,17 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             reviews_link: settings.location.reviewsLink,
           }
           const corporate = !!isSuperAdmin
+          // What the switches show: read straight from the location's current
+          // variant(s). One set when organizing and moving match ("same"),
+          // one per sequence when they don't.
+          const answersOf = key => {
+            const a = answersFromPathStyle(styleFromPathKey(key))
+            return { rate: a.rate === RATE_IN_EMAIL, link: a.booking === BOOKING_ONLINE }
+          }
+          const variantSwitches = { split: !movingSame, sequences: movingSame || !settings.paths.moveDefault
+            ? [{ key: 'both', label: null, ...answersOf(settings.paths.generalDefault) }]
+            : [{ key: 'organizing', label: 'Organizing clients', ...answersOf(settings.paths.generalDefault) },
+               { key: 'moving', label: 'Moving clients', ...answersOf(settings.paths.moveDefault) }] }
           return (
           <div style={{ background:ET.background, paddingBottom:'24px' }}>
             <EmailsFonts />
@@ -24478,9 +24441,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 // validateReviewsLink came over with the field from Location.
                 rate={settings.location.ratePerHour} calendarLink={settings.location.bookingLink} reviewsLink={settings.location.reviewsLink}
                 options={es} ready={emailSettings.ready} counts={counts} waiting={waiting}
-                linkOnlyCount={statusRows.filter(r => !((r.rail === 'drip' && Number(r.order) === 1) || r.rail === 'welcome') && asksForLink(r)).length}
                 nothingWaiting={held.length === 0}
-                onSaveLocation={(kind, v) => kind === 'reviews' && validateReviewsLink(v) ? Promise.resolve(validateReviewsLink(v)) : emailsSaveLocation(kind, v)} onSaveOption={saveEmailSettings} />
+                onSaveLocation={(kind, v) => kind === 'reviews' && validateReviewsLink(v) ? Promise.resolve(validateReviewsLink(v)) : emailsSaveLocation(kind, v)} onSaveOption={saveEmailSettings}
+                // The two switches ARE the sequence variant (emailsSetVariant).
+                variant={variantSwitches} onVariant={realLocId ? emailsSetVariant : null} />
 
               <EmailStyleSection style={es.style} ready={emailSettings.ready.style}
                 onPick={id => saveEmailSettings({ email_style: id })} />
@@ -24497,8 +24461,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   masterSteps={masterSteps}
                   generalDefault={settings.paths.generalDefault}
                   moveDefault={settings.paths.moveDefault}
-                  actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions, remove: openRemoveEmail, restore: emailsRowRestore, pause: emailsRowPause } : null}
-                  variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
+                  actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, remove: openRemoveEmail, restore: emailsRowRestore, pause: emailsRowPause } : null}
                   view={emailsView}
                   onViewChange={setEmailsView}
                   // issue 240 step 9a — mirrors what the guards read at send
@@ -24507,6 +24470,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   sending={senderAddressSet}
                   locationId={realLocId}
                   preview={{ style: es.style, values: previewValues, signature: signatureFromData(emailSig.data) }}
+                  moving={realLocId ? { same: movingSame, onChoose: emailsChooseMovingSame } : null}
                 />
               </ESection>
 
@@ -24585,20 +24549,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         </div>{/* /content column */}
       </div>{/* /rail + content */}
 
-      {/* issue 240 step 9c — the two questions. */}
-      {variantState && (
-        <TwoQuestionsModal
-          answers={answersFromPathStyle(styleFromPathKey(settings.paths.generalDefault))}
-          cfg={{ ratePerHour: settings.location.ratePerHour, locationCalendarLink: settings.location.bookingLink,
-                 generalDefault: settings.paths.generalDefault, moveDefault: settings.paths.moveDefault }}
-          ownsPathKeys={variantState.ownsPathKeys}
-          liveLeadCount={variantState.liveLeadCount}
-          busy={variantState.busy}
-          err={variantState.err}
-          onCancel={() => setVariantState(null)}
-          onConfirm={confirmVariant}
-        />
-      )}
+      {/* issue 240 step 9c's two-questions modal was retired 2026-10-30: the
+          Emails screen's two switches ask the same questions (emailsSetVariant). */}
       {/* issue 240 step 10 — timing, drip rows only. */}
       {timingEditState && (
         <TimingEditModal

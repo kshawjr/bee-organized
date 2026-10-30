@@ -4,20 +4,20 @@
 // (lib/email-send-options.ts holds the rules they drive):
 //
 //   email_style              'soft' | 'outline' | 'bold' | 'rounded' | 'classic'
-//   shows_hourly_rate        "I share my hourly rate"     (false = I don't)
-//   uses_booking_links       "Clients book through a link" (false = they don't)
 //   discovery_booking_link   {{discovery_booking_link}}
 //   virtual_booking_link     {{virtual_booking_link}}
 //
-// GET   → { settings: LocationEmailOptions, ready: { style, switches, links } }
+// GET   → { settings: LocationEmailOptions, ready: { style, links } }
 //         `ready` says which migrations have run, so the screen can say "not
 //         set up yet" instead of failing a save.
-// PATCH any subset of the five → { ok, settings }
+// PATCH any subset of the three → { ok, settings }
 //         A field whose column doesn't exist yet → 409 not_set_up_yet,
 //         nothing written. Links must be real web addresses; blank clears.
 //
 // The hourly rate, the in-home link (calendar_link) and the reviews link keep
-// saving through PATCH /api/locations/[id], exactly as before.
+// saving through PATCH /api/locations/[id], exactly as before. Whether the
+// location quotes its rate / uses a booking link is its sequence variant
+// (PATCH /api/locations/[id]/drip-paths), not a column here.
 //
 // Auth: same as the other drip-config routes — signed in; lite_user and
 // manager refused for writes; an owner only for their own location, admins any.
@@ -32,7 +32,6 @@ import { EMAIL_STYLES } from '@/lib/drip-email-layout'
 
 export const runtime = 'nodejs'
 
-const BOOL_FIELDS = ['shows_hourly_rate', 'uses_booking_links'] as const
 const LINK_FIELDS = ['discovery_booking_link', 'virtual_booking_link'] as const
 const LINK_NOUNS: Record<(typeof LINK_FIELDS)[number], string> = {
   discovery_booking_link: 'Discovery call booking link',
@@ -68,7 +67,6 @@ async function readRow(locId: string): Promise<Record<string, unknown> | null> {
 function readiness(row: Record<string, unknown>) {
   return {
     style: 'email_style' in row,
-    switches: 'shows_hourly_rate' in row && 'uses_booking_links' in row,
     links: 'discovery_booking_link' in row && 'virtual_booking_link' in row,
   }
 }
@@ -99,11 +97,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: 'invalid_email_style' }, { status: 400 })
     }
     patch.email_style = v
-  }
-  for (const f of BOOL_FIELDS) {
-    if (!(f in body)) continue
-    if (typeof body[f] !== 'boolean') return NextResponse.json({ error: `${f}_must_be_boolean` }, { status: 400 })
-    patch[f] = body[f]
   }
   for (const f of LINK_FIELDS) {
     if (!(f in body)) continue

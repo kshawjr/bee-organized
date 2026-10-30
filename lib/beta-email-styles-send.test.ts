@@ -8,12 +8,9 @@
 //   • a location with no style set renders Soft (Kevin: everyone on Soft)
 //   • a location's chosen style reaches the email
 //   • a paused email stays put and does not send; step 1 can't be paused
-//   • "I don't show rates" ON  → a later rate email is SKIPPED, not held;
-//                                the first email sends without the price line
-//   • "I don't show rates" OFF and no rate → that email is HELD, as today
+//   • no rate set → a rate-quoting email is HELD, as today
 //   • each of the three booking links reaches its own tag
 //   • a button whose link is a blank booking tag holds like the wording would
-//   • "I don't use booking links" → a later link email is SKIPPED
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const h = vi.hoisted(() => {
@@ -157,28 +154,14 @@ describe('Pause one email', () => {
   })
 })
 
+// A rate-quoting email at a location with no rate is HELD, as it always was.
+// (Whether a location quotes its rate at all is its sequence variant — a
+// no-rate variant's wording never contains the tag — so there is no
+// separate "don't show rates" rule here any more: 2026-10-30 follow-up.)
 const RATE_BODY = 'Following the assessment, we will provide an estimate of time and associated costs. Our rate starts at {{rate_per_hour}} per hour per Bee. We will source and bring recommended products.'
 
-describe('"I don’t show rates"', () => {
-  it('ON: a later email that quotes the rate is SKIPPED — not sent, not held, client moves on', async () => {
-    queueRun({ step: step(2, { body: RATE_BODY }), loc: { shows_hourly_rate: false, rate_per_hour: null }, next: step(3), current: step(2) })
-    const res = await sendDripStepForRow(row(2) as any)
-    expect(res).toMatchObject({ sent: false, error: 'skipped_rate_not_shown' })
-    expect(sendEmailMock).not.toHaveBeenCalled()
-    expect(advanced()).toBe(true)
-    expect(heldStatus()).toBeUndefined()
-  })
-
-  it('ON: the first email still sends, without the price sentence, and reads on', async () => {
-    queueRun({ step: step(1, { body: RATE_BODY }), loc: { shows_hourly_rate: false, rate_per_hour: null }, next: step(2), current: step(1) })
-    const res = await sendDripStepForRow(row(1) as any)
-    expect(res.sent).toBe(true)
-    expect(sent().text).toContain('Following the assessment, we will provide an estimate of time and associated costs. We will source and bring recommended products.')
-    expect(sent().text).not.toContain('Our rate')
-    expect(sent().html).not.toContain('Our rate')
-  })
-
-  it('OFF (the default) and no rate set: the email is HELD, exactly as today', async () => {
+describe('a blank rate holds, exactly as today', () => {
+  it('no rate set: the rate-quoting email is HELD, not sent, not advanced', async () => {
     queueRun({ step: step(2, { body: RATE_BODY }), loc: { rate_per_hour: null }, next: step(3), current: step(2) })
     const res = await sendDripStepForRow(row(2) as any)
     expect(res).toMatchObject({ sent: false, error: 'missing_rate' })
@@ -211,13 +194,5 @@ describe('three booking links, three tags', () => {
     queueRun({ step: step(2, { button_text: 'Book', button_link: '{{virtual_booking_link}}' }), next: step(3), current: step(2) })
     const res = await sendDripStepForRow(row(2) as any)
     expect(res).toMatchObject({ sent: false, error: 'missing_booking_link' })
-  })
-
-  it('"I don’t use booking links": a later email that asks for one is SKIPPED, not held', async () => {
-    queueRun({ step: step(2, { body: 'Visit: {{booking_link}}' }), loc: { uses_booking_links: false, calendar_link: null }, next: step(3), current: step(2) })
-    const res = await sendDripStepForRow(row(2) as any)
-    expect(res).toMatchObject({ sent: false, error: 'skipped_no_booking_links' })
-    expect(advanced()).toBe(true)
-    expect(heldStatus()).toBeUndefined()
   })
 })

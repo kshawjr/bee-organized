@@ -121,9 +121,7 @@ export async function GET(req: NextRequest) {
       result.error === 'location_not_active' ||
       result.error === 'followups_off' ||   // owner switched off emails after step 1 — stopped
       result.error === 'step_removed' ||    // owner removed this email — skipped, moved on
-      result.error === 'step_paused' ||     // owner paused this email — skipped, moved on
-      result.error === 'skipped_rate_not_shown' ||    // "I don't show rates" — skipped, moved on
-      result.error === 'skipped_no_booking_links'     // "I don't use booking links" — skipped, moved on
+      result.error === 'step_paused'        // owner paused this email — skipped, moved on
     ) {
       // Expected skips: drip auto-stopped (no_email / opted_out),
       // auto-advanced past a non-email step, or HELD because the location

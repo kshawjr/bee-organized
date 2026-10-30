@@ -33,13 +33,12 @@ import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import {
-  FIRST_STEP,
   FOLLOWUPS_OFF_REASON,
   dripStepDecision,
   readFollowupsOff,
   stopAfterSend,
 } from './drip-followups'
-import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
+import { extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 
 export type SendDripResult = {
   sent: boolean
@@ -210,8 +209,8 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // 8 master path templates + opp-stage emails.
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    // '*', not a column list: the Settings → Emails columns (email_style,
-    // shows_hourly_rate, uses_booking_links, the two new booking links) arrive
+    // '*', not a column list: the Settings → Emails columns (email_style and
+    // the two new booking links) arrive
     // in migrations run after this ships, and a named missing column would
     // fail the whole read. Missing → today's behaviour (lib/email-send-options).
     .select('*')
@@ -312,34 +311,16 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     ? (step as any).templates[0]
     : (step as any).templates) as { subject: string | null; body: string } | null
 
-  const rawSubjectSource = step.subject ?? linkedTpl?.subject ?? null
-  const rawBodySource = step.body ?? linkedTpl?.body ?? null
+  const subjectSource = step.subject ?? linkedTpl?.subject ?? null
+  const bodySource = step.body ?? linkedTpl?.body ?? null
 
-  if (!rawBodySource) {
+  if (!bodySource) {
     return { sent: false, error: 'no_body_source' }
   }
 
-  // "I don't show rates" / "I don't use booking links" (lib/email-send-options).
-  // Step 1 always sends, with the price / booking-link sentence taken out;
-  // any later email that needs either is SKIPPED (passed over, like a removed
-  // one), never held. Applied to the SOURCE, so the hold guards below only
-  // ever see what will actually be sent.
-  const switched = applyEmailSwitches({
-    alwaysSends: row.current_step <= FIRST_STEP,
-    options: emailOptions,
-    subject: rawSubjectSource,
-    body: rawBodySource,
-    buttonLink: stepExtras.buttonLink,
-  })
-  if (switched.action === 'skip') {
-    const skippedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
-    return { sent: false, error: switched.reason === 'rate_not_shown' ? 'skipped_rate_not_shown' : 'skipped_no_booking_links', advanced_to_step: skippedTo }
-  }
-  const subjectSource = switched.subject
-  const bodySource = switched.body
   // The button's link is checked by the same guards as the wording: a button
   // pointing at a blank booking link holds the email like the sentence would.
-  const buttonLinkSource = switched.buttonLink
+  const buttonLinkSource = stepExtras.buttonLink
   const guardBody = buttonLinkSource ? `${bodySource}\n${buttonLinkSource}` : bodySource
 
   // RATE GUARD: this template quotes {{rate_per_hour}} but the location has
