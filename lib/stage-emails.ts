@@ -33,6 +33,7 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { buildCanSpamFooter } from './marketing-unsubscribe'
+import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 import { resolveLocationTemplateFork } from './template-fork'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -278,7 +279,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // selected so the fork can be found via cloned_from_id.
   const { data: master, error: tplErr } = await supabaseService
     .from('templates')
-    .select('id, subject, body, name')
+    .select('*')
     .eq('legacy_id', row.stage_email_key)
     .is('location_uuid', null)
     .maybeSingle()
@@ -316,6 +317,19 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   }
   if (!lead.location_uuid) return { sent: false, error: 'no_location' }
 
+  // Location
+  const { data: loc, error: locErr } = await supabaseService
+    .from('locations')
+    // '*' so the Settings → Emails columns ride along once their migrations
+    // have run; absent before (lib/email-send-options.ts).
+    .select('*')
+    .eq('id', lead.location_uuid)
+    .maybeSingle()
+
+  if (locErr || !loc) {
+    return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
+  }
+
   // issue 206 — prefer the owner's customized copy of this template, falling
   // back to the master. ONLY subject + body come from the fork: `name` (the
   // touchpoint label) stays the master's so the timeline label is stable, and
@@ -325,22 +339,35 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // footer. The rate / booking-link holds run against this `tpl`, so a
   // customized body referencing an unfilled token holds rather than sends broken.
   const fork = await resolveLocationTemplateFork(master.id, lead.location_uuid)
-  const tpl = {
+
+  // The owner's email settings and this template's button (2026-10-30,
+  // lib/email-send-options.ts). These follow-ups are not "always sends": with
+  // "I don't show rates" / "I don't use booking links", one that needs the
+  // rate / a link is SKIPPED — cancelled with the reason, never retried.
+  const emailOptions = locationEmailOptionsFromRow(loc as Record<string, unknown>)
+  // The owner's own copy carries its own button; otherwise the master's.
+  const tplExtras = extrasFromRow((fork ?? master) as Record<string, unknown>)
+  const switched = applyEmailSwitches({
+    alwaysSends: false,
+    options: emailOptions,
     subject: fork?.subject ?? master.subject,
-    body: fork?.body ?? master.body,
+    body: (fork?.body ?? master.body) ?? '',
+    buttonLink: tplExtras.buttonLink,
+  })
+  if (switched.action === 'skip') {
+    await supabaseService
+      .from('scheduled_stage_emails')
+      .update({ cancelled_at: new Date().toISOString(), cancelled_reason: switched.reason })
+      .eq('id', row.id)
+    return { sent: false, error: switched.reason }
+  }
+  const tpl = {
+    subject: switched.subject,
+    body: switched.body,
     name: master.name,
   }
-
-  // Location
-  const { data: loc, error: locErr } = await supabaseService
-    .from('locations')
-    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state')
-    .eq('id', lead.location_uuid)
-    .maybeSingle()
-
-  if (locErr || !loc) {
-    return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
-  }
+  const buttonLinkSource = switched.buttonLink
+  const guardTpl = { subject: tpl.subject, body: buttonLinkSource ? `${tpl.body}\n${buttonLinkSource}` : tpl.body }
 
   // Owners — resolve the location's DESIGNATED primary owner (Phase 2 co-owner
   // support) so the sending identity is deterministic when a location has two
@@ -389,12 +416,14 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     location_phone: loc.phone,
     book_assessment_link: loc.calendar_link,
     reviews_link: loc.reviews_link,
+    discovery_booking_link: emailOptions.discoveryBookingLink,
+    virtual_booking_link: emailOptions.virtualBookingLink,
   }
 
   // RATE GUARD: template quotes {{rate_per_hour}} but the location has no
   // rate. HOLD — send_at stays intact so the cron retries every tick and
   // the email goes out on the first tick after the rate is entered.
-  if (blockedOnMissingRate(tpl, loc.rate_per_hour)) {
+  if (blockedOnMissingRate(guardTpl, loc.rate_per_hour)) {
     console.warn('[stage-emails] held: template quotes {{rate_per_hour}} but location rate is blank', {
       rowId: row.id, leadId: lead.id, locationId: loc.id,
     })
@@ -405,7 +434,12 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // link and none resolves. HOLD — send_at stays intact so the cron retries
   // every tick and it goes out on the first tick after a link is set.
   if (
-    blockedOnMissingBookingLink(tpl, { ownerBookingLink, locationCalendarLink: loc.calendar_link })
+    blockedOnMissingBookingLink(guardTpl, {
+      ownerBookingLink,
+      locationCalendarLink: loc.calendar_link,
+      discoveryBookingLink: emailOptions.discoveryBookingLink,
+      virtualBookingLink: emailOptions.virtualBookingLink,
+    })
   ) {
     console.warn('[stage-emails] held: template quotes a booking tag but no link resolves', {
       rowId: row.id, leadId: lead.id, locationId: loc.id,
@@ -414,6 +448,9 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true })
+  const renderedButton = tplExtras.buttonText && buttonLinkSource
+    ? renderTemplate({ subject: tplExtras.buttonText, body: buttonLinkSource }, ctx)
+    : null
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
   // subject is NULL/empty, or it renders to nothing. HOLD — send_at stays
@@ -473,6 +510,9 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
       location_phone: loc.phone,
       reviews_link: loc.reviews_link,
       signature,
+      style: emailOptions.style,
+      heading: rendered.subject,
+      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
     },
     canSpamFooter,
   )

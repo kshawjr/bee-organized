@@ -13,6 +13,7 @@
 // Reset overrides SUBJECT and BODY only on BOTH rails, so it is one promise on
 // every row — mirroring mergeForkOverMaster. Rail A's reset leaves delay_days
 // alone: timing is step 10's.
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -56,6 +57,7 @@ const mount = async (over: any = {}) => {
     ...over,
   }
   await act(async () => { root.render(<EmailsList {...props} />) })
+  await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
   return props
 }
 const buttons = (label: string) =>
@@ -100,7 +102,7 @@ describe('Edit appears on every row, and never adds or deletes', () => {
   it('there is no add affordance and no delete — the only thing that can drift a shape', async () => {
     await mount()
     const labels = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim() ?? '')
-    for (const banned of ['+ Add another email', 'Add another email', '＋ Add another email', 'Delete', 'Remove', '+ Add step']) {
+    for (const banned of ['+ Add another email', 'Add another email', '＋ Add another email', '+ Add an email here', 'Delete', 'Remove', '+ Add step']) {
       expect(labels, `must not offer "${banned}"`).not.toContain(banned)
     }
   })

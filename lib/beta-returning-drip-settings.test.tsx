@@ -18,6 +18,7 @@
 //      organizing-c sees returning-c (no rate, no booking link, so no Paused
 //      chip), and a seeded -b is NOT shown to them
 //   4) nothing seeded for that variant → no heading at all
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -116,6 +117,7 @@ describe('3 + 4) the list picks the variant from the organizing answers', () => 
       root.render(<EmailsList pathSteps={pathSteps} templates={templates}
         generalDefault={generalDefault} moveDefault={generalDefault} sendConfig={sendConfig} />)
     })
+    await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
     return container
   }
   const readButtons = () => Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read')
@@ -150,7 +152,8 @@ describe('3 + 4) the list picks the variant from the organizing answers', () => 
   it('an owner on organizing-b who has NOT filled in the link is told so — held is for a blank setting, not a declined one', async () => {
     await mount({ 'organizing-b': organizingSteps, 'returning-b': returningBSteps }, 'organizing-b',
       { ratePerHour: '$98.00', ownerBookingLink: '', locationCalendarLink: '' })
-    expect(container.textContent).toContain('Paused')
-    expect(container.textContent).toContain('your booking link is empty')
+    // 2026-10-30 design: held reads "Not sending — add …" (Paused now means
+    // the owner paused it).
+    expect(container.textContent).toContain('Not sending — add your in-home assessment booking link')
   })
 })

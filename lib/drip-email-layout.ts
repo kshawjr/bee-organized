@@ -4,8 +4,9 @@
 //
 // Drips go to franchisees' own clients; the audience skews 45-65, so this
 // wrapper prioritises legibility over density: single column, ~600px, 16px
-// body copy at generous line-height, one gold bee logo + wordmark header,
-// and a solid teal footer band.
+// body copy at generous line-height. Since 2026-10-30 the look is the
+// designer's: honeycomb band, gold bee logo + wordmark, script heading, and one
+// of five button styles chosen per location (EMAIL_STYLES below).
 //
 // SCOPE: every automated client email — drips, all six opportunity-stage
 // emails (lib/stage-emails.ts — the four estimate follow-ups AND the two
@@ -14,10 +15,10 @@
 // plain bodyToHtml path (lib/drip-send.ts) no longer has a sending caller.
 //
 // COMPLIANCE SLOT: a commercial email's CAN-SPAM footer (unsubscribe + postal
-// address) must sit INSIDE the white card, above the teal band. Appending it to
+// address) must sit INSIDE the white card, as its last row. Appending it to
 // the finished document would land it after </html>, outside the frame. The
-// caller passes it as `cardFooterHtml`; with no footer passed, the output is
-// byte-identical to before (drips never pass one).
+// caller passes it as `cardFooterHtml`; with no footer passed there is no
+// such row (drips never pass one).
 //
 // EMAIL-CLIENT CONSTRAINTS (not optional): table-based layout, every style
 // inline (Gmail strips <style>), no flexbox/grid (Outlook). A single <style>
@@ -34,7 +35,7 @@
 // can share them without a circular import) and are re-exported here.
 import { escHtml, escAttr } from './email-escape'
 import { displayPhone } from './phone'
-import { htmlWithSignature, textWithSignature, type EmailSignature } from './email-signature'
+import { htmlWithSignature, textWithSignature, safeHttpUrl, SIGNATURE_MARKER, type EmailSignature } from './email-signature'
 export { escHtml, escAttr }
 
 // The gold bee mark — the SAME transparent PNG the brand site uses, but
@@ -62,12 +63,11 @@ export function resolveDripLogoUrl(env: NodeJS.ProcessEnv = process.env): string
   return base ? `${base}${DRIP_LOGO_PATH}` : DRIP_LOGO_PATH
 }
 
-// Brand teal = ui/tokens GREEN_FILL (hive token set accent.fg — the site's own
-// deep teal). Closest existing brand colour to the reference's teal band, and
-// dark enough to carry white text (AA), unlike gold #D4A049 / sage #A8C9C4
-// which the palette bans for white text. NOT eyedropped from the screenshot.
+// Brand teal = ui/tokens GREEN_FILL. No longer painted in client email (the
+// teal band went with the 2026-10-30 redesign); kept because other screens and
+// tests still import it by name.
 export const DRIP_BRAND_TEAL = '#054E4A'
-// Gold-hued ink that passes on white (tokens brand.goldFill) — the tagline.
+// Gold-hued ink that passes on white (tokens brand.goldFill).
 export const DRIP_BRAND_GOLD_INK = '#8C6421'
 
 // Website is NOT per-location — every location shares this. Hardcoded per #90:
@@ -80,6 +80,77 @@ export const DRIP_WEBSITE_LABEL = 'beeorganized.com'
 // master template bodies so the two never read differently.
 export const REVIEWS_LINE_TEXT = 'Be sure to check out our Google Reviews!'
 
+// ── THE FIVE STYLES (Settings → Emails → Look, 2026-10-30) ─────────────────
+// Taken exactly from the designer's export (its src/lib/email-html.ts). One
+// layout; the style is a parameter of it, never a second layout. Every client
+// email — drips, the welcome, the job follow-ups — goes through
+// buildBrandedShellHtml, so a location's style reaches all of them.
+//
+// Kevin's ruling 2026-10-30: Soft is the default and EVERY location is on it
+// from the day this ships (a NULL locations.email_style is Soft).
+//
+// Two styles change more than the button:
+//   rounded  repeats the honeycomb band under the card, upside down. The
+//            export flipped it with transform:scaleY(-1), which Outlook
+//            ignores (the band would sit the right way up). So it is a
+//            SECOND IMAGE FILE, already flipped: public/email-honeycomb-footer.png.
+//   classic  replaces the gold script heading with sage Arvo at 30px.
+export type EmailStyle = 'soft' | 'outline' | 'bold' | 'rounded' | 'classic'
+export const DEFAULT_EMAIL_STYLE: EmailStyle = 'soft'
+
+export type EmailStyleSpec = {
+  id: EmailStyle
+  name: string
+  note: string
+  buttonBg: string
+  buttonText: string
+  buttonBorder: string
+  buttonRadius: number
+  // true: uppercase, 15px, 2px tracking. false: sentence case, 17px, 0.5px.
+  buttonCaps: boolean
+}
+
+export const EMAIL_STYLES: EmailStyleSpec[] = [
+  { id: 'soft',    name: 'Soft',    note: 'Gentle and calm',        buttonBg: '#A8C9C4', buttonText: '#3A3C39', buttonBorder: '#A8C9C4', buttonRadius: 10, buttonCaps: true },
+  { id: 'outline', name: 'Outline', note: 'Light and airy',         buttonBg: '#FFFFFF', buttonText: '#4A4C49', buttonBorder: '#A8C9C4', buttonRadius: 10, buttonCaps: true },
+  { id: 'bold',    name: 'Bold',    note: 'Easiest to spot',        buttonBg: '#60625F', buttonText: '#FFFFFF', buttonBorder: '#60625F', buttonRadius: 10, buttonCaps: true },
+  { id: 'rounded', name: 'Rounded', note: 'Friendly and relaxed',   buttonBg: '#A8C9C4', buttonText: '#3A3C39', buttonBorder: '#A8C9C4', buttonRadius: 30, buttonCaps: false },
+  { id: 'classic', name: 'Classic', note: 'Traditional, with gold', buttonBg: '#FFFFFF', buttonText: '#60625F', buttonBorder: '#C99B50', buttonRadius: 10, buttonCaps: true },
+]
+
+// Anything that isn't one of the five (NULL, a typo, a column that doesn't
+// exist yet) is Soft.
+export function normalizeEmailStyle(v: unknown): EmailStyle {
+  return EMAIL_STYLES.some((s) => s.id === v) ? (v as EmailStyle) : DEFAULT_EMAIL_STYLE
+}
+export function emailStyleSpec(v: unknown): EmailStyleSpec {
+  const id = normalizeEmailStyle(v)
+  return EMAIL_STYLES.find((s) => s.id === id)!
+}
+
+// The honeycomb band, self-hosted for the same reason as the logo. The export
+// pointed at a Lovable preview host, which would vanish from every email in
+// every inbox the day the preview expired.
+export const EMAIL_HONEYCOMB_PATH = '/email-honeycomb-header.png'
+export const EMAIL_HONEYCOMB_FLIPPED_PATH = '/email-honeycomb-footer.png'
+function appAsset(path: string, env: NodeJS.ProcessEnv = process.env): string {
+  const base = (env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')
+  return base ? `${base}${path}` : path
+}
+export const resolveHoneycombUrl = (env: NodeJS.ProcessEnv = process.env) => appAsset(EMAIL_HONEYCOMB_PATH, env)
+export const resolveHoneycombFlippedUrl = (env: NodeJS.ProcessEnv = process.env) => appAsset(EMAIL_HONEYCOMB_FLIPPED_PATH, env)
+
+// Type and colour, from the export.
+export const EMAIL_TEXT = '#60625F'
+export const EMAIL_GOLD = '#C99B50'
+export const EMAIL_SAGE = '#A8C9C4'
+export const EMAIL_CLASSIC_HEADING = '#7FA8A2'
+const EMAIL_MIST = '#F6F8F3'
+export const EMAIL_SANS = `'Helvetica Neue', Helvetica, Arial, sans-serif`
+export const EMAIL_SCRIPT = `Corinthia, 'Brush Script MT', cursive`
+export const EMAIL_ARVO = `Arvo, Georgia, 'Times New Roman', serif`
+const FONTS_LINK = 'https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=Lato:wght@300;700&family=Corinthia&display=swap'
+
 export type BrandedEmailContext = {
   location_name?: string | null
   location_phone?: string | null
@@ -87,9 +158,18 @@ export type BrandedEmailContext = {
   // What {{signature}} becomes (lib/email-signature.ts). Only read when the
   // rendered body carries SIGNATURE_MARKER; null/absent → the marker is dropped.
   signature?: EmailSignature | null
+  // The location's look (locations.email_style). Absent → Soft.
+  style?: EmailStyle | string | null
+  // The heading at the top of the card — a client email's rendered subject.
+  // Absent → no heading row.
+  heading?: string | null
+  // The email's optional button (button_text + button_link), ALREADY
+  // RENDERED. Both must be present and the link a real http(s) URL, or there
+  // is no button.
+  button?: { label?: string | null; href?: string | null } | null
 }
 
-const LINK_STYLE = `color:${DRIP_BRAND_TEAL};text-decoration:underline;`
+const LINK_STYLE = `color:${EMAIL_TEXT};text-decoration:underline;`
 
 // Turn URLs in a single line of ALREADY-RENDERED, RAW (un-escaped) text into
 // clickable links, escaping everything else. Two forms, template-agnostic:
@@ -137,7 +217,7 @@ function bodyParagraphsHtml(body: string): string {
         .split('\n')
         .map((line) => linkifyLine(line))
         .join('<br />')
-      return `<p style="margin:0 0 18px;font-size:16px;line-height:1.7;color:#2b2b28;">${inner}</p>`
+      return `<p class="dm-text" style="margin:0 0 20px 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};">${inner}</p>`
     })
     .join('\n')
 }
@@ -165,90 +245,139 @@ function footerSegments(ctx: BrandedEmailContext): {
 }
 
 // ── Shared branded shell ────────────────────────────────────────────────────
-// The Bee Organized chrome — dark-mode guard, single 600px card, gold bee logo
-// + wordmark + tagline header, and the teal footer band — with two slots the
-// caller fills:
+// The Bee Organized chrome (the 2026-10-30 design): honeycomb band, gold bee
+// logo + wordmark, an optional heading over a thin rule, the card body, an
+// optional compliance row, and the location line under the card. Slots:
 //   • cardContentHtml   → the white card body (drip paragraphs, OR a lead-
 //                          notification field grid + button — structured HTML)
-//   • footerBandHtml    → the white-on-teal footer band content
+//   • footerBandHtml    → the line under the card (name | website | phone)
+//   • cardFooterHtml    → optional; the CAN-SPAM footer of a commercial email,
+//                          the last row INSIDE the card. Empty → no row.
+//   • opts.style        → the location's look; absent → Soft
+//   • opts.heading      → heading text (escaped here); absent → no heading
+// Every HTML slot is inserted verbatim: the caller escapes its own content.
 //
-// Extracted from buildBrandedDripHtml so a second caller (the #113 lead
-// notification) reuses the exact same chrome instead of copying it. The drip
-// body is plain text run through bodyParagraphsHtml; the notification body is a
-// table-based field grid — those DON'T share a body model, but they DO share
-// this shell, so the shell takes already-built inner HTML and stays agnostic
-// about what's inside. Every slot is inserted verbatim: the caller is
-// responsible for escaping its own content.
-//
-//   • cardFooterHtml    → optional; the CAN-SPAM footer of a commercial email.
-//                          Its own row at the bottom of the white card, directly
-//                          above the teal band. Empty → no row at all.
+// No CSS transforms anywhere (Outlook ignores them — hence the second,
+// pre-flipped band image for Rounded). The web-font link is a progressive
+// enhancement; every font stack falls back to a system face.
+export type ShellOptions = { style?: EmailStyle | string | null; heading?: string | null }
+
 export function buildBrandedShellHtml(
   cardContentHtml: string,
   footerBandHtml: string,
   cardFooterHtml = '',
+  opts: ShellOptions = {},
 ): string {
+  const style = normalizeEmailStyle(opts.style)
   const logoUrl = resolveDripLogoUrl()
+  const heading = opts.heading?.trim() || ''
+  const headingHtml = !heading
+    ? ''
+    : style === 'classic'
+      ? `<h1 style="margin:0 0 14px 0;font-family:${EMAIL_ARVO};font-size:30px;line-height:40px;font-weight:400;letter-spacing:1px;color:${EMAIL_CLASSIC_HEADING};text-align:center;">${escHtml(heading)}</h1>`
+      : `<h1 style="margin:0 0 8px 0;font-family:${EMAIL_SCRIPT};font-size:46px;line-height:56px;font-weight:400;color:${EMAIL_GOLD};text-align:center;">${escHtml(heading)}</h1>`
+  const headingRow = headingHtml
+    ? `
+          <tr><td align="center" style="padding:20px 28px 0 28px;">
+            ${headingHtml}
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="80%" align="center"><tr><td class="dm-line" style="border-top:1px solid #DDDDDA;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr></table>
+          </td></tr>`
+    : ''
   const cardFooterRow = cardFooterHtml
     ? `
           <tr>
-            <td class="bo-card-footer" style="padding:0 40px 28px;background:#ffffff;">
+            <td class="bo-card-footer dm-line" style="padding:16px 32px 24px 32px;border-top:1px solid #EEEEEE;font-family:${EMAIL_SANS};font-size:13px;line-height:20px;color:#7A7C79;text-align:center;">
               ${cardFooterHtml}
             </td>
           </tr>`
     : ''
+  const bottomBandRow = style === 'rounded'
+    ? `
+          <tr><td style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombFlippedUrl()}" width="600" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>`
+    : ''
+  const darkCss = `.dm-bg{background-color:#1F201E !important;}.dm-card{background-color:#2A2B29 !important;}.dm-text,.dm-text a,.dm-text strong{color:#E4E5E1 !important;}.dm-line{border-color:#454643 !important;}`
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
+${heading ? `<title>${escHtml(heading)}</title>\n` : ''}<link href="${FONTS_LINK}" rel="stylesheet">
 <style>
   /* Dark-mode guard only. Gmail strips this block; the email is fully correct
-     without it. Where honoured (Apple Mail, iOS Mail), it pins the card white
-     so the dark wordmark/body stay legible instead of being force-inverted. */
-  @media (prefers-color-scheme: dark) {
-    .bo-wrap { background:#12110f !important; }
-    .bo-card { background:#ffffff !important; }
-  }
+     without it. */
+  :root{color-scheme:light dark;supported-color-schemes:light dark;}
+  @media (prefers-color-scheme: dark) { ${darkCss} }
+  [data-ogsc] .dm-text{color:#E4E5E1 !important;}
 </style>
 </head>
-<body style="margin:0;padding:0;background:#f4f2ec;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bo-wrap" style="background:#f4f2ec;">
+<body class="dm-bg" style="margin:0;padding:0;background-color:${EMAIL_MIST};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bo-wrap dm-bg" bgcolor="${EMAIL_MIST}" style="background-color:${EMAIL_MIST};">
     <tr>
-      <td align="center" style="padding:24px 12px;">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="bo-card" style="width:600px;max-width:600px;background:#ffffff;border-radius:4px;overflow:hidden;">
+      <td align="center" style="padding:24px 10px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="bo-card dm-card" bgcolor="#FFFFFF" style="width:100%;max-width:600px;background-color:#FFFFFF;">
+          <tr><td align="right" style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombUrl()}" width="600" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>
+          <tr><td align="center" style="padding:0 24px 4px 24px;">
+            <img src="${logoUrl}" width="72" alt="Bee Organized" style="display:block;margin:0 auto;width:72px;height:auto;border:0;font-family:${EMAIL_SANS};font-size:20px;letter-spacing:3px;color:${EMAIL_TEXT};">
+            <p class="dm-text" style="margin:10px 0 0 0;font-family:${EMAIL_SANS};font-size:13px;letter-spacing:4px;text-transform:uppercase;color:${EMAIL_TEXT};">Bee Organized</p>
+          </td></tr>${headingRow}
           <tr>
-            <td align="center" style="padding:36px 40px 4px;background:#ffffff;">
-              <img src="${logoUrl}" width="120" height="84" alt="Bee Organized" style="display:block;border:0;outline:none;text-decoration:none;width:120px;height:auto;">
-              <div style="font-family:Georgia,'Times New Roman',serif;font-size:23px;letter-spacing:3px;color:${DRIP_BRAND_TEAL};padding-top:16px;">BEE ORGANIZED</div>
-              <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:${DRIP_BRAND_GOLD_INK};padding-top:6px;">Simplify Your Hive</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 40px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+            <td style="padding:24px 28px 8px 32px;font-family:${EMAIL_SANS};">
               ${cardContentHtml}
             </td>
-          </tr>${cardFooterRow}
-          <tr>
-            <td style="padding:0;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td align="center" bgcolor="${DRIP_BRAND_TEAL}" style="background:${DRIP_BRAND_TEAL};padding:18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#ffffff;">
-                    ${footerBandHtml}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+          </tr>${cardFooterRow}${bottomBandRow}
+        </table>
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+          <tr><td align="center" class="dm-text" style="padding:20px 24px;font-family:${EMAIL_SANS};font-size:14px;line-height:22px;color:${EMAIL_TEXT};">
+            ${footerBandHtml}
+          </td></tr>
         </table>
       </td>
     </tr>
   </table>
 </body>
 </html>`
+}
+
+// ── The button ─────────────────────────────────────────────────────────────
+// Kevin, 2026-10-30: a button only when BOTH its text and its link are filled
+// in. The link has already been through renderTemplate, so a tag with nothing
+// behind it ({{booking_link}} with no link set) leaves an empty string — not a
+// URL, so no button. Only http(s) survives (safeHttpUrl, as for signature
+// links): an owner-typed "javascript:" never reaches an href.
+export function resolveButton(button: BrandedEmailContext['button']): { label: string; href: string } | null {
+  const label = button?.label?.trim()
+  const raw = button?.href?.trim()
+  if (!label || !raw) return null
+  const href = safeHttpUrl(raw)
+  return href ? { label, href } : null
+}
+
+export function buildButtonHtml(style: EmailStyle | string | null | undefined, button: { label: string; href: string }): string {
+  const s = emailStyleSpec(style)
+  const size = s.buttonCaps ? 15 : 17
+  const tracking = s.buttonCaps ? 2 : 0.5
+  const transform = s.buttonCaps ? 'uppercase' : 'none'
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 20px auto;">
+<tr><td align="center" bgcolor="${s.buttonBg}" style="background-color:${s.buttonBg};border:2px solid ${s.buttonBorder};border-radius:${s.buttonRadius}px;">
+<a href="${escAttr(button.href)}" target="_blank" style="display:inline-block;padding:14px 32px;font-family:${EMAIL_SANS};font-size:${size}px;font-weight:500;letter-spacing:${tracking}px;text-transform:${transform};color:${s.buttonText};text-decoration:none;border-radius:${s.buttonRadius}px;">${escHtml(button.label)}</a>
+</td></tr></table>`
+}
+
+// Where the button goes: after the message, before the sign-off, as the design
+// lays it out. With {{signature}} in the body, the paragraph holding it (the
+// "Thank you," line and the signature) and everything after it follow the
+// button; the rest is the message. No signature → the button closes the message.
+export function splitForButton(body: string): [string, string] {
+  const i = body.indexOf(SIGNATURE_MARKER)
+  if (i === -1) return [body, '']
+  const head = body.slice(0, i)
+  const lastBreak = head.replace(/\n+$/, '').lastIndexOf('\n\n')
+  const cut = lastBreak === -1 ? 0 : lastBreak
+  return [body.slice(0, cut), body.slice(cut).replace(/^\n+/, '')]
 }
 
 // A commercial email's compliance footer, pre-built by the caller
@@ -266,22 +395,34 @@ export function buildBrandedDripHtml(
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
 
   const reviewsHtml = addReviewsLine
-    ? `<p style="margin:20px 0 0;font-size:16px;line-height:1.7;color:#2b2b28;"><a href="${escAttr(
+    ? `<p class="dm-text" style="margin:20px 0 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};"><a href="${escAttr(
         reviewsLink!,
       )}" style="${LINK_STYLE}">${escHtml(REVIEWS_LINE_TEXT)}</a></p>`
     : ''
 
   const { brand, phone } = footerSegments(ctx)
-  const websiteCell = `<a href="${DRIP_WEBSITE_URL}" style="color:#ffffff;text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
+  const websiteCell = `<a href="${DRIP_WEBSITE_URL}" style="color:${EMAIL_TEXT};">${DRIP_WEBSITE_LABEL}</a>`
   const footerInner = [escHtml(brand), websiteCell, phone ? escHtml(phone) : null]
     .filter(Boolean)
-    .join('&nbsp;&nbsp;|&nbsp;&nbsp;')
+    .join(' | ')
 
   // {{signature}}: the body is split on the private placeholder, every piece is
   // escaped by bodyParagraphsHtml exactly as before, and the fixed signature
   // layout is joined in between (lib/email-signature.ts header).
-  return buildBrandedShellHtml(`${htmlWithSignature(renderedBody, bodyParagraphsHtml, ctx.signature)}
-              ${reviewsHtml}`, footerInner, cardFooter?.html ?? '')
+  const button = resolveButton(ctx.button)
+  let contentHtml: string
+  if (button) {
+    const [message, rest] = splitForButton(renderedBody)
+    contentHtml = [
+      message.trim() ? htmlWithSignature(message, bodyParagraphsHtml, ctx.signature) : '',
+      buildButtonHtml(ctx.style, button),
+      rest.trim() ? htmlWithSignature(rest, bodyParagraphsHtml, ctx.signature) : '',
+    ].filter(Boolean).join('\n              ')
+  } else {
+    contentHtml = htmlWithSignature(renderedBody, bodyParagraphsHtml, ctx.signature)
+  }
+  return buildBrandedShellHtml(`${contentHtml}
+              ${reviewsHtml}`, footerInner, cardFooter?.html ?? '', { style: ctx.style, heading: ctx.heading })
 }
 
 // ── Plain text ────────────────────────────────────────────────────────────
@@ -300,11 +441,18 @@ export function buildBrandedDripText(
   const { brand, phone } = footerSegments(ctx)
   const footerLine = [brand, DRIP_WEBSITE_LABEL, phone].filter(Boolean).join(' | ')
 
-  const parts = [
-    'BEE ORGANIZED — Simplify Your Hive',
-    '',
-    textWithSignature(renderedBody, ctx.signature).trimEnd(),
-  ]
+  const heading = ctx.heading?.trim()
+  const button = resolveButton(ctx.button)
+  const parts = ['BEE ORGANIZED', '']
+  if (heading) parts.push(heading, '')
+  if (button) {
+    const [message, rest] = splitForButton(renderedBody)
+    if (message.trim()) parts.push(textWithSignature(message, ctx.signature).trimEnd(), '')
+    parts.push(`${button.label.toUpperCase()}:`, button.href)
+    if (rest.trim()) parts.push('', textWithSignature(rest, ctx.signature).trimEnd())
+  } else {
+    parts.push(textWithSignature(renderedBody, ctx.signature).trimEnd())
+  }
   if (addReviewsLine) {
     parts.push('', `${REVIEWS_LINE_TEXT} (${reviewsLink})`)
   }

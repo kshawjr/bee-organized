@@ -389,11 +389,17 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     // heading, which issue 303 replaced: the card now leads with what the shown
     // sequence sends as, and those rows ARE the location identity wherever it is
     // headed. A heading is copy and copy moves; the rows are the feature.
-    expect(beehub).toContain('label="Send From Name"')
-    expect(comp).not.toContain('Send From Name')
-    // And the reverse direction, which is the half that would actually hurt:
-    // Emails must not grow the per-type editors that New leads owns.
+    //
+    // 2026-10-30 (the Emails screen design): the per-type editors — who
+    // handles each job type and what it sends as — MOVED to Emails, on
+    // Kevin's instruction. Still ONE editable copy: Emails mounts this
+    // component's handlers half, New leads keeps only who is told.
+    expect(beehub).toContain('label="Main name"')
+    expect(comp).not.toContain('Main name')
     expect(comp).toContain('What it sends as')
+    expect(beehub).toContain('<NewLeadsSection realLocId={realLocId} readOnly={false} only="handlers" />')
+    expect(beehub).toContain('<NewLeadsSection realLocId={realLocId} readOnly={false} only="recipients" />')
+    expect(beehub.split('<NewLeadsSection ').length - 1).toBe(2)
   })
   it('the tab hosting this component is OWNER-allowlisted (hidden from manager AND lite_user)', () => {
     // The section list is an allowlist on franchiseRole==='owner' — the old

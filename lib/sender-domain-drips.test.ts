@@ -353,10 +353,13 @@ describe('job-type senders — typed address and person-mode handler', () => {
 // ═══ where the field is edited ═══════════════════════════════════════
 describe('the screens check it as the owner types', () => {
   const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-  it('Settings › Send From Email validates with the shared rule', () => {
-    const row = src.split('\n').find(l => l.includes('label="Send From Email"'))!
-    expect(row).toContain('validate={v=>senderAddressProblem(v, null)}')
-    expect(row).toContain('not a personal Gmail')
+  // 2026-10-30: the row is the Emails screen's "Main address" field.
+  it('Settings › Emails › Main address validates with the shared rule', () => {
+    const at = src.indexOf('label="Main address"')
+    expect(at).toBeGreaterThan(-1)
+    const field = src.slice(at, src.indexOf('/>', at))
+    expect(field).toContain("const p = senderAddressProblem(v, null); return p ? Promise.resolve(p) : emailsSaveLocation('sendFromEmail', v)")
+    expect(field).toContain('not a personal Gmail')
   })
   it('onboarding refuses a bad Send From before saving and says why', () => {
     expect(src).toContain('const sendFromErr = senderAddressProblem(locationForm.sendFromEmail, null)')

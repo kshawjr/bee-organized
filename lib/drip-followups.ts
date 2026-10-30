@@ -42,20 +42,28 @@ import { supabaseService } from './supabase-service'
 export const FIRST_STEP = 1
 export const FOLLOWUPS_OFF_REASON = 'followups_off'
 
-export type StepDecision = 'send' | 'skip_removed' | 'stop_followups_off'
+export type StepDecision = 'send' | 'skip_removed' | 'skip_paused' | 'stop_followups_off'
 
 // THE rule, at the moment a step is due. Step 1 is answered before anything
 // else is looked at: no setting and no flag on the step can hold it back.
+//
+// PAUSED (2026-10-30, drip_path_steps.is_paused) is passed over exactly like
+// REMOVED — the client moves on to the next email on its own date. The
+// difference is only on the Emails screen: a paused email stays in its place
+// and says Paused; a removed one drops to the bottom of its group.
 export function dripStepDecision(input: {
   stepOrder: number
   stepActive: boolean | null | undefined
   followupsOff: boolean
+  stepPaused?: boolean | null
 }): StepDecision {
   if (input.stepOrder <= FIRST_STEP) return 'send'
   if (input.followupsOff) return 'stop_followups_off'
   // Only an explicit false removes a step. NULL / missing reads as active, so
   // a row written before this existed can never be skipped by accident.
   if (input.stepActive === false) return 'skip_removed'
+  // Same: only an explicit true pauses.
+  if (input.stepPaused === true) return 'skip_paused'
   return 'send'
 }
 

@@ -193,9 +193,10 @@ const editButtons = () =>
     b => b.textContent?.trim() === 'Edit') as HTMLElement[]
 
 // The timing pencil on a drip row (step 10) — what replaced the delay chip.
+// 2026-10-30 design: the timing control is a clock button, and step 1's
+// timing is fixed — so the list of controls starts at step 2.
 const pencils = () =>
-  Array.from(container.querySelectorAll('button')).filter(
-    b => (b.textContent ?? '').includes('\u270e')) as HTMLElement[]
+  Array.from(container.querySelectorAll('button[title="Change when this goes out"]')) as HTMLElement[]
 
 const stepsPatches = () => calls.filter(c => c.method === 'PATCH' && /\/api\/drip-paths\/[^/]+\/steps/.test(c.url))
 const perStepCalls = () => calls.filter(c => c.url.includes('/api/drip-path-steps/'))
@@ -302,7 +303,7 @@ describe('inline edit on an already-customized path', () => {
 
     // Timing edit commits through the same seam (step 10 replaced the delay
     // chip with the pencil; the write path underneath is unchanged).
-    await act(async () => { pencils()[1].click() })
+    await act(async () => { pencils()[0].click() })
     const num = container.querySelector('input[type="number"]') as HTMLInputElement
     await setNativeValue(num, '3')
     await clickText('Save')
@@ -347,7 +348,7 @@ describe('a commit failure leaves the sequence unchanged', () => {
     await mountPaths()
     stepsPatchStatus = 500
 
-    await act(async () => { pencils()[1].click() })
+    await act(async () => { pencils()[0].click() })
     await setNativeValue(container.querySelector('input[type="number"]') as HTMLInputElement, '9')
     await clickText('Save')
     await act(async () => {})

@@ -58,8 +58,21 @@ const mount = async (over: any = {}) => {
   await act(async () => { root.render(<EmailsList {...props} />) })
   return props
 }
-const pausedBadges = () => Array.from(container.querySelectorAll('span')).filter(s => s.textContent === 'Paused')
+// 2026-10-30 design: a row held for a missing detail no longer wears a
+// "Paused" badge — "Paused" now means the OWNER paused it (Pause button). A
+// held row is the amber "waiting" state with a "⏸ Not sending — add …" link
+// that jumps to the field. Same rule, new words.
+const pausedBadges = () => Array.from(container.querySelectorAll('button')).filter(b => (b.textContent ?? '').startsWith('⏸ Not sending — add'))
 const text = () => container.textContent ?? ''
+// Groups fold and show three rows until "More" (2026-10-30 design). Open all.
+const expandAll = async () => {
+  for (let pass = 0; pass < 3; pass++) {
+    const closed = Array.from(container.querySelectorAll('button[aria-expanded="false"]')) as HTMLButtonElement[]
+    const more = Array.from(container.querySelectorAll('button')).filter(b => (b.textContent ?? '').startsWith('More —')) as HTMLButtonElement[]
+    if (!closed.length && !more.length) return
+    await act(async () => { for (const b of [...closed, ...more]) b.click() })
+  }
+}
 
 // ─────────────── the enumeration, as a pure function ───────────────
 describe('what actually blocks a send', () => {
@@ -115,7 +128,7 @@ describe('a blocked row is dimmed and says why', () => {
       sendConfig: { ...ALL_SET, ratePerHour: '' },
     })
     expect(pausedBadges().length).toBe(1)
-    expect(text()).toContain('Not sending — it mentions your hourly rate')
+    expect(text()).toContain('Not sending — add your hourly rate')
   })
 
   it('still shows the wording — paused, not hidden', async () => {
@@ -123,8 +136,12 @@ describe('a blocked row is dimmed and says why', () => {
       steps: [step(1, 'One', `Our rate is ${RATE}.\n\nSecond line survives.`), step(2, 'Two', 'Plain.'), step(3, 'Three', 'Plain.')],
       sendConfig: { ...ALL_SET, ratePerHour: '' },
     })
-    expect(text()).toContain('Second line survives')
+    // The list shows each email's first meaningful line; the rest of the
+    // wording is one Read away, never hidden.
+    await expandAll()
     expect(Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read').length).toBe(6)
+    await act(async () => { (Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read')[0] as HTMLButtonElement).click() })
+    expect(container.querySelector('[role="dialog"]')!.textContent).toContain('Second line survives')
   })
 
   it('an unblocked row renders normally', async () => {
@@ -139,7 +156,7 @@ describe('a blocked row is dimmed and says why', () => {
       sendConfig: { ratePerHour: '', ownerBookingLink: '', locationCalendarLink: '' },
     })
     expect(pausedBadges().length).toBe(1)
-    expect(text()).toContain('Not sending —')
+    expect(text()).toContain('Not sending — add your hourly rate and your own booking link')
   })
 
   it('the reason is owner language — no field names, routes, or null', async () => {
@@ -151,9 +168,7 @@ describe('a blocked row is dimmed and says why', () => {
     // wording, which legitimately contains {{merge_tags}} — step 7 shows those
     // raw on purpose. Asserting over the whole row would test the fixture's
     // body, not the language we wrote.
-    const reasons = Array.from(container.querySelectorAll('p'))
-      .map(el => el.textContent ?? '')
-      .filter(t => t.startsWith('Not sending —'))
+    const reasons = pausedBadges().map(el => el.textContent ?? '')
     expect(reasons.length, 'a reason is present').toBeGreaterThan(0)
     for (const t of reasons) {
       for (const banned of ['rate_per_hour', 'booking_link', 'calendar_link', 'null', 'undefined', '/api/', '{{', 'location_uuid', 'is_active']) {
@@ -169,6 +184,7 @@ describe('a blocked row is dimmed and says why', () => {
       TEMPLATES[2],
     ]
     await mount({ templates: withRate, sendConfig: { ...ALL_SET, ratePerHour: '' } })
+    await expandAll()
     expect(pausedBadges().length).toBe(1)
   })
 })
@@ -203,7 +219,7 @@ describe('no add affordance, still', () => {
   it('offers no way to add or delete a row', async () => {
     await mount()
     const labels = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim() ?? '')
-    for (const banned of ['+ Add another email', 'Add another email', '＋ Add another email', 'Delete', 'Remove', '+ Add step']) {
+    for (const banned of ['+ Add another email', 'Add another email', '＋ Add another email', '+ Add an email here', 'Delete', 'Remove', '+ Add step']) {
       expect(labels, `must not offer "${banned}"`).not.toContain(banned)
     }
   })

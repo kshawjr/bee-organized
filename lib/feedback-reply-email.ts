@@ -51,6 +51,7 @@ import {
   DRIP_BRAND_TEAL,
   DRIP_WEBSITE_URL,
   DRIP_WEBSITE_LABEL,
+  EMAIL_TEXT,
 } from './drip-email-layout'
 
 // The same corporate sender trio as the invite rail and no-coverage — the one
@@ -224,7 +225,9 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
               </table>` : ''}
               <p style="margin:0;font-size:15px;line-height:1.7;color:#61615C;">${escHtml(closing)}</p>`
 
-  const footerInner = `Bee Organized&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${DRIP_WEBSITE_URL}" style="color:#ffffff;text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
+  // The line under the card (dark text on the page background since the
+  // 2026-10-30 layout; it was white on the old teal band).
+  const footerInner = `Bee Organized&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${DRIP_WEBSITE_URL}" style="color:${EMAIL_TEXT};text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
 
   const html = buildBrandedShellHtml(cardContentHtml, footerInner)
 

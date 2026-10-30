@@ -316,7 +316,7 @@ describe('the card and the preview always resolve to the same person', () => {
         const u = user(expected)
         expect(body.person.id).toBe(expected)
         // the preview is that same person: their name is the preview's name line
-        expect(body.preview.html).toContain(`>${u.full_name}</div>`)
+        expect(body.preview.html).toContain(`>${u.full_name}</strong>`)
         expect(body.preview.text.split('\n')[0]).toBe(u.full_name)
       } else {
         expect(body.person).toBeNull()
@@ -329,21 +329,21 @@ describe('the card and the preview always resolve to the same person', () => {
     await patch({ locationId: SWA, targetUserId: RALUCA, signature_title: 'Owner' })
     const { body } = await get(SWA)
     expect(body.person.title).toBe('Owner')
-    expect(body.preview.html).toContain('>Owner</div>')
+    expect(body.preview.html).toContain('<br>Owner, Bee Organized Southwest Austin<br>')
   })
 })
 
 // ─────────────────────────────────────────────────────────────────────────
 describe('THE PINNED CASE: headshot + title, location with no links', () => {
-  it('the preview shows the photo, the title and the rule — and the no-links note is flagged', async () => {
+  // 2026-10-30 design: round photo, no vertical rule, title names the location.
+  it('the preview shows the photo and the title — and the no-links note is flagged', async () => {
     as(DANA) // Boulder has no website or social links
     const { body } = await get()
     const html: string = body.preview.html
     expect(html).toContain(`${SIGNATURE_PHOTO_ROUTE}/${DANA_PHOTO}`) // the photo
     expect(html).toContain('width="80" height="80" alt="Dana Diaz"')
-    expect(html).toContain('Owner &amp; Lead Organizer') // the title
-    expect(html).toMatch(/font-weight:bold;font-style:italic;/)
-    expect(html).toMatch(/border-left:2px solid #A8C9C4;/) // the rule
+    expect(html).toContain('Owner &amp; Lead Organizer, Bee Organized Boulder') // the title
+    expect(html).toContain('border-radius:40px') // round
     expect(html).not.toContain('alt="Facebook"')
     expect(body.hasLinks).toBe(false)
   })
@@ -354,8 +354,8 @@ describe('THE PINNED CASE: headshot + title, location with no links', () => {
     await patch({ locationId: SWA, targetUserId: RALUCA, signature_photo_path: RALUCA_NEW_PHOTO })
     const { body } = await get(SWA)
     expect(body.preview.html).toContain(`${SIGNATURE_PHOTO_ROUTE}/${RALUCA_NEW_PHOTO}`)
-    expect(body.preview.html).toContain('>Owner</div>')
-    expect(body.preview.html).toMatch(/border-left:2px solid #A8C9C4;/)
+    expect(body.preview.html).toContain('<br>Owner, Bee Organized Southwest Austin<br>')
+    expect(body.preview.html).toContain('border-radius:40px')
   })
 })
 

@@ -129,8 +129,10 @@ const FULL: EmailSignature = {
 // quote or angle bracket inside. Anything an owner smuggled in as markup
 // would show up here as an unknown tag, an unknown attribute, or a broken
 // attribute string.
-const OK_TAGS = new Set(['table', 'tr', 'td', 'div', 'a', 'img', 'p', 'br'])
-const OK_ATTRS = new Set(['role', 'cellpadding', 'cellspacing', 'border', 'style', 'valign', 'href', 'src', 'width', 'height', 'alt'])
+// 2026-10-30 design: <strong> (the name) and class — whose ONLY allowed value
+// is the layout's own dark-mode hook "dm-text" (checked below) — were added.
+const OK_TAGS = new Set(['table', 'tr', 'td', 'div', 'a', 'img', 'p', 'br', 'strong'])
+const OK_ATTRS = new Set(['role', 'cellpadding', 'cellspacing', 'border', 'style', 'valign', 'href', 'src', 'width', 'height', 'alt', 'class'])
 function assertOnlyLayoutMarkup(html: string) {
   const tagRe = /<\/?([a-zA-Z0-9]+)([^>]*)>/g
   let m: RegExpExecArray | null
@@ -139,8 +141,9 @@ function assertOnlyLayoutMarkup(html: string) {
     const [, name, rest] = m
     expect(OK_TAGS.has(name.toLowerCase()), `unexpected tag <${name}>`).toBe(true)
     const attrs = rest.replace(/\s*\/$/, '')
-    const leftover = attrs.replace(/\s+([a-z-]+)="([^"<>]*)"/g, (_all, a: string) => {
+    const leftover = attrs.replace(/\s+([a-z-]+)="([^"<>]*)"/g, (_all, a: string, v: string) => {
       expect(OK_ATTRS.has(a), `unexpected attribute ${a} on <${name}>`).toBe(true)
+      if (a === 'class') expect(v, `unexpected class "${v}" on <${name}>`).toBe('dm-text')
       return ''
     })
     expect(leftover.trim(), `unparsed attribute text on <${name}>: ${leftover}`).toBe('')
@@ -166,30 +169,36 @@ function assertOnlyLayoutMarkup(html: string) {
 describe('a person with everything set renders the full layout', () => {
   const html = buildSignatureHtml(FULL)
 
-  it('headshot on the left: square, fixed size, from OUR domain, alt = their name', () => {
+  // 2026-10-30 design: ROUND 80px photo, no vertical rule, name in sage Arvo,
+  // title line names the location, "Mobile:" instead of "m:".
+  it('headshot on the left: round, fixed size, from OUR domain, alt = their name', () => {
     expect(html).toContain(`<img src="${APP}${SIGNATURE_PHOTO_ROUTE}/${PHOTO}" width="80" height="80" alt="Jane Smith"`)
+    expect(html).toContain('border-radius:40px')
     expect(html).not.toContain('supabase.co')
     // photo cell comes before the text cell
-    expect(html.indexOf(SIGNATURE_PHOTO_ROUTE)).toBeLessThan(html.indexOf('Jane Smith</div>'))
+    expect(html.indexOf(SIGNATURE_PHOTO_ROUTE)).toBeLessThan(html.indexOf('Jane Smith</strong>'))
   })
 
-  it('a vertical rule between photo and text', () => {
-    expect(html).toMatch(/border-left:2px solid #A8C9C4;/)
+  it('no vertical rule between photo and text (the old layout had one)', () => {
+    expect(html).not.toContain('border-left')
   })
 
-  it('name in the pale green brand colour, larger and bold', () => {
-    expect(html).toContain(`<div style="font-size:18px;line-height:1.3;font-weight:bold;color:${SIGNATURE_NAME_COLOR};">Jane Smith</div>`)
+  it('name in the pale green brand colour, in Arvo, larger', () => {
+    expect(html).toContain(`<strong style="font-size:20px;color:${SIGNATURE_NAME_COLOR};font-family:Arvo, Georgia, 'Times New Roman', serif;font-weight:400;">Jane Smith</strong>`)
   })
 
-  it('title bold italic grey', () => {
-    expect(html).toContain(`font-weight:bold;font-style:italic;color:${SIGNATURE_TITLE_COLOR};`)
-    expect(html).toContain('Owner &amp; Lead Organizer')
+  it('title on its own line in the text grey, naming the location when it is known', () => {
+    expect(html).toContain('<br>Owner &amp; Lead Organizer<br>')
+    expect(html).toContain(`color:${SIGNATURE_TITLE_COLOR};`)
+    expect(buildSignatureHtml({ ...FULL, locationName: 'Boulder' })).toContain('<br>Owner &amp; Lead Organizer, Bee Organized Boulder<br>')
+    // No title → no line, even with a location (never ", Bee Organized Boulder").
+    expect(buildSignatureHtml({ ...FULL, title: null, locationName: 'Boulder' })).not.toContain(', Bee Organized Boulder')
   })
 
-  it('email linked, "m:" then the mobile linked, website linked', () => {
+  it('email linked, "Mobile:" then the mobile linked, website linked', () => {
     expect(html).toContain('href="mailto:jane@beeorganized.com"')
     expect(html).toContain('>jane@beeorganized.com</a>')
-    expect(html).toContain('m:&nbsp;<a href="tel:+13035550147"')
+    expect(html).toContain('Mobile: <a href="tel:+13035550147"')
     expect(html).toContain('>(303) 555-0147</a>')
     expect(html).toContain('href="https://beeorganized.com/boulder"')
     expect(html).toContain('>beeorganized.com/boulder</a>')
@@ -207,7 +216,7 @@ describe('a person with everything set renders the full layout', () => {
   })
 
   it('field order: name, title, email, mobile, website, socials', () => {
-    const order = ['Jane Smith', 'Owner &amp;', 'mailto:', 'm:&nbsp;', 'beeorganized.com/boulder</a>', 'alt="Facebook"'].map((s) => html.indexOf(s))
+    const order = ['Jane Smith', 'Owner &amp;', 'mailto:', 'Mobile: ', 'beeorganized.com/boulder</a>', 'alt="Facebook"'].map((s) => html.indexOf(s))
     expect(order.every((v) => v > -1)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
@@ -222,7 +231,7 @@ describe('a person with everything set renders the full layout', () => {
         'Jane Smith',
         'Owner & Lead Organizer',
         'jane@beeorganized.com',
-        'm: (303) 555-0147',
+        'Mobile: (303) 555-0147',
         'beeorganized.com/boulder',
         'Facebook: https://www.facebook.com/beeorganizedboulder',
         'Instagram: https://www.instagram.com/beeorganizedboulder',
@@ -258,7 +267,7 @@ describe('a person with no photo still renders and reads properly', () => {
 
   it('a name alone is still a signature; nothing at all is empty', () => {
     const nameOnly = buildSignatureHtml({ ...EMPTY_SIGNATURE, name: 'Bee Organized Boulder' })
-    expect(nameOnly).toContain('>Bee Organized Boulder</div>')
+    expect(nameOnly).toContain('>Bee Organized Boulder</strong>')
     expect(buildSignatureHtml(EMPTY_SIGNATURE)).toBe('')
     expect(buildSignatureText(EMPTY_SIGNATURE)).toBe('')
   })
@@ -392,7 +401,7 @@ describe('the fallback chain: assignee active HERE → primary owner active HERE
       const sig = await resolveEmailSignature({ locationId: LOC, locationName: 'Boulder', assigneeUserId: JANE })
       expect(sig.name).toBe('Bee Organized Boulder')
       expect(sig.email).toBeNull()
-      expect(buildSignatureHtml(sig)).toContain('>Bee Organized Boulder</div>')
+      expect(buildSignatureHtml(sig)).toContain('>Bee Organized Boulder</strong>')
     })
 
     it('before the migration runs: name, email and mobile only — no title, no photo, no links', async () => {
@@ -443,7 +452,7 @@ describe('both email layouts render it — where it was typed, once, and nowhere
   const count = (h: string, s: string) => h.split(s).length - 1
 
   function checkPlacement(html: string) {
-    expect(count(html, '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 18px;">')).toBe(1)
+    expect(count(html, '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px 0;">')).toBe(1)
     const thanks = html.indexOf('Thank you,')
     const sig = html.indexOf(SIGNATURE_PHOTO_ROUTE)
     const reviews = html.indexOf('Be sure to check out')
@@ -451,14 +460,14 @@ describe('both email layouts render it — where it was typed, once, and nowhere
     expect(sig).toBeGreaterThan(thanks)
     expect(reviews).toBeGreaterThan(sig)
     // signs ONCE: the name appears exactly once (alt text aside)
-    expect(count(html, 'Jane Smith</div>')).toBe(1)
+    expect(count(html, 'Jane Smith</strong>')).toBe(1)
     expect(html).not.toContain(SIGNATURE_MARKER)
   }
 
   it('branded layout (drips, estimate follow-ups): HTML and text', () => {
     checkPlacement(buildBrandedDripHtml(body, brandCtx))
     const text = buildBrandedDripText(body, brandCtx)
-    expect(text).toContain('Thank you,\nJane Smith\nOwner & Lead Organizer\njane@beeorganized.com\nm: (303) 555-0147')
+    expect(text).toContain('Thank you,\nJane Smith\nOwner & Lead Organizer\njane@beeorganized.com\nMobile: (303) 555-0147')
     expect(text).not.toContain(SIGNATURE_MARKER)
   })
 
@@ -563,7 +572,7 @@ describe('nothing an owner typed is ever rendered as HTML', () => {
       expect(out).toContain('&lt;b&gt;Hi&lt;/b&gt;')
       expect(out).toContain('&lt;script&gt;alert(9)&lt;/script&gt;')
       // exactly one signature table, and it is the layout's
-      expect(out.split('border-collapse:collapse;margin:0 0 18px;').length - 1).toBe(1)
+      expect(out.split('style="margin:8px 0 20px 0;"').length - 1).toBe(1)
     }
   })
 

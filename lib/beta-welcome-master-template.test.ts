@@ -173,9 +173,10 @@ describe('a new lead\'s welcome renders from this template', () => {
     expect(sent.subject).toBe('Welcome to the Bee Organized Hive!')
     expect(sent.to).toBe('sarah@email.com')
     expect(sent.email_kind).toBe('welcome')
-    // Branded layout (2026-09-28): the text half opens with the wordmark line,
-    // exactly as drips do, and the greeting follows it.
-    expect(sent.text.startsWith('BEE ORGANIZED — Simplify Your Hive\n\nSarah,\n\nWelcome to the Bee Organized Hive!')).toBe(true)
+    // Branded layout (2026-10-30 design): the text half opens with the
+    // wordmark line and the heading (the subject), exactly as drips do, and
+    // the greeting follows them.
+    expect(sent.text.startsWith('BEE ORGANIZED\n\nWelcome to the Bee Organized Hive!\n\nSarah,\n\nWelcome to the Bee Organized Hive!')).toBe(true)
     expect(sent.html).toMatch(/<p [^>]*>Sarah,<\/p>/)
     // Plain text can't hyperlink, so it keeps both addresses visible…
     expect(sent.text).toContain('Quiz here (https://beeorganized.com/)')
@@ -199,7 +200,7 @@ describe('a new lead\'s welcome renders from this template', () => {
   it('a lead with no first_name is greeted by the first word of their name, not a blank', async () => {
     freshState({ lead: { first_name: null, name: 'Jordan Reyes' } })
     const sent = await sendAndCapture()
-    expect(sent.text.startsWith('BEE ORGANIZED — Simplify Your Hive\n\nJordan,')).toBe(true)
+    expect(sent.text.startsWith('BEE ORGANIZED\n\nWelcome to the Bee Organized Hive!\n\nJordan,')).toBe(true)
   })
 
   it('the unsubscribe footer IS attached — the welcome is on the follow-ups\' side, not the drips\'', async () => {
@@ -252,7 +253,7 @@ describe('{{signature}} resolves on the welcome path', () => {
     expect(sent.html).toContain('<table role="presentation"')   // the signature block, not text
     expect(sent.html).toContain('Olive Owner')
     expect(sent.html).toContain('mailto:olive@beeorganized.com')
-    expect(sent.text).toContain('\n\nOlive Owner\nolive@beeorganized.com\nm: 555-0100')
+    expect(sent.text).toContain('\n\nOlive Owner\nolive@beeorganized.com\nMobile: 555-0100')
   })
 
   it('an ACTIVE assignee signs instead of the owner', async () => {
@@ -331,15 +332,18 @@ describe('with this template in place: new leads only', () => {
 // white card, directly above the teal band — never after </html>. This is the
 // compliance pin for Kevin's live copy on the real send path.
 describe('the welcome goes out on the branded layout, footer inside the card', () => {
-  const TEAL_BAND = 'bgcolor="#054E4A"'
+  // 2026-10-30: the teal band is gone. The card now ends with the compliance
+  // row, and the location line sits under the card — that line is the marker
+  // the footer must stay above.
+  const TEAL_BAND = 'Bee Organized Boulder | '
   const UNSUB = 'href="https://beehive.beeorganized.com/unsubscribe/tok-abc"'
 
-  it('logo, card and teal band are there', async () => {
+  it('honeycomb, logo, card and the location line are there', async () => {
     const { html } = await sendAndCapture()
-    expect(html).toContain('BEE ORGANIZED')
-    expect(html).toContain('Simplify Your Hive')
+    expect(html).toContain('>Bee Organized</p>')
+    expect(html).toContain('https://beehive.beeorganized.com/email-honeycomb-header.png')
     expect(html).toContain('https://beehive.beeorganized.com/bee-organized-logo.png')
-    expect(html).toContain('class="bo-card"')
+    expect(html).toContain('class="bo-card dm-card"')
     expect(html).toContain(TEAL_BAND)
     expect(html).toContain('Bee Organized Boulder')
   })
@@ -352,7 +356,7 @@ describe('the welcome goes out on the branded layout, footer inside the card', (
     const postal = html.indexOf('123 Hive Lane, Suite 4, Omaha, NE 68102')
     const sig = html.indexOf('Olive Owner')
     const band = html.indexOf(TEAL_BAND)
-    expect(at).toBeGreaterThan(html.indexOf('class="bo-card"'))
+    expect(at).toBeGreaterThan(html.indexOf('class="bo-card dm-card"'))
     expect(sig).toBeGreaterThan(-1)
     expect(at).toBeGreaterThan(sig)
     expect(postal).toBeGreaterThan(sig)

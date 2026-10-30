@@ -131,16 +131,17 @@ const STAND_IN_FOOTER = {
   text: '—\nUnsubscribe at any time: https://x/unsubscribe/t',
 }
 
-// Where the teal band starts — everything above it and after the card's own
-// open tag is "inside the white card".
-const TEAL_BAND = `bgcolor="${DRIP_BRAND_TEAL}"`
+// Where the card ends. Since the 2026-10-30 design there is no teal band: the
+// card closes and the location line sits under it. Everything above that line
+// and after the card's own open tag is "inside the white card".
+const TEAL_BAND = 'Bee Organized Boulder | '
 
 function expectBrandedChrome(html: string) {
   expect(html).toContain('role="presentation"')
   expect(html).toContain('max-width:600px')
-  expect(html).toContain('BEE ORGANIZED')
-  expect(html).toContain('Simplify Your Hive')
+  expect(html).toContain('>Bee Organized</p>')
   expect(html).toContain(`${APP_ORIGIN}${DRIP_LOGO_PATH}`)
+  expect(html).not.toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
   expect(html).toContain(TEAL_BAND)
   expect(html).toContain('Bee Organized Boulder')
   expect(html).toContain(DRIP_WEBSITE_LABEL)
@@ -152,7 +153,7 @@ function expectBrandedChrome(html: string) {
 function expectFooterInsideCard(html: string, needle: string, bodyMarker: string) {
   expect(html.split(needle).length - 1).toBe(1)
   const at = html.indexOf(needle)
-  expect(at).toBeGreaterThan(html.indexOf('class="bo-card"'))
+  expect(at).toBeGreaterThan(html.indexOf('class="bo-card dm-card"'))
   expect(at).toBeGreaterThan(html.indexOf(bodyMarker))
   expect(at).toBeLessThan(html.indexOf(TEAL_BAND))
   expect(at).toBeLessThan(html.indexOf('</body>'))
@@ -285,38 +286,42 @@ describe('COMPLIANCE — what actually ships for a Closed-Job follow-up', () => 
 
 // ── Drips are unchanged ─────────────────────────────────────────────────────
 describe('drips are byte-identical to before the footer slot existed', () => {
-  // SHA-256 of buildBrandedDripHtml / buildBrandedDripText for this exact input,
-  // recorded on d4e99c5 BEFORE the card-footer slot was added.
+  // SHA-256 of buildBrandedDripHtml / buildBrandedDripText for this exact input.
+  // First recorded on d4e99c5 BEFORE the card-footer slot was added.
+  // RE-RECORDED 2026-10-30 for the new layout (Kevin's ruling: every location
+  // moves to the Soft style the day it ships). Unset style = Soft is pinned in
+  // lib/beta-email-styles.test.ts; this hash now pins Soft byte for byte.
   it('same output, byte for byte', () => {
     const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
     const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
     const sha = (s: string) => createHash('sha256').update(s).digest('hex')
     expect(sha(buildBrandedDripHtml(body, ctx))).toBe(
-      '2ccb28fcb2afe51dff02929f8e29639782542b69b825b368d18fa09118992e76',
+      '79c288b84e44173d315a43ea0f609c152953aa22ffa9ddb325059e0c8375da4c',
     )
     expect(sha(buildBrandedDripText(body, ctx))).toBe(
-      '3b9d0e5b8a968c165ed27212cf0100f47512d861455a7d498593546731568eed',
+      'fd66adda5b1ff3a4c0b5e9eb2c57246fcf78a9760d04f496de78dd352ae160d2',
     )
     expect(buildBrandedDripHtml(body, ctx)).not.toContain('bo-card-footer')
   })
 
   it('the drip send site passes no footer', () => {
     const src = readFileSync(join(__dirname, 'drip-send.ts'), 'utf8')
-    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature \}\)/)
-    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature \}\)/)
+    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look \}\)/)
+    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look \}\)/)
   })
 })
 
 // ── Follow-ups unchanged by the welcome move ────────────────────────────────
 describe('the Closed-Job follow-ups are byte-identical to 5656a86', () => {
   // SHA-256 recorded on 5656a86, before the welcome moved to the branded layout.
+  // RE-RECORDED 2026-10-30 for the new layout (Kevin's ruling, see above).
   it('same output, byte for byte', () => {
     const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
     const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
     const r = renderStageEmailContent('opp_closed_job_3mo', body, ctx, { html: '<div>FOOTER</div>', text: 'FOOTER' })
     const sha = (s: string) => createHash('sha256').update(s).digest('hex')
-    expect(sha(r.html)).toBe('2cd4623a2bb9cf3230917d27caae1ae9f00e8839a056a5502572f31aec58eeea')
-    expect(sha(r.text)).toBe('ddf4cf2733ab65db098ef5f4750fe1823629b079107a22754b70f82d956faf6f')
+    expect(sha(r.html)).toBe('d076bb3748c5decbfe114a7a1b63bf087511d405c077588e5434b338c9952eaa')
+    expect(sha(r.text)).toBe('ec823e07f0065881ba3e4b6f2ffe3ff3acfd9354dc1fb6fb4e3f2a2f3b766e20')
   })
 })
 

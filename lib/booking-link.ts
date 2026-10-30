@@ -46,6 +46,9 @@ const clean = (v: unknown): string | null => (blank(v) ? null : String(v).trim()
 // value is blank, so all three are guarded.
 export const OWNER_BOOKING_TAG = '{{owner_booking_link}}'
 export const LOCATION_BOOKING_TAGS = ['{{book_assessment_link}}', '{{booking_link}}'] as const
+// Their own links (2026-10-30): a discovery call and a virtual assessment.
+export const DISCOVERY_BOOKING_TAG = '{{discovery_booking_link}}'
+export const VIRTUAL_BOOKING_TAG = '{{virtual_booking_link}}'
 
 // ── tier 1 / 2: one user's own link ──────────────────────────────────
 // Never throws, never widens someone else's query. A missing column, a
@@ -102,6 +105,10 @@ export function blockedOnMissingBookingLink(
   links: {
     ownerBookingLink: string | null | undefined
     locationCalendarLink: string | null | undefined
+    // The two links added 2026-10-30. Absent → treated as blank, so an email
+    // using one of their tags holds exactly like the in-home link does.
+    discoveryBookingLink?: string | null | undefined
+    virtualBookingLink?: string | null | undefined
   },
 ): boolean {
   const source = `${template.subject ?? ''}\n${template.body ?? ''}`
@@ -112,6 +119,8 @@ export function blockedOnMissingBookingLink(
   ) {
     return true
   }
+  if (source.includes(DISCOVERY_BOOKING_TAG) && blank(links.discoveryBookingLink)) return true
+  if (source.includes(VIRTUAL_BOOKING_TAG) && blank(links.virtualBookingLink)) return true
   return false
 }
 

@@ -34,7 +34,8 @@ export async function GET() {
       .order('path_key', { ascending: true }),
     supabaseService
       .from('drip_path_steps')
-      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, is_active')
+      // '*': the button and timing unit (2026-10-30) once their migrations run.
+      .select('*')
       .order('step_order', { ascending: true }),
   ])
 

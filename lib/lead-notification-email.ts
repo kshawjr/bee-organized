@@ -61,7 +61,7 @@ import { logNotification } from './notification-log'
 import { displayPhone } from './phone'
 import { resolveNotificationsLive } from './notifications-live'
 import { formatLeadAddressLabeled } from './lead-address'
-import { buildBrandedShellHtml } from './drip-email-layout'
+import { buildBrandedShellHtml, EMAIL_TEXT } from './drip-email-layout'
 
 // The plain-text wordmark line — the text alternative's echo of the shell's
 // gold-logo + wordmark header. Same string buildBrandedDripText uses, so a
@@ -288,13 +288,14 @@ function buildLeadNotificationEmail(args: {
               ${detailsHtml}
               ${buttonHtml}`
 
-  // Footer band content — white text on the teal band. The get-set-up line is
+  // Footer content — the line under the card, dark text on the page background
+  // (2026-10-30 layout; it was white text on the old teal band). The get-set-up line is
   // BEE-HUB-scoped (#82/#91): it names the product, so it renders ONLY on the
   // hub variant and is omitted entirely on the non-hub one (which must contain
   // ZERO Bee Hub references). The "why you're receiving this" note is identical
   // in both variants and names only Bee Organized.
-  const footerBandHtml = `${hasHubAccess ? `<div style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#ffffff;">${escapeHtml(NO_ACCESS_FOOTER)}</div>
-                    ` : ''}<div style="margin:0;font-size:12px;line-height:1.6;color:#ffffff;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</div>`
+  const footerBandHtml = `${hasHubAccess ? `<div style="margin:0 0 8px;font-size:13px;line-height:1.6;color:${EMAIL_TEXT};">${escapeHtml(NO_ACCESS_FOOTER)}</div>
+                    ` : ''}<div style="margin:0;font-size:12px;line-height:1.6;color:${EMAIL_TEXT};">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</div>`
 
   const html = buildBrandedShellHtml(cardContentHtml, footerBandHtml)
 

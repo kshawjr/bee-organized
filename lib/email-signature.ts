@@ -7,12 +7,17 @@
 // type plain values into Settings, and THIS file is the only place signature
 // HTML is ever built.
 //
-//   ┌────────┐ │ Jane Smith                 ← sage, larger, bold
-//   │ photo  │ │ Owner & Lead Organizer     ← bold italic, grey
-//   │ 80×80  │ │ jane@beeorganized.com      ← mailto:
-//   └────────┘ │ m: (303) 555-0147          ← tel:
-//              │ beeorganized.com/boulder   ← the LOCATION's website
-//              │ [f] [ig] [in]              ← the LOCATION's social links
+//   ╭────────╮  Jane Smith                              ← sage Arvo, 20px
+//   │ photo  │  Owner & Lead Organizer, Bee Organized Boulder
+//   │ 80 × 80│  jane@beeorganized.com                   ← mailto:
+//   ╰────────╯  Mobile: (303) 555-0147                  ← tel:
+//               beeorganized.com/boulder                ← the LOCATION's website
+//               [f] [ig] [in]                           ← the LOCATION's social links
+//
+// 2026-10-30: the designer's version (round photo, no vertical rule, name in
+// sage Arvo, "Mobile:"). The website line is kept although the export's email
+// HTML leaves it out — the export's own signature preview and settings form
+// both carry it, and dropping it would silently lose a link owners set.
 //
 // PURE: no DB, no env reads except the app origin for image URLs. The
 // send-time resolver (who signs, with what) is lib/email-signature-resolve.ts.
@@ -50,10 +55,10 @@ import { escHtml, escAttr } from './email-escape'
 // The brand's pale green (sage) — the same hex the design tokens call
 // brand.sage. Name line only.
 export const SIGNATURE_NAME_COLOR = '#A8C9C4'
-export const SIGNATURE_TITLE_COLOR = '#6B6B66'
-export const SIGNATURE_TEXT_COLOR = '#4A4A45'
-export const SIGNATURE_LINK_COLOR = '#054E4A'
-export const SIGNATURE_RULE_COLOR = '#A8C9C4'
+export const SIGNATURE_TITLE_COLOR = '#60625F'
+export const SIGNATURE_TEXT_COLOR = '#60625F'
+export const SIGNATURE_LINK_COLOR = '#60625F'
+export const SIGNATURE_NAME_FONT = `Arvo, Georgia, 'Times New Roman', serif`
 
 // Display size of the headshot. Uploads are shrunk in the browser to 2× this
 // (lib/signature-photo.js) so it stays sharp on high-density screens.
@@ -102,6 +107,9 @@ export type EmailSignature = {
   facebookUrl: string | null
   instagramUrl: string | null
   linkedinUrl: string | null
+  // The location the signer works for, for the title line. Optional: absent
+  // or null → the title stands alone.
+  locationName?: string | null
 }
 
 export const EMPTY_SIGNATURE: EmailSignature = {
@@ -183,38 +191,48 @@ function clean(s: string | null | undefined): string | null {
   return t ? t : null
 }
 
-const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif`
+const FONT = `'Helvetica Neue', Helvetica, Arial, sans-serif`
+
+// The title line: "Owner, Bee Organized Boulder"; title alone without a
+// location; nothing without a title.
+function titleLine(sig: EmailSignature): string | null {
+  const title = clean(sig.title)
+  if (!title) return null
+  const loc = clean(sig.locationName ?? null)
+  return loc ? `${title}, Bee Organized ${loc}` : title
+}
 
 // ── HTML ──────────────────────────────────────────────────────────────────
-// Table layout (the only thing every mail client agrees on). Photo cell and
-// the vertical rule appear only when there is a photo — without one, a rule
-// with nothing to its left reads as a mistake, so the text simply stands alone.
+// Table layout (the only thing every mail client agrees on). The photo cell
+// appears only when there is a photo; without one the text simply stands alone.
+// The photo is ROUND by border-radius — Outlook desktop ignores that and shows
+// it square, which is harmless.
 export function buildSignatureHtml(sig: EmailSignature, env: NodeJS.ProcessEnv = process.env): string {
   const name = clean(sig.name)
-  const title = clean(sig.title)
+  const title = titleLine(sig)
   const mobile = clean(sig.mobile)
   const email = safeEmail(sig.email)
   const mobileHref = telHref(mobile)
   const website = safeHttpUrl(sig.websiteUrl)
   const photo = signaturePhotoUrl(sig.photoPath, env)
 
-  const linkStyle = `color:${SIGNATURE_LINK_COLOR};text-decoration:none;`
+  const linkStyle = `color:${SIGNATURE_LINK_COLOR};`
   const lines: string[] = []
   if (name) {
-    lines.push(`<div style="font-size:18px;line-height:1.3;font-weight:bold;color:${SIGNATURE_NAME_COLOR};">${escHtml(name)}</div>`)
+    lines.push(`<strong style="font-size:20px;color:${SIGNATURE_NAME_COLOR};font-family:${SIGNATURE_NAME_FONT};font-weight:400;">${escHtml(name)}</strong>`)
   }
   if (title) {
-    lines.push(`<div style="font-weight:bold;font-style:italic;color:${SIGNATURE_TITLE_COLOR};padding-bottom:4px;">${escHtml(title)}</div>`)
+    lines.push(escHtml(title))
   }
   if (email) {
-    lines.push(`<div><a href="${escAttr(`mailto:${email}`)}" style="${linkStyle}">${escHtml(email)}</a></div>`)
+    lines.push(`<a href="${escAttr(`mailto:${email}`)}" style="${linkStyle}">${escHtml(email)}</a>`)
   }
   if (mobile) {
     const shown = escHtml(mobile)
-    lines.push(`<div>m:&nbsp;${mobileHref ? `<a href="${escAttr(mobileHref)}" style="${linkStyle}">${shown}</a>` : shown}</div>`)
+    lines.push(`Mobile: ${mobileHref ? `<a href="${escAttr(mobileHref)}" style="${linkStyle}">${shown}</a>` : shown}`)
   }
   if (website) {
-    lines.push(`<div><a href="${escAttr(website)}" style="${linkStyle}">${escHtml(displayUrl(website))}</a></div>`)
+    lines.push(`<a href="${escAttr(website)}" style="${linkStyle}">${escHtml(displayUrl(website))}</a>`)
   }
 
   const socials: string[] = []
@@ -222,38 +240,35 @@ export function buildSignatureHtml(sig: EmailSignature, env: NodeJS.ProcessEnv =
     const url = safeHttpUrl(raw)
     if (!url) return
     socials.push(
-      `<a href="${escAttr(url)}" style="text-decoration:none;"><img src="${escAttr(iconUrl(key, env))}" width="${SIGNATURE_ICON_PX}" height="${SIGNATURE_ICON_PX}" alt="${label}" style="display:inline-block;width:${SIGNATURE_ICON_PX}px;height:${SIGNATURE_ICON_PX}px;border:0;"></a>`,
+      `<a href="${escAttr(url)}"><img src="${escAttr(iconUrl(key, env))}" width="${SIGNATURE_ICON_PX}" height="${SIGNATURE_ICON_PX}" alt="${label}" style="display:inline-block;border:0;margin:8px 6px 0 0;"></a>`,
     )
   }
   social('facebook', sig.facebookUrl, 'Facebook')
   social('instagram', sig.instagramUrl, 'Instagram')
   social('linkedin', sig.linkedinUrl, 'LinkedIn')
-  if (socials.length) {
-    lines.push(`<div style="padding-top:8px;">${socials.join('&nbsp;&nbsp;')}</div>`)
-  }
 
-  if (!lines.length) return ''
+  if (!lines.length && !socials.length) return ''
 
-  const textCell = `<td valign="top" style="${photo ? `border-left:2px solid ${SIGNATURE_RULE_COLOR};padding:0 0 0 14px;` : 'padding:0;'}font-family:${FONT};font-size:13px;line-height:1.55;color:${SIGNATURE_TEXT_COLOR};">${lines.join('')}</td>`
+  const textCell = `<td valign="top" class="dm-text" style="font-family:${FONT};font-size:16px;line-height:24px;color:${SIGNATURE_TEXT_COLOR};">${lines.join('<br>')}${socials.length ? `${lines.length ? '<br>' : ''}${socials.join('')}` : ''}</td>`
   const photoCell = photo
-    ? `<td valign="top" style="padding:0 14px 0 0;"><img src="${escAttr(photo)}" width="${SIGNATURE_PHOTO_PX}" height="${SIGNATURE_PHOTO_PX}" alt="${escHtml(name ?? '')}" style="display:block;width:${SIGNATURE_PHOTO_PX}px;height:${SIGNATURE_PHOTO_PX}px;border:0;"></td>`
+    ? `<td valign="top" width="${SIGNATURE_PHOTO_PX}" style="padding-right:16px;"><img src="${escAttr(photo)}" width="${SIGNATURE_PHOTO_PX}" height="${SIGNATURE_PHOTO_PX}" alt="${escHtml(name ?? '')}" style="display:block;width:${SIGNATURE_PHOTO_PX}px;height:${SIGNATURE_PHOTO_PX}px;border-radius:${SIGNATURE_PHOTO_PX / 2}px;border:0;"></td>`
     : ''
 
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 18px;"><tr>${photoCell}${textCell}</tr></table>`
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px 0;"><tr>${photoCell}${textCell}</tr></table>`
 }
 
 // ── Plain text (the text/plain half of the email) ─────────────────────────
 export function buildSignatureText(sig: EmailSignature): string {
   const out: string[] = []
   const name = clean(sig.name)
-  const title = clean(sig.title)
+  const title = titleLine(sig)
   const email = safeEmail(sig.email)
   const mobile = clean(sig.mobile)
   const website = safeHttpUrl(sig.websiteUrl)
   if (name) out.push(name)
   if (title) out.push(title)
   if (email) out.push(email)
-  if (mobile) out.push(`m: ${mobile}`)
+  if (mobile) out.push(`Mobile: ${mobile}`)
   if (website) out.push(displayUrl(website))
   const fb = safeHttpUrl(sig.facebookUrl)
   const ig = safeHttpUrl(sig.instagramUrl)

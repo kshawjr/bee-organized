@@ -18,6 +18,7 @@
 //     gap to zero via max(0, …) and sends on the next hourly tick. The floor
 //     is ours to hold, which is why it is checked at save and not only at the
 //     input.
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -57,9 +58,13 @@ const mountList = async (over: any = {}) => {
     ...over,
   }
   await act(async () => { root.render(<EmailsList {...props} />) })
+  await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
   return props
 }
-const pencils = () => Array.from(container.querySelectorAll('button')).filter(b => (b.textContent ?? '').includes('✎'))
+// 2026-10-30 design: the control is a clock button titled "Change when this
+// goes out" (was a ✎). And the FIRST email's timing is fixed — it is the
+// automatic reply to the enquiry ("Fixed — automatic reply").
+const pencils = () => Array.from(container.querySelectorAll('button[title="Change when this goes out"]')) as HTMLElement[]
 
 // ───────────── the floor ─────────────
 describe('the floor is the previous step, because nothing else enforces it', () => {
@@ -104,9 +109,10 @@ describe('what a change actually does — absolute, so nothing after it moves', 
 
 // ───────────── which rows may be edited ─────────────
 describe('only rows whose timing is really data get a control', () => {
-  it('the three drip rows have a pencil', async () => {
+  it('drip rows after the first have the control; the first is the fixed automatic reply', async () => {
     await mountList()
-    expect(pencils().length).toBe(3)
+    expect(pencils().length).toBe(2)
+    expect(container.textContent).toContain('Fixed — automatic reply')
   })
 
   it('welcome and the closed-job pair render timing as plain text', async () => {
@@ -124,7 +130,7 @@ describe('only rows whose timing is really data get a control', () => {
   it('an added step is editable like any other drip row', async () => {
     const withAdded = [...STEPS, step(4, 'Added', 44, { origin: 'added' })]
     await mountList({ pathSteps: { p: withAdded }, masterSteps: { p: STEPS } })
-    expect(pencils().length).toBe(4)
+    expect(pencils().length).toBe(3)
   })
 
   it('a read-only mount offers no timing control at all', async () => {
@@ -178,7 +184,29 @@ describe('the editor refuses a value that would send straight away', () => {
     await setVal('40')
     expect(saveBtn().disabled).toBe(false)
     await act(async () => { saveBtn().click() })
-    expect(props.onConfirm).toHaveBeenCalledWith(40)
+    expect(props.onConfirm).toHaveBeenCalledWith(40, 'days')
+  })
+
+  // 2026-10-30 — months and years. The number is in the unit picked; what is
+  // checked against the floor and handed back is DAYS, with the unit beside it.
+  it('3 months is day 90, handed back with its unit', async () => {
+    const props = await mountModal()
+    await setVal('3')
+    const sel = container.querySelector('select[aria-label="Wait measured in"]') as HTMLSelectElement
+    await act(async () => { sel.value = 'months'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(container.textContent).toContain('That’s day 90.')
+    await act(async () => { saveBtn().click() })
+    expect(props.onConfirm).toHaveBeenCalledWith(90, 'months')
+  })
+
+  it('the floor applies to the days a unit adds up to, not the number typed', async () => {
+    await mountModal()          // predecessor is day 5, so the floor is day 6
+    await setVal('1')
+    const sel = container.querySelector('select[aria-label="Wait measured in"]') as HTMLSelectElement
+    await act(async () => { sel.value = 'days'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(saveBtn().disabled).toBe(true)          // day 1 — too soon
+    await act(async () => { sel.value = 'months'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(saveBtn().disabled).toBe(false)         // 1 month = day 30 — fine
   })
 
   it('says later emails keep their own day — the absolute rule, in words', async () => {

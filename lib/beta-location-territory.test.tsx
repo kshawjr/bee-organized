@@ -440,7 +440,9 @@ describe('D. mounted on both location pages; built from the shared parts', () =>
   it('Settings → Location: right after Location Details (address, ZIP), before Online Presence', () => {
     const details = BEEHUB.indexOf('label="Location ID"')
     const panel = BEEHUB.indexOf('<LocationZipsPanel locationId={realLocId} />')
-    const online = BEEHUB.indexOf('<SectionHeader title="Online Presence" />')
+    // 2026-10-30: the Online Presence rows moved to Settings → Emails; their
+    // header (now a pointer) still follows the territory panel.
+    const online = BEEHUB.indexOf('<SectionHeader title="Online Presence &amp; Pricing" />')
     expect(panel).toBeGreaterThan(details)
     expect(panel).toBeLessThan(online)
   })

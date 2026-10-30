@@ -16,6 +16,7 @@
 // existing path is returned instead of duplicating.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { stepExtrasFromRow } from '@/lib/drip-step-extras'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
@@ -83,7 +84,9 @@ export async function POST(
   // Load master's steps
   const { data: masterSteps, error: stepsErr } = await supabaseService
     .from('drip_path_steps')
-    .select('step_order, delay_days, channel, subject, body, master_template_id, is_active, origin')
+    // '*' so the 2026-10-30 columns (button, timing unit) come along once
+    // their migrations have run, and are simply absent before.
+    .select('*')
     .eq('drip_path_id', master.id)
     .order('step_order', { ascending: true })
 
@@ -127,6 +130,9 @@ export async function POST(
       // what it is doing; the first owner-added step after a fork would
       // otherwise mislabel the whole path.
       origin: 'master',
+      // The master's button and timing unit travel with the copy
+      // (lib/drip-step-extras.ts). Only columns the row actually has.
+      ...stepExtrasFromRow(s as Record<string, unknown>),
     }))
     const { error: insErr } = await supabaseService.from('drip_path_steps').insert(stepRows)
     if (insErr) {

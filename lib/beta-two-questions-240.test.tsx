@@ -20,6 +20,7 @@
 //   * enrolment PINS the path row, so a switch is future-only
 //   * a fork is orphaned by a switch, never deleted, and returns if you
 //     switch back — 9 of 20 active locations run a forked default
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -231,6 +232,7 @@ describe('the Emails list carries the sentence and its Change link', () => {
       ...over,
     }
     await act(async () => { root.render(<EmailsList {...props} />) })
+    await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
     return props
   }
 

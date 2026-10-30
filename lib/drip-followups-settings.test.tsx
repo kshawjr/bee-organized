@@ -3,6 +3,7 @@
 // Settings → Emails: removing an email, and the after-the-first switch
 // (lib/drip-followups.ts). Render only — the writes are pinned in
 // lib/drip-followups.test.ts.
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -44,12 +45,14 @@ const mountList = async (over: any = {}) => {
     followupsOff: !!over.followupsOff,
   }
   await act(async () => { root.render(<EmailsList {...props} />) })
+  await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
   return actions
 }
 // Each rendered row's text, keyed by its subject.
+// 2026-10-30 design: each row is an <li data-email-row>.
 const rowFor = (subject: string) =>
-  Array.from(container.querySelectorAll('b')).find(b => b.textContent === subject)!
-    .closest('div[style*="border-radius: 11px"]') as HTMLElement
+  Array.from(container.querySelectorAll('li[data-email-row] p')).find(p => p.textContent === subject)!
+    .closest('li[data-email-row]') as HTMLElement
 const buttonsIn = (el: HTMLElement) => Array.from(el.querySelectorAll('button')).map(b => b.textContent)
 
 describe('Remove, per email', () => {
@@ -73,14 +76,17 @@ describe('Remove, per email', () => {
     expect(rowCanBeRemoved({ rail: 'welcome', order: 2 })).toBe(false)
   })
 
-  it('a removed email stays listed, says so, and offers Put back', async () => {
+  // 2026-10-30 design: a removed email leaves the timeline and waits at the
+  // bottom of its group under "Removed from this group", with Bring back.
+  it('a removed email stays listed under its group, says so, and offers Bring back', async () => {
     const actions = await mountList({ steps: [step(1), step(2, { isActive: false }), step(3)] })
-    const r = rowFor('Subject 2')
-    expect(r.textContent).toContain('Removed')
-    expect(r.textContent).toContain('won’t send')
-    expect(buttonsIn(r)).toContain('Put back')
+    expect(Array.from(container.querySelectorAll('li[data-email-row] p')).some(p => p.textContent === 'Subject 2')).toBe(false)
+    const r = container.querySelector('li[data-removed-row]') as HTMLElement
+    expect(r.closest('div')!.textContent).toContain('Removed from this group')
+    expect(r.textContent).toContain('Subject 2')
+    expect(buttonsIn(r)).toContain('Bring back')
     expect(buttonsIn(r)).not.toContain('Remove')
-    await act(async () => { Array.from(r.querySelectorAll('button')).find(b => b.textContent === 'Put back')!.click() })
+    await act(async () => { Array.from(r.querySelectorAll('button')).find(b => b.textContent === 'Bring back')!.click() })
     expect(actions.restore).toHaveBeenCalledWith(expect.objectContaining({ order: 2 }))
   })
 

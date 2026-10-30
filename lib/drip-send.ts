@@ -33,11 +33,13 @@ import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import {
+  FIRST_STEP,
   FOLLOWUPS_OFF_REASON,
   dripStepDecision,
   readFollowupsOff,
   stopAfterSend,
 } from './drip-followups'
+import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 
 export type SendDripResult = {
   sent: boolean
@@ -148,7 +150,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     .from('drip_path_steps')
     .select(
       `
-      id, step_order, delay_days, channel, subject, body, master_template_id, is_active,
+      *,
       templates:master_template_id ( subject, body )
       `,
     )
@@ -208,7 +210,11 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // 8 master path templates + opp-stage emails.
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state, timezone, lifecycle_status')
+    // '*', not a column list: the Settings → Emails columns (email_style,
+    // shows_hourly_rate, uses_booking_links, the two new booking links) arrive
+    // in migrations run after this ships, and a named missing column would
+    // fail the whole read. Missing → today's behaviour (lib/email-send-options).
+    .select('*')
     .eq('id', lead.location_uuid)
     .maybeSingle()
 
@@ -238,10 +244,16 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   //   step removed  → skip it: no send, no status write, move on to the next
   //                   email on that email's own date.
   const followupsOff = await readFollowupsOff(loc.id)
+  // Pause + button (this step's row) and the owner's email settings (the
+  // location row) — both already read with '*', so a column whose migration
+  // hasn't run is simply absent and reads as today (lib/email-send-options.ts).
+  const stepExtras = extrasFromRow(step as Record<string, unknown>)
+  const emailOptions = locationEmailOptionsFromRow(loc as Record<string, unknown>)
   const decision = dripStepDecision({
     stepOrder: row.current_step,
     stepActive: (step as { is_active?: boolean | null }).is_active,
     followupsOff,
+    stepPaused: stepExtras.isPaused,
   })
   if (decision === 'stop_followups_off') {
     await supabaseService
@@ -253,6 +265,11 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   if (decision === 'skip_removed') {
     const skippedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
     return { sent: false, error: 'step_removed', advanced_to_step: skippedTo }
+  }
+  // Paused: passed over exactly like removed (lib/drip-followups.ts).
+  if (decision === 'skip_paused') {
+    const skippedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
+    return { sent: false, error: 'step_paused', advanced_to_step: skippedTo }
   }
 
   // Location owner (two uses: phone fallback + location_owner_name). Resolves
@@ -295,12 +312,35 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     ? (step as any).templates[0]
     : (step as any).templates) as { subject: string | null; body: string } | null
 
-  const subjectSource = step.subject ?? linkedTpl?.subject ?? null
-  const bodySource = step.body ?? linkedTpl?.body ?? null
+  const rawSubjectSource = step.subject ?? linkedTpl?.subject ?? null
+  const rawBodySource = step.body ?? linkedTpl?.body ?? null
 
-  if (!bodySource) {
+  if (!rawBodySource) {
     return { sent: false, error: 'no_body_source' }
   }
+
+  // "I don't show rates" / "I don't use booking links" (lib/email-send-options).
+  // Step 1 always sends, with the price / booking-link sentence taken out;
+  // any later email that needs either is SKIPPED (passed over, like a removed
+  // one), never held. Applied to the SOURCE, so the hold guards below only
+  // ever see what will actually be sent.
+  const switched = applyEmailSwitches({
+    alwaysSends: row.current_step <= FIRST_STEP,
+    options: emailOptions,
+    subject: rawSubjectSource,
+    body: rawBodySource,
+    buttonLink: stepExtras.buttonLink,
+  })
+  if (switched.action === 'skip') {
+    const skippedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
+    return { sent: false, error: switched.reason === 'rate_not_shown' ? 'skipped_rate_not_shown' : 'skipped_no_booking_links', advanced_to_step: skippedTo }
+  }
+  const subjectSource = switched.subject
+  const bodySource = switched.body
+  // The button's link is checked by the same guards as the wording: a button
+  // pointing at a blank booking link holds the email like the sentence would.
+  const buttonLinkSource = switched.buttonLink
+  const guardBody = buttonLinkSource ? `${bodySource}\n${buttonLinkSource}` : bodySource
 
   // RATE GUARD: this template quotes {{rate_per_hour}} but the location has
   // no rate set. HOLD — row untouched, retried next tick, so the drip resumes
@@ -308,7 +348,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // ways (lead drip status below, cron held_missing_rate counter, digest
   // blank-rate section); what never happens is the client reading
   // "Our rate starts at  per hour per Bee."
-  if (blockedOnMissingRate({ subject: subjectSource, body: bodySource }, loc.rate_per_hour)) {
+  if (blockedOnMissingRate({ subject: subjectSource, body: guardBody }, loc.rate_per_hour)) {
     console.warn('[drip-send] held: template quotes {{rate_per_hour}} but location rate is blank', {
       leadId: row.lead_id, locationId: loc.id, step: row.current_step,
     })
@@ -328,8 +368,13 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // the client reading "Please click here () to select a day and time."
   if (
     blockedOnMissingBookingLink(
-      { subject: subjectSource, body: bodySource },
-      { ownerBookingLink, locationCalendarLink: loc.calendar_link },
+      { subject: subjectSource, body: guardBody },
+      {
+        ownerBookingLink,
+        locationCalendarLink: loc.calendar_link,
+        discoveryBookingLink: emailOptions.discoveryBookingLink,
+        virtualBookingLink: emailOptions.virtualBookingLink,
+      },
     )
   ) {
     console.warn('[drip-send] held: template quotes a booking tag but no link resolves', {
@@ -369,9 +414,15 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     location_phone: loc.phone,
     book_assessment_link: loc.calendar_link,
     reviews_link: loc.reviews_link,
+    discovery_booking_link: emailOptions.discoveryBookingLink,
+    virtual_booking_link: emailOptions.virtualBookingLink,
   }
 
   const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx, { signatureMarker: true })
+  // The button's text and link, through the same tags as the wording.
+  const renderedButton = stepExtras.buttonText && buttonLinkSource
+    ? renderTemplate({ subject: stepExtras.buttonText, body: buttonLinkSource }, ctx)
+    : null
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the step /
   // template subject is NULL/empty, or it renders to nothing. HOLD exactly
@@ -409,8 +460,15 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
         assigneeUserId: lead.assigned_to ?? null,
       })
     : null
-  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature })
-  const text = buildBrandedDripText(rendered.body, { ...ctx, signature })
+  // The location's style, the subject as the heading, and the button
+  // (2026-10-30 layout).
+  const look = {
+    style: emailOptions.style,
+    heading: rendered.subject,
+    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
+  }
+  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look })
+  const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look })
 
   // Per-project-type SENDER routing. If the location split senders by project
   // type, this drip sends AS the sender assigned to the lead's project_type;

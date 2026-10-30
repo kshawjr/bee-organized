@@ -142,8 +142,9 @@ const FIELDS: Array<{ label: string; column: string; value: string }> = [
   // Timezone is a dropdown (lib/us-timezones.ts) — the value must be a listed
   // label. The row displays the option's label, which contains the value.
   { label: 'Timezone',       column: 'timezone',     value: 'Mountain Time (MT)' },
-  { label: 'Booking Link',   column: 'calendar_link', value: 'https://book.example.com/new' },
-  { label: 'Google Reviews', column: 'reviews_link', value: 'https://g.page/r/newreview' },
+  // Booking Link and Google Reviews MOVED to Settings → Emails on 2026-10-30;
+  // the same three guarantees are pinned there, in
+  // lib/beta-emails-moved-settings.test.tsx.
 ]
 
 describe('Settings — Location fields persist to their own column (#93)', () => {
@@ -261,10 +262,15 @@ describe('Settings — no row is left on the local-only path (#93 source guards)
     expect(src).not.toContain('onDelete={()=>updateLocation(')
   })
 
+  // 2026-10-30: the sender fields are on the Emails screen and save through
+  // emailsSaveLocation — same route, paint only after the write lands.
   it('sender rows persist to sender_name / send_from_email / reply_to_email', () => {
-    expect(src).toContain("persistLocationField('sendFromName','sender_name'")
-    expect(src).toContain("persistLocationField('sendFromEmail','send_from_email'")
-    expect(src).toContain("persistLocationField('replyToEmail','reply_to_email'")
+    expect(src).toMatch(/sendFromName:\s*\['sendFromName',\s*'sender_name'\]/)
+    expect(src).toMatch(/sendFromEmail:\s*\['sendFromEmail',\s*'send_from_email'\]/)
+    expect(src).toMatch(/replyToEmail:\s*\['replyToEmail',\s*'reply_to_email'\]/)
+    expect(src).toContain("emailsSaveLocation('sendFromName', v)")
+    expect(src).toContain("emailsSaveLocation('sendFromEmail', v)")
+    expect(src).toContain("emailsSaveLocation('replyToEmail', v)")
   })
 
   it('the PATCH route allowlists name (the added column) alongside address parts', () => {

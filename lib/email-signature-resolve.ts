@@ -110,6 +110,9 @@ export function assembleSignature(
     mobile: person.phone ?? null,
     photoPath: person.signature_photo_path ?? null,
     ...locationLinks,
+    // "Owner & Lead Organizer, Bee Organized Boulder" — the title line names
+    // the location (2026-10-30 design).
+    locationName: locationName?.trim() || null,
   }
 }
 

@@ -74,7 +74,9 @@ export async function GET(
       .order('name', { ascending: true }),
     supabaseService
       .from('drip_path_steps')
-      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, master_template_id, is_active, origin, templates:master_template_id(name, legacy_id, subject, body)')
+      // '*' brings is_paused / delay_unit / button_* once their migrations have
+      // run (lib/drip-step-extras.ts); before that they are simply absent.
+      .select('*, templates:master_template_id(name, legacy_id, subject, body)')
       .order('step_order', { ascending: true }),
     supabaseService
       .from('locations')
@@ -118,6 +120,11 @@ export async function GET(
           // issue 240 step 9b — selecting the column is not enough; this
           // mapper is a fixed shape and would drop it silently.
           origin: (s as any).origin ?? 'master',
+          // 2026-10-30 — same fixed-shape trap. Absent column → today's value.
+          is_paused: (s as any).is_paused === true,
+          delay_unit: (s as any).delay_unit ?? null,
+          button_text: (s as any).button_text ?? null,
+          button_link: (s as any).button_link ?? null,
         }
       }),
   }))

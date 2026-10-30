@@ -18,6 +18,7 @@
 //   4) fork resolution matches the server rule, and marks "Your wording"
 //   5) Read opens the full body; Previous/Next stops at both ends
 //   6) NO write path exists from this component
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -218,6 +219,7 @@ describe('the list renders and Read works', () => {
       root.render(<EmailsList pathSteps={{ 'organizing-a': masterSteps }} templates={templates}
         generalDefault="organizing-a" moveDefault="organizing-a" />)
     })
+    await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
     return container
   }
   const readButtons = () =>
@@ -233,7 +235,7 @@ describe('the list renders and Read works', () => {
   it('shows no editing affordance anywhere', async () => {
     await mount()
     const labels = Array.from(container.querySelectorAll('button')).map(b => b.textContent ?? '')
-    for (const banned of ['Edit', 'Duplicate', 'Customize', 'Save', 'Use a different one', 'Add another email']) {
+    for (const banned of ['Edit', 'Duplicate', 'Customize', 'Save', 'Use a different one', 'Add another email', '+ Add an email here']) {
       expect(labels, `must not offer "${banned}"`).not.toContain(banned)
     }
     expect(container.querySelectorAll('input, textarea, select').length).toBe(0)

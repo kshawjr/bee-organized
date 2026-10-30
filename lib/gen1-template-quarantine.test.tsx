@@ -205,8 +205,9 @@ describe('Settings → Emails customization clones the master', () => {
     await clickText('Moving')            // the moving half of the step 7b toggle
   }
 
-  const pencils = () => Array.from(container.querySelectorAll('button'))
-    .filter(b => (b.textContent ?? '').includes('\u270e')) as HTMLElement[]
+  // 2026-10-30 design: a clock button; step 1's timing is fixed, so the
+  // controls start at step 2.
+  const pencils = () => Array.from(container.querySelectorAll('button[title="Change when this goes out"]')) as HTMLElement[]
 
   const setNumber = async (v: string) => {
     const el = container.querySelector('input[type="number"]') as HTMLInputElement
@@ -219,7 +220,7 @@ describe('Settings → Emails customization clones the master', () => {
   // pin are unchanged; the trigger is now the first edit itself (here, a
   // delay tweak confirmed through the fork-on-edit dialog).
   const firstMutation = async () => {
-    await act(async () => { pencils()[1].click() })      // step 2's timing
+    await act(async () => { pencils()[0].click() })      // step 2's timing
     await setNumber('7')
     await clickText('Save')                              // → fork gate
     await act(async () => {})
@@ -296,7 +297,7 @@ describe('Settings → Emails customization clones the master', () => {
     await mountPaths()
     // Already-customized path: a timing tweak commits directly — no fork
     // confirm, no clone.
-    await act(async () => { pencils()[1].click() })
+    await act(async () => { pencils()[0].click() })
     await setNumber('7')
     await clickText('Save')
     await act(async () => {})

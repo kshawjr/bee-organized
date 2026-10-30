@@ -35,6 +35,13 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { renumberSteps } from '@/lib/drip-step-order'
 import { firstStepRemovalError } from '@/lib/drip-followups'
+import {
+  existingStepExtraColumns,
+  extrasNeedingMissingColumns,
+  parseStepExtras,
+  stepExtrasForInsert,
+  type StepExtrasIn,
+} from '@/lib/drip-step-extras'
 
 const VALID_CHANNELS = new Set(['email', 'sms'])
 
@@ -92,7 +99,7 @@ export async function PATCH(
   }
 
   // Validate + normalize step payload
-  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null; origin: 'master' | 'added'; is_active: boolean }
+  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null; origin: 'master' | 'added'; is_active: boolean } & StepExtrasIn
   const stepsIn: StepIn[] = []
   for (const raw of body.steps as Array<Record<string, unknown>>) {
     if (typeof raw !== 'object' || raw === null) {
@@ -130,6 +137,9 @@ export async function PATCH(
       // Same trap as origin: named here or silently dropped. Only an explicit
       // false removes; anything else is the email sending as normal.
       is_active: raw.is_active === false ? false : true,
+      // 2026-10-30 — pause, timing unit, button (lib/drip-step-extras.ts).
+      // Same trap again: named here or silently dropped.
+      ...parseStepExtras(raw),
     })
   }
 
@@ -186,6 +196,23 @@ export async function PATCH(
   if (firstStepErr) {
     return NextResponse.json({ error: firstStepErr }, { status: 400 })
   }
+  // …and it can't be paused either.
+  if (stepsIn.some(s => s.step_order === 1 && s.is_paused === true)) {
+    return NextResponse.json({ error: 'first_email_always_sends' }, { status: 400 })
+  }
+
+  // THE NEW COLUMNS MAY NOT EXIST YET (Kevin runs the migrations by hand,
+  // after this ships). The write below DELETES the path's steps and then
+  // inserts — an insert naming a missing column would fail AFTER the delete
+  // and leave the sequence empty. So: ask which columns exist BEFORE deleting.
+  // A save that tries to SET something whose column is missing (pause an
+  // email, a months timing, a button) is refused untouched; a save that
+  // doesn't simply leaves those keys out.
+  const extraCols = await existingStepExtraColumns()
+  const notReady = extrasNeedingMissingColumns(stepsIn, extraCols)
+  if (notReady.length) {
+    return NextResponse.json({ error: 'not_set_up_yet', columns: notReady }, { status: 409 })
+  }
 
   // Two-phase write to avoid bumping into the UNIQUE(drip_path_id, step_order)
   // constraint when reordering: stash incoming step_orders into a high range
@@ -215,12 +242,13 @@ export async function PATCH(
     is_active: s.is_active,
     // Validated-but-not-inserted is the same silent failure as above.
     origin: s.origin,
+    ...stepExtrasForInsert(s, extraCols),
   }))
 
   const { data: inserted, error: insErr } = await supabaseService
     .from('drip_path_steps')
     .insert(insertRows)
-    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active, origin')
+    .select('*')
 
   if (insErr) {
     console.error('[/api/drip-paths/[id]/steps PATCH] insert error:', insErr.message)

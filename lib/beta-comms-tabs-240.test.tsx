@@ -117,7 +117,7 @@ describe('the sections exist and render', () => {
     // because every section name also appears in the nav.
     // Lower-cased mid-sentence since issue 246 step 1: the subtitle now leads
     // with "Who your emails come from", because the sending identity moved in.
-    expect(await mount('emails')).toContain('what a client receives automatically')
+    expect(await mount('emails')).toContain('Everything about the emails your clients receive, in one place.')   // 2026-10-30 design
     expect(await mount('texts')).toContain('Texts are on their way')
     // The three addresses Your team's contents moved to (issue 246 step 1).
     expect(await mount('newleads')).toContain('Who handles each kind of job')
@@ -147,11 +147,12 @@ describe('nothing that worked before is unreachable', () => {
     // moved this block by line range, and the risk it guards is a block that
     // lands nowhere. The three rows are the block; they are what "whole" means.
     const text = await mount('emails')
-    expect(text).toContain('Send From Name')
-    expect(text).toContain('Send From Email')
-    expect(text).toContain('Reply-To Email')
+    // 2026-10-30 design labels for the same three columns.
+    expect(text).toContain('Main name')
+    expect(text).toContain('Main address')
+    expect(text).toContain('Replies go to')
     // Still introduced as a fallback rather than dumped in unlabelled.
-    expect(text).toContain('Everything else')
+    expect(text).toContain('Anything else goes out from the main address below.')
   })
 
   it('New leads renders its own body at its own address', async () => {

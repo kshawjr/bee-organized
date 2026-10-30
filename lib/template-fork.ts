@@ -33,6 +33,10 @@ import { supabaseService } from './supabase-service'
 export type TemplateFork = {
   subject: string | null
   body: string | null
+  // The single-fork lookup below reads '*', so the fork's button columns
+  // (templates.button_text / button_link) ride along once they exist.
+  button_text?: string | null
+  button_link?: string | null
 }
 
 type ForkRow = {
@@ -94,7 +98,9 @@ export async function resolveLocationTemplateFork(
   if (!locationUuid) return null
   const { data, error } = await supabaseService
     .from('templates')
-    .select('subject, body')
+    // '*' so the fork's button columns come along when their migration has
+    // run (lib/email-send-options.ts) and are simply absent before.
+    .select('*')
     .eq('cloned_from_id', masterId)
     .eq('location_uuid', locationUuid)
     .eq('is_active', true)

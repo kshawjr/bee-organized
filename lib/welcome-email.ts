@@ -39,6 +39,7 @@ import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { buildCanSpamFooter } from './marketing-unsubscribe'
+import { applyEmailSwitches, extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
 import { resolveLocationTemplateFork } from './template-fork'
 // Type-only: erased at build, so it adds no runtime cycle (drip-lifecycle
 // imports this file; the value import below stays dynamic for that reason).
@@ -265,7 +266,9 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   if (!lead.location_uuid) return { sent: false, error: 'no_location' }
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state')
+    // '*' so the Settings → Emails columns ride along once their migrations
+    // have run; absent before (lib/email-send-options.ts).
+    .select('*')
     .eq('id', lead.location_uuid)
     .maybeSingle()
 
@@ -278,7 +281,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // below. `id` is selected so the fork can be found via cloned_from_id.
   const { data: master, error: tplErr } = await supabaseService
     .from('templates')
-    .select('id, subject, body')
+    .select('*')
     .eq('legacy_id', WELCOME_LEGACY_ID)
     .is('location_uuid', null)
     .maybeSingle()
@@ -292,15 +295,33 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // email), and the rate / booking-link holds run against this `tpl` — so a
   // customized body can neither strip the footer nor ship an unfilled token.
   const fork = await resolveLocationTemplateFork(master.id, loc.id)
-  const tpl = {
+  // The owner's email settings and this template's button (2026-10-30,
+  // lib/email-send-options.ts). The welcome ALWAYS sends (Kevin's ruling), so
+  // "I don't show rates" / "I don't use booking links" only ever take the
+  // price / link sentence OUT of it — they never skip it.
+  const emailOptions = locationEmailOptionsFromRow(loc as Record<string, unknown>)
+  // The owner's own copy carries its own button; otherwise the master's.
+  const tplExtras = extrasFromRow((fork ?? master) as Record<string, unknown>)
+  const switched = applyEmailSwitches({
+    alwaysSends: true,
+    options: emailOptions,
     subject: fork?.subject ?? master.subject,
-    body: fork?.body ?? master.body,
+    body: (fork?.body ?? master.body) ?? '',
+    buttonLink: tplExtras.buttonLink,
+  })
+  // alwaysSends: true never yields 'skip'; the narrowing is for the compiler.
+  if (switched.action === 'skip') return { sent: false, error: switched.reason }
+  const tpl = {
+    subject: switched.subject,
+    body: switched.body,
   }
+  const buttonLinkSource = switched.buttonLink
+  const guardTpl = { subject: tpl.subject, body: buttonLinkSource ? `${tpl.body}\n${buttonLinkSource}` : tpl.body }
 
   // RATE GUARD: template quotes {{rate_per_hour}} but the location has no
   // rate. HOLD — scheduled_at stays intact so the cron retries every tick
   // and the welcome goes out on the first tick after the rate is entered.
-  if (blockedOnMissingRate(tpl, loc.rate_per_hour)) {
+  if (blockedOnMissingRate(guardTpl, loc.rate_per_hour)) {
     console.warn('[welcome] held: template quotes {{rate_per_hour}} but location rate is blank', {
       leadId, locationId: loc.id,
     })
@@ -336,8 +357,13 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // every tick and it goes out on the first tick after a link is set.
   if (
     blockedOnMissingBookingLink(
-      { subject: tpl.subject, body: tpl.body },
-      { ownerBookingLink, locationCalendarLink: loc.calendar_link },
+      guardTpl,
+      {
+        ownerBookingLink,
+        locationCalendarLink: loc.calendar_link,
+        discoveryBookingLink: emailOptions.discoveryBookingLink,
+        virtualBookingLink: emailOptions.virtualBookingLink,
+      },
     )
   ) {
     console.warn('[welcome] held: template quotes a booking tag but no link resolves', {
@@ -369,9 +395,14 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     location_phone: loc.phone,
     book_assessment_link: loc.calendar_link,
     reviews_link: loc.reviews_link,
+    discovery_booking_link: emailOptions.discoveryBookingLink,
+    virtual_booking_link: emailOptions.virtualBookingLink,
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true })
+  const renderedButton = tplExtras.buttonText && buttonLinkSource
+    ? renderTemplate({ subject: tplExtras.buttonText, body: buttonLinkSource }, ctx)
+    : null
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the template
   // subject is NULL/empty, or it renders to nothing. HOLD — scheduled_at stays
@@ -423,6 +454,9 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
       location_phone: loc.phone,
       reviews_link: loc.reviews_link,
       signature,
+      style: emailOptions.style,
+      heading: rendered.subject,
+      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
     },
     { html: footer.html, text: footer.text },
   )

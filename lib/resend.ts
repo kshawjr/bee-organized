@@ -110,6 +110,8 @@ interface SendEmailDirectArgs extends NotificationContext {
 //   book_assessment_link location.calendar_link (alias used by new templates)
 //   reviews_link         location.reviews_link
 //   partner_name         (Partner Drip — Phase 2, currently no-op)
+//   discovery_booking_link  location.discovery_booking_link
+//   virtual_booking_link    location.virtual_booking_link
 export interface RenderContext {
   first_name?: string | null
   organizer_name?: string | null
@@ -129,6 +131,11 @@ export interface RenderContext {
   book_assessment_link?: string | null
   reviews_link?: string | null
   partner_name?: string | null
+  // The two booking links added 2026-10-30 (locations.discovery_booking_link /
+  // virtual_booking_link). {{booking_link}} / {{book_assessment_link}} stay
+  // the in-home assessment link (locations.calendar_link).
+  discovery_booking_link?: string | null
+  virtual_booking_link?: string | null
 }
 
 const VAR_RE = /\{\{(\w+)\}\}/g

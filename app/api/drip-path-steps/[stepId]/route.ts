@@ -90,6 +90,15 @@ export async function PATCH(
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
   }
 
+  // 2026-10-30 — the optional button (migrations/email_buttons.sql). Blank
+  // clears. Text is shown as typed (escaped); the link may be a tag such as
+  // {{booking_link}} and is checked as a real web address at send time.
+  for (const f of ['button_text', 'button_link'] as const) {
+    if (!(f in body)) continue
+    const v = body[f]
+    patch[f] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null
+  }
+
   // issue 316, server side — a subject edit on an EMAIL step must not leave
   // it with no subject from any source. The sender resolves
   // `step.subject ?? template.subject` (nullish, lib/drip-send.ts): patching
@@ -125,6 +134,9 @@ export async function PATCH(
     .select('id, drip_path_id, step_order, delay_days, channel, subject, body, is_active, updated_at')
     .single()
 
+  if (error && /button_(text|link)/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+    return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/email_buttons.sql has not been run' }, { status: 409 })
+  }
   if (error) {
     console.error('[/api/drip-path-steps PATCH] update error', error.message)
     return NextResponse.json({ error: 'update_failed', detail: error.message }, { status: 500 })

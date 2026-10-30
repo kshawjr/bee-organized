@@ -20,8 +20,9 @@ import { isAdmin } from '@/lib/auth'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const SELECT_COLS =
-  'id, legacy_id, name, type, tag, subject, body, is_active, location_uuid, cloned_from_id, created_by, created_at, updated_at'
+// '*' so button_text / button_link (migrations/email_buttons.sql) come back
+// once that migration has run, and are simply absent before.
+const SELECT_COLS = '*'
 
 function matchColumn(id: string) {
   return UUID_RE.test(id) ? 'id' : 'legacy_id'
@@ -128,6 +129,14 @@ export async function PATCH(
   }
   if (typeof body.body === 'string') patch.body = body.body
   if (typeof body.is_active === 'boolean') patch.is_active = body.is_active
+  // 2026-10-30 — the optional button (migrations/email_buttons.sql). Blank
+  // clears. Text is shown as typed (escaped); the link may be a tag such as
+  // {{booking_link}} and is checked as a real web address at send time.
+  for (const f of ['button_text', 'button_link'] as const) {
+    if (!(f in body)) continue
+    const v = body[f]
+    patch[f] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
@@ -155,6 +164,9 @@ export async function PATCH(
     .select(SELECT_COLS)
     .maybeSingle()
 
+  if (error && /button_(text|link)/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+    return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/email_buttons.sql has not been run' }, { status: 409 })
+  }
   if (error) {
     console.error('[/api/templates/[id] PATCH] error:', error.message)
     return NextResponse.json({ error: 'update_failed', detail: error.message }, { status: 500 })

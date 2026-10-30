@@ -12,6 +12,7 @@
 // NOT COMBINED MODE. Two sequences, one on screen at a time, each fully
 // editable. The toggle is a VIEW and writes nothing; 9c's two questions remain
 // the only way to change a variant.
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -60,11 +61,13 @@ const mount = async (over: any = {}) => {
     ...over,
   }
   await act(async () => { root.render(<EmailsList {...props} />) })
+  await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
   return props
 }
 const btn = (t: string) => Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim() === t) as HTMLButtonElement
 const reads = () => Array.from(container.querySelectorAll('button')).filter(b => b.textContent === 'Read')
-const pencils = () => Array.from(container.querySelectorAll('button')).filter(b => (b.textContent ?? '').includes('✎'))
+// 2026-10-30 design: a clock button; the first email's timing is fixed.
+const pencils = () => Array.from(container.querySelectorAll('button[title="Change when this goes out"]')) as HTMLElement[]
 const text = () => container.textContent ?? ''
 
 describe('the toggle switches which sequence is on screen', () => {
@@ -129,14 +132,14 @@ describe('every downstream feature works on the moving sequence', () => {
   it('Add targets the MOVING path (9b)', async () => {
     const props = await mount()
     await toMoving()
-    await act(async () => { btn('+ Add another email').click() })
+    await act(async () => { btn('+ Add an email here').click() })
     expect(props.actions.add).toHaveBeenCalledWith('moving-b')
   })
 
   it('Timing is editable on the moving drip rows (10)', async () => {
     const props = await mount()
     await toMoving()
-    expect(pencils().length).toBe(3)
+    expect(pencils().length).toBe(2)
     await act(async () => { pencils()[0].click() })
     expect(props.actions.editTiming.mock.calls[0][0].pathKey).toBe('moving-b')
   })
@@ -149,7 +152,7 @@ describe('every downstream feature works on the moving sequence', () => {
     })
     expect(text()).not.toContain('Not sending')
     await toMoving()
-    expect(text()).toContain('Not sending — it mentions your hourly rate')
+    expect(text()).toContain('Not sending — add your hourly rate')
   })
 
   it('reset offers on the moving sequence when its shape matches (8b)', async () => {

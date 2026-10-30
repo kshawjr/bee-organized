@@ -120,7 +120,7 @@ describe('the retired surfaces do not render on Emails', () => {
     const t = await mount('emails')
     expect(t).toContain('Every email a client can receive')
     expect(buttons()).toContain('Edit')
-    expect(buttons()).toContain('+ Add another email')
+    expect(buttons()).toContain('+ Add an email here')   // 2026-10-30 design wording
     expect(t).toContain('Organizing')
     expect(t).toContain('Moving')
   })
@@ -181,9 +181,14 @@ describe('the write inventory — every one still has a path', () => {
     expect(beehub).toContain('<MasterTemplatesEditor')
   })
 
-  it('4. rate and booking links are still owner-editable where they always were', async () => {
-    const t = await mount('location')
-    expect(t).toContain('Booking Link')
+  // 2026-10-30: they MOVED to Settings → Emails → Your details (the Emails
+  // screen design). Still owner-editable — now in one place, beside the
+  // emails that use them — and Location points there.
+  it('4. rate and booking links are still owner-editable — on Emails now', async () => {
+    const t = await mount('emails')
+    expect(t).toContain('Hourly rate')
+    expect(t).toContain('In-home assessment booking link')
+    // Location's pointer to here is pinned in lib/beta-emails-moved-settings.test.tsx.
   })
 
   it('7. both sequences reach the list, so neither can go dark', () => {

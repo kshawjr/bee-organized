@@ -87,36 +87,34 @@ describe('branded drip wrapper — chrome', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
     expect(html).toContain('role="presentation"')
     expect(html).toContain('max-width:600px')
-    expect(html).toContain('BEE ORGANIZED')
-    expect(html).toContain('Simplify Your Hive')
-    // Body copy at 16px for the 45-65 audience.
-    expect(html).toContain('font-size:16px')
+    expect(html).toContain('>Bee Organized</p>')
+    // Body copy at 17px for the 45-65 audience (2026-10-30 design; was 16px).
+    expect(html).toContain('font-size:17px')
   })
 
-  it('declares color-scheme + a dark-mode guard that pins the card white', () => {
+  it('declares color-scheme + a dark-mode guard for the card and text', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
     expect(html).toContain('color-scheme')
     expect(html).toContain('prefers-color-scheme: dark')
-    expect(html).toContain('.bo-card')
+    expect(html).toContain('.dm-card')
+    expect(html).toContain('class="bo-card dm-card"')
   })
 })
 
-describe('branded drip wrapper — footer band', () => {
-  it('renders "Bee Organized <name> | beeorganized.com | <phone>" in the brand teal', () => {
+describe('branded drip wrapper — the location line under the card', () => {
+  it('renders "Bee Organized <name> | beeorganized.com | <phone>"', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
-    expect(html).toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
-    expect(html).toContain('Bee Organized Boulder')
+    expect(html).toContain('Bee Organized Boulder | ')
     expect(html).toContain('(303) 555-0147')
     // Website: shown without the scheme, linked to the full URL, hardcoded.
     expect(html).toContain(`href="${DRIP_WEBSITE_URL}"`)
     expect(html).toContain(`>${DRIP_WEBSITE_LABEL}<`)
   })
 
-  it('the band uses a dark brand color that carries white text', () => {
+  it('the teal band is gone (2026-10-30): no teal fill, no white text', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
-    // White text sits on the teal band.
-    const bandMatch = html.match(/bgcolor="#054E4A"[^>]*color:#ffffff/)
-    expect(bandMatch).toBeTruthy()
+    expect(html).not.toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
+    expect(html).not.toMatch(/[^-]color:#ffffff/i)   // text colour, not the card background
   })
 })
 
@@ -134,7 +132,7 @@ describe('branded drip wrapper — links', () => {
   it('renders the reviews line as a working link', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
     expect(html).toContain(
-      `<a href="${ctx.reviews_link}" style="color:${DRIP_BRAND_TEAL};text-decoration:underline;">${REVIEWS_LINE_TEXT}</a>`,
+      `<a href="${ctx.reviews_link}" style="color:#60625F;text-decoration:underline;">${REVIEWS_LINE_TEXT}</a>`,
     )
   })
 
@@ -202,17 +200,17 @@ describe('branded drip wrapper — token safety & degradation', () => {
     // Just "Bee Organized | beeorganized.com" — the separator precedes the
     // website link, and there is no doubled/trailing separator (no empty
     // name or phone segment).
-    expect(html).toContain('Bee Organized&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://beeorganized.com"')
+    expect(html).toContain('Bee Organized | <a href="https://beeorganized.com"')
     expect(html).not.toMatch(/\|\s*\|/)
     // Nothing after the website link: no trailing separator + phone segment.
-    expect(html).not.toContain(`${DRIP_WEBSITE_LABEL}</a>&nbsp;&nbsp;|`)
+    expect(html).not.toContain(`${DRIP_WEBSITE_LABEL}</a> |`)
   })
 })
 
 describe('branded drip wrapper — plain text alternative', () => {
   it('is present, matches, and carries the footer band', () => {
     const text = buildBrandedDripText(BODY_WITH_REVIEWS, ctx)
-    expect(text).toContain('BEE ORGANIZED — Simplify Your Hive')
+    expect(text.startsWith('BEE ORGANIZED\n\n')).toBe(true)
     expect(text).toContain('Bee Organized Boulder | beeorganized.com | (303) 555-0147')
     // Body copy survives verbatim (plain text keeps visible URLs).
     expect(text).toContain('Please click HERE (https://book.example.com/sarah?ref=a&b=2)')

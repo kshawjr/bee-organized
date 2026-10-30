@@ -10,6 +10,7 @@
 // to guessing by position — while appearing to work. A single write-then-read
 // does not catch it. The round-trip test below saves TWICE, because the second
 // save is where a value that was never persisted shows up as lost.
+import { expandAllEmailGroups } from './emails-test-helpers'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -60,11 +61,13 @@ describe('origin survives a full round trip, including a SECOND save', () => {
 
   it('the clone writes master on every copied step', () => {
     expect(cloneRoute).toContain("origin: 'master'")
-    expect(cloneRoute).toContain('is_active, origin')      // and reads it back
+    // and reads it back — since 2026-10-30 as '*', so the new step columns
+    // (button, timing unit) come along once their migrations run.
+    expect(cloneRoute).toContain(".select('*')\n    .eq('drip_path_id', master.id)")
   })
 
   it('the GET selects AND maps it — selecting alone is not enough', () => {
-    expect(getRoute).toContain('is_active, origin,')
+    expect(getRoute).toContain(".select('*, templates:master_template_id(name, legacy_id, subject, body)')")
     expect(getRoute).toContain("origin: (s as any).origin ?? 'master'")
   })
 
@@ -262,13 +265,15 @@ describe('the list offers append, and nothing else', () => {
       ...over,
     }
     await act(async () => { root.render(<EmailsList {...props} />) })
+    await expandAllEmailGroups(container, act as any)  // groups fold (2026-10-30 design)
     return props
   }
   const labels = () => Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim() ?? '')
 
   it('offers exactly one add, and no delete or insert', async () => {
     await mount()
-    expect(labels().filter(l => l === '+ Add another email').length).toBe(1)
+    // 2026-10-30 design wording: "+ Add an email here", at the foot of the group.
+    expect(labels().filter(l => l === '+ Add an email here').length).toBe(1)
     for (const banned of ['Delete', 'Remove', 'Insert', 'Add above', 'Add below']) {
       expect(labels(), `must not offer "${banned}"`).not.toContain(banned)
     }

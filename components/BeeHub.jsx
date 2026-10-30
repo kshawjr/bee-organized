@@ -40,11 +40,15 @@ import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
-import { SignatureCard, LocationSignatureLinksCard, SignaturePreview } from "@/components/settings/EmailSignatureSettings"
+import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
+import {
+  EmailsFonts, EmailStatusPanel, EmailsJumpNav, ESection, EField, EBtn, ETag, ET, EF, EmailStyleSection, EmailDetailsSection,
+  EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds, rowAfterSwitches,
+  asksForLink, goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields,
+} from "@/components/settings/EmailsScreen"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
-import { resolveConfiguredSenders } from "@/lib/sequence-senders"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
@@ -16541,6 +16545,12 @@ function masterStepsToUi(master) {
         body: s.body ?? null,
         fromMaster: true,
         origin: 'master',
+        // 2026-10-30 — the master's button and timing unit, and its row id
+        // (a location still on the master test-sends this row).
+        stepId: s.id ?? null,
+        delayUnit: s.delay_unit ?? null,
+        buttonText: s.button_text ?? null,
+        buttonLink: s.button_link ?? null,
       }
     })
     .sort((a, b) => a.order - b.order)
@@ -18264,6 +18274,7 @@ const CLOSED_JOB_ROWS = [
 import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
 import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
 import PhoneInput from '@/components/hive/shared/PhoneInput'
+import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -18313,6 +18324,10 @@ function templateRow(templates, legacyId, days, when) {
     body: use.body || '',
     firstLine: firstMeaningfulLine(use.body),
     wording: fork ? 'yours' : 'master',
+    // 2026-10-30 — the optional button; the test send names the template.
+    buttonText: use.buttonText || '',
+    buttonLink: use.buttonLink || '',
+    templateKey: legacyId,
   }
 }
 
@@ -18389,7 +18404,10 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
           pathKey: key,
           order: Number(s.order ?? 0),
           days: Number(s.delay_days ?? 0),
-          when: whenLabelForDays(s.delay_days ?? 0),
+          // A months/years timing reads as the owner chose it; days as before.
+          when: s.delayUnit === 'months' || s.delayUnit === 'years'
+            ? timingLabel(s.delay_days ?? 0, s.delayUnit)
+            : whenLabelForDays(s.delay_days ?? 0),
           timingIsData: true,
           subject, body,
           firstLine: firstMeaningfulLine(body),
@@ -18402,6 +18420,14 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
           // Owner removed this email (drip_path_steps.is_active = false). It
           // stays listed so it can be put back; the sender skips it.
           removed: s.isActive === false,
+          // 2026-10-30 — paused stays in its place and doesn't send
+          // (drip_path_steps.is_paused); the timing unit, the button, and the
+          // row's step id for "Send me a test".
+          paused: s.isPaused === true,
+          delayUnit: s.delayUnit || null,
+          buttonText: s.buttonText || '',
+          buttonLink: s.buttonLink || '',
+          stepId: s.dbId ?? s.stepId ?? null,
           contentMissing: !subject && !body,
         }
       })
@@ -18436,7 +18462,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
 //
 // Read only. No Edit, no fork, no writes — step 8 owns those. The one control
 // per row is Read, and it opens a modal that navigates the group it belongs to.
-function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason, blockedReason }) {
+function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason, blockedReason, sending = true, locationId = null, preview = null, cfg = {} }) {
   const row = rows[index]
   React.useEffect(() => {
     const onKey = e => {
@@ -18486,18 +18512,27 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
                   : null}
             </div>
           )}
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
-          <h2 style={{ fontSize:'19px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:'0 0 16px' }}>{row.subject || <span style={{ color:'#b0c0bc' }}>No subject</span>}</h2>
+          {/* 2026-10-30 — the email exactly as it goes: this location's
+              style, real rate, links and phone, a sample client, the
+              signature. Without the screen's preview context (tests, a read-
+              only mount) it falls back to the wording as typed. */}
           {row.contentMissing ? (
             <div style={{ background:'#fdf6e3', border:'1px solid rgba(212,160,70,0.3)', borderRadius:'10px', padding:'16px 18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
               We can't show this one. It points at a template whose wording we couldn't load, so anything shown here might not be what actually sends.
             </div>
+          ) : preview ? (
+            <EmailFrame html={previewEmailHtml({ row, style: preview.style, values: preview.values, cfg, signature: preview.signature })} />
           ) : (
-            <div style={{ background:'#fbfaf7', border:'1px solid rgba(26,46,43,0.10)', borderRadius:'10px', padding:'19px 21px', fontSize:'14px', lineHeight:1.65, color:'#4a5f5b', whiteSpace:'pre-line' }}>{row.body}</div>
+            <>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
+              <h2 style={{ fontSize:'19px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:'0 0 16px' }}>{row.subject || <span style={{ color:'#b0c0bc' }}>No subject</span>}</h2>
+              <div style={{ background:'#fbfaf7', border:'1px solid rgba(26,46,43,0.10)', borderRadius:'10px', padding:'19px 21px', fontSize:'14px', lineHeight:1.65, color:'#4a5f5b', whiteSpace:'pre-line' }}>{row.body}</div>
+              <p style={{ marginTop:'12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.6 }}>
+                The bits in braces get filled in for each person — <code style={{ background:'#efede6', borderRadius:'5px', padding:'2px 7px', fontFamily:'ui-monospace,Menlo,monospace', fontSize:'12px', color:'#1a2e2b' }}>{'{{first_name}}'}</code> becomes their first name.
+              </p>
+            </>
           )}
-          <p style={{ marginTop:'12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.6 }}>
-            The bits in braces get filled in for each person — <code style={{ background:'#efede6', borderRadius:'5px', padding:'2px 7px', fontFamily:'ui-monospace,Menlo,monospace', fontSize:'12px', color:'#1a2e2b' }}>{'{{first_name}}'}</code> becomes their first name.
-          </p>
+          {preview && !row.contentMissing && <SendTestBar locationId={locationId} row={row} sending={sending} />}
         </div>
         <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3' }}>
           <button onClick={onClose} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action }}>Close</button>
@@ -18517,9 +18552,12 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
 function EmailTemplateEditor({ row, onCancel, onSave }) {
   const [subject, setSubject] = React.useState(row.subject || '')
   const [body, setBody] = React.useState(row.body || '')
+  const [buttonText, setButtonText] = React.useState(row.buttonText || '')
+  const [buttonLink, setButtonLink] = React.useState(row.buttonLink || '')
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState('')
-  const changed = subject !== (row.subject || '') || body !== (row.body || '')
+  const changed = subject !== (row.subject || '') || body !== (row.body || '') ||
+    buttonText !== (row.buttonText || '') || buttonLink !== (row.buttonLink || '')
   const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'9px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:70 }}>
@@ -18534,6 +18572,9 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
           <textarea value={body} onChange={e => setBody(e.target.value)}
             style={{ width:'100%', minHeight:'200px', padding:'16px 18px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'10px', font:'inherit', fontSize:'14px', lineHeight:1.65, resize:'vertical', background:'white', color:'#1a2e2b' }} />
           <p style={{ marginTop:'10px', fontSize:'12px', color:'#8a9e9a' }}>The bits in braces get filled in for each person.</p>
+          <div style={{ marginTop:'14px' }}>
+            <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
+          </div>
           {err && <p style={{ marginTop:'8px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
         </div>
         <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
@@ -18548,7 +18589,7 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
               if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
               if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
               setBusy(true)
-              try { await onSave(subject, body) }
+              try { await onSave(subject, body, { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }) }
               catch (e) { setErr(String(e?.message || e)); setBusy(false) }
             }}
             disabled={busy || !changed}
@@ -18752,10 +18793,17 @@ export function timingChangeEffect(steps, order, nextDelay) {
 
 export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
   const minDay = timingMinFor(steps, row.order)
-  const [val, setVal] = React.useState(String(row.days ?? 0))
-  const n = Number(val)
-  const valid = val.trim() !== '' && Number.isInteger(n) && n >= 0 && n >= minDay
-  const tooSoon = val.trim() !== '' && Number.isInteger(n) && n >= 0 && n < minDay
+  // 2026-10-30 — days, months or years (lib/email-timing.ts). The number the
+  // owner types is in the unit they pick; what is checked and saved is days
+  // (a month is 30, a year 365), and the unit is kept so it reads back as
+  // they wrote it.
+  const start = timingFromStored(row.days ?? 0, row.delayUnit)
+  const [val, setVal] = React.useState(String(start.immediate ? (row.days ?? 0) : start.n))
+  const [unit, setUnit] = React.useState(start.immediate ? 'days' : start.unit)
+  const count = Number(val)
+  const n = Number.isInteger(count) ? timingToStored({ immediate: false, n: count, unit }).delay_days : NaN
+  const valid = val.trim() !== '' && Number.isInteger(count) && count >= 0 && n >= minDay
+  const tooSoon = val.trim() !== '' && Number.isInteger(count) && count >= 0 && n < minDay
   const eff = timingChangeEffect(steps, row.order, n)
   const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
   return (
@@ -18764,11 +18812,22 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
         style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>When this sends · {row.subject || 'this email'}</div>
         <div style={{ padding:'20px 24px 22px' }}>
-          <label style={{ display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Days after someone first gets in touch</label>
-          {/* A day count is a small control. It does not stretch. */}
-          <input type="number" min={minDay} step={1} value={val}
-            onChange={e => setVal(e.target.value)}
-            style={{ width:'110px', padding:'9px 11px', border:`1.5px solid ${tooSoon ? '#c0554e' : 'rgba(26,46,43,0.14)'}`, borderRadius:'9px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }} />
+          <p style={{ margin:'0 0 4px', fontSize:'14px', fontWeight:600, color:'#323B35' }}>When it goes out</p>
+          {/* A count and a unit — small controls. They do not stretch. */}
+          <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px', fontSize:'14px' }}>
+            <span style={{ color:'#737970' }}>Send it</span>
+            <input type="number" min={0} max={999} step={1} value={val} aria-label="How long to wait"
+              onChange={e => setVal(e.target.value)}
+              style={{ width:'80px', padding:'6px 8px', textAlign:'center', border:`1.5px solid ${tooSoon ? '#c0554e' : 'rgba(26,46,43,0.14)'}`, borderRadius:'8px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }} />
+            <select value={unit} aria-label="Wait measured in" onChange={e => setUnit(e.target.value)}
+              style={{ padding:'6px 8px', border:'1.5px solid rgba(26,46,43,0.14)', borderRadius:'8px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }}>
+              {TIMING_UNITS.map(u => <option key={u.v} value={u.v}>{u.label}</option>)}
+            </select>
+            <span style={{ color:'#737970' }}>after {row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
+          </div>
+          {valid && <p style={{ margin:'8px 0 0', fontSize:'12px', color:'#737970' }}>
+            That’s day {n}.{formatTiming({ immediate:false, n:count, unit }) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
+          </p>}
           {tooSoon && (
             <p style={{ fontSize:'12.5px', color:'#c0554e', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
               That’s the same day as the one before it, or earlier — so this would go out straight away, on top of the last one. It needs to be day {minDay} or later.
@@ -18798,7 +18857,7 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
         </div>
         <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
           <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={() => onConfirm(n)} disabled={busy || !valid}
+          <button onClick={() => onConfirm(n, unit)} disabled={busy || !valid}
             style={{ ...btn, background: (busy || !valid) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !valid) ? 'not-allowed' : 'pointer' }}>
             {busy ? 'Saving…' : 'Save'}
           </button>
@@ -18893,67 +18952,68 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
   )
 }
 
-function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason, onRemove = null, onRestore = null, alwaysSendsNote = null }) {
-  // issue 240 step 9a — a paused row is DIMMED, never hidden: the owner still
-  // reads the wording and can still open it. Only the chrome recedes, and the
-  // reason sits on the row so it is impossible to miss.
-  // A REMOVED row (lib/drip-followups.ts) reads the same way: still listed,
-  // still readable, one click from Put back.
-  const removed = !!row.removed
-  const paused = !!blockedReason || removed
+// 2026-10-30 — the designer's row (Settings → Emails export): a dot on a
+// timeline (gold sending · amber waiting · grey off), the timing in gold
+// (a clock button where the timing is really data — drip rows), the wording
+// tag, and Read / Edit / Pause / Remove. A REMOVED row is no longer drawn
+// here: it waits at the bottom of its group with "Bring back" (EmailsList).
+//   needs     blank details holding this row back (rowNeeds) — "Not sending —
+//             add …", a link that jumps to the field
+//   skipped   'rate_not_shown' | 'booking_links_not_used' — the owner's switch
+//   blockedReason  the follow-ups switch's sentence, when that is why
+function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, needs = [], skipped = null, sending = true, onPause = null, onRemove = null, lockedReason = null, timingLocked = false }) {
+  const paused = !!row.paused
+  const waiting = sending && !paused && !skipped && !blockedReason && needs.length > 0
+  const off = !sending || paused || !!skipped || !!blockedReason
+  const gold = '#C89A56', muted = '#737970', warn = '#9A6A20'
+  const btn = { display:'inline-flex', alignItems:'center', gap:'6px', borderRadius:'8px', padding:'6px 12px', fontSize:'14px', fontWeight:500, fontFamily:"'Lato', system-ui, sans-serif", cursor:'pointer', whiteSpace:'nowrap', background:'#FFFFFF', color:'#323B35', border:'1px solid #E3E4DC' }
+  const ghost = { ...btn, background:'transparent', border:'1px solid transparent' }
   return (
-    <div style={{ background: paused ? '#fffdf7' : 'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start', boxShadow: paused ? 'inset 3px 0 0 #8a6a0e' : 'none' }}>
-      <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
-        {/* issue 240 step 10 — a pencil ONLY where the timing is really data.
-            The welcome (24h) and the closed-job pair (90/365) are code
-            constants, and rows carry timingIsData from step 7 for exactly
-            this. Those three render as plain text with no affordance, rather
-            than a control that would refuse or silently do nothing. */}
-        {onEditTiming && row.timingIsData
-          ? <button onClick={onEditTiming} style={{ background:'none', border:'none', padding:0, font:'inherit', fontSize:'12px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', textAlign:'left' }}>{row.when} ✎</button>
-          : row.when}
-        {row.fixedNote && <><br /><span style={{ fontSize:'11px', opacity:0.75 }}>{row.fixedNote}</span></>}
-      </div>
-      <div style={{ flex:1, minWidth:0, opacity: paused ? 0.62 : 1 }}>
-        <div style={{ display:'flex', alignItems:'baseline', gap:'8px', flexWrap:'wrap', marginBottom:'2px' }}>
-          <b style={{ fontSize:'14.5px', fontWeight:600, color:'#1a2e2b' }}>{row.subject || 'No subject'}</b>
-          {removed
-            ? <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#efede6', color:'#7a8b87' }}>Removed</span>
-            : paused && <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap', background:'#fdf6e3', color:'#8a6a0e' }}>Paused</span>}
-          <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap',
-            background: row.wording === 'yours' ? '#fdf6e3' : '#efede6', color: row.wording === 'yours' ? '#8a6a0e' : '#7a8b87' }}>
-            {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
-          </span>
+    <li data-email-row={row.key} style={{ position:'relative', listStyle:'none', borderRadius:'12px', border:`1px solid ${waiting ? 'rgba(154,106,32,0.5)' : '#E3E4DC'}`, background: waiting ? 'rgba(250,240,218,0.4)' : '#FFFFFF', padding:'16px', opacity: off ? 0.6 : 1, fontFamily:"'Lato', system-ui, sans-serif" }}>
+      <span aria-hidden style={{ position:'absolute', left:'-27px', top:'20px', height:'12px', width:'12px', borderRadius:'999px', border:'2px solid #FFFFFF', boxSizing:'border-box', background: waiting ? warn : off ? muted : gold }} />
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'12px' }}>
+        <div style={{ width:'112px', flexShrink:0 }}>
+          {/* issue 240 step 10 — the clock ONLY where the timing is really
+              data. The welcome (24h) and the closed-job pair (90/365) are
+              code constants and read as plain text. */}
+          {onEditTiming && row.timingIsData && !timingLocked
+            ? <button onClick={onEditTiming} title="Change when this goes out" style={{ margin:'0 -4px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:'6px', padding:'0 4px', background:'none', border:'none', textAlign:'left', fontSize:'14px', fontWeight:600, color:gold, cursor:'pointer', fontFamily:'inherit' }}>{row.when} <svg aria-hidden width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity:0.4 }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg></button>
+            : <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:gold }}>{row.when}</p>}
+          {timingLocked && <p style={{ margin:0, fontSize:'11px', color:muted }}>Fixed — automatic reply</p>}
+          {!timingLocked && lockedReason && <p style={{ margin:0, fontSize:'11px', color:muted }}>Always sent</p>}
+          {paused && <p style={{ margin:0, fontSize:'11px', fontWeight:600, color:muted }}>Paused</p>}
         </div>
-        <p style={{ fontSize:'13px', color:'#4a5f5b', margin:0, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
-          {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
-        </p>
-        {removed ? (
-          <p style={{ fontSize:'12px', color:'#7a8b87', margin:'6px 0 0', lineHeight:1.5 }}>
-            Removed — this one won’t send. People skip straight to the next email.
+        <div style={{ flex:'1 1 220px', minWidth:0 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'8px' }}>
+            <p style={{ margin:0, fontWeight:600, color:'#323B35' }}>{row.subject || 'No subject'}</p>
+            <span style={{ display:'inline-flex', whiteSpace:'nowrap', borderRadius:'999px', padding:'2px 8px', fontSize:'11px', fontWeight:600,
+              background: row.wording === 'yours' ? '#EAF3F1' : '#F8EEDD', color: row.wording === 'yours' ? '#1E3B38' : warn }}>
+              {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
+            </span>
+          </div>
+          <p style={{ margin:'2px 0 0', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', fontFamily:"'Arvo', Georgia, serif", fontSize:'12px', color:muted }}>
+            {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
           </p>
-        ) : paused && (
-          <p style={{ fontSize:'12px', color:'#8a6a0e', margin:'6px 0 0', lineHeight:1.5 }}>
-            Not sending — {blockedReason}.
-          </p>
-        )}
-        {alwaysSendsNote && (
-          <p style={{ fontSize:'12px', color:'#7a8b87', margin:'6px 0 0', lineHeight:1.5 }}>{alwaysSendsNote}</p>
-        )}
+          {lockedReason && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{lockedReason}</p>}
+          {skipped && !paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{skipped === 'rate_not_shown'
+            ? 'Skipped — you don’t show an hourly rate. Switch it on in Your details to send this.'
+            : 'Skipped — you don’t use booking links. Switch it on in Your details to send this.'}</p>}
+          {paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Paused — no client gets this one until you start it again.</p>}
+          {blockedReason && !paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Not sending — {blockedReason}.</p>}
+          {waiting && (
+            <button onClick={() => goToField(EMAIL_FIELD_ID[needs[0]])} style={{ marginTop:'8px', display:'inline-flex', alignItems:'center', gap:'6px', background:'none', border:'none', padding:0, fontSize:'12px', fontWeight:600, color:warn, textDecoration:'underline', textUnderlineOffset:'2px', cursor:'pointer', fontFamily:'inherit' }}>
+              ⏸ Not sending — add {needs.map(n => EMAIL_NEED_LABEL[n]).join(' and ')}
+            </button>
+          )}
+        </div>
+        <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap' }}>
+          <button onClick={onRead} style={btn}>Read</button>
+          {onEdit && <button onClick={onEdit} style={btn}>Edit</button>}
+          {onPause && <button onClick={onPause} aria-label={paused ? 'Start again' : 'Pause'} style={ghost}>{paused ? '▶ Start' : '⏸ Pause'}</button>}
+          {onRemove && <button onClick={onRemove} style={{ ...ghost, color:'#B4412F' }}>Remove</button>}
+        </div>
       </div>
-      <div style={{ display:'flex', gap:'7px', flexShrink:0 }}>
-        <button onClick={onRead} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Read</button>
-        {onEdit && (
-          <button onClick={onEdit} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Edit</button>
-        )}
-        {removed && onRestore && (
-          <button onClick={onRestore} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Put back</button>
-        )}
-        {!removed && onRemove && (
-          <button onClick={onRemove} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#8a4a44', cursor:'pointer', whiteSpace:'nowrap' }}>Remove</button>
-        )}
-      </div>
-    </div>
+    </li>
   )
 }
 
@@ -19098,7 +19158,12 @@ const LOCATION_BOOKING_TAGS = ['{{book_assessment_link}}', '{{booking_link}}']
 const isBlank = v => v == null || String(v).trim() === ''
 
 export function emailRowBlockers(row, cfg = {}) {
-  const source = `${row?.subject ?? ''}\n${row?.body ?? ''}`
+  // 2026-10-30 — the owner's switches come first, exactly as at send time: a
+  // skipped row isn't held, and a first email with rates off has lost its
+  // price sentence, so it can't be held for the rate (lib/email-switches.ts).
+  const switched = rowAfterSwitches(row, cfg)
+  if (switched.skipped) return []
+  const source = `${switched.subject}\n${switched.body}\n${switched.buttonLink}`
   const out = []
   // Mirrors blockedOnMissingRate.
   if (source.includes(RATE_TAG) && isBlank(cfg.ratePerHour)) {
@@ -19110,6 +19175,12 @@ export function emailRowBlockers(row, cfg = {}) {
   }
   if (LOCATION_BOOKING_TAGS.some(t => source.includes(t)) && isBlank(cfg.locationCalendarLink)) {
     out.push('it asks people to book a time, and your booking link is empty')
+  }
+  if (source.includes('{{discovery_booking_link}}') && isBlank(cfg.discoveryBookingLink)) {
+    out.push('it asks people to book a discovery call, and that booking link is empty')
+  }
+  if (source.includes('{{virtual_booking_link}}') && isBlank(cfg.virtualBookingLink)) {
+    out.push('it asks people to book a virtual assessment, and that booking link is empty')
   }
   return out
 }
@@ -19214,8 +19285,12 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null, followupsOff = false }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
+  // 2026-10-30 design: groups fold (only the first open at first), and show
+  // three rows until "More" is pressed.
+  const [collapsed, setCollapsed] = React.useState({})
+  const [expanded, setExpanded] = React.useState({})
 
   // ─── issue 240 step 7b — which sequence is on screen ───
   //
@@ -19295,82 +19370,146 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // isn't sending is the switch, not a missing rate or link.
   const blockedFor = row => followupsOffReasonFor(row, followupsOff) || blockedSentence(emailRowBlockers(row, sendConfig))
 
-  const Group = ({ id, title, count, note, rows }) => (
-    <div style={{ marginBottom:'22px' }}>
-      <div style={{ display:'flex', alignItems:'baseline', gap:'10px', flexWrap:'wrap', margin:'0 2px 4px' }}>
-        <h2 style={{ fontSize:'16px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0 }}>{title}</h2>
-        <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{count}</span>
+  // Why a row can't be removed, in the owner's words (export LOCKED_REASON).
+  const lockedReasonFor = (r, groupId) => {
+    if (r.rail === 'drip' && Number(r.order) === 1) return groupId === 'returning' ? 'Can’t be removed — it tells a returning client we got their message.' : FIRST_EMAIL_ALWAYS_SENDS_NOTE
+    if (r.rail === 'welcome') return 'Can’t be removed — every new client is welcomed to the Hive.'
+    if (r.key === 'opp_closed_job_3mo') return 'Can’t be removed — it’s how Bee Organized collects reviews.'
+    if (r.key === 'opp_closed_job_12mo') return 'Can’t be removed — the yearly check-in goes to every client.'
+    return null
+  }
+  const SHOW = 3
+  const Group = ({ id, title, count, note, rows, add = null }) => {
+    const groupOpen = collapsed[id] === undefined ? id === 'new' : !collapsed[id]
+    const live = rows.filter(r => !r.removed)
+    const removedRows = rows.filter(r => r.removed)
+    const isOpen = !!expanded[id]
+    const shown = isOpen ? live : live.slice(0, SHOW)
+    const hidden = live.length - shown.length
+    return (
+      <div style={{ marginBottom:'32px' }}>
+        <button type="button" aria-expanded={groupOpen} onClick={() => setCollapsed(x => ({ ...x, [id]: groupOpen }))}
+          style={{ display:'flex', width:'100%', alignItems:'flex-start', gap:'12px', borderRadius:'12px', border:'1px solid #E3E4DC', background:'#FFFFFF', padding:'12px', textAlign:'left', cursor:'pointer', marginBottom: groupOpen ? '12px' : 0, fontFamily:"'Lato', system-ui, sans-serif" }}>
+          <div style={{ minWidth:0, flex:1 }}>
+            <h3 style={{ margin:0, fontSize:'16px', fontWeight:700, color:'#323B35', fontFamily:"'Lato', system-ui, sans-serif" }}>{title} <span style={{ fontWeight:400, color:'#737970' }}>· {count}</span></h3>
+            {note && <p style={{ margin:0, fontSize:'12px', color:'#737970' }}>{note}</p>}
+          </div>
+          <span aria-hidden style={{ marginTop:'4px', color:'#737970', transform: groupOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
+        </button>
+        {groupOpen && <>
+          {live.length === 0
+            ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
+            : (
+              <ol style={{ position:'relative', margin:'0 0 0 8px', padding:'0 0 0 20px', borderLeft:'2px solid rgba(168,201,196,0.6)', display:'flex', flexDirection:'column', gap:'8px' }}>
+                {shown.map(r => {
+                  const i = rows.indexOf(r)
+                  const sw = rowAfterSwitches(r, sendConfig)
+                  return (
+                    <EmailRow key={r.key} row={r}
+                      sending={sending}
+                      blockedReason={followupsOffReasonFor(r, followupsOff)}
+                      skipped={sw.skipped}
+                      needs={rowNeeds(r, sendConfig)}
+                      timingLocked={r.rail === 'drip' && Number(r.order) === 1}
+                      lockedReason={lockedReasonFor(r, id)}
+                      onRead={() => setOpen({ group:id, index:i })}
+                      onEdit={canEdit ? () => actions.edit(r) : null}
+                      onEditTiming={actions && actions.editTiming ? () => actions.editTiming(r) : null}
+                      onPause={actions && actions.pause && rowCanBeRemoved(r) ? () => actions.pause(r, !r.paused) : null}
+                      onRemove={actions && actions.remove && rowCanBeRemoved(r) ? () => actions.remove(r) : null} />
+                  )
+                })}
+              </ol>
+            )}
+          {live.length > SHOW && (
+            <button type="button" onClick={() => setExpanded(x => ({ ...x, [id]: !isOpen }))}
+              style={{ margin:'8px 0 0 28px', display:'flex', width:'calc(100% - 28px)', alignItems:'center', justifyContent:'center', gap:'8px', borderRadius:'12px', border:'2px dashed rgba(200,154,86,0.5)', background:'rgba(248,238,221,0.5)', padding:'12px 16px', fontSize:'14px', fontWeight:600, color:'#323B35', cursor:'pointer', fontFamily:"'Lato', system-ui, sans-serif" }}>
+              {isOpen ? 'Show fewer ⌃' : `More — ${hidden} more ${hidden === 1 ? 'email' : 'emails'} in this group ⌄`}
+            </button>
+          )}
+          {removedRows.length > 0 && (
+            <div style={{ margin:'8px 0 0 28px', borderRadius:'8px', background:'#F2F2EE', padding:'12px', fontSize:'12px', fontFamily:"'Lato', system-ui, sans-serif" }}>
+              <p style={{ margin:0, fontWeight:600 }}>Removed from this group</p>
+              <ul style={{ listStyle:'none', margin:'6px 0 0', padding:0, display:'flex', flexDirection:'column', gap:'6px' }}>
+                {removedRows.map(r => (
+                  <li key={r.key} data-removed-row={r.key} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span style={{ minWidth:0, flex:1, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis', color:'#737970' }}>{r.when} · {r.subject}</span>
+                    {actions && actions.restore && rowCanBeRemoved(r) && (
+                      <button type="button" onClick={() => actions.restore(r)} style={{ flexShrink:0, borderRadius:'8px', border:'1px solid #E3E4DC', background:'#FFFFFF', padding:'4px 10px', fontSize:'12px', cursor:'pointer', fontFamily:'inherit' }}>Bring back</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {add && (
+            <button type="button" onClick={add}
+              style={{ margin:'8px 0 0 28px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:'8px', border:'1px dashed #E3E4DC', background:'transparent', padding:'6px 12px', fontSize:'14px', color:'#737970', cursor:'pointer', fontFamily:"'Lato', system-ui, sans-serif" }}>
+              + Add an email here
+            </button>
+          )}
+        </>}
       </div>
-      {note && <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'0 2px 10px', lineHeight:1.5 }}>{note}</p>}
-      {rows.length === 0
-        ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
-        : rows.map((r, i) => (
-            <EmailRow key={r.key} row={r}
-              blockedReason={blockedFor(r)}
-              onRead={() => setOpen({ group:id, index:i })}
-              onEdit={canEdit ? () => actions.edit(r) : null}
-              onEditTiming={actions && actions.editTiming ? () => actions.editTiming(r) : null}
-              onRemove={actions && actions.remove && rowCanBeRemoved(r) ? () => actions.remove(r) : null}
-              onRestore={actions && actions.restore && rowCanBeRemoved(r) ? () => actions.restore(r) : null}
-              alwaysSendsNote={actions && actions.remove && isAlwaysSentFirstEmail(r) ? FIRST_EMAIL_ALWAYS_SENDS_NOTE : null} />
-          ))}
-    </div>
-  )
+    )
+  }
 
+  const allRows = [...withNotes, ...returning, ...afterJob]
+  const ownCount = allRows.filter(r => r.wording === 'yours').length
+  const pill = { display:'inline-flex', alignItems:'center', gap:'4px', whiteSpace:'nowrap', borderRadius:'999px', padding:'2px 8px', fontSize:'11px', fontWeight:600 }
   return (
-    <div style={{ margin:'0 12px' }}>
-      {/* issue 240 step 9c — the two questions, as ONE sentence with a Change
-          link. This replaced the sequence tiles' variant picker, retired in
-          step 11; without it an owner would have no way left to choose what
-          their clients receive. persistDefault itself is very much alive —
-          confirmVariant is now its only caller. */}
-      {/* issue 240 step 7b — the sequence toggle. A control: capped, sitting
-          left, not a full-width segmented bar. */}
-      {hasMoving && (
-        <div style={{ display:'flex', gap:'6px', marginBottom:'14px' }}>
-          {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
-            <button key={k} onClick={() => { setView(k); setOpen(null) }}
-              style={{ flex:'0 0 auto', maxWidth:CONTROL_W.action, padding:'7px 15px', borderRadius:'20px', border:`1px solid ${view === k ? '#1a2e2b' : 'rgba(26,46,43,0.14)'}`, background: view === k ? '#1a2e2b' : 'white', color: view === k ? 'white' : '#4a5f5b', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', cursor:'pointer' }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-      {activeAnswers && (
-        <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'16px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
-          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(activeAnswers.booking, activeAnswers.rate)}</p>
-          {actions && actions.changeVariant && (
-            <button onClick={actions.changeVariant}
-              style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
-              Change how this works
-            </button>
+    <div style={{ fontFamily:"'Lato', system-ui, sans-serif" }}>
+      {/* Ownership summary (2026-10-30 design). */}
+      <div style={{ marginBottom:'20px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
+        <span style={{ ...pill, background:'#F8EEDD', color:'#9A6A20' }}>🐝 {allRows.length - ownCount} use Bee Organized wording</span>
+        <span style={{ ...pill, background:'#EAF3F1', color:'#1E3B38' }}>{ownCount} in your own words</span>
+      </div>
+      {/* issue 240 step 7b — the sequence toggle, a VIEW that writes nothing.
+          Shown only when moving clients really have their own sequence. */}
+      {(hasMoving || activeAnswers) && (
+        <div style={{ marginBottom:'24px', borderRadius:'12px', border:'1px solid #E3E4DC', padding:'16px' }}>
+          <p style={{ margin:0, fontSize:'14px', fontWeight:600 }}>Moving clients</p>
+          {/* issue 240 step 9c — the two questions, as ONE sentence with a
+              Change link. The only way left to choose what clients receive. */}
+          {activeAnswers && (
+            <div style={{ marginTop:'8px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
+              <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#323B35', margin:0, lineHeight:1.55, fontFamily:"'Arvo', Georgia, serif" }}>{variantSentence(activeAnswers.booking, activeAnswers.rate)}</p>
+              {actions && actions.changeVariant && (
+                <button onClick={actions.changeVariant}
+                  style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#323B35', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
+                  Change how this works
+                </button>
+              )}
+            </div>
+          )}
+          {hasMoving && (
+            <div style={{ marginTop:'12px', display:'flex', alignItems:'center', gap:'8px', fontSize:'14px', flexWrap:'wrap' }}>
+              <span style={{ color:'#737970' }}>Showing:</span>
+              {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
+                <button key={k} onClick={() => { setView(k); setOpen(null) }}
+                  style={{ borderRadius:'999px', padding:'4px 12px', border:'none', background: view === k ? '#1E3B38' : '#F2F2EE', color: view === k ? '#FAF9F5' : '#323B35', fontSize:'14px', cursor:'pointer', fontFamily:'inherit' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}
-      {/* Append only, and only on the sequence group — the closed-job pair is
-          not a sequence and has nothing to append to. */}
       <Group id="new" title="When someone new gets in touch"
-        count={`${withNotes.length} email${withNotes.length === 1 ? '' : 's'}`}
-        rows={withNotes} />
-      {actions && actions.add && (
-        <button onClick={() => actions.add(activePathKey)}
-          style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', marginTop:'-14px', marginBottom:'22px', background:'transparent', border:'1px dashed rgba(26,46,43,0.22)', borderRadius:'10px', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#4a5f5b', cursor:'pointer' }}>
-          + Add another email
-        </button>
-      )}
-      {/* The returning-client sequence. One fixed path, so no organizing /
-          moving toggle and no variant sentence; the same rows, Read, Edit,
-          Reset and timing as group one. Hidden until the master is seeded —
-          an empty "Nothing here yet" would promise emails that do not exist. */}
+        count={withNotes.length}
+        note="Counted from the day their enquiry arrives."
+        rows={withNotes}
+        add={actions && actions.add ? () => actions.add(activePathKey) : null} />
+      {/* The returning-client sequence. Hidden until its master is seeded —
+          an empty group would promise emails that do not exist. */}
       {returning.length > 0 && (
         <Group id="returning" title="When a past client gets back in touch"
-          count={`${returning.length} email${returning.length === 1 ? '' : 's'}`}
+          count={returning.length}
           note="For someone you've worked with before who fills in the website form again. Counted from the day their enquiry arrives. Stops the moment you log a reach-out, or the enquiry moves past Request."
           rows={returning} />
       )}
       <Group id="job" title="After a job is finished"
-        count={`${afterJob.length} email${afterJob.length === 1 ? '' : 's'}`}
-        note="These go out long after the work is done, so they're easy to forget about. Counted from the day the job closes, not from when the lead arrived."
+        count={afterJob.length}
+        note="Counted from the day the job closes, not from when they first got in touch."
         rows={afterJob} />
       {open && (
         <EmailReadModal rows={openRows} index={open.index}
@@ -19379,7 +19518,8 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
           onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
           resetBlockedReason={noCounterpartFor(openRows[open.index]) || resetBlockedFor(openRows[open.index])}
-          blockedReason={blockedFor(openRows[open.index])} />
+          blockedReason={blockedFor(openRows[open.index])}
+          sending={sending} locationId={locationId} preview={preview} cfg={sendConfig} />
       )}
     </div>
   )
@@ -19806,7 +19946,10 @@ export function MailchimpCard({ settings, updateLocation }) {
 // NO MASTER TOGGLE. Both split_* flags are retired: "no handler row" is the off
 // state and it says so per type, which is both simpler and truthful — the old
 // flags let a location hold handler rows that silently did nothing.
-export function NewLeadsSection({ realLocId, readOnly = false }) {
+// `only` (2026-10-30): Settings → Emails shows 'handlers' — who handles each
+// job type and what it sends as, moved there — and Settings → New leads shows
+// 'recipients' — who is told. Absent shows both, as before.
+export function NewLeadsSection({ realLocId, readOnly = false, only = null }) {
   const [handlers, setHandlers] = React.useState(null)   // sender/handler config
   const [notif, setNotif] = React.useState(null)         // recipients config
   const [busy, setBusy] = React.useState(null)
@@ -20033,6 +20176,7 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
     <div>
       {err && <p style={{ fontSize:'12px', color:'#c96a6a', margin:'0 12px 8px' }}>{err}</p>}
 
+      {only !== 'recipients' && <>
       {/* ── 1 · WHO HANDLES WHAT ─────────────────────────────────────────── */}
       <CommsLabel>Who handles what</CommsLabel>
       <div style={{ margin:'0 12px' }}>
@@ -20183,6 +20327,9 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
         </p>
       </div>
 
+      </>}
+
+      {only !== 'handlers' && <>
       {/* ── 2 · WHO IS TOLD ──────────────────────────────────────────────── */}
       <CommsLabel>Who is told about a new lead</CommsLabel>
       <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
@@ -20311,6 +20458,7 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
           Connect or disconnect it under <strong style={{ fontWeight:600 }}>Connections › Slack</strong>.
         </p>
       </div>
+      </>}
     </div>
   )
 }
@@ -21893,132 +22041,14 @@ const CONTROL_W = {
   rail:   '196px',   // the settings section rail
 }
 
-// ─── Emails › who sends what (issue 303, redone 2026-09-03) ─────────────────
-//
-// THE SECOND DEFECT. Issue 303 made this card answer for the sequence chosen
-// by the Organizing / Moving toggle. That toggle sits at the TOP of "Every
-// email a client can receive"; this card sits BELOW the whole list — the
-// chosen sequence, the returning-client sequence, the after-a-job emails. An
-// owner who scrolled to the bottom read "Every one of the organizing emails
-// goes out as Lynette Ewy" with nothing nearby to say a second answer existed
-// behind a control several screens up. Kansas City read it, concluded Lynette
-// sends everything, and complained — while Carol's moving emails were going
-// out as Carol the whole time.
-//
-// So the card no longer follows the toggle at all. It lists EVERY kind of job
-// that goes out as someone in particular — who, and where replies go — and
-// then "Everything else" for the rest. One read, the whole answer.
-//
-// IT REPORTS, IT DOES NOT DECIDE. Unchanged from 303: the per-job-type sender
-// controls live on New leads; this card links there. The location's own three
-// fields stay editable here, because they are what "everything else" means.
-function SequenceSenderCard({
-  senderConfig, loading, failed, locationDefault,
-  senderAddressSet, onOpenNewLeads, children,
-}) {
-  const report = resolveConfiguredSenders(senderConfig, locationDefault)
-  const rows = report.rows
-
-  const addr = { fontSize:'12.5px', color:'#4a5f5b', lineHeight:1.5, wordBreak:'break-word' }
-
-  // One sender, as prose: the name in bold, the address beside it, and a note
-  // when it is a shared mailbox rather than a person.
-  const nameOf = s => (
-    <>
-      <strong style={{ fontWeight:700, color:'#1a2e2b' }}>{s.name}</strong>, {s.email}
-      {s.typed && <span style={{ color:'#8a9e9a' }}> — a shared mailbox, not one person</span>}
-    </>
-  )
-
-  return (
-    <>
-      <CommsLabel>Who your emails come from</CommsLabel>
-      <div data-sequence-sender-card="all"
-        style={{ margin:'0 12px', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
-        <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
-          <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <CommsIcon name="send" size={20} color="#4f46e5" />
-          </div>
-          {/* data-sender-answer marks the half that reads the payload. The
-              location's own name sits in the editable rows below and is
-              legitimately always present, so a test asserting "Carol is named
-              and Lynette is not the answer for Moving" has to say WHERE. */}
-          <div data-sender-answer="all" style={{ flex:1, minWidth:0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
-              <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Who sends what</h2>
-              {!senderAddressSet && (
-                <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
-              )}
-            </div>
-
-            {/* Never guess while the answer is still in flight, and never fall
-                back to the location default to fill the gap — showing the
-                default in place of the real answer is the original defect. */}
-            {loading && (
-              <p style={{ ...addr, marginTop:'4px' }}>Checking who your emails go out as…</p>
-            )}
-            {failed && (
-              <p style={{ ...addr, marginTop:'4px' }}>We could not check who your emails go out as just now. Reload to try again.</p>
-            )}
-
-            {!loading && !failed && rows.length === 0 && (
-              <p style={{ ...addr, marginTop:'4px' }}>
-                Every email goes out as your own sending name and address, below.
-              </p>
-            )}
-
-            {/* THE LIST — every kind of job with a sender of its own, across
-                both sequences, in the order the website form offers them. */}
-            {!loading && !failed && rows.length > 0 && (
-              <>
-                <p style={{ ...addr, marginTop:'4px' }}>
-                  These kinds of job have their own sender:
-                </p>
-                <div style={{ marginTop:'9px', display:'flex', flexDirection:'column', gap:'9px' }}>
-                  {rows.map(r => (
-                    <div key={r.projectType} data-sender-for={r.projectType}
-                      style={{ paddingLeft:'11px', borderLeft:'2px solid rgba(99,102,241,0.22)' }}>
-                      <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', margin:0 }}>{r.projectType}</p>
-                      <p style={{ ...addr, margin:'1px 0 0' }}>Goes out as {nameOf(r.sender)}</p>
-                      <p style={{ fontSize:'11.5px', color:'#8a9e9a', margin:'1px 0 0', wordBreak:'break-word' }}>Replies go to {r.sender.replyTo}</p>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {!loading && !failed && onOpenNewLeads && (
-              <button type="button" onClick={onOpenNewLeads}
-                style={{ marginTop:'11px', maxWidth:CONTROL_W.action, background:'none', border:'none', padding:0, font:'inherit', fontSize:'12.5px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', textAlign:'left' }}>
-                Change who handles a kind of job under New leads
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* ── The location's own identity, still editable, labelled for what
-            it is: everything the list above does not cover.
-
-            HONEST ABOUT WHEN IT APPLIES. "Every kind of job has someone, so
-            this is never used" is the tempting sentence and it is false: a
-            lead that arrives with no kind of job on it, or one this location
-            does not run, never reaches a handler row at all — lib/resend.ts
-            only consults them `if (senderProjectType)`. At loc_kc that is most
-            leads. This is the most-used sender at the location, not the unused
-            one, and the copy says so. ────────────────────────────────── */}
-        <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)', padding:'14px 17px 2px' }}>
-          <h3 style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', margin:0 }}>Everything else</h3>
-          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>
-            Emails for any kind of job you have not given to someone, and for any lead
-            that arrives without a kind of job, go out under the name and address below.
-            Replies go to the Reply-To address below.
-          </p>
-        </div>
-        <div>{children}</div>
-      </div>
-    </>
-  )
-}
+// ─── Emails › who sends what (issue 303) — RETIRED 2026-10-30 ───────────────
+// SequenceSenderCard reported each job type's sender, read-only, at the foot of
+// Settings → Emails, and linked to New leads for the controls. The Emails
+// screen design moved those controls themselves to the top of Emails
+// (NewLeadsSection only="handlers", in the Sending section), right beside the
+// main address, so the report beside a link became the thing itself. Issue
+// 303's rule still holds there: every kind of job is listed with who it goes
+// out as, whatever the Organizing / Moving view shows.
 
 export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation/currentUser from context
@@ -22423,6 +22453,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       isOwnCustom: r.is_own_custom === true,
       clonedFromId: r.cloned_from_id || null,
       updatedAt: r.updated_at || null,
+      // 2026-10-30 — the optional button (migrations/email_buttons.sql).
+      buttonText: r.button_text || '',
+      buttonLink: r.button_link || '',
       usedIn: [],
     })))
     setTemplatesError(null)
@@ -22473,40 +22506,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const realLocId = UUID_RE.test(settings.location.locId || '') ? settings.location.locId : null
 
-  // ── Emails › who each job type sends as (issue 303) ───────────────────────
-  //
-  // A SECOND GET, NOT A LIFT OF NEW LEADS'. New leads reads the same endpoint
-  // from inside NewLeadsSection, and lifting that fetch to here so both sections
-  // share one payload was the obvious move. It is the wrong one:
-  //
-  //   NOTHING IS SAVED BY IT. `activeSection` renders exactly ONE section, so
-  //     Emails and New leads are never mounted together. There is no pair of
-  //     simultaneous fetches to collapse — one visit, one GET, either way.
-  //   IT WOULD COST A REQUEST. Hoisted state loads on every Settings visit, so
-  //     owners who open Billing and leave would start paying for a payload
-  //     neither section on screen wants. Gating it back on `activeSection`
-  //     recovers the same request count as this, with the state living two
-  //     thousand lines from both readers.
-  //   NEW LEADS WRITES. It POSTs, PUTs and DELETEs, then re-reads. Sharing the
-  //     payload means its reload path has to be threaded back up through here.
-  //     Real coupling, in a 37k-line file, for zero saved requests.
-  //
-  // So: one reader, one read. The section that only REPORTS gets its own
-  // read-only GET, and the section that DECIDES keeps owning its own writes.
-  const [emailSenders, setEmailSenders] = useState(null)
-  const [emailSendersState, setEmailSendersState] = useState('idle') // idle | loading | ready | failed
-  useEffect(() => {
-    if (activeSection !== 'emails' || !realLocId) return
-    let alive = true
-    setEmailSendersState('loading')
-    fetch(`/api/locations/${realLocId}/project-type-senders`, { credentials:'include' })
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('load')))
-      .then(j => { if (alive) { setEmailSenders(j); setEmailSendersState('ready') } })
-      // Says so rather than guessing. Falling back to the location default on a
-      // failed read would print the exact sentence issue 303 exists to delete.
-      .catch(() => { if (alive) { setEmailSenders(null); setEmailSendersState('failed') } })
-    return () => { alive = false }
-  }, [activeSection, realLocId])
 
   // Translate the UI's delay strings ("3 days later", "Immediately") into
   // an integer day count for the DB. We accept anything with a number, which
@@ -22561,6 +22560,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // Removed by the owner — commitSteps sends it back, or a save would
           // quietly put every removed email back.
           isActive: s.is_active !== false,
+          // 2026-10-30 — same reason: commitSteps rewrites every row, so
+          // anything not carried here would be lost on the next save.
+          isPaused: s.is_paused === true,
+          delayUnit: s.delay_unit ?? null,
+          buttonText: s.button_text ?? null,
+          buttonLink: s.button_link ?? null,
         }))
       }
       setDbPaths(newDbPaths)
@@ -22686,6 +22691,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // Same trap, same fix: named or dropped. The server refuses false on
           // step 1 (lib/drip-followups.ts).
           is_active: s.isActive === false ? false : true,
+          // 2026-10-30 (lib/drip-step-extras.ts). Pausing, a months/years unit
+          // or a button before their migration has run is refused untouched.
+          is_paused: s.isPaused === true,
+          delay_unit: s.delayUnit === 'months' || s.delayUnit === 'years' ? s.delayUnit : null,
+          button_text: s.buttonText || null,
+          button_link: s.buttonLink || null,
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -22809,7 +22820,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setTimingEditState({ row, pathKey, ownsPath: owned, liveLeadCount, busy: false, err: '' })
   }
 
-  async function confirmTimingEdit(nextDelay) {
+  async function confirmTimingEdit(nextDelay, unit = 'days') {
     const { row, pathKey } = timingEditState
     setTimingEditState(st => ({ ...st, busy: true, err: '' }))
     try {
@@ -22824,7 +22835,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               // delay_days ONLY. Reset restores subject and body and never
               // touches timing; timing changes never touch wording. The two
               // stay separable on purpose.
-              ? { ...s, delay_days: nextDelay, delay: daysToDelayLabel(nextDelay) }
+              // The unit only says how to SHOW it (lib/email-timing.ts).
+              ? { ...s, delay_days: nextDelay, delay: daysToDelayLabel(nextDelay), delayUnit: unit === 'months' || unit === 'years' ? unit : null }
               : s)
             await commitSteps(pathKey, next)
             resolve()
@@ -22941,6 +22953,60 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     catch (e) { alert('Could not put it back: ' + (e?.message || e)) }
   }
 
+  // 2026-10-30 — Pause / Start one email (drip_path_steps.is_paused). Same
+  // write as Remove, a different flag: the row keeps its place and says
+  // Paused; the sender passes over it. Refused untouched until
+  // migrations/drip_path_steps_paused.sql has run.
+  async function emailsRowPause(row, paused) {
+    try {
+      await new Promise((resolve, reject) => {
+        ensureOwnedThen(row.pathKey, async (steps) => {
+          try {
+            await commitSteps(row.pathKey, steps.map(s => Number(s.order) === Number(row.order) ? { ...s, isPaused: !!paused } : s))
+            resolve()
+          } catch (e) { reject(e) }
+        })
+      })
+    } catch (e) {
+      const m = String(e?.message || e)
+      alert(m.includes('not_set_up_yet') ? 'Pausing a single email isn’t switched on yet.' : (paused ? 'Could not pause it: ' : 'Could not start it again: ') + m)
+    }
+  }
+
+  // 2026-10-30 — the location's look, rate / link switches and the two new
+  // booking links (app/api/locations/[id]/email-settings). `ready` says which
+  // migrations have run; until one has, its control says so rather than fail.
+  const [emailSettings, setEmailSettings] = useState({
+    settings: { style:'soft', showsHourlyRate:true, usesBookingLinks:true, discoveryBookingLink:null, virtualBookingLink:null },
+    ready: { style:false, switches:false, links:false },
+  })
+  useEffect(() => {
+    if (!realLocId || activeSection !== 'emails') return
+    let cancelled = false
+    fetch(`/api/locations/${realLocId}/email-settings`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => { if (!cancelled && j?.settings) setEmailSettings({ settings: j.settings, ready: j.ready || { style:false, switches:false, links:false } }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [realLocId, activeSection])
+
+  // The signature, loaded once for the Signature section AND the email
+  // previews, so both show the same person.
+  const emailSig = useSignature(realLocId, activeSection !== 'emails')
+
+  async function saveEmailSettings(patch) {
+    if (!realLocId) return 'Open a real location to change this.'
+    try {
+      const r = await fetch(`/api/locations/${realLocId}/email-settings`, {
+        method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(patch),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) return j.error === 'not_set_up_yet' ? 'This isn’t switched on yet.' : (j.error || 'That did not save. Try again.')
+      setEmailSettings(st => ({ ...st, settings: j.settings || st.settings }))
+      return null
+    } catch { return 'That did not save. Try again.' }
+  }
+
   const [followupsState, setFollowupsState] = useState(null)
   useEffect(() => {
     if (!realLocId) return
@@ -23010,7 +23076,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
   // Create-or-reuse the location's fork of a master template, then patch it.
   // Shaped exactly as POST /api/templates/:id/duplicate shapes a fork.
-  async function emailsSaveTemplateEdit(row, subject, body) {
+  async function emailsSaveTemplateEdit(row, subject, body, button = null) {
     let forkId = row.forkDbId
     if (!forkId) {
       const dup = await fetch(`/api/templates/${row.masterDbId}/duplicate`, { method:'POST' })
@@ -23021,8 +23087,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
     const res = await fetch(`/api/templates/${forkId}`, {
       method:'PATCH', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ subject, body }),
+      // The button only when it changed — before migrations/email_buttons.sql
+      // runs, an untouched button must not turn every wording save into a
+      // "not set up yet" refusal.
+      body: JSON.stringify({ subject, body, ...(button && ((button.button_text || '') !== (row.buttonText || '') || (button.button_link || '') !== (row.buttonLink || '')) ? button : {}) }),
     })
+    if (res.status === 409) throw new Error('Buttons aren’t switched on yet — save without one for now.')
     if (!res.ok) throw new Error('could not save your wording')
     await reloadTemplates()
   }
@@ -23124,7 +23194,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   async function saveStepContent(patch) {
     const { pathId, step } = stepContentEditor
     const nextSteps = (pathSteps[pathId] || []).map(s => s.order === step.order
-      ? applyStepContentEdit(s, patch, templates)
+      ? {
+          ...applyStepContentEdit(s, patch, templates),
+          // The button rides on the step; commitSteps sends it.
+          ...('button_text' in patch ? { buttonText: patch.button_text, buttonLink: patch.button_link } : {}),
+        }
       : s)
     await commitSteps(pathId, nextSteps)
     setStepContentEditor(null)
@@ -23181,6 +23255,34 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       console.error('[settings] rate_per_hour save failed', e)
       alert('Could not save your hourly rate: ' + (e?.message || e))
     }
+  }
+
+  // 2026-10-30 — the Emails screen's fields save on blur and show their
+  // problem under the field (the design's Field), so this returns the problem
+  // in words instead of alerting. Same route, same honesty: paint only after
+  // the write lands.
+  const EMAILS_LOCATION_FIELDS = {
+    rate:         ['ratePerHour',   'rate_per_hour'],
+    booking:      ['bookingLink',   'calendar_link'],
+    reviews:      ['reviewsLink',   'reviews_link'],
+    sendFromName: ['sendFromName',  'sender_name'],
+    sendFromEmail:['sendFromEmail', 'send_from_email'],
+    replyToEmail: ['replyToEmail',  'reply_to_email'],
+  }
+  async function emailsSaveLocation(kind, v) {
+    const [stateKey, column] = EMAILS_LOCATION_FIELDS[kind] || []
+    if (!column) return 'That can’t be saved here.'
+    if (!realLocId) return 'You’re viewing this location — open the real location to change it.'
+    try {
+      const res = await fetch(`/api/locations/${realLocId}`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [column]: v }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) return j?.error || 'That did not save. Try again.'
+      updateLocation(stateKey, j?.location?.[column] ?? v)
+      return null
+    } catch { return 'That did not save. Try again.' }
   }
 
   // Persist a single locations column through PATCH /api/locations/[id] — the
@@ -23780,8 +23882,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 hint={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
             </div>
 
-            <SectionHeader title="Email Signature" desc="The Bee Organized signature used when a client email includes {{signature}} — the card names whose it is" />
-            <SignatureCard locationId={realLocId} signedIn={!!currentUserCtx?.id} />
+            {/* MOVED 2026-10-30 — the signature (headshot, title, and the
+                location's links) is one section on Settings → Emails now. */}
+            <SectionHeader title="Email Signature" />
+            <p style={{ margin:'0 12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+              Your email signature is now on{' '}
+              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>, with everything else your emails use.
+            </p>
 
             {isPastDue && (
               <>
@@ -23878,20 +23985,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <LocationZipsPanel locationId={realLocId} />
             </div>
 
-            <SectionHeader title="Online Presence" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>persistLocationField('bookingLink','calendar_link',v,'booking link')}  hint="Shared in your new lead emails" />
-              <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>persistLocationField('reviewsLink','reviews_link',v,'Google Reviews link')}  hint="Sent to completed clients" required validate={validateReviewsLink} />
-            </div>
-
-            <SectionHeader title="Email Signature Links" desc="Your location's website and social pages, shown in every email signature from this location" />
-            <LocationSignatureLinksCard locationId={realLocId} />
-
-            <SectionHeader title="Pricing" desc="Quoted to clients in your follow-up emails" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Hourly Rate" value={settings.location.ratePerHour||''} onSave={persistRatePerHour}
-                hint={'Appears word-for-word in client emails: "Our rate starts at ___ per hour per Bee." Write it exactly as it should read — e.g. $95, or $85/hr (3-hour minimum). Leave blank and rate-quoting emails are held until it’s set.'} />
-            </div>
+            {/* MOVED 2026-10-30 — the booking links, Google Reviews link,
+                hourly rate and the signature's website and social links only
+                exist to fill emails, so they live on Settings → Emails
+                ("Your details" and "Signature"). One editable copy each. */}
+            <SectionHeader title="Online Presence &amp; Pricing" />
+            <p style={{ margin:'0 12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+              Your booking links, Google Reviews link, hourly rate and website and social links is now on{' '}
+              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>, with everything else your emails use.
+            </p>
 
             <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
@@ -24185,7 +24287,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who handles each kind of job, and who hears about a new lead. Two separate things.</p>
             </div>
 
-            <NewLeadsSection realLocId={realLocId} readOnly={false} />
+            {/* Who handles each job type and what it sends as moved to
+                Settings → Emails (2026-10-30); New leads keeps who is told. */}
+            <p style={{ margin:'0 12px 10px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+              Who handles each kind of job, and what its emails go out as, is now on{' '}
+              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>.
+            </p>
+            <NewLeadsSection realLocId={realLocId} readOnly={false} only="recipients" />
 
           </div>
         )}
@@ -24263,46 +24371,155 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // stays: a blank send-from address genuinely fails sending closed
           // (lib/resend.ts), so that warning is earned.
           const senderAddressSet = !!settings.location.sendFromEmail
+          // ── 2026-10-30 — the designer's Emails screen ──────────────────
+          // components/settings/EmailsScreen.jsx holds the pieces; this
+          // composes them with what already lived here (the list, the
+          // follow-ups switch, the editors and their modals).
+          const es = emailSettings.settings
+          const sendCfg = {
+            ratePerHour: settings.location.ratePerHour,
+            ownerBookingLink: settings.profile.bookingLink,
+            locationCalendarLink: settings.location.bookingLink,
+            discoveryBookingLink: es.discoveryBookingLink,
+            virtualBookingLink: es.virtualBookingLink,
+            showsHourlyRate: es.showsHourlyRate,
+            usesBookingLinks: es.usesBookingLinks,
+          }
+          // Every row the status and the details count across — the
+          // organizing sequence, the returning one, the job follow-ups.
+          const statusRows = (() => {
+            const { newLead, returning, afterJob } = buildEmailList({ pathSteps, templates, pathKey: settings.paths.generalDefault, returningPathKey: returningPathKeyFor(settings.paths.generalDefault) })
+            return [...newLead, ...returning, ...afterJob].filter(r => !r.removed)
+          })()
+          const followupsOffNow = !!followupsState?.off
+          const sendingRows = statusRows.filter(r => !r.paused && !followupsOffReasonFor(r, followupsOffNow) && !rowAfterSwitches(r, sendCfg).skipped)
+          const heldByNeed = {}
+          for (const r of sendingRows) for (const n of rowNeeds(r, sendCfg)) (heldByNeed[n] = heldByNeed[n] || []).push(r.subject || 'No subject')
+          const held = Object.entries(heldByNeed).map(([need, subjects]) => ({ need, subjects }))
+          const heldCount = new Set(sendingRows.filter(r => rowNeeds(r, sendCfg).length).map(r => r.key)).size
+          const usedIn = tag => statusRows.filter(r => `${r.subject}\n${r.body}\n${r.buttonLink || ''}`.includes(tag)).length
+          const counts = {
+            rate: usedIn('{{rate_per_hour}}'),
+            discoveryBooking: usedIn('{{discovery_booking_link}}'),
+            booking: statusRows.filter(r => /\{\{(booking_link|book_assessment_link)\}\}/.test(`${r.subject}\n${r.body}\n${r.buttonLink || ''}`)).length,
+            virtualBooking: usedIn('{{virtual_booking_link}}'),
+            reviews: usedIn('{{reviews_link}}'),
+          }
+          const waiting = {}
+          for (const h of held) waiting[h.need === 'ownerBooking' ? 'booking' : h.need] = (waiting[h.need === 'ownerBooking' ? 'booking' : h.need] || 0) + h.subjects.length
+          const ownerName = [settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(' ')
+          const previewValues = {
+            first_name: 'Jordan',
+            organizer_name: settings.location.sendFromName,
+            location_name: settings.location.name,
+            phone: settings.location.phone,
+            location_phone: settings.location.phone,
+            booking_link: settings.location.bookingLink,
+            book_assessment_link: settings.location.bookingLink,
+            owner_booking_link: settings.profile.bookingLink || settings.location.bookingLink,
+            discovery_booking_link: es.discoveryBookingLink,
+            virtual_booking_link: es.virtualBookingLink,
+            service_area: [settings.location.city, settings.location.state].filter(Boolean).join(', '),
+            owner_name: ownerName,
+            owner_first_name: settings.profile.firstName,
+            location_owner_name: ownerName,
+            rate_per_hour: settings.location.ratePerHour,
+            reviews_link: settings.location.reviewsLink,
+          }
+          const corporate = !!isSuperAdmin
           return (
-          <div style={{ paddingBottom:'12px' }}>
+          <div style={{ background:ET.background, paddingBottom:'24px' }}>
+            <EmailsFonts />
+            <div style={{ maxWidth:'896px', margin:'0 auto', padding:'24px 16px', display:'flex', flexDirection:'column', gap:'24px', fontFamily:EF.ui, color:ET.foreground }}>
+              <header style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-end', justifyContent:'space-between', gap:'16px' }}>
+                <div>
+                  <h1 style={{ margin:0, fontSize:'30px', fontWeight:300, color:ET.foreground, fontFamily:EF.heading }}>Emails</h1>
+                  <p style={{ margin:'4px 0 0', fontFamily:EF.body, fontSize:'14px', color:ET.mutedFg }}>Everything about the emails your clients receive, in one place.</p>
+                </div>
+              </header>
 
-            <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Emails</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who your emails come from, what a client receives automatically, and the templates behind it.</p>
+              <EmailStatusPanel sending={senderAddressSet} locationName={settings.location.name} fromEmail={settings.location.sendFromEmail}
+                held={held} activeCount={sendingRows.length - heldCount} totalCount={statusRows.length}
+                someOff={sendingRows.length - heldCount < statusRows.length}
+                onStartSending={realLocId ? (async addr => {
+                  const err = await emailsSaveLocation('sendFromEmail', addr)
+                  if (!err && !settings.location.replyToEmail) await emailsSaveLocation('replyToEmail', addr)
+                  return err
+                }) : null} />
+
+              <EmailsJumpNav corporate={corporate} />
+
+              {/* ── Sending: the location's main identity, then who handles
+                  each kind of job and what it sends as — moved here from
+                  Settings → New leads (NewLeadsSection only="handlers"). */}
+              <ESection id="sender" eyebrow="Sending" title="Who your emails come from"
+                intro="Each kind of job can go out from a different person on your team. Anything else goes out from the main address below.">
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'16px' }}>
+                  <EField label="Main name" value={settings.location.sendFromName || ''} hint="e.g. Bee Organized Kansas City"
+                    onSave={v => emailsSaveLocation('sendFromName', v)} />
+                  <EField id="field-from-email" label="Main address" required type="email" value={settings.location.sendFromEmail || ''} placeholder="you@beeorganized.com"
+                    problem={!senderAddressSet ? 'Nothing can send until this is filled in' : undefined}
+                    hint="A Bee Organized address, not a personal Gmail."
+                    onSave={v => { const p = senderAddressProblem(v, null); return p ? Promise.resolve(p) : emailsSaveLocation('sendFromEmail', v) }} />
+                  <div style={{ gridColumn:'1 / -1' }}>
+                    <EField label="Replies go to" type="email" value={settings.location.replyToEmail || ''}
+                      hint="One shared inbox works best if two people answer clients."
+                      onSave={v => { const p = replyToProblem(v); return p ? Promise.resolve(p) : emailsSaveLocation('replyToEmail', v) }} />
+                  </div>
+                </div>
+                <h3 style={{ margin:'28px 0 8px', fontSize:'14px', fontWeight:600, fontFamily:EF.ui }}>By kind of job</h3>
+                <div style={{ margin:'0 -12px' }}>
+                  <NewLeadsSection realLocId={realLocId} readOnly={false} only="handlers" />
+                </div>
+                <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.mutedFg }}>This also decides who gets the new-lead alert for that kind of job.</p>
+              </ESection>
+
+              <EmailDetailsSection
+                // validateReviewsLink came over with the field from Location.
+                rate={settings.location.ratePerHour} calendarLink={settings.location.bookingLink} reviewsLink={settings.location.reviewsLink}
+                options={es} ready={emailSettings.ready} counts={counts} waiting={waiting}
+                linkOnlyCount={statusRows.filter(r => !((r.rail === 'drip' && Number(r.order) === 1) || r.rail === 'welcome') && asksForLink(r)).length}
+                nothingWaiting={held.length === 0}
+                onSaveLocation={(kind, v) => kind === 'reviews' && validateReviewsLink(v) ? Promise.resolve(validateReviewsLink(v)) : emailsSaveLocation(kind, v)} onSaveOption={saveEmailSettings} />
+
+              <EmailStyleSection style={es.style} ready={emailSettings.ready.style}
+                onPick={id => saveEmailSettings({ email_style: id })} />
+
+              <EmailSignatureSection locationId={realLocId} sig={emailSig} />
+
+              <ESection id="emails" eyebrow="The emails" title="Every email a client can receive"
+                intro="They go out on their own, in this order. Tap the day on any email to change when it goes out.">
+                {realLocId && <div style={{ margin:'0 -12px 20px' }}><FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} /></div>}
+                <EmailsList
+                  followupsOff={followupsOffNow}
+                  pathSteps={pathSteps}
+                  templates={templates}
+                  masterSteps={masterSteps}
+                  generalDefault={settings.paths.generalDefault}
+                  moveDefault={settings.paths.moveDefault}
+                  actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions, remove: openRemoveEmail, restore: emailsRowRestore, pause: emailsRowPause } : null}
+                  variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
+                  view={emailsView}
+                  onViewChange={setEmailsView}
+                  // issue 240 step 9a — mirrors what the guards read at send
+                  // time, plus (2026-10-30) the two new links and the switches.
+                  sendConfig={sendCfg}
+                  sending={senderAddressSet}
+                  locationId={realLocId}
+                  preview={{ style: es.style, values: previewValues, signature: signatureFromData(emailSig.data) }}
+                />
+              </ESection>
+
+              {/* ── Corporate only: the wording every location starts with,
+                  moved in from Admin → Content (where it also still lives —
+                  same rows, same editor, same route). */}
+              {corporate && (
+                <ESection id="masters" corporate eyebrow="Bee Organized versions" title="The wording every location starts with"
+                  intro="Changes here reach every location using Bee Organized wording straight away.">
+                  <MasterTemplatesEditor />
+                </ESection>
+              )}
             </div>
-
-            {/* ── issue 240 — every email a client can receive, one list.
-                Organizing and moving are separate sequences behind the toggle
-                (step 7b); each row reads, edits, resets, retimes and pauses
-                through this component alone. ─────────────────────────────── */}
-            <CommsLabel>Every email a client can receive</CommsLabel>
-            {realLocId && <FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} />}
-            <EmailsList
-              followupsOff={!!followupsState?.off}
-              pathSteps={pathSteps}
-              templates={templates}
-              masterSteps={masterSteps}
-              generalDefault={settings.paths.generalDefault}
-              moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions, remove: openRemoveEmail, restore: emailsRowRestore } : null}
-              // issue 240 step 7b — resolves per sequence, so the sentence
-              // describes whichever one is on screen.
-              variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
-              // issue 303 — the toggle's value, so the card below can answer
-              // for the sequence actually on screen.
-              view={emailsView}
-              onViewChange={setEmailsView}
-              // issue 240 step 9a — mirrors what the guards read at send time.
-              // The owner link is the signed-in owner's; the send path also
-              // consults the assigned user's, which has no meaning without a
-              // lead, so this is the location-level view of the same rule.
-              sendConfig={{
-                ratePerHour: settings.location.ratePerHour,
-                ownerBookingLink: settings.profile.bookingLink,
-                locationCalendarLink: settings.location.bookingLink,
-              }}
-            />
-
             {/* ── issue 240 step 11 — RETIRED HERE ───────────────────────
                 Removed from this tab: the two sequence tiles and everything
                 inside them — the path-style radios, Customize, Reset to
@@ -24331,37 +24548,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 Texts & scripts is untouched: renderTemplateTypeSections is
                 still called there with the call slice, so call scripts stay
                 creatable, editable and deletable. ───────────────────── */}
-
-            {/* ── The sending identity card, moved here whole from Your team
-                (issue 246 step 1) — card and contents unchanged.
-
-                BELOW the list, not above it. Steps 7–11 of 240 built this
-                section around the list as its hero, and identity is a
-                configure-once thing: three fields an owner sets in their first
-                week and then never opens again. Above the list it would also
-                put its three SettingsEditRow "Edit" buttons ahead of every
-                row's Edit — same word, different job, first in the DOM. */}
-            {/* issue 303, redone 2026-09-03 — the card lists every kind of job
-                with its own sender, across both sequences, and no longer
-                follows the toggle at the top of the list (which is a whole
-                page away from here). The three location rows are unchanged
-                and still save exactly as they did. */}
-            <SequenceSenderCard
-              senderConfig={emailSenders}
-              loading={emailSendersState === 'loading'}
-              failed={emailSendersState === 'failed'}
-              locationDefault={{
-                name: settings.location.sendFromName,
-                email: settings.location.sendFromEmail,
-                replyTo: settings.location.replyToEmail,
-              }}
-              senderAddressSet={senderAddressSet}
-              onOpenNewLeads={realLocId ? () => openSection('newleads', { push:false }) : null}
-            >
-              <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
-              <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="One address, on a domain Bee Organized can send from — your Bee Organized address, not a personal Gmail." type="email" validate={v=>senderAddressProblem(v, null)} />
-              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land — one Bee Organized address. For two people, use one shared inbox." type="email" validate={replyToProblem} />
-            </SequenceSenderCard>
 
           </div>
           )
@@ -24456,8 +24642,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         <EmailTemplateEditor
           row={emailTemplateEditor.row}
           onCancel={() => setEmailTemplateEditor(null)}
-          onSave={async (subject, body) => {
-            await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body)
+          onSave={async (subject, body, button) => {
+            await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body, button)
             setEmailTemplateEditor(null)
           }}
         />
@@ -24498,6 +24684,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             // wording lives on a template used to open blank here.
             ...stepEditorContent(stepContentEditor.step, templates),
             delay_days: stepContentEditor.step.delay_days ?? delayToDays(stepContentEditor.step.delay),
+            button_text: stepContentEditor.step.buttonText || '',
+            button_link: stepContentEditor.step.buttonLink || '',
           }}
           onSave={saveStepContent}
           onClose={()=>setStepContentEditor(null)}
@@ -33262,6 +33450,9 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 function DripPathStepEditor({ step, onSave, onClose }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
+  // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
+  const [buttonText, setButtonText] = useState(step.button_text || '')
+  const [buttonLink, setButtonLink] = useState(step.button_link || '')
   const [delayDays, setDelayDays] = useState(step.delay_days ?? 0)
   const [saving, setSaving] = useState(false)
   const [localErr, setLocalErr] = useState(null)
@@ -33290,6 +33481,11 @@ function DripPathStepEditor({ step, onSave, onClose }) {
         subject: subject.trim() || null,
         body,
         delay_days: Number(delayDays),
+        // Only when changed: an untouched button never trips "not set up yet"
+        // before migrations/email_buttons.sql has run.
+        ...((buttonText.trim() !== (step.button_text || '') || buttonLink.trim() !== (step.button_link || ''))
+          ? { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }
+          : {}),
       })
     } catch (e) {
       setLocalErr(String(e?.message || e))
@@ -33322,6 +33518,7 @@ function DripPathStepEditor({ step, onSave, onClose }) {
               style={{ width:'120px', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
             <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'4px' }}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</p>
           </label>
+          <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
           {localErr && <p style={{ fontSize:'12px', color:'#ef4444' }}>{localErr}</p>}
         </div>
         <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>

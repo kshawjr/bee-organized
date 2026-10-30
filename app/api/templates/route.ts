@@ -19,8 +19,9 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
-const SELECT_COLS =
-  'id, legacy_id, name, type, tag, subject, body, is_active, location_uuid, cloned_from_id, created_by, created_at, updated_at'
+// '*' so button_text / button_link (migrations/email_buttons.sql) come back
+// once that migration has run, and are simply absent before.
+const SELECT_COLS = '*'
 
 function decorate(row: any, ownLocId: string | null) {
   const isMaster = row.location_uuid == null

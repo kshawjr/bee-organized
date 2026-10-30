@@ -135,11 +135,13 @@ describe('the retired sender toggle no longer renders on Emails', () => {
     // with what the SHOWN SEQUENCE sends as and carries the location trio as a
     // labelled fallback. The three rows are what makes the tab non-blank, so
     // they are what the control group asserts.
+    // 2026-10-30 design: the trio is the "Sending" section's Main name,
+    // Main address and Replies go to.
     await mount('emails')
     const txt = bodyText()
-    expect(txt).toContain('Send From Name')
-    expect(txt).toContain('Send From Email')
-    expect(txt).toContain('Reply-To Email')
+    expect(txt).toContain('Main name')
+    expect(txt).toContain('Main address')
+    expect(txt).toContain('Replies go to')
   })
 
   it('the toggle copy is gone', async () => {
@@ -185,10 +187,14 @@ describe('the retired sender toggle no longer renders on Emails', () => {
     expect(txt).not.toContain('Could not load sender routing')
   })
 
-  it('the identity card carries no switch at all', async () => {
+  it('the Sending section carries no switch at all', async () => {
     // Copy-independent: catches a reinstatement that renames the label.
+    // Scoped to the section since 2026-10-30 — the screen now has real
+    // switches elsewhere (rates, booking links), none about senders.
     await mount('emails')
-    expect(container.querySelectorAll('[role="switch"]').length).toBe(0)
+    const section = container.querySelector('#sender') as HTMLElement
+    expect(section, 'the Sending section').toBeTruthy()
+    expect(section.querySelectorAll('[role="switch"]').length).toBe(0)
   })
 
   it('the Emails tab READS the senders route and never writes to it', async () => {
@@ -212,16 +218,19 @@ describe('the retired sender toggle no longer renders on Emails', () => {
     expect(writes, JSON.stringify(writes)).toEqual([])
   })
 
-  it('and hosts no per-type editor of its own', async () => {
-    // The other half of the same invariant, stated where a reader will find it:
-    // reporting is allowed, deciding is not. New leads owns the controls.
+  // REVERSED 2026-10-30, on Kevin's instruction (the Emails screen brief):
+  // who handles each job type and what it sends as MOVED to Emails. The
+  // invariant this file exists for — ONE editor over the table, never two —
+  // still holds: Emails mounts NewLeadsSection's handlers half, and New leads
+  // keeps only who is told.
+  it('hosts the per-type editor, and New leads no longer does', async () => {
     await mount('emails')
-    const card = container.querySelector('[data-sequence-sender-card]') as HTMLElement
-    expect(card, 'the sequence sender card').toBeTruthy()
-    expect(card.querySelectorAll('select')).toHaveLength(0)
+    expect(container.querySelector('#sender [data-handler-row]') || container.querySelector('#sender')!.textContent!.includes('Who handles what')).toBeTruthy()
+    await mount('newleads')
     const txt = bodyText()
     expect(txt).not.toContain('Who handles it')
     expect(txt).not.toContain('What it sends as')
+    expect(txt).toContain('Settings → Emails')
   })
 })
 
@@ -231,17 +240,11 @@ describe('the retired sender toggle no longer renders on Emails', () => {
 // Deleting a sibling out of a card is exactly the edit that takes a working
 // row with it, and these three are the only writable thing left on the card.
 describe('the sending identity rows still save', () => {
-  // Rows are keyed by their visible label; each opens with its own Edit button.
+  // 2026-10-30 design: each is a labelled field that saves when it loses
+  // focus. Found by its visible label.
   const editRow = async (label: string, next: string) => {
-    const row = Array.from(container.querySelectorAll('div')).find(d => {
-      const p = d.querySelector(':scope > div > div > p')
-      return p?.textContent?.trim() === label
-    })
-    expect(row, `row "${label}" not found`).toBeTruthy()
-    const edit = Array.from(row!.querySelectorAll('button')).find(b => b.textContent === 'Edit')
-    expect(edit, `Edit button for "${label}" not found`).toBeTruthy()
-    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-
+    const row = Array.from(container.querySelectorAll('#sender label')).find(l => (l.querySelector('span')?.textContent ?? '').startsWith(label))
+    expect(row, `field "${label}" not found`).toBeTruthy()
     const input = row!.querySelector('input') as HTMLInputElement
     expect(input, `input for "${label}" not found`).toBeTruthy()
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
@@ -249,9 +252,7 @@ describe('the sending identity rows still save', () => {
       setter.call(input, next)
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const save = Array.from(row!.querySelectorAll('button')).find(b => b.textContent === 'Save')
-    expect(save, `Save button for "${label}" not found`).toBeTruthy()
-    await act(async () => { save!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); input.dispatchEvent(new FocusEvent('blur')) })
   }
 
   const patchBody = () => {
@@ -261,9 +262,9 @@ describe('the sending identity rows still save', () => {
   }
 
   it.each([
-    ['Send From Name',  'Bee Organized Overland Park', 'sender_name'],
-    ['Send From Email', 'hi@op.beeorganized.test',     'send_from_email'],
-    ['Reply-To Email',  'replies@op.beeorganized.test', 'reply_to_email'],
+    ['Main name',     'Bee Organized Overland Park', 'sender_name'],
+    ['Main address',  'hi@op.beeorganized.test',     'send_from_email'],
+    ['Replies go to', 'replies@op.beeorganized.test', 'reply_to_email'],
   ])('%s saves to its own column', async (label, next, column) => {
     await mount('emails')
     calls.length = 0
@@ -289,12 +290,11 @@ describe('the card says default, and says where the exception lives', () => {
     // "Everything else" and says when that is. The word was only ever a proxy
     // for "this is not the whole answer", so the assertion moves to the thing
     // the word stood for.
+    // 2026-10-30 design: the section says it in one line — "Anything else
+    // goes out from the main address below" — with the per-type rows beside it.
     await mount('emails')
-    const txt = bodyText()
-    expect(txt).toContain('Everything else')
-    expect(txt).toMatch(/any kind of job you have not given to someone/)
-    // Still says where the exception is SET, which is the half step 3 added.
-    expect(txt).toMatch(/New leads/)
+    const txt = (container.querySelector('#sender') as HTMLElement).textContent ?? ''
+    expect(txt).toContain('Each kind of job can go out from a different person on your team. Anything else goes out from the main address below.')
   })
 
   it('does not promise to be the only sender', async () => {
@@ -340,7 +340,10 @@ describe('New leads is unaffected, and is now the sole caller', () => {
     const others = Array.from(
       outside.matchAll(/fetch\(\s*`[^`]*project-type-senders`\s*,\s*\{([\s\S]{0,200}?)\}/g),
     ).map(m => m[1])
-    expect(others.length, 'the Emails tab reader should be found').toBeGreaterThan(0)
+    // 2026-10-30: the Emails tab's separate reader is gone too — Emails now
+    // mounts NewLeadsSection itself — so there is NO caller outside it at all,
+    // which is the stronger form of the same rule.
+    expect(others.length, 'no caller of the senders route outside NewLeadsSection').toBe(0)
     for (const opts of others) {
       expect(opts, `a non-GET call outside NewLeadsSection: ${opts}`).not.toMatch(/method\s*:/)
     }

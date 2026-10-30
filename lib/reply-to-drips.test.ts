@@ -234,12 +234,14 @@ describe('a send refused on the reply-to', () => {
 describe('where the field is edited', () => {
   const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
 
-  it('Settings › Reply-To Email validates with the shared rule (which also refuses blank)', () => {
-    const row = src.split('\n').find(l => l.includes('label="Reply-To Email"'))!
-    expect(row).toContain('validate={replyToProblem}')
-    expect(row).not.toContain('defaults to Send From')
-    // SettingsEditRow disables Save while validate() returns a reason, so a
-    // blank or two-address value can't be saved from the row at all.
+  // 2026-10-30: the row is the Emails screen's "Replies go to" field. It
+  // saves on blur and refuses with the shared rule's reason BEFORE any write.
+  it('Settings › Emails › Replies go to validates with the shared rule (which also refuses blank)', () => {
+    const at = src.indexOf('label="Replies go to"')
+    expect(at).toBeGreaterThan(-1)
+    const field = src.slice(at, src.indexOf('/>', at))
+    expect(field).toContain("const p = replyToProblem(v); return p ? Promise.resolve(p) : emailsSaveLocation('replyToEmail', v)")
+    expect(field).not.toContain('defaults to Send From')
   })
 
   it('onboarding refuses a bad reply-to before saving, shows why, and saves the fallback', () => {
