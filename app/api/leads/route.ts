@@ -27,6 +27,13 @@
 // merged behind their back. An in-question or name-only match still creates,
 // flagged possible_duplicate_of like intake. A failed check degrades to the
 // plain create: losing a real client is worse than a duplicate.
+//
+// THE WAY THROUGH (29 Oct 2026). A refusal with no exit is a wall: a husband
+// and wife sharing one email is ordinary. When the person was SHOWN a record
+// and chose "None of these", the form sends its id in
+// confirmed_not_duplicate_of. A solid match on THAT record creates — flagged
+// possible_duplicate_of it, so the new record carries the notice. A solid
+// match on any record they were not shown is still refused.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -81,6 +88,8 @@ type Body = {
   notifyEmail?: boolean
   notifySlack?: boolean
   startDrip?: boolean
+  // Ids of records the person was shown and said are someone else.
+  confirmed_not_duplicate_of?: string[]
 }
 
 const VALID_STAGES = new Set([
@@ -220,17 +229,23 @@ export async function POST(req: NextRequest) {
       matchedOn?: string
       matchIds?: string[]
     }
+    const confirmedOther = Array.isArray(body.confirmed_not_duplicate_of)
+      ? body.confirmed_not_duplicate_of.filter((v): v is string => typeof v === 'string')
+      : []
     if (verdict.tier === 'solid') {
-      return NextResponse.json(
-        {
-          error: 'duplicate_client',
-          existing: { id: verdict.match.id, name: verdict.match.name ?? null },
-          matched_on: verdict.matchedOn ?? null,
-        },
-        { status: 409 },
-      )
-    }
-    if (verdict.tier === 'in_question') {
+      // Shown this very record and said it is someone else: create, flagged.
+      if (!confirmedOther.includes(verdict.match.id)) {
+        return NextResponse.json(
+          {
+            error: 'duplicate_client',
+            existing: { id: verdict.match.id, name: verdict.match.name ?? null },
+            matched_on: verdict.matchedOn ?? null,
+          },
+          { status: 409 },
+        )
+      }
+      possibleDuplicateIds = [verdict.match.id]
+    } else if (verdict.tier === 'in_question') {
       possibleDuplicateIds = verdict.matchIds ?? []
     } else {
       // Name-only: never refuses, only flags. ilike with escaped wildcards =

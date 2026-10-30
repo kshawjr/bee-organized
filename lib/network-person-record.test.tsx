@@ -97,6 +97,20 @@ const installFetch = (handlers: Record<string, any> = {}) => {
   vi.stubGlobal('fetch', fetchMock)
 }
 
+// A fake POST /api/leads that refuses what the REAL route refuses. The old
+// fake answered { lead } to any body, so it accepted location_id — a key the
+// route ignores — and "Add as client" failed for every real user from 23 Jul
+// to 30 Oct 2026 while this suite stayed green. The real route is exercised
+// with this component's own body in beta-create-duplicate-check.test.ts.
+const leadsRoute = (lead: any) => (u: string, init: any) => {
+  if (init?.method !== 'POST') return {}
+  const b = JSON.parse(init.body)
+  const refuse = (error: string) => Promise.resolve({ ok: false, status: 400, json: async () => ({ error }) })
+  if (!b.location_uuid || typeof b.location_uuid !== 'string') return refuse('location_uuid_required')
+  if (!String(b.name || '').trim()) return refuse('name_required')
+  return { lead }
+}
+
 const mount = async (props: any = {}) => {
   host = document.createElement('div')
   document.body.appendChild(host)
@@ -284,7 +298,7 @@ describe('F) customer path — link, never a blind copy', () => {
 
   it('a partial phone never matches, and 2 letters inside a name never match', async () => {
     const onUpdate = vi.fn()
-    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-2' } } : {}) })
+    installFetch({ '/api/leads': leadsRoute({ id: 'lead-new-2' }) })
     const partner = { ...PARTNER, name: 'Al', email: '', phone: '555-0916' }
     await mount({ onUpdate, partner, people: [
       client({ id: 'lead-a', name: 'Alice Walker', email: '', phone: '(816) 555-0916' }), // phone CONTAINS 5550916
@@ -328,7 +342,7 @@ describe('F) customer path — link, never a blind copy', () => {
 
   it('"None of these" exists and creates a new client; Cancel does nothing', async () => {
     const onUpdate = vi.fn()
-    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-3' } } : {}) })
+    installFetch({ '/api/leads': leadsRoute({ id: 'lead-new-3' }) })
     await mount({ onUpdate, partner: { ...PARTNER, email: '', phone: '' }, people: [client({ email: 'x@y.com' })] })
     await openAddAsClient()
     const none = [...host.querySelectorAll('button')].find(b => b.textContent === 'None of these — add as a new client')!
@@ -342,7 +356,7 @@ describe('F) customer path — link, never a blind copy', () => {
 
   it('a client at another location is never offered or linked, even on an exact email', async () => {
     const onUpdate = vi.fn()
-    installFetch({ '/api/leads': (u: string, init: any) => (init?.method === 'POST' ? { lead: { id: 'lead-new-4' } } : {}) })
+    installFetch({ '/api/leads': leadsRoute({ id: 'lead-new-4' }) })
     dbRows = [] // the DB re-check is location-scoped
     await mount({ onUpdate, people: [
       client({ id: 'lead-far', locationId: 'loc-2' }),               // same email, other location
@@ -357,16 +371,46 @@ describe('F) customer path — link, never a blind copy', () => {
 
   it('no match → POST /api/leads and store the REAL created id (the Classic copy stored nothing)', async () => {
     const onUpdate = vi.fn()
-    installFetch({
-      '/api/leads': (u: string, init: any) => (init?.method === 'POST'
-        ? { lead: { id: 'lead-new-1', name: 'Karen Martinez' } }
-        : {}),
-    })
+    installFetch({ '/api/leads': leadsRoute({ id: 'lead-new-1', name: 'Karen Martinez' }) })
     await mount({ onUpdate, people: [] })
     await openAddAsClient()
     const post = leadPosts()[0]
-    expect(JSON.parse(post.init.body)).toMatchObject({ name: 'Karen Martinez', location_id: 'loc-1' })
+    expect(JSON.parse(post.init.body)).toMatchObject({ name: 'Karen Martinez', location_uuid: 'loc-1' })
+    expect(JSON.parse(post.init.body)).not.toHaveProperty('location_id')
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ isCustomer: true, customerLeadId: 'lead-new-1' }))
+  })
+})
+
+describe('E2) Add as client — the route\'s own answers (30 Oct 2026)', () => {
+  const client = (over: any = {}) => ({ id: 'lead-77', name: 'Karen Martinez', email: 'karen@meridian.com', phone: '', locationId: 'loc-1', isJunk: null, ...over })
+  const openAddAsClient = async () => {
+    await act(async () => { (host.querySelector('[aria-label="Partner actions"]') as HTMLElement).click() })
+    const item = Array.from(document.querySelectorAll('button')).find(b => b.textContent!.includes('Add as client'))!
+    await act(async () => { item.click() })
+    await act(async () => {})
+  }
+  const leadPosts = () => fetchCalls.filter(c => c.url.includes('/api/leads') && c.init?.method === 'POST')
+
+  it('"None of these" sends the shown clients as confirmed-different, and the client is created', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/leads': leadsRoute({ id: 'lead-new-5' }) })
+    await mount({ onUpdate, partner: { ...PARTNER, email: '', phone: '' }, people: [client({ id: 'lead-k1', email: 'a@x.com' }), client({ id: 'lead-k2', email: 'b@x.com' })] })
+    await openAddAsClient()
+    const none = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'None of these — add as a new client')!
+    await act(async () => { none.click() })
+    await act(async () => {})
+    expect(JSON.parse(leadPosts()[0].init.body).confirmed_not_duplicate_of).toEqual(['lead-k1', 'lead-k2'])
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ customerLeadId: 'lead-new-5' }))
+  })
+
+  it('the route finding one existing client the browser missed links to it — no error, no second client', async () => {
+    const onUpdate = vi.fn()
+    installFetch({ '/api/leads': (u: string, init: any) => init?.method === 'POST'
+      ? Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'duplicate_client', existing: { id: 'lead-db', name: 'Karen M' }, matched_on: 'email' }) })
+      : {} })
+    await mount({ onUpdate, people: [] })
+    await openAddAsClient()
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ isCustomer: true, customerLeadId: 'lead-db' }))
   })
 })
 

@@ -192,3 +192,47 @@ describe('in-app create — no match, or a failed check', () => {
     expect(insertOf('leads')[0]).not.toHaveProperty('possible_duplicate_of')
   })
 })
+
+describe('"None of these" — the way through a refusal (30 Oct 2026)', () => {
+  it('a solid match on a record the person was SHOWN and dismissed creates, flagged against it', async () => {
+    setup([stored({ phone: null, phone_normalized: '' })], { id: 'lead-new', name: 'Ray Morgan' })
+    const res = await post({ name: 'Ray Morgan', email: 'smorganwre@yahoo.com', confirmed_not_duplicate_of: ['lead-A'] })
+    expect(res.status).toBe(201)
+    expect(insertOf('leads')[0].possible_duplicate_of).toEqual(['lead-A'])
+    expect(insertOf('touchpoints').map(t => t.label)).toContain('Possible duplicate — matched an existing client when created')
+  })
+
+  it('dismissing a DIFFERENT record does not get past a solid match', async () => {
+    setup([stored({ phone: null, phone_normalized: '' })])
+    const res = await post({ name: 'Ray Morgan', email: 'smorganwre@yahoo.com', confirmed_not_duplicate_of: ['lead-ZZZ'] })
+    expect(res.status).toBe(409)
+    expect(insertOf('leads')).toHaveLength(0)
+  })
+})
+
+// The REAL route, fed the exact body Network "Add as client" builds. The
+// component tests fake the server; this one cannot pass against a reply the
+// route would never send. (It failed with location_uuid_required for every
+// real user from 23 Jul to 30 Oct 2026.)
+import { networkClientLeadBody } from '@/components/hive/NetworkPersonRecord'
+
+describe('Network "Add as client" — its body against the real route', () => {
+  const partner = { name: 'Karen Martinez', email: 'karen@meridian.com', phone: '(816) 555-0916', locationId: 'loc-uuid-1', title: 'Agent', company: 'Meridian Realty' }
+  const send = (body: any) => POST(new Request('http://test/api/leads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }) as any)
+
+  it('creates a client', async () => {
+    setup([], [], { id: 'lead-net', name: 'Karen Martinez' })
+    const res = await send(networkClientLeadBody(partner))
+    expect(res.status).toBe(201)
+    expect(insertOf('leads')[0]).toMatchObject({ name: 'Karen Martinez', location_uuid: 'loc-uuid-1', source: 'Referral' })
+  })
+
+  it('carries the dismissed clients through to the flag', async () => {
+    setup([stored({ id: 'lead-k1', email: 'karen@meridian.com', phone: null, phone_normalized: '' })], { id: 'lead-net' })
+    const res = await send(networkClientLeadBody(partner, ['lead-k1']))
+    expect(res.status).toBe(201)
+    expect(insertOf('leads')[0].possible_duplicate_of).toEqual(['lead-k1'])
+  })
+})

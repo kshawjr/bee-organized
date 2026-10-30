@@ -19,6 +19,27 @@
 // A failed dedup read degrades to plain insert with a warning — losing
 // the lead is worse than a duplicate.
 //
+// WHERE IT LOOKS (29 Oct 2026). Not only where the lead lands. The zip decides
+// the landing, and a not-live zip parks the lead in Other — while the client
+// may already be a client at the location the website sent. Shirley Ann
+// Morgan, 12 Oct: parked in Other, searched Other only, her Central Denver
+// record never seen, a second record made. Now:
+//   landed in Other  → search Other AND the sent location; a solid match in
+//                      either is merged into (at the sent location, the
+//                      client's own franchise hears about it at once). One
+//                      record in each is in_question: flagged, never merged.
+//   landed at a real location → search it (merge as always), plus Other and
+//                      the sent location FLAG-ONLY: a client waiting in Other
+//                      is not merged into, because that would hide this
+//                      enquiry from the owner it was just routed to. The new
+//                      record is flagged against it, and when the Other copy
+//                      is moved here the transfer joins the two (attach-to-
+//                      existing, lib/lead-transfer).
+// A sent location is merged into only when it takes leads (active/onboarding,
+// lib/zip-routing); a paused one is flag-only and a closed one is not
+// searched. Never wider than these: two people at two franchises can share
+// an email.
+//
 // No service_requests row is created here — these are pre-Jobber leads,
 // the Hive pipeline will pick them up via stage filter.
 //
@@ -48,7 +69,7 @@ import {
 } from '@/components/hive/shared/clientMatch'
 import { attachResubmission, type ResubmissionArgs } from '@/lib/enquiry-resubmission'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
-import { routeByZip, zipDecides, routeLogToken, type ZipRouteDecision } from '@/lib/zip-routing'
+import { routeByZip, zipDecides, routeLogToken, locationTakesZipLeads, type ZipRouteDecision } from '@/lib/zip-routing'
 import { isClosedLocation, OTHER_SLUG } from '@/lib/location-close'
 import { phoneForWrite } from '@/lib/phone'
 import { recordPhoneNote } from '@/lib/phone-note'
@@ -292,8 +313,10 @@ export async function POST(req: NextRequest) {
   // can't reach one — routing sends anything not active/onboarding to Other —
   // but a lead with NO zip goes where the website says, and the website keeps
   // a closed franchise's page. Send it to Other, and say so on the log row.
+  let closedSlug: string | null = null
   if (!locErr && location && isClosedLocation(location.lifecycle_status)) {
     zipRouteLogToken += ` sent_loc_closed=${location.location_id}`
+    closedSlug = location.location_id
     ;({ data: location, error: locErr } = await lookupLocation(OTHER_SLUG))
   }
 
@@ -335,25 +358,69 @@ export async function POST(req: NextRequest) {
     // dropped value must be visible in the response + sync_log message.
     dedupWarnings.push('email_invalid_ignored')
   }
+
+  // ─── Where the match looks (see header: WHERE IT LOOKS) ──────
+  // Each extra location is a soft read: a failed lookup drops that location
+  // from the search, it never stops the lead or the landing-location check.
+  type Loc = { id: string; name: string; location_id: string; lifecycle_status: string | null }
+  const softLookup = async (slug: string): Promise<Loc | null> => {
+    try {
+      const { data, error } = await lookupLocation(slug)
+      if (error) throw error
+      return (data as Loc | null) ?? null
+    } catch (err: any) {
+      dedupWarnings.push(`dedup_scope_lookup_failed: ${slug}`)
+      return null
+    }
+  }
+  const landedInOther = location.location_id === OTHER_SLUG
+  const otherLoc: Loc | null = landedInOther ? null : await softLookup(OTHER_SLUG)
+  let sentLoc: Loc | null =
+    // A sent location already found closed above is not looked up again.
+    sentSlug && sentSlug !== location.location_id && sentSlug !== OTHER_SLUG && sentSlug !== closedSlug
+      ? await softLookup(sentSlug)
+      : null
+  if (sentLoc && isClosedLocation(sentLoc.lifecycle_status)) sentLoc = null
+  const sentMergeable = !!sentLoc && locationTakesZipLeads(sentLoc.lifecycle_status)
+  // Locations a solid match may be MERGED into; the rest only flag.
+  const mergeLocs: Loc[] = [location as Loc, ...(landedInOther && sentLoc && sentMergeable ? [sentLoc] : [])]
+  const flagLocs: Loc[] = [
+    ...(otherLoc ? [otherLoc] : []),
+    ...(sentLoc && !mergeLocs.includes(sentLoc) ? [sentLoc] : []),
+  ]
+  const scopeLocs = [...mergeLocs, ...flagLocs]
+  if (scopeLocs.length > 1) zipRouteLogToken += ` dedup_scope=${scopeLocs.map(l => l.location_id).join(',')}`
+
   try {
     const strongRows = await queryLeadMatches(supabaseService, {
       email: validEmail,
       phone,
-      locationUuid: location.id,
+      // One location: the exact single-location query this door always ran.
+      locationUuid: scopeLocs.length > 1 ? scopeLocs.map(l => l.id) : location.id,
     })
+    const mergeIds = new Set(mergeLocs.map(l => l.id))
+    const flagOnlyIds = new Set(flagLocs.map(l => l.id))
+    const mergeRows = strongRows.filter((r: any) => mergeIds.has(r.location_uuid))
+    // Anything outside the searched locations is ignored, never flagged.
+    const flagRows = strongRows.filter((r: any) => flagOnlyIds.has(r.location_uuid))
     // (cast: the JS module's inferred return is a union TS won't narrow)
-    const verdict = classifyLeadMatches(strongRows, { email: validEmail, phone }) as {
+    type Verdict = {
       tier: 'solid' | 'in_question' | 'none'
       match?: any
       matchedOn?: string
       matchIds?: string[]
     }
+    const verdict = classifyLeadMatches(mergeRows, { email: validEmail, phone }) as Verdict
 
     if (verdict.tier === 'solid') {
+      // Merged at the sent location (the lead was parked in Other): that
+      // location is the one told, and the row says so.
+      const mergeLoc = mergeLocs.find(l => l.id === verdict.match.location_uuid) ?? (location as Loc)
+      if (mergeLoc.id !== location.id) zipRouteLogToken += ` matched_loc=${mergeLoc.location_id}`
       return await mergeResubmission({
         matched: verdict.match,
         matchedOn: verdict.matchedOn ?? 'email',
-        location,
+        location: mergeLoc,
         // The name the returning client just typed on the form — the freshest
         // spelling, and what the resubmission notification is addressed with.
         submittedName: full_name.trim(),
@@ -376,8 +443,17 @@ export async function POST(req: NextRequest) {
       })
     }
 
+    // Strong hits in the flag-only locations ride along on any flag.
+    const flagVerdict = classifyLeadMatches(flagRows, { email: validEmail, phone }) as Verdict
+    const flagIds: string[] =
+      flagVerdict.tier === 'solid' ? [flagVerdict.match.id]
+      : flagVerdict.tier === 'in_question' ? (flagVerdict.matchIds ?? [])
+      : []
+
     if (verdict.tier === 'in_question') {
-      possibleDuplicateIds = verdict.matchIds ?? []
+      possibleDuplicateIds = [...(verdict.matchIds ?? []), ...flagIds]
+    } else if (flagIds.length) {
+      possibleDuplicateIds = flagIds
     } else {
       // No strong-key hit — name-only check. Name matches NEVER merge;
       // they can only flag. ilike with escaped wildcards = case-

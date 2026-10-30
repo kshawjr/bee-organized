@@ -86,14 +86,16 @@ describe('intake — a closed sent location, no zip', () => {
     expect(lastLog().message).toContain('sent_loc_closed=loc_kc')
   })
 
-  it('an open sent location is unchanged — one lookup, lands there', async () => {
+  it('an open sent location is unchanged — lands there (and Other is looked up for the duplicate check)', async () => {
     h.enqueue('locations', OPEN_KC)
     h.enqueue('leads', [])
     h.enqueue('leads', [])
     h.enqueue('leads', { id: 'lead-new' })
     const res = await POST(makeReq(lead))
     expect(res.status).toBe(200)
-    expect(locationLookups()).toEqual(['loc_kc'])
+    // The second lookup is the duplicate check's (29 Oct 2026): a client
+    // waiting in Other is looked for too. It does not change where this lands.
+    expect(locationLookups()).toEqual(['loc_kc', 'loc_other'])
     expect((await res.json()).location.slug).toBe('loc_kc')
     expect(lastLog().message).not.toContain('sent_loc_closed')
   })

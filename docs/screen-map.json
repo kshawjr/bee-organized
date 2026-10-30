@@ -1195,7 +1195,7 @@
       ],
       "lines": [
         193,
-        805
+        819
       ]
     },
     {
@@ -1438,8 +1438,8 @@
         "their tags"
       ],
       "lines": [
-        70,
-        484
+        83,
+        504
       ],
       "note": "The old 'What's next' (partners.next_steps) section was retired 2026-09-30; the shared Reminder strip replaced it (reminders.record)."
     },

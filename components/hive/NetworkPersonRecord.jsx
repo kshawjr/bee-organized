@@ -67,6 +67,19 @@ const statusChip = {
   lead: { label: 'Lead', fam: 'blue' },
 }
 
+// The POST /api/leads body for "Add as client". Exported so a test can post
+// it to the REAL route (lib/beta-create-duplicate-check.test.ts): the
+// component tests fake the server, and a fake accepted the wrong key
+// (location_id) for three months while every real create failed.
+export function networkClientLeadBody(partner, confirmedOther = []) {
+  return {
+    name: partner.name, phone: partner.phone || null, email: partner.email || null,
+    location_uuid: partner.locationId, source: 'Referral',
+    request_details: `From the Network — ${[partner.title, partner.company].filter(Boolean).join(' at ')}`,
+    ...(confirmedOther.length ? { confirmed_not_duplicate_of: confirmedOther } : {}),
+  }
+}
+
 export default function NetworkPersonRecord({
   partner,
   companies = [],
@@ -220,19 +233,25 @@ export default function NetworkPersonRecord({
     patch({ isCustomer: true, customerLeadId: person.id })
     setToast({ kind: 'success', msg: `Linked to existing client ${person.name}` })
   }
-  async function createClientLead() {
+  // confirmedOther: ids of the clients the person was shown and said are
+  // someone else ("None of these") — the route then creates, flagged.
+  async function createClientLead(confirmedOther = []) {
     // Mint the real lead, then store the REAL id (the Classic path
     // minted a fake local id and linked nothing).
+    // location_uuid, not location_id: the route requires it, and from
+    // 23 Jul to 30 Oct 2026 this sent location_id, so every create failed
+    // with location_uuid_required — no Network client was ever created.
     const res = await fetch('/api/leads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: partner.name, phone: partner.phone || null, email: partner.email || null,
-        location_id: partner.locationId, source: 'Referral',
-        request_details: `From the Network — ${[partner.title, partner.company].filter(Boolean).join(' at ')}`,
-      }),
+      body: JSON.stringify(networkClientLeadBody(partner, confirmedOther)),
     })
     const json = await res.json().catch(() => ({}))
+    // The route's own check found one existing client the browser check
+    // missed: that IS them — link, exactly as an auto match does.
+    if (res.status === 409 && json?.error === 'duplicate_client' && json?.existing?.id) {
+      return linkTo({ id: json.existing.id, name: json.existing.name || 'the existing client' })
+    }
     if (!res.ok || !json?.lead?.id) throw new Error(json?.error || `HTTP ${res.status}`)
     setLinkChoices(null)
     patch({ isCustomer: true, customerLeadId: json.lead.id })
@@ -241,7 +260,8 @@ export default function NetworkPersonRecord({
   async function noneOfThese() {
     if (linkingClient) return
     setLinkingClient(true)
-    try { await createClientLead() }
+    // Only the clients actually on screen count as "seen and not them".
+    try { await createClientLead((linkChoices || []).slice(0, LINK_CHOICES_SHOWN).map(c => c.person.id)) }
     catch (e) { setToast({ kind: 'error', msg: `Couldn't add as client: ${String(e?.message || e)}` }) }
     finally { setLinkingClient(false) }
   }

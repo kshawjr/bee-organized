@@ -190,6 +190,13 @@ export function buildLeadMatchOr({ email, phone } = {}) {
 // Errors propagate — the caller decides how a failed re-check degrades
 // (the people-prop gate has already run by then).
 //
+// locationUuid — WHERE to look:
+//   a uuid string → that location only (.eq), as every caller has always sent
+//   'all' / empty  → no location filter (unchanged)
+//   an ARRAY       → those locations only (.in) — intake's sent-location + Other
+//                    search (29 Oct 2026). An empty array finds nothing: it is
+//                    never read as "everywhere".
+//
 // jobber_client_id rides in the select for the Jobber import's adoption
 // pass (lib/jobber-import.ts): it needs to restrict candidates to rows
 // NOT yet linked to a Jobber client. It is inert for the other two
@@ -197,13 +204,18 @@ export function buildLeadMatchOr({ email, phone } = {}) {
 export async function queryLeadMatches(supabase, { email, phone, locationUuid } = {}) {
   const orFilter = buildLeadMatchOr({ email, phone })
   if (!orFilter) return []
+  const scope = Array.isArray(locationUuid)
+    ? [...new Set(locationUuid.filter(u => typeof u === 'string' && u && u !== 'all'))]
+    : null
+  if (scope && scope.length === 0) return []
   let q = supabase
     .from('leads')
     .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, request_details, preferred_contact, stage, is_junk, location_uuid, created_at, jobber_client_id')
     .or(orFilter)
     .not('is_junk', 'is', true)
     .range(0, 999)
-  if (locationUuid && locationUuid !== 'all') q = q.eq('location_uuid', locationUuid)
+  if (scope) q = q.in('location_uuid', scope)
+  else if (locationUuid && locationUuid !== 'all') q = q.eq('location_uuid', locationUuid)
   const { data, error } = await q
   if (error) throw new Error(error.message || 'lead match query failed')
   return data || []

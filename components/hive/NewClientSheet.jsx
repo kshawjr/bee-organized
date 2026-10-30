@@ -227,6 +227,11 @@ export default function NewClientSheet({
   const [forceNew, setForceNew] = useState(false) // "None of these — create a new client"
   const [confirming, setConfirming] = useState(false) // frame D
   const [dbMatch, setDbMatch] = useState(null) // pre-insert gate hit not in the loaded set
+  // Records the person was SHOWN and said are someone else ("None of these").
+  // Neither gate may bounce them back to one of these again; the server
+  // creates the client flagged against them (confirmed_not_duplicate_of).
+  // Before 30 Oct 2026 this exit looped straight back to the same record.
+  const [dismissedIds, setDismissedIds] = useState([])
   const [busy, setBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
 
@@ -261,7 +266,14 @@ export default function NewClientSheet({
 
   // The missing exit: from a list, a returning client, or a pre-insert
   // bounce, straight to frame C. The query stays, so the name prefills.
-  const createNewInstead = () => { setForceNew(true); setPickedId(null); setDbMatch(null); setErrorMsg(null) }
+  const createNewInstead = () => {
+    // Only what was on screen: the open record, or the listed matches.
+    const shown = dbMatch ? [dbMatch.person.id]
+      : match ? [match.person.id]
+      : matches.slice(0, MAX_LISTED).map(m => m.person.id)
+    setDismissedIds(prev => [...new Set([...prev, ...shown.filter(Boolean)])])
+    setForceNew(true); setPickedId(null); setDbMatch(null); setErrorMsg(null)
+  }
   const backToMatches = () => { setForceNew(false); setPickedId(null); setErrorMsg(null) }
 
   // Frame B/D derived facts — session rowPatches already applied upstream.
@@ -368,7 +380,8 @@ export default function NewClientSheet({
         try {
           // Scoped to the location the create targets — the dupe gate is
           // per-location (one leads row per person per location).
-          const rows = await queryLeadMatches(createClient(), { ...keys, locationUuid })
+          const rows = (await queryLeadMatches(createClient(), { ...keys, locationUuid }))
+            .filter(r => !dismissedIds.includes(r.id))
           if (rows.length > 0) {
             setForceNew(false)
             const row = rows[0]
@@ -416,6 +429,7 @@ export default function NewClientSheet({
         startDrip:   form.startDrip,
         // Optional address (empty when the block was never opened).
         ...buildAddressFields(),
+        ...(dismissedIds.length ? { confirmed_not_duplicate_of: dismissedIds } : {}),
       })
       // Frame C stays person-world by design: a genuinely NEW inquiry
       // lands in the Inbox as a person (doctrine above), and Send to Jobber
@@ -431,8 +445,8 @@ export default function NewClientSheet({
     } catch (e) {
       if (e?.existing) {
         // Same frame the browser-side gate opens: the existing record, with
-        // "Open client profile". The server refuses every retry, so this is
-        // where the create ends.
+        // "Open client profile" — and "None of these", which now really
+        // creates (dismissedIds → confirmed_not_duplicate_of), flagged.
         setForceNew(false)
         setDbMatch({
           person: { id: e.existing.id, name: e.existing.name || 'Existing client', outreachTimeline: [] },

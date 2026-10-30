@@ -22,6 +22,23 @@ import ClientProfile from '@/components/hive/ClientProfile'
 import NewClientSheet from '@/components/hive/NewClientSheet'
 import { duplicateIdsOf, resolveDuplicateOf } from '@/components/hive/shared/duplicateFlag'
 
+// The sheet's browser-side gate (queryLeadMatches over the browser client):
+// rows put here come back whatever the filter.
+let gateRows: any[] = []
+vi.mock('@/lib/supabase', () => ({
+  createClient: () => {
+    const chain: any = {
+      from: () => chain, select: () => chain, or: () => chain, not: () => chain,
+      range: () => chain, eq: () => chain, in: () => chain,
+      // the card's live-contacts subscription (not under test here)
+      channel: () => { const ch: any = { on: () => ch, subscribe: () => ch, unsubscribe: () => {} }; return ch },
+      removeChannel: () => {},
+      then: (res: any, rej: any) => Promise.resolve({ data: gateRows, error: null }).then(res, rej),
+    }
+    return chain
+  },
+}))
+
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 const jsonRes = (body: any, status = 200) => ({ ok: status < 400, status, json: async () => body })
@@ -45,6 +62,7 @@ beforeEach(() => {
   document.body.innerHTML = ''
   profileClient = {}
   leadPost = () => jsonRes({})
+  gateRows = []
   ;(globalThis as any).fetch = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/profile')) return jsonRes(profilePayload(profileClient))
@@ -171,6 +189,53 @@ describe('the New client sheet, refused by the server', () => {
     const open = Array.from(host.querySelectorAll('button')).find(b => (b.textContent || '').trim() === 'Open client profile')!
     await click(open)
     expect(onOpenClient).toHaveBeenCalledWith('real-072e')
+    await unmount()
+  })
+
+  it('"None of these" after a refusal really creates — sending the record it was shown', async () => {
+    const posts: any[] = []
+    leadPost = (body) => {
+      posts.push(body)
+      return body.confirmed_not_duplicate_of?.includes('real-072e')
+        ? jsonRes({ lead: { id: 'lead-spouse', name: body.name, possible_duplicate_of: ['real-072e'] } }, 201)
+        : jsonRes({ error: 'duplicate_client', existing: { id: 'real-072e', name: 'Shirley Ann Morgan' }, matched_on: 'email' }, 409)
+    }
+    const onCreated = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[]} locFilter="loc-uuid-1" onClose={() => {}} onCreated={onCreated} setToast={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Ray Morgan')
+    const btn = (t: string) => Array.from(host.querySelectorAll('button')).find(b => (b.textContent || '').trim() === t)!
+    await click(btn('Create — opens card'))
+    expect(host.textContent).toContain('Returning client')
+    await click(btn('None of these — create a new client'))
+    await click(btn('Create — opens card'))
+    expect(posts).toHaveLength(2)
+    expect(posts[0].confirmed_not_duplicate_of).toBeUndefined()
+    expect(posts[1].confirmed_not_duplicate_of).toEqual(['real-072e'])
+    expect(onCreated).toHaveBeenCalledTimes(1)
+    expect(onCreated.mock.calls[0][0].id).toBe('lead-spouse')
+    await unmount()
+  })
+
+  it('the browser check does not bounce a record the person already dismissed', async () => {
+    const posts: any[] = []
+    leadPost = (body) => { posts.push(body); return jsonRes({ lead: { id: 'lead-spouse', name: body.name } }, 201) }
+    const wife = { id: 'lead-wife', name: 'Ann Morgan', email: 'home@morgan.com', phone: '', locationId: 'loc-uuid-1', isJunk: false, outreachTimeline: [] }
+    gateRows = [{ id: 'lead-wife', name: 'Ann Morgan', email: 'home@morgan.com', phone: null, location_uuid: 'loc-uuid-1' }]
+    const onCreated = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[wife] as any} locFilter="loc-uuid-1" onClose={() => {}} onCreated={onCreated} setToast={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'home@morgan.com')
+    const btn = (t: string) => Array.from(host.querySelectorAll('button')).find(b => (b.textContent || '').trim() === t)!
+    expect(host.textContent).toContain('Returning client')
+    await click(btn('None of these — create a new client'))
+    await type(host.querySelector('input[aria-label="Name"]')!, 'Ray Morgan')
+    await click(btn('Create — opens card'))
+    expect(posts).toHaveLength(1)
+    expect(posts[0]).toMatchObject({ name: 'Ray Morgan', email: 'home@morgan.com', confirmed_not_duplicate_of: ['lead-wife'] })
+    expect(onCreated).toHaveBeenCalledTimes(1)
     await unmount()
   })
 })
