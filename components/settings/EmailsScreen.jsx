@@ -16,6 +16,7 @@ import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
 import { SIGNATURE_MARKER } from '@/lib/email-signature'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
+import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
 
 // ── Tokens (export src/styles.css :root) ──────────────────────────────────
 export const ET = {
@@ -659,6 +660,77 @@ export function ButtonFields({ text, link, onText, onLink, labelStyle = null, in
       <p style={{ gridColumn:'1 / -1', margin:0, fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
         Fill in both and the email shows a button in your chosen look. Leave either blank for no button. The link can be one of your booking links, like <code>{'{{booking_link}}'}</code>, <code>{'{{discovery_booking_link}}'}</code> or <code>{'{{virtual_booking_link}}'}</code>.
       </p>
+    </div>
+  )
+}
+
+// ── Merge tags an owner can click in (2026-10-30) ─────────────────────────
+// lib/merge-tags.ts is the list; this is how an editor offers it. Grouped
+// chips; the description of the chip under the pointer or focus shows below,
+// and "What each one means" lists them all (phones have no hover).
+//
+// useTagInsert: an editor binds its subject / body fields with bind(), and a
+// chip lands where the cursor was in the field last used — never just
+// appended at the end.
+export function useTagInsert() {
+  const last = React.useRef(null)       // { el, get, set }
+  const bind = (get, set) => ({
+    onFocus: e => { last.current = { el: e.target, get, set } },
+    onSelect: e => { last.current = { el: e.target, get, set } },
+  })
+  const insert = (token) => {
+    const t = last.current
+    if (!t) return false
+    const { next, caret } = insertAtCursor(t.get(), token, t.el.selectionStart, t.el.selectionEnd)
+    t.set(next)
+    setTimeout(() => { try { t.el.focus(); t.el.setSelectionRange(caret, caret) } catch { /* detached */ } }, 0)
+    return true
+  }
+  return { bind, insert, hasTarget: () => !!last.current }
+}
+
+export function MergeTagPicker({ onInsert, tags = OWNER_MERGE_TAGS }) {
+  const [hint, setHint] = React.useState(null)
+  const [all, setAll] = React.useState(false)
+  return (
+    <div data-merge-tag-picker style={{ fontFamily:EF.ui }}>
+      <p style={{ margin:'0 0 6px', fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>Insert a detail <span style={{ fontWeight:400, color:'#8a9e9a' }}>· click where it should go, then pick one</span></p>
+      {MERGE_TAG_GROUPS.map(g => {
+        const inGroup = tags.filter(t => t.group === g.id)
+        if (!inGroup.length) return null
+        return (
+          <div key={g.id} style={{ marginBottom:'6px' }}>
+            <p style={{ margin:'0 0 4px', fontSize:'10px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#8a9e9a' }}>{g.title}</p>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
+              {inGroup.map(t => (
+                <button key={t.key} type="button" data-merge-tag={t.key} title={t.description}
+                  onMouseDown={e => e.preventDefault()}   // keep the field's cursor
+                  onMouseEnter={() => setHint(t)} onFocus={() => setHint(t)}
+                  onClick={() => onInsert(mergeTagToken(t.key))}
+                  style={{ padding:'4px 9px', borderRadius:'20px', cursor:'pointer', border:'1px solid rgba(168,201,196,0.7)', background:'rgba(168,201,196,0.14)', fontSize:'11.5px', fontFamily:'inherit', color:'#1a2e2b', fontWeight:500 }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+      <p aria-live="polite" style={{ margin:'4px 0 0', minHeight:'16px', fontSize:'11.5px', color:'#4a5f5b', lineHeight:1.5 }}>
+        {hint ? <><code>{mergeTagToken(hint.key)}</code> — {hint.description}</> : null}
+      </p>
+      <button type="button" onClick={() => setAll(a => !a)} style={{ marginTop:'2px', background:'none', border:'none', padding:0, fontSize:'11.5px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit' }}>
+        {all ? 'Hide what each one means' : 'What each one means'}
+      </button>
+      {all && (
+        <dl style={{ margin:'6px 0 0', fontSize:'11.5px', lineHeight:1.5, color:'#4a5f5b' }}>
+          {tags.map(t => (
+            <div key={t.key} style={{ marginBottom:'4px' }}>
+              <dt style={{ display:'inline', fontWeight:600, color:'#1a2e2b' }}>{t.label} <code style={{ fontWeight:400 }}>{mergeTagToken(t.key)}</code></dt>
+              <dd style={{ display:'inline', margin:'0 0 0 6px' }}>{t.description}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   )
 }

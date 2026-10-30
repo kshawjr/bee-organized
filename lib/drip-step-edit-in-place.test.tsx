@@ -226,6 +226,14 @@ describe('fork-on-edit for master-backed paths', () => {
     expect(textarea, 'the step editor body field').toBeTruthy()
     expect(textarea.value).toBe('CLONED-BODY-ONE')
 
+    // 2026-10-30 — the owner's drip editor offers the merge tags, both new
+    // booking links included (lib/merge-tags.ts).
+    const picker = container.querySelector('[data-merge-tag-picker]') as HTMLElement
+    expect(picker, 'the merge-tag list in the owner’s drip editor').toBeTruthy()
+    for (const k of ['first_name', 'book_assessment_link', 'discovery_booking_link', 'virtual_booking_link']) {
+      expect(picker.querySelector(`[data-merge-tag="${k}"]`), k).toBeTruthy()
+    }
+
     // Save an edit → bulk replace against the CLONE id.
     await setNativeValue(textarea, 'OWNER EDITED BODY')
     await clickText('Save')

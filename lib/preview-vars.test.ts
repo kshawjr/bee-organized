@@ -29,14 +29,17 @@ const SEND_TIME_KEYS = [
   'location_phone',
   'book_assessment_link',
   'reviews_link',
+  // 2026-10-30 — the two new booking links, filled by all three senders.
+  'discovery_booking_link',
+  'virtual_booking_link',
 ]
 
 const ALL_TAGS_TEMPLATE = SEND_TIME_KEYS.map(k => `${k}=[{{${k}}}]`).join('\n')
 
-describe('buildPreviewVars mirrors the 14-variable send-time context', () => {
+describe('buildPreviewVars mirrors the 16-variable send-time context', () => {
   it('PREVIEW_VAR_KEYS is exactly the send-time set — none silently omitted', () => {
     expect([...PREVIEW_VAR_KEYS].sort()).toEqual([...SEND_TIME_KEYS].sort())
-    expect(PREVIEW_VAR_KEYS).toHaveLength(14)
+    expect(PREVIEW_VAR_KEYS).toHaveLength(16)
   })
 
   it('every key resolves to a non-empty string even with NO settings', () => {

@@ -44,7 +44,7 @@ import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
   EmailsFonts, EmailStatusPanel, EmailsJumpNav, ESection, EField, EBtn, ETag, ET, EF, EmailStyleSection, EmailDetailsSection,
   EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
-  goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields,
+  goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
 } from "@/components/settings/EmailsScreen"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
@@ -16486,22 +16486,9 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
 
 
 // ─── Template Library Data ────────────────────────────────────────────────────
-const TEMPLATE_VARIABLES = [
-  { key:'{{first_name}}',     label:'First Name'     },
-  { key:'{{last_name}}',      label:'Last Name'      },
-  { key:'{{organizer_name}}', label:'Your Name'      },
-  { key:'{{location_name}}',  label:'Location'       },
-  { key:'{{booking_link}}',   label:'Booking Link'   },
-  // Per-assignee: resolves to the assigned person's own calendar, falling
-  // back to the location owner's and then to the location Booking Link.
-  { key:'{{owner_booking_link}}', label:'Assignee Booking Link' },
-  { key:'{{phone}}',          label:'Your Phone'     },
-  { key:'{{service_area}}',   label:'Service Area'   },
-  // The fixed Bee Organized signature block (photo, name, title, email,
-  // mobile, location website + socials) — lib/email-signature.ts. Appears
-  // ONLY where typed; includes the name, so "Thank you,\n{{signature}}".
-  { key:'{{signature}}',      label:'Signature'      },
-]
+// TEMPLATE_VARIABLES (nine tags, one of them — {{last_name}} — filled by
+// nothing) was replaced 2026-10-30 by lib/merge-tags.ts OWNER_MERGE_TAGS,
+// shown through MergeTagPicker in every email editor.
 
 // ─── Master drip content helpers ──────────────────────────────────────────────
 // The 8 corp master paths in drip_paths (seed_master_drip_paths.sql) are the
@@ -16844,14 +16831,8 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
 
               {/* Variables */}
               <div>
-                <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'6px' }}>Insert Variable</label>
-                <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }}>
-                  {TEMPLATE_VARIABLES.map(v=>(
-                    <button key={v.key} onClick={()=>insertVariable(v.key)} style={{ padding:'4px 9px', borderRadius:'20px', cursor:'pointer', border:'1px solid rgba(99,102,241,0.25)', background:'rgba(99,102,241,0.06)', fontSize:'11px', fontFamily:'inherit', color:'#6366f1', fontWeight:500 }}>
-                      {v.label}
-                    </button>
-                  ))}
-                </div>
+                {/* Inserts at the body's cursor (insertVariable). */}
+                <MergeTagPicker onInsert={insertVariable} />
               </div>
 
               {/* Body */}
@@ -18274,6 +18255,7 @@ const CLOSED_JOB_ROWS = [
 import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shared/returningVariant'
 import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
 import PhoneInput from '@/components/hive/shared/PhoneInput'
+import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS } from '@/lib/merge-tags'
 import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
@@ -18549,11 +18531,13 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
 // Subject + body only, matching what reset restores and what
 // mergeForkOverMaster overrides at send time. The owner never sees
 // "duplicate", "master" or "custom template"; the fork is plumbing.
-function EmailTemplateEditor({ row, onCancel, onSave }) {
+export function EmailTemplateEditor({ row, onCancel, onSave }) {
   const [subject, setSubject] = React.useState(row.subject || '')
   const [body, setBody] = React.useState(row.body || '')
   const [buttonText, setButtonText] = React.useState(row.buttonText || '')
   const [buttonLink, setButtonLink] = React.useState(row.buttonLink || '')
+  // Merge tags land at the cursor in whichever field was used last.
+  const tags = useTagInsert()
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState('')
   const changed = subject !== (row.subject || '') || body !== (row.body || '') ||
@@ -18566,12 +18550,15 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
         <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Editing · {row.when}</div>
         <div style={{ padding:'20px 24px 22px' }}>
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
-          <input value={subject} onChange={e => setSubject(e.target.value)} style={{ ...field, marginBottom:'14px', fontWeight:600 }} />
+          <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...field, marginBottom:'14px', fontWeight:600 }} />
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Message</p>
           {/* The body is CONTENT — it may use the width. */}
-          <textarea value={body} onChange={e => setBody(e.target.value)}
+          <textarea value={body} onChange={e => setBody(e.target.value)} {...tags.bind(() => body, setBody)}
             style={{ width:'100%', minHeight:'200px', padding:'16px 18px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'10px', font:'inherit', fontSize:'14px', lineHeight:1.65, resize:'vertical', background:'white', color:'#1a2e2b' }} />
           <p style={{ marginTop:'10px', fontSize:'12px', color:'#8a9e9a' }}>The bits in braces get filled in for each person.</p>
+          <div style={{ marginTop:'10px' }}>
+            <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
+          </div>
           <div style={{ marginTop:'14px' }}>
             <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
           </div>
@@ -33399,12 +33386,14 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // Used by both Admin → Content (master steps, saved via the per-step PATCH)
 // and Settings → Communications (the owner's customized copies, saved via
 // commitSteps' bulk replace — the owner surface never writes per-step).
-function DripPathStepEditor({ step, onSave, onClose }) {
+export function DripPathStepEditor({ step, onSave, onClose }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
   // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
   const [buttonText, setButtonText] = useState(step.button_text || '')
   const [buttonLink, setButtonLink] = useState(step.button_link || '')
+  // Merge tags land at the cursor in whichever field was used last.
+  const tags = useTagInsert()
   const [delayDays, setDelayDays] = useState(step.delay_days ?? 0)
   const [saving, setSaving] = useState(false)
   const [localErr, setLocalErr] = useState(null)
@@ -33451,19 +33440,20 @@ function DripPathStepEditor({ step, onSave, onClose }) {
       <div onClick={(e)=>e.stopPropagation()} style={{ background:'white', borderRadius:'12px', maxWidth:'640px', width:'100%', maxHeight:'90vh', overflow:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Edit Step {step.step_order}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Variables: <code>{'{{first_name}}'}</code>, <code>{'{{owner_name}}'}</code>, <code>{'{{rate_per_hour}}'}</code>, <code>{'{{book_assessment_link}}'}</code>, <code>{'{{reviews_link}}'}</code>, <code>{'{{location_phone}}'}</code>, <code>{'{{location_owner_name}}'}</code>. See Variable Reference tab for the full list.</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
         </div>
         <div style={{ padding:'14px 18px', display:'grid', gap:'12px' }}>
           <label style={{ display:'block' }}>
             <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Subject</span>
-            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)}
+            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)}
               style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
           </label>
           <label style={{ display:'block' }}>
             <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Body</span>
-            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14}
+            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14} {...tags.bind(() => body, setBody)}
               style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', lineHeight:1.5, resize:'vertical' }} />
           </label>
+          <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
           <label style={{ display:'block' }}>
             <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Delay (days after the lead comes in)</span>
             <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)}
@@ -33488,21 +33478,11 @@ function DripPathStepEditor({ step, onSave, onClose }) {
 // available to the renderer (lib/resend.ts RenderContext + drip-send.ts /
 // welcome-email.ts / stage-emails.ts resolvers). Lives in Admin → Content.
 function VariableReference() {
+  // From lib/merge-tags.ts — the same list owners are offered, plus the tags
+  // still filled for older wording but no longer offered (and why).
   const variables = [
-    { key:'first_name',          source:'lead.first_name (falls back to first word of lead.name)', notes:'Most personalization starts here.' },
-    { key:'owner_name',          source:'leads.assigned_to → hub_users.full_name (falls back to location owner)', notes:'The "Request Owner" — who reached out to the lead.' },
-    { key:'owner_first_name',    source:'First word of {{owner_name}}', notes:'Use when a first-name signature reads better.' },
-    { key:'location_owner_name', source:"location's owner-role hub_users.full_name", notes:'The franchise owner.' },
-    { key:'location_name',       source:'locations.name', notes:'e.g. "Palm Beach".' },
-    { key:'rate_per_hour',       source:'locations.rate_per_hour', notes:'Free-form text — store as "$95" or "$85/hr (3-hour minimum)".' },
-    { key:'location_phone',      source:'locations.phone', notes:'Same as {{phone}} (no fallback to owner phone).' },
-    { key:'phone',               source:'locations.phone, falls back to owner.phone', notes:'Legacy — kept for older templates.' },
-    { key:'book_assessment_link',source:'locations.calendar_link', notes:'Booking link in the new master content.' },
-    { key:'booking_link',        source:'locations.calendar_link', notes:'Legacy alias of {{book_assessment_link}}.' },
-    { key:'reviews_link',        source:'locations.reviews_link', notes:'Google reviews URL.' },
-    { key:'service_area',        source:'"City, State" from locations.city + .state', notes:'Legacy.' },
-    { key:'organizer_name',      source:'locations.sender_name', notes:'Legacy — used in t1–t9 templates.' },
-    { key:'partner_name',        source:'(Partner Drip — Phase 2)', notes:'Currently no-op; will resolve when partners are wired up.' },
+    ...OWNER_MERGE_TAGS.map(t => ({ key: t.key, source: t.source, notes: `${t.label}. ${t.description}` })),
+    ...LEGACY_MERGE_TAGS.map(t => ({ key: t.key, source: t.source, notes: `Not offered to owners. ${t.why}` })),
   ]
 
   return (
