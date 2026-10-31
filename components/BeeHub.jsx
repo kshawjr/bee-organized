@@ -19013,13 +19013,13 @@ export function emailRowBlockers(row, cfg = {}) {
     out.push('it asks people to book a time with you, and your own booking link is empty')
   }
   if (LOCATION_BOOKING_TAGS.some(t => source.includes(t)) && isBlank(cfg.locationCalendarLink)) {
-    out.push('it asks people to book a time, and your booking link is empty')
+    out.push('it asks people to book a time, and your in-home assessment link is empty')
   }
   if (source.includes('{{discovery_booking_link}}') && isBlank(cfg.discoveryBookingLink)) {
-    out.push('it asks people to book a discovery call, and that booking link is empty')
+    out.push('it asks people to book a discovery call, and your discovery call link is empty')
   }
   if (source.includes('{{virtual_booking_link}}') && isBlank(cfg.virtualBookingLink)) {
-    out.push('it asks people to book a virtual assessment, and that booking link is empty')
+    out.push('it asks people to book a video assessment, and your video assessment link is empty')
   }
   return out
 }
@@ -22658,7 +22658,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       ratePerHour: known.ratePerHour ?? settings.location.ratePerHour,
       locationCalendarLink: known.locationCalendarLink ?? settings.location.bookingLink,
     })
-    if (missing.length) return missing.includes('rate') ? 'Add your hourly rate first.' : 'Add your booking link first.'
+    if (missing.length) return missing.includes('rate') ? 'Add your hourly rate first.' : 'Add your in-home assessment link first.'
     const pair = variantPairFor(booking, rate)
     try {
       const next = { ...settings.paths }

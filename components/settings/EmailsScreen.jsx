@@ -292,9 +292,9 @@ export function goToField(id) {
 // ── What a blank detail holds back ────────────────────────────────────────
 export const NEED_LABEL = {
   rate: 'your hourly rate',
-  discoveryBooking: 'your discovery call booking link',
-  booking: 'your in-home assessment booking link',
-  virtualBooking: 'your virtual assessment booking link',
+  discoveryBooking: 'your discovery call link',
+  booking: 'your in-home assessment link',
+  virtualBooking: 'your video assessment link',
   ownerBooking: 'your own booking link',
 }
 export const FIELD_ID = {
@@ -696,19 +696,22 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
     if (p2) { setProblem(p2); return }
     setAsking(false); setValue('')
   }
-  const what = need === 'rate' ? 'your hourly rate' : 'your booking link'
+  // The link switch asks for the in-home link only: it is the one the
+  // emails we write for you link to, so it is what the guard needs. The
+  // discovery and video links are offered once the switch is on.
+  const what = need === 'rate' ? 'your hourly rate' : 'your in-home assessment link'
   return (
     <div data-variant-switch={testId}>
       <UseToggle label={label} on={on} disabled={disabled || busy} onChange={flip} onText={onText} offText={offText} />
       {asking && !on && (
         <div role="group" aria-label={`Add ${what}`} style={{ marginTop:'8px', borderRadius:ER.xl, border:`1px solid ${alpha(ET.warning, 0.5)}`, background:ET.warningSoft, padding:'12px', fontFamily:EF.ui }}>
           <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:ET.foreground }}>
-            {need === 'rate' ? 'Your hourly rate' : 'Your booking link'}
+            {need === 'rate' ? 'Your hourly rate' : 'Your in-home assessment link'}
             <input autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder={need === 'rate' ? '$85' : 'https://calendly.com/…'}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirm() } }}
               style={{ ...eInputStyle, marginTop:'6px', background:ET.card, fontWeight:400 }} />
           </label>
-          <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.</p>
+          <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.{need === 'rate' ? '' : ' Once it’s on you can add a discovery call link and a video assessment link too.'}</p>
           <div style={{ marginTop:'8px', display:'flex', gap:'8px' }}>
             <EBtn variant="primary" disabled={!value.trim() || busy} onClick={confirm}>{busy ? 'Saving…' : 'Turn it on'}</EBtn>
             <EBtn onClick={() => { setAsking(false); setValue(''); setProblem(null) }}>Cancel</EBtn>
@@ -746,13 +749,16 @@ export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'16px' }}>
         {usesRates && <EField id="field-rate" label="Hourly rate" value={rate || ''} placeholder="$85" problem={prob('rate')} hint={used('rate')} onSave={v => onSaveLocation('rate', v)} />}
         <EField id="field-reviews" label="Google Reviews link" value={reviewsLink || ''} placeholder="https://g.page/…" hint={used('reviews')} onSave={v => onSaveLocation('reviews', v)} />
+        {/* THREE LINKS, EACH OPTIONAL (Kevin, 2026-10-30). Shown while the link
+            switch is on; hidden, never cleared, while it is off. A blank one is
+            normal — only an email that uses its tag waits for it. */}
         {usesLinks && <>
-          <EField id="field-discovery-booking" label="Discovery call booking link" value={options.discoveryBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
-            problem={prob('discoveryBooking')} hint={ready.links ? used('discoveryBooking', ' · only needed if you offer them') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ discovery_booking_link: v })} />
-          <EField id="field-booking" label="In-home assessment booking link" value={calendarLink || ''} placeholder="https://calendly.com/…"
+          <EField id="field-discovery-booking" label="Discovery call link" value={options.discoveryBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
+            problem={prob('discoveryBooking')} hint={ready.links ? used('discoveryBooking', ' · optional') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ discovery_booking_link: v })} />
+          <EField id="field-virtual-booking" label="Video assessment link" value={options.virtualBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
+            problem={prob('virtualBooking')} hint={ready.links ? used('virtualBooking', ' · optional') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ virtual_booking_link: v })} />
+          <EField id="field-booking" label="In-home assessment link" value={calendarLink || ''} placeholder="https://calendly.com/…"
             problem={prob('booking')} hint={used('booking')} onSave={v => onSaveLocation('booking', v)} />
-          <EField id="field-virtual-booking" label="Virtual assessment booking link" value={options.virtualBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
-            problem={prob('virtualBooking')} hint={ready.links ? used('virtualBooking', ' · only needed if you offer them') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ virtual_booking_link: v })} />
         </>}
       </div>
       {nothingWaiting && <p style={{ margin:'16px 0 0', display:'flex', alignItems:'center', gap:'6px', fontSize:'12px', color:ET.success, fontFamily:EF.ui }}>✓ Nothing is waiting on these.</p>}

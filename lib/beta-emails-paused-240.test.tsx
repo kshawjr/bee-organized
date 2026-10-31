@@ -95,7 +95,7 @@ describe('what actually blocks a send', () => {
   it('the location aliases need the LOCATION link, not the owner one', () => {
     const cfg = { ...ALL_SET, locationCalendarLink: '' }
     expect(emailRowBlockers(row(`Book here: ${LOC_LINK}`), cfg).length).toBe(1)
-    expect(emailRowBlockers(row(`Book here: ${LOC_LINK}`), cfg)[0]).toContain('your booking link')
+    expect(emailRowBlockers(row(`Book here: ${LOC_LINK}`), cfg)[0]).toContain('your in-home assessment link')
   })
 
   it('a row with no guarded tag is never blocked, however much is unset', () => {

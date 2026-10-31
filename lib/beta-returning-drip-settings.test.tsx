@@ -154,6 +154,6 @@ describe('3 + 4) the list picks the variant from the organizing answers', () => 
       { ratePerHour: '$98.00', ownerBookingLink: '', locationCalendarLink: '' })
     // 2026-10-30 design: held reads "Not sending — add …" (Paused now means
     // the owner paused it).
-    expect(container.textContent).toContain('Not sending — add your in-home assessment booking link')
+    expect(container.textContent).toContain('Not sending — add your in-home assessment link')
   })
 })

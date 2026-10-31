@@ -34,8 +34,8 @@ export const runtime = 'nodejs'
 
 const LINK_FIELDS = ['discovery_booking_link', 'virtual_booking_link'] as const
 const LINK_NOUNS: Record<(typeof LINK_FIELDS)[number], string> = {
-  discovery_booking_link: 'Discovery call booking link',
-  virtual_booking_link: 'Virtual assessment booking link',
+  discovery_booking_link: 'Discovery call link',
+  virtual_booking_link: 'Video assessment link',
 }
 
 async function authorise(locId: string, write: boolean) {

@@ -183,7 +183,7 @@ describe('the guard is the switch’s own', () => {
     expect(variantWrites()).toEqual([])
     expect(locationWrites()).toEqual([])
     const ask = container.querySelector('[data-variant-switch="both-link"] [role="group"]') as HTMLElement
-    expect(ask.textContent).toContain('Your booking link')
+    expect(ask.textContent).toContain('Your in-home assessment link')
   })
 
   it('with the value already set, a switch turns on straight away', async () => {

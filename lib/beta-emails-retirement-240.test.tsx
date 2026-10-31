@@ -185,7 +185,7 @@ describe('the write inventory — every one still has a path', () => {
   it('4. rate and booking links are still owner-editable — on Emails now', async () => {
     const t = await mount('emails')
     expect(t).toContain('Hourly rate')
-    expect(t).toContain('In-home assessment booking link')
+    expect(t).toContain('In-home assessment link')
     // Location's pointer to here is pinned in lib/beta-emails-moved-settings.test.tsx.
   })
 

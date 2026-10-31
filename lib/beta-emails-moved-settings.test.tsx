@@ -102,7 +102,7 @@ const patches = () => fetchMock.mock.calls.filter(([url, opts]: any[]) => String
 
 const FIELDS = [
   { label: 'Hourly rate', column: 'rate_per_hour', value: '$85/hr (3-hour minimum)' },
-  { label: 'In-home assessment booking link', column: 'calendar_link', value: 'https://book.example.com/new' },
+  { label: 'In-home assessment link', column: 'calendar_link', value: 'https://book.example.com/new' },
   { label: 'Google Reviews link', column: 'reviews_link', value: 'https://g.page/r/newreview' },
 ]
 

@@ -117,7 +117,7 @@ describe('the owner’s drip email editor', () => {
     await mount()
     expect(container.querySelector('[data-merge-tag-picker]')).toBeTruthy()
     expect(chip('discovery_booking_link').textContent).toBe('Discovery call link')
-    expect(chip('virtual_booking_link').textContent).toBe('Virtual assessment link')
+    expect(chip('virtual_booking_link').textContent).toBe('Video assessment link')
     expect(chip('last_name')).toBeNull()
   })
 
@@ -152,7 +152,7 @@ describe('the owner’s drip email editor', () => {
   it('hovering a tag says what it is', async () => {
     await mount()
     await act(async () => { chip('booking_link').dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
-    expect(container.querySelector('[data-merge-tag-picker]')!.textContent).toContain('Exactly the same link as “Location booking link”')
+    expect(container.querySelector('[data-merge-tag-picker]')!.textContent).toContain('Exactly the same link as “In-home assessment link”')
   })
 })
 
