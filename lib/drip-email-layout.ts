@@ -165,8 +165,15 @@ export type BrandedEmailContext = {
   heading?: string | null
   // The email's optional button (button_text + button_link), ALREADY
   // RENDERED. Both must be present and the link a real http(s) URL, or there
-  // is no button.
-  button?: { label?: string | null; href?: string | null } | null
+  // is no button. align (drip_path_steps / templates .button_align) is where
+  // it sits; absent or unknown → centre, as every button was before it existed.
+  button?: { label?: string | null; href?: string | null; align?: string | null } | null
+}
+
+export type ButtonAlign = 'left' | 'center' | 'right'
+export const BUTTON_ALIGNS: ButtonAlign[] = ['left', 'center', 'right']
+export function buttonAlignOf(v: unknown): ButtonAlign {
+  return v === 'left' || v === 'right' ? v : 'center'
 }
 
 const LINK_STYLE = `color:${EMAIL_TEXT};text-decoration:underline;`
@@ -348,22 +355,34 @@ ${heading ? `<title>${escHtml(heading)}</title>\n` : ''}<link href="${FONTS_LINK
 // behind it ({{booking_link}} with no link set) leaves an empty string — not a
 // URL, so no button. Only http(s) survives (safeHttpUrl, as for signature
 // links): an owner-typed "javascript:" never reaches an href.
-export function resolveButton(button: BrandedEmailContext['button']): { label: string; href: string } | null {
+export function resolveButton(button: BrandedEmailContext['button']): { label: string; href: string; align: ButtonAlign } | null {
   const label = button?.label?.trim()
   const raw = button?.href?.trim()
   if (!label || !raw) return null
   const href = safeHttpUrl(raw)
-  return href ? { label, href } : null
+  return href ? { label, href, align: buttonAlignOf(button?.align) } : null
 }
 
-export function buildButtonHtml(style: EmailStyle | string | null | undefined, button: { label: string; href: string }): string {
+// Centre is the markup every button had before alignment existed, byte for
+// byte. Left and right sit the same button inside a full-width row aligned
+// that way — a bare align="left" table floats in Outlook and lets the next
+// paragraph wrap beside it.
+export function buildButtonHtml(style: EmailStyle | string | null | undefined, button: { label: string; href: string; align?: string | null }): string {
   const s = emailStyleSpec(style)
   const size = s.buttonCaps ? 15 : 17
   const tracking = s.buttonCaps ? 2 : 0.5
   const transform = s.buttonCaps ? 'uppercase' : 'none'
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 20px auto;">
-<tr><td align="center" bgcolor="${s.buttonBg}" style="background-color:${s.buttonBg};border:2px solid ${s.buttonBorder};border-radius:${s.buttonRadius}px;">
+  const cell = `<tr><td align="center" bgcolor="${s.buttonBg}" style="background-color:${s.buttonBg};border:2px solid ${s.buttonBorder};border-radius:${s.buttonRadius}px;">
 <a href="${escAttr(button.href)}" target="_blank" style="display:inline-block;padding:14px 32px;font-family:${EMAIL_SANS};font-size:${size}px;font-weight:500;letter-spacing:${tracking}px;text-transform:${transform};color:${s.buttonText};text-decoration:none;border-radius:${s.buttonRadius}px;">${escHtml(button.label)}</a>
+</td></tr></table>`
+  const align = buttonAlignOf(button.align)
+  if (align === 'center') {
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 20px auto;">
+${cell}`
+  }
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0;"><tr><td align="${align}">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}">
+${cell}
 </td></tr></table>`
 }
 

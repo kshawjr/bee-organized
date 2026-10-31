@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { buttonAlignIn } from '@/lib/drip-step-extras'
 
 export async function PATCH(
   req: NextRequest,
@@ -98,6 +99,10 @@ export async function PATCH(
     const v = body[f]
     patch[f] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null
   }
+  // Where the button sits (migrations/button_align.sql): left | right, null =
+  // centre. Before that migration runs, a centred button needs no column and
+  // is simply left out; only left / right are refused (below).
+  if ('button_align' in body) patch.button_align = buttonAlignIn(body.button_align)
 
   // issue 316, server side — a subject edit on an EMAIL step must not leave
   // it with no subject from any source. The sender resolves
@@ -127,13 +132,21 @@ export async function PATCH(
     }
   }
 
-  const { data, error } = await supabaseService
+  const runUpdate = () => supabaseService
     .from('drip_path_steps')
     .update(patch)
     .eq('id', params.stepId)
     .select('id, drip_path_id, step_order, delay_days, channel, subject, body, is_active, updated_at')
     .single()
+  let { data, error } = await runUpdate()
 
+  if (error && /button_align/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+    if (patch.button_align) {
+      return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/button_align.sql has not been run' }, { status: 409 })
+    }
+    delete patch.button_align
+    ;({ data, error } = await runUpdate())
+  }
   if (error && /button_(text|link)/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
     return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/email_buttons.sql has not been run' }, { status: 409 })
   }

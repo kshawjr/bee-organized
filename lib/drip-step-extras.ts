@@ -7,6 +7,7 @@
 //   delay_unit   migrations/drip_path_steps_delay_unit.sql
 //   button_text  migrations/email_buttons.sql
 //   button_link  migrations/email_buttons.sql
+//   button_align migrations/button_align.sql (left | right; null = centre)
 //
 // WHY THIS IS CAREFUL. The step save is DELETE-then-INSERT. If the insert named
 // a column whose migration hasn't run, it would fail after the delete and the
@@ -16,7 +17,7 @@
 
 import { supabaseService } from './supabase-service'
 
-export const STEP_EXTRA_COLUMNS = ['is_paused', 'delay_unit', 'button_text', 'button_link'] as const
+export const STEP_EXTRA_COLUMNS = ['is_paused', 'delay_unit', 'button_text', 'button_link', 'button_align'] as const
 export type StepExtraColumn = (typeof STEP_EXTRA_COLUMNS)[number]
 
 export type DelayUnit = 'days' | 'months' | 'years'
@@ -28,6 +29,9 @@ export type StepExtrasIn = {
   delay_unit?: DelayUnit | null
   button_text?: string | null
   button_link?: string | null
+  // null = centre, the default; centre is stored as null so an untouched
+  // email and a centred one are the same row.
+  button_align?: 'left' | 'right' | null
 }
 
 function textOrNull(v: unknown): string | null | undefined {
@@ -35,6 +39,10 @@ function textOrNull(v: unknown): string | null | undefined {
   if (typeof v !== 'string') return null
   const t = v.trim()
   return t ? t.slice(0, 500) : null
+}
+
+export function buttonAlignIn(v: unknown): 'left' | 'right' | null {
+  return v === 'left' || v === 'right' ? v : null
 }
 
 export function parseStepExtras(raw: Record<string, unknown>): StepExtrasIn {
@@ -46,6 +54,7 @@ export function parseStepExtras(raw: Record<string, unknown>): StepExtrasIn {
   if (bt !== undefined) out.button_text = bt
   const bl = textOrNull(raw.button_link)
   if (bl !== undefined) out.button_link = bl
+  if (raw.button_align !== undefined) out.button_align = buttonAlignIn(raw.button_align)
   return out
 }
 
@@ -68,7 +77,8 @@ export async function existingStepExtraColumns(): Promise<Set<StepExtraColumn>> 
 
 // The columns a save NEEDS but the database doesn't have yet. Only values
 // that change behaviour count: pausing, a months/years unit, a button.
-// Un-pausing, a days unit and an empty button are today's behaviour already.
+// Un-pausing, a days unit, an empty button and a centred one are today's
+// behaviour already.
 export function extrasNeedingMissingColumns(steps: StepExtrasIn[], cols: Set<StepExtraColumn>): StepExtraColumn[] {
   const need = new Set<StepExtraColumn>()
   for (const s of steps) {
@@ -76,6 +86,7 @@ export function extrasNeedingMissingColumns(steps: StepExtrasIn[], cols: Set<Ste
     if ((s.delay_unit === 'months' || s.delay_unit === 'years') && !cols.has('delay_unit')) need.add('delay_unit')
     if (s.button_text && !cols.has('button_text')) need.add('button_text')
     if (s.button_link && !cols.has('button_link')) need.add('button_link')
+    if (s.button_align && !cols.has('button_align')) need.add('button_align')
   }
   return Array.from(need)
 }
@@ -88,6 +99,7 @@ export function stepExtrasForInsert(s: StepExtrasIn, cols: Set<StepExtraColumn>)
   if (cols.has('delay_unit')) out.delay_unit = s.delay_unit && s.delay_unit !== 'days' ? s.delay_unit : null
   if (cols.has('button_text')) out.button_text = s.button_text ?? null
   if (cols.has('button_link')) out.button_link = s.button_link ?? null
+  if (cols.has('button_align')) out.button_align = s.button_align ?? null
   return out
 }
 

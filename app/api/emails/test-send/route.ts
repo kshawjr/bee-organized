@@ -63,6 +63,7 @@ type Source = {
   body: string
   buttonText: string | null
   buttonLink: string | null
+  buttonAlign: 'left' | 'center' | 'right' | null
   render: 'drip' | 'welcome' | 'stage'
   templateKey: string | null
 }
@@ -121,6 +122,7 @@ export async function POST(req: NextRequest) {
       body: (step as any).body ?? tpl?.body ?? '',
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
+      buttonAlign: extras.buttonAlign,
       render: 'drip',
       templateKey: null,
     }
@@ -140,6 +142,7 @@ export async function POST(req: NextRequest) {
       body: fork?.body ?? (master as any).body ?? '',
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
+      buttonAlign: extras.buttonAlign,
       render: key === 'welcome' ? 'welcome' : 'stage',
       templateKey: key,
     }
@@ -209,7 +212,7 @@ export async function POST(req: NextRequest) {
     signature,
     style: options.style,
     heading: rendered.subject,
-    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
+    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: source.buttonAlign } : null,
   }
 
   let html: string

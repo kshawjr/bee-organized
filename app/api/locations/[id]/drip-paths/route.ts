@@ -125,6 +125,7 @@ export async function GET(
           delay_unit: (s as any).delay_unit ?? null,
           button_text: (s as any).button_text ?? null,
           button_link: (s as any).button_link ?? null,
+          button_align: (s as any).button_align ?? null,
         }
       }),
   }))

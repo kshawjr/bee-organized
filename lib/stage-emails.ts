@@ -496,7 +496,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
       signature,
       style: emailOptions.style,
       heading: rendered.subject,
-      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
+      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: tplExtras.buttonAlign } : null,
     },
     canSpamFooter,
   )

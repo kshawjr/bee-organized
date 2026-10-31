@@ -71,8 +71,11 @@ export type EmailExtras = {
   isPaused: boolean
   buttonText: string | null
   buttonLink: string | null
+  // drip_path_steps / templates .button_align (migrations/button_align.sql).
+  // Absent column or unknown value → null, which renders centre.
+  buttonAlign: 'left' | 'center' | 'right' | null
 }
-export const NO_EXTRAS: EmailExtras = { isPaused: false, buttonText: null, buttonLink: null }
+export const NO_EXTRAS: EmailExtras = { isPaused: false, buttonText: null, buttonLink: null, buttonAlign: null }
 
 export function extrasFromRow(row: Record<string, unknown> | null | undefined): EmailExtras {
   if (!row) return { ...NO_EXTRAS }
@@ -80,6 +83,7 @@ export function extrasFromRow(row: Record<string, unknown> | null | undefined): 
     isPaused: row.is_paused === true,
     buttonText: cleanText(row.button_text),
     buttonLink: cleanText(row.button_link),
+    buttonAlign: row.button_align === 'left' || row.button_align === 'center' || row.button_align === 'right' ? row.button_align : null,
   }
 }
 

@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { buttonAlignIn } from '@/lib/drip-step-extras'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -137,6 +138,10 @@ export async function PATCH(
     const v = body[f]
     patch[f] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null
   }
+  // Where the button sits (migrations/button_align.sql): left | right, null =
+  // centre. Before that migration runs, a centred button needs no column and
+  // is simply left out; only left / right are refused (below).
+  if ('button_align' in body) patch.button_align = buttonAlignIn(body.button_align)
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
@@ -157,13 +162,21 @@ export async function PATCH(
     }
   }
 
-  const { data, error } = await supabaseService
+  const runUpdate = () => supabaseService
     .from('templates')
     .update(patch)
     .eq('id', tpl.id)
     .select(SELECT_COLS)
     .maybeSingle()
+  let { data, error } = await runUpdate()
 
+  if (error && /button_align/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+    if (patch.button_align) {
+      return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/button_align.sql has not been run' }, { status: 409 })
+    }
+    delete patch.button_align
+    ;({ data, error } = await runUpdate())
+  }
   if (error && /button_(text|link)/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
     return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/email_buttons.sql has not been run' }, { status: 409 })
   }

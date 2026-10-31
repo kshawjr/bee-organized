@@ -7,7 +7,9 @@
 //   discovery_booking_link   {{discovery_booking_link}}
 //   virtual_booking_link     {{virtual_booking_link}}
 //
-// GET   → { settings: LocationEmailOptions, ready: { style, links } }
+// GET   → { settings: LocationEmailOptions, ready: { style, links, align } }
+//         align: drip_path_steps AND templates have button_align
+//         (migrations/button_align.sql), so the editors offer left / right.
 //         `ready` says which migrations have run, so the screen can say "not
 //         set up yet" instead of failing a save.
 // PATCH any subset of the three → { ok, settings }
@@ -71,12 +73,28 @@ function readiness(row: Record<string, unknown>) {
   }
 }
 
+// One row of each, '*': a missing column is simply absent. Both tables always
+// have rows (the corporate masters); an empty answer reads as not ready, the
+// safe direction.
+async function alignReady(): Promise<boolean> {
+  try {
+    const [steps, templates] = await Promise.all([
+      supabaseService.from('drip_path_steps').select('*').limit(1),
+      supabaseService.from('templates').select('*').limit(1),
+    ])
+    const has = (r: { data: unknown }) => Array.isArray(r.data) && !!r.data[0] && 'button_align' in (r.data[0] as Record<string, unknown>)
+    return has(steps) && has(templates)
+  } catch {
+    return false
+  }
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const denied = await authorise(params.id, false)
   if (denied) return denied
   const row = await readRow(params.id)
   if (!row) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
-  return NextResponse.json({ settings: locationEmailOptionsFromRow(row), ready: readiness(row) })
+  return NextResponse.json({ settings: locationEmailOptionsFromRow(row), ready: { ...readiness(row), align: await alignReady() } })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

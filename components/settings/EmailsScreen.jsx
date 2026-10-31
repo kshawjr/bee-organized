@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
-import { SIGNATURE_MARKER } from '@/lib/email-signature'
+import { SIGNATURE_MARKER, safeHttpUrl } from '@/lib/email-signature'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
 
@@ -613,7 +613,7 @@ export function previewEmailHtml({ row, style, values, signature = null }) {
     signature,
     style,
     heading: subject,
-    button: row?.buttonText && buttonLink ? { label: fill(row.buttonText, false), href: buttonLink } : null,
+    button: row?.buttonText && buttonLink ? { label: fill(row.buttonText, false), href: buttonLink, align: row.buttonAlign } : null,
   })
 }
 
@@ -886,26 +886,181 @@ export function EmailSignatureSection({ locationId, sig }) {
   )
 }
 
-// ── The optional button (Kevin, 2026-10-30) ──────────────────────────────
-// "Button text" + "Button link". Both filled in → the email shows a button in
-// the location's style; either blank → no button. The link can be a tag such
-// as {{booking_link}}, filled in per client like the wording.
-export function ButtonFields({ text, link, onText, onLink, labelStyle = null, inputStyle = null }) {
+// ── The optional button (Kevin, 2026-10-30; the Lovable button section) ──
+// WHERE IT GOES is a row of pills, not a box an owner types a code into:
+// None (the default, and every email today), the three saved booking links by
+// short name, or Custom (a web address). A pill stores the tag in button_link,
+// so the link is filled per location at send time exactly as before.
+//
+// A pill for a link this location hasn't saved still shows, amber, and says
+// the email will be held — a button's link is guarded like the wording
+// (blockedOnMissingBookingLink). With no links saved at all, only None and
+// Custom (plus whichever one the email already carries).
+//
+// THE WORDS keep their own box, pre-filled from the pill. A suggestion is
+// replaced when the pill changes; anything else the owner typed never is.
+// Told apart by value: the box is "still a suggestion" when it is empty or
+// reads exactly one of BUTTON_DEFAULT_TEXT.
+//
+// WHERE IT SITS: left / centre / right, offered once migrations/button_align.sql
+// has run (alignReady). Centre is stored as null.
+//
+//   links   { discovery, inHome, video } — this location's saved values; null
+//           when there is no location (corporate's master editor): every
+//           pill shows, none is amber.
+export const BUTTON_LINKS = [
+  { id:'discovery', label:'Discovery', tag:'{{discovery_booking_link}}', name:'discovery call link' },
+  { id:'inHome',    label:'In-home',   tag:'{{book_assessment_link}}',   name:'in-home assessment link', alsoTags:['{{booking_link}}'] },
+  { id:'video',     label:'Video',     tag:'{{virtual_booking_link}}',   name:'video assessment link' },
+]
+export const BUTTON_DEFAULT_TEXT = {
+  discovery: 'Book a Discovery Call',
+  inHome: 'Book Your Assessment',
+  video: 'Book a Video Assessment',
+}
+// What a stored button_link reads as: '' → none, a link tag → its pill,
+// anything else → custom.
+export function buttonChoiceOf(link) {
+  const v = String(link || '').trim()
+  if (!v) return 'none'
+  const hit = BUTTON_LINKS.find(l => l.tag === v || (l.alsoTags || []).includes(v))
+  return hit ? hit.id : 'custom'
+}
+export const CUSTOM_LINK_PROBLEM = 'That link needs to be a full web address starting with https://, like https://calendly.com/you.'
+// Why this button can't be saved, or null. The editors ask before saving.
+export function buttonProblem(text, link) {
+  const choice = buttonChoiceOf(link)
+  if (choice === 'none') return null
+  if (choice === 'custom' && !safeHttpUrl(String(link).trim())) return CUSTOM_LINK_PROBLEM
+  if (!String(text || '').trim()) return 'Add the words for the button, or choose None.'
+  return null
+}
+// What the editors save. None clears the words too.
+// A custom address is saved the way the send reads it (safeHttpUrl), so a
+// bare "calendly.com/you" goes in as https://calendly.com/you.
+export function buttonForSave(text, link, align) {
+  const raw = String(link || '').trim()
+  const l = buttonChoiceOf(raw) === 'custom' ? (safeHttpUrl(raw) || raw) : raw
+  return {
+    button_text: l ? (String(text || '').trim() || null) : null,
+    button_link: l || null,
+    button_align: align === 'left' || align === 'right' ? align : null,
+  }
+}
+const isSuggestion = (t) => !String(t || '').trim() || Object.values(BUTTON_DEFAULT_TEXT).includes(String(t).trim())
+
+const ALIGN_OPTIONS = [
+  { id:'left', label:'Left', lines:[[3, 13], [3, 9], [3, 13]] },
+  { id:'center', label:'Centre', lines:[[3, 13], [5, 11], [3, 13]] },
+  { id:'right', label:'Right', lines:[[3, 13], [7, 13], [3, 13]] },
+]
+
+export function ButtonFields({ text, link, align = null, onText, onLink, onAlign = null, alignReady = false, links = null, labelStyle = null, inputStyle = null }) {
   const lab = labelStyle || eLabelStyle
   const inp = inputStyle || eInputStyle
+  const [touched, setTouched] = React.useState(false)
+  const uid = React.useId()
+  const choice = buttonChoiceOf(link)
+  const saved = (id) => !links || !blank(links[id])
+  const noLinks = !!links && BUTTON_LINKS.every(l => blank(links[l.id]))
+  const shown = BUTTON_LINKS.filter(l => !noLinks || l.id === choice)
+  const pick = (id) => {
+    setTouched(false)
+    if (id === 'none') { onLink(''); onText(''); return }
+    if (id === 'custom') { if (choice !== 'custom') onLink('https://'); return }
+    const l = BUTTON_LINKS.find(x => x.id === id)
+    onLink(l.tag)
+    if (isSuggestion(text)) onText(BUTTON_DEFAULT_TEXT[id])
+  }
+  const pill = (id, label, unsaved = false) => {
+    const on = choice === id
+    return (
+      <button key={id} type="button" role="radio" aria-checked={on} data-button-pill={id} data-unsaved={unsaved ? 'true' : undefined}
+        onClick={() => pick(id)} data-ehover={on ? undefined : 'muted'}
+        style={{ flex:'1 1 64px', minHeight:'44px', boxSizing:'border-box', borderRadius:ER.lg, padding:'8px 10px',
+          border:`1px solid ${on ? (unsaved ? ET.warning : ET.primary) : unsaved ? alpha(ET.warning, 0.5) : ET.border}`,
+          background: unsaved ? ET.warningSoft : on ? ET.sageSoft : ET.card,
+          fontSize:'14px', fontWeight: on ? 600 : 400, color: unsaved ? ET.warning : ET.foreground, fontFamily:EF.ui, cursor:'pointer' }}>
+        {label}
+      </button>
+    )
+  }
+  const chosenLink = BUTTON_LINKS.find(l => l.id === choice)
+  const customProblem = choice === 'custom' && touched && !safeHttpUrl(String(link).trim()) ? CUSTOM_LINK_PROBLEM : null
   return (
-    <div data-button-fields style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'12px' }}>
-      <label style={{ display:'block' }}>
-        <span style={lab}>Button text <span style={{ fontWeight:400, color:ET.mutedFg }}>· optional</span></span>
-        <input type="text" value={text} maxLength={60} placeholder="Book a time" onChange={e => onText(e.target.value)} style={inp} />
-      </label>
-      <label style={{ display:'block' }}>
-        <span style={lab}>Button link <span style={{ fontWeight:400, color:ET.mutedFg }}>· optional</span></span>
-        <input type="text" value={link} placeholder="{{booking_link}}" onChange={e => onLink(e.target.value)} style={inp} />
-      </label>
-      <p style={{ gridColumn:'1 / -1', margin:0, fontSize:'12px', color:ET.mutedFg, lineHeight:1.5 }}>
-        Fill in both and the email shows a button in your chosen look. Leave either blank for no button. The link can be one of your booking links, like <code>{'{{booking_link}}'}</code>, <code>{'{{discovery_booking_link}}'}</code> or <code>{'{{virtual_booking_link}}'}</code>.
-      </p>
+    <div data-button-fields style={{ display:'grid', gap:'12px', fontFamily:EF.ui }}>
+      <div>
+        <span id={`${uid}-link`} style={lab}>Button <span style={{ fontWeight:400, color:ET.mutedFg }}>· optional</span></span>
+        <div role="radiogroup" aria-labelledby={`${uid}-link`} style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+          {pill('none', 'None')}
+          {shown.map(l => pill(l.id, l.label, !saved(l.id)))}
+          {pill('custom', 'Custom')}
+        </div>
+        {noLinks && (
+          <p data-no-links style={{ ...eHintStyle, margin:'6px 0 0' }}>You haven’t saved any booking links yet. Add them in Your details, or use Custom for any web address.</p>
+        )}
+        {chosenLink && !saved(chosenLink.id) && (
+          <p role="status" data-held-warning style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>⚠ You haven’t saved a {chosenLink.name} yet, so this email will be held until you add it in Your details.</p>
+        )}
+      </div>
+      {choice === 'custom' && (
+        <label style={{ display:'block' }}>
+          <span style={lab}>Web address</span>
+          <input type="url" value={link} placeholder="https://calendly.com/you" onChange={e => onLink(e.target.value)} onBlur={() => setTouched(true)}
+            aria-invalid={customProblem ? 'true' : undefined} style={{ ...inp, ...(customProblem ? { borderColor:ET.destructive } : null) }} />
+          {customProblem && <span role="alert" style={{ marginTop:'4px', display:'block', fontSize:'12px', color:ET.destructive }}>⚠ {customProblem}</span>}
+        </label>
+      )}
+      {choice !== 'none' && (
+        <label style={{ display:'block' }}>
+          <span style={lab}>Button text</span>
+          <input type="text" value={text} maxLength={60} placeholder={BUTTON_DEFAULT_TEXT[choice] || 'Book a time'} onChange={e => onText(e.target.value)} style={inp} />
+        </label>
+      )}
+      {choice !== 'none' && alignReady && onAlign && (
+        <div>
+          <span id={`${uid}-align`} style={lab}>Button position</span>
+          <div role="radiogroup" aria-labelledby={`${uid}-align`} style={{ display:'flex', gap:'6px' }}>
+            {ALIGN_OPTIONS.map(o => {
+              const on = (align === 'left' || align === 'right' ? align : 'center') === o.id
+              return (
+                <button key={o.id} type="button" role="radio" aria-checked={on} aria-label={o.label} title={o.label} data-button-align={o.id}
+                  onClick={() => onAlign(o.id === 'center' ? null : o.id)} data-ehover={on ? undefined : 'muted'}
+                  style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', boxSizing:'border-box', borderRadius:ER.lg,
+                    border:`1px solid ${on ? ET.primary : ET.border}`, background: on ? ET.sageSoft : ET.card, color:ET.foreground, cursor:'pointer', padding:0 }}>
+                  <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    {o.lines.map(([x1, x2], i) => <line key={i} x1={x1} x2={x2} y1={4 + i * 4} y2={4 + i * 4} />)}
+                  </svg>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The editors' Preview: the real branded email (previewEmailHtml →
+// lib/drip-email-layout.ts, what sends) with the unsaved subject, wording and
+// button. Without a location (corporate's master editor, tests) it uses
+// sample details so the button still shows.
+export const SAMPLE_PREVIEW = {
+  style: 'soft',
+  signature: null,
+  values: {
+    first_name: 'Jordan', location_name: 'Bee Organized', owner_name: 'Your name', owner_first_name: 'Your name',
+    discovery_booking_link: 'https://example.com/discovery', book_assessment_link: 'https://example.com/in-home',
+    booking_link: 'https://example.com/in-home', virtual_booking_link: 'https://example.com/video',
+    owner_booking_link: 'https://example.com/in-home', rate_per_hour: '$95',
+  },
+}
+export function EditorPreview({ draft, preview }) {
+  const ctx = preview || SAMPLE_PREVIEW
+  return (
+    <div data-editor-preview>
+      {!preview && <p style={{ ...eHintStyle, margin:'0 0 8px' }}>Shown with sample details.</p>}
+      <EmailFrame html={previewEmailHtml({ row: draft, style: ctx.style, values: ctx.values, signature: ctx.signature })} />
     </div>
   )
 }

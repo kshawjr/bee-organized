@@ -46,6 +46,7 @@ import {
   ESelect, EDialog, ENote, ERadioCard, eBtnStyle, eInputStyle, eTextareaStyle, eLabelStyle, eHintStyle,
   EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
   goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
+  buttonProblem, buttonForSave, EditorPreview,
 } from "@/components/settings/EmailsScreen"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
@@ -16539,6 +16540,7 @@ function masterStepsToUi(master) {
         delayUnit: s.delay_unit ?? null,
         buttonText: s.button_text ?? null,
         buttonLink: s.button_link ?? null,
+        buttonAlign: s.button_align ?? null,
       }
     })
     .sort((a, b) => a.order - b.order)
@@ -18310,6 +18312,7 @@ function templateRow(templates, legacyId, days, when) {
     // 2026-10-30 — the optional button; the test send names the template.
     buttonText: use.buttonText || '',
     buttonLink: use.buttonLink || '',
+    buttonAlign: use.buttonAlign || null,
     templateKey: legacyId,
   }
 }
@@ -18410,6 +18413,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
           delayUnit: s.delayUnit || null,
           buttonText: s.buttonText || '',
           buttonLink: s.buttonLink || '',
+          buttonAlign: s.buttonAlign || null,
           stepId: s.dbId ?? s.stepId ?? null,
           contentMissing: !subject && !body,
         }
@@ -18518,17 +18522,20 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
 // Subject + body only, matching what reset restores and what
 // mergeForkOverMaster overrides at send time. The owner never sees
 // "duplicate", "master" or "custom template"; the fork is plumbing.
-export function EmailTemplateEditor({ row, onCancel, onSave }) {
+export function EmailTemplateEditor({ row, onCancel, onSave, links = null, alignReady = false, preview = null }) {
   const [subject, setSubject] = React.useState(row.subject || '')
   const [body, setBody] = React.useState(row.body || '')
   const [buttonText, setButtonText] = React.useState(row.buttonText || '')
   const [buttonLink, setButtonLink] = React.useState(row.buttonLink || '')
+  const [buttonAlign, setButtonAlign] = React.useState(row.buttonAlign || null)
+  // Preview swaps the form for the real email; the drafts above stay put.
+  const [previewing, setPreviewing] = React.useState(false)
   // Merge tags land at the cursor in whichever field was used last.
   const tags = useTagInsert()
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState('')
   const changed = subject !== (row.subject || '') || body !== (row.body || '') ||
-    buttonText !== (row.buttonText || '') || buttonLink !== (row.buttonLink || '')
+    buttonText !== (row.buttonText || '') || buttonLink !== (row.buttonLink || '') || (buttonAlign || null) !== (row.buttonAlign || null)
   const save = async () => {
     setErr('')
     // issue 316 — same checks as the drip step editor: a blank
@@ -18537,16 +18544,22 @@ export function EmailTemplateEditor({ row, onCancel, onSave }) {
     // owner can see why. This rail is email-only.
     if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
     if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
+    const bp = buttonProblem(buttonText, buttonLink)
+    if (bp) { setErr(bp); setPreviewing(false); return }
     setBusy(true)
-    try { await onSave(subject, body, { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }) }
+    try { await onSave(subject, body, buttonForSave(buttonText, buttonLink, buttonAlign)) }
     catch (e) { setErr(String(e?.message || e)); setBusy(false) }
   }
   return (
-    <EDialog label="Edit this email" eyebrow={row.when} title="Change wording" onClose={busy ? null : onCancel}
+    <EDialog label="Edit this email" eyebrow={row.when} title={previewing ? 'Preview' : 'Change wording'} onClose={busy ? null : onCancel}
       footer={<>
         <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
+        <EBtn onClick={() => setPreviewing(p => !p)} disabled={busy}>{previewing ? 'Back to editing' : 'Preview'}</EBtn>
         <EBtn variant="primary" onClick={save} disabled={busy || !changed}>{busy ? 'Saving…' : 'Save'}</EBtn>
       </>}>
+      {previewing ? (
+        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
+      ) : <>
       <label style={eLabelStyle}>Subject</label>
       <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...eInputStyle, marginBottom:'12px' }} />
       <label style={eLabelStyle}>Message</label>
@@ -18558,11 +18571,19 @@ export function EmailTemplateEditor({ row, onCancel, onSave }) {
         <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
       </div>
       <div style={{ marginTop:'16px' }}>
-        <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
+        <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
+          alignReady={alignReady} links={links} />
       </div>
+      </>}
       {err && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
     </EDialog>
   )
+}
+
+// The draft as previewEmailHtml reads a row's button.
+function buttonDraft(text, link, align) {
+  const b = buttonForSave(text, link, align)
+  return { buttonText: b.button_text || '', buttonLink: b.button_link || '', buttonAlign: b.button_align }
 }
 
 // ─── issue 240 step 9c — the two questions ───
@@ -22330,6 +22351,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // 2026-10-30 — the optional button (migrations/email_buttons.sql).
       buttonText: r.button_text || '',
       buttonLink: r.button_link || '',
+      buttonAlign: r.button_align || null,
       usedIn: [],
     })))
     setTemplatesError(null)
@@ -22440,6 +22462,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           delayUnit: s.delay_unit ?? null,
           buttonText: s.button_text ?? null,
           buttonLink: s.button_link ?? null,
+          buttonAlign: s.button_align ?? null,
         }))
       }
       setDbPaths(newDbPaths)
@@ -22571,6 +22594,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           delay_unit: s.delayUnit === 'months' || s.delayUnit === 'years' ? s.delayUnit : null,
           button_text: s.buttonText || null,
           button_link: s.buttonLink || null,
+          // Centre is null; null needs no column (migrations/button_align.sql).
+          button_align: s.buttonAlign === 'left' || s.buttonAlign === 'right' ? s.buttonAlign : null,
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -22909,6 +22934,42 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     } catch { return 'That did not save. Try again.' }
   }
 
+  // The tags filled the way a send fills them, with this location's real
+  // values and a sample client — the Read dialog's preview and the editors'.
+  function emailsPreviewValues() {
+    const es = emailSettings.settings
+    const ownerName = [settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(' ')
+    return {
+      first_name: 'Jordan',
+      organizer_name: settings.location.sendFromName,
+      location_name: settings.location.name,
+      phone: settings.location.phone,
+      location_phone: settings.location.phone,
+      booking_link: settings.location.bookingLink,
+      book_assessment_link: settings.location.bookingLink,
+      owner_booking_link: settings.profile.bookingLink || settings.location.bookingLink,
+      discovery_booking_link: es.discoveryBookingLink,
+      virtual_booking_link: es.virtualBookingLink,
+      service_area: [settings.location.city, settings.location.state].filter(Boolean).join(', '),
+      owner_name: ownerName,
+      owner_first_name: settings.profile.firstName,
+      location_owner_name: ownerName,
+      rate_per_hour: settings.location.ratePerHour,
+      reviews_link: settings.location.reviewsLink,
+    }
+  }
+
+  // What the editors' Preview and button pills need: the location's look,
+  // the filled values, the signature, and which booking links are saved.
+  function emailsEditorProps() {
+    const es = emailSettings.settings
+    return {
+      preview: { style: es.style, values: emailsPreviewValues(), signature: signatureFromData(emailSig.data) },
+      links: { discovery: es.discoveryBookingLink, inHome: settings.location.bookingLink, video: es.virtualBookingLink },
+      alignReady: emailSettings.ready.align === true,
+    }
+  }
+
   const [followupsState, setFollowupsState] = useState(null)
   useEffect(() => {
     if (!realLocId) return
@@ -22992,7 +23053,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // The button only when it changed — before migrations/email_buttons.sql
       // runs, an untouched button must not turn every wording save into a
       // "not set up yet" refusal.
-      body: JSON.stringify({ subject, body, ...(button && ((button.button_text || '') !== (row.buttonText || '') || (button.button_link || '') !== (row.buttonLink || '')) ? button : {}) }),
+      body: JSON.stringify({ subject, body, ...(button && ((button.button_text || '') !== (row.buttonText || '') || (button.button_link || '') !== (row.buttonLink || '') || (button.button_align || null) !== (row.buttonAlign || null)) ? button : {}) }),
     })
     if (res.status === 409) throw new Error('Buttons aren’t switched on yet — save without one for now.')
     if (!res.ok) throw new Error('could not save your wording')
@@ -23099,7 +23160,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       ? {
           ...applyStepContentEdit(s, patch, templates),
           // The button rides on the step; commitSteps sends it.
-          ...('button_text' in patch ? { buttonText: patch.button_text, buttonLink: patch.button_link } : {}),
+          ...('button_text' in patch ? { buttonText: patch.button_text, buttonLink: patch.button_link, buttonAlign: patch.button_align ?? null } : {}),
         }
       : s)
     await commitSteps(pathId, nextSteps)
@@ -24295,25 +24356,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           }
           const waiting = {}
           for (const h of held) waiting[h.need === 'ownerBooking' ? 'booking' : h.need] = (waiting[h.need === 'ownerBooking' ? 'booking' : h.need] || 0) + h.subjects.length
-          const ownerName = [settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(' ')
-          const previewValues = {
-            first_name: 'Jordan',
-            organizer_name: settings.location.sendFromName,
-            location_name: settings.location.name,
-            phone: settings.location.phone,
-            location_phone: settings.location.phone,
-            booking_link: settings.location.bookingLink,
-            book_assessment_link: settings.location.bookingLink,
-            owner_booking_link: settings.profile.bookingLink || settings.location.bookingLink,
-            discovery_booking_link: es.discoveryBookingLink,
-            virtual_booking_link: es.virtualBookingLink,
-            service_area: [settings.location.city, settings.location.state].filter(Boolean).join(', '),
-            owner_name: ownerName,
-            owner_first_name: settings.profile.firstName,
-            location_owner_name: ownerName,
-            rate_per_hour: settings.location.ratePerHour,
-            reviews_link: settings.location.reviewsLink,
-          }
+          const previewValues = emailsPreviewValues()
           const corporate = !!isSuperAdmin
           // What the switches show: read straight from the location's current
           // variant(s). One set when organizing and moving match ("same"),
@@ -24532,6 +24575,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       {/* issue 240 step 8b — rail B/C edit (welcome, closed job). */}
       {emailTemplateEditor && (
         <EmailTemplateEditor
+          {...emailsEditorProps()}
           row={emailTemplateEditor.row}
           onCancel={() => setEmailTemplateEditor(null)}
           onSave={async (subject, body, button) => {
@@ -24570,6 +24614,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           through commitSteps (the bulk replace) — never a per-step PATCH. */}
       {stepContentEditor&&(
         <DripPathStepEditor
+          {...emailsEditorProps()}
           step={{
             step_order: stepContentEditor.step.order,
             // The step's own text, else its linked template's — a step whose
@@ -24578,6 +24623,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             delay_days: stepContentEditor.step.delay_days ?? delayToDays(stepContentEditor.step.delay),
             button_text: stepContentEditor.step.buttonText || '',
             button_link: stepContentEditor.step.buttonLink || '',
+            button_align: stepContentEditor.step.buttonAlign || null,
           }}
           onSave={saveStepContent}
           onClose={()=>setStepContentEditor(null)}
@@ -33279,7 +33325,9 @@ function MasterDripPathsEditor() {
       // Merge updated step back into masters
       setMasters(prev => prev.map(p => ({
         ...p,
-        steps: (p.steps || []).map(s => s.id === step.id ? { ...s, ...j.step } : s),
+        // The patch too: the route's answer leaves the button out, and the
+        // next edit would open on the old one.
+        steps: (p.steps || []).map(s => s.id === step.id ? { ...s, ...patch, ...j.step } : s),
       })))
       setEditing(null)
     } catch (e) {
@@ -33347,6 +33395,10 @@ function MasterDripPathsEditor() {
       {editing && (
         <DripPathStepEditor
           step={editing.step}
+          // Masters: no location, so every pill shows and Preview uses sample
+          // details. The rows come from '*', so the column's presence is the
+          // migration's.
+          alignReady={'button_align' in editing.step}
           onSave={(patch) => saveStep(editing.step, patch)}
           onClose={() => setEditing(null)}
         />
@@ -33389,12 +33441,15 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // Used by both Admin → Content (master steps, saved via the per-step PATCH)
 // and Settings → Communications (the owner's customized copies, saved via
 // commitSteps' bulk replace — the owner surface never writes per-step).
-export function DripPathStepEditor({ step, onSave, onClose }) {
+export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
   // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
   const [buttonText, setButtonText] = useState(step.button_text || '')
   const [buttonLink, setButtonLink] = useState(step.button_link || '')
+  const [buttonAlign, setButtonAlign] = useState(step.button_align || null)
+  // Preview swaps the form for the real email; the drafts above stay put.
+  const [previewing, setPreviewing] = useState(false)
   // Merge tags land at the cursor in whichever field was used last.
   const tags = useTagInsert()
   const [delayDays, setDelayDays] = useState(step.delay_days ?? 0)
@@ -33419,6 +33474,9 @@ export function DripPathStepEditor({ step, onSave, onClose }) {
       setLocalErr('The email subject can’t be empty.')
       return
     }
+    const bp = buttonProblem(buttonText, buttonLink)
+    if (bp) { setLocalErr(bp); setPreviewing(false); return }
+    const button = buttonForSave(buttonText, buttonLink, buttonAlign)
     setSaving(true)
     try {
       await onSave({
@@ -33427,8 +33485,8 @@ export function DripPathStepEditor({ step, onSave, onClose }) {
         delay_days: Number(delayDays),
         // Only when changed: an untouched button never trips "not set up yet"
         // before migrations/email_buttons.sql has run.
-        ...((buttonText.trim() !== (step.button_text || '') || buttonLink.trim() !== (step.button_link || ''))
-          ? { button_text: buttonText.trim() || null, button_link: buttonLink.trim() || null }
+        ...(((button.button_text || '') !== (step.button_text || '') || (button.button_link || '') !== (step.button_link || '') || button.button_align !== (step.button_align || null))
+          ? button
           : {}),
       })
     } catch (e) {
@@ -33441,11 +33499,16 @@ export function DripPathStepEditor({ step, onSave, onClose }) {
   // 2026-10-30 follow-up — the Emails screen's dialog (EDialog), the
   // design's fields. Also the corporate master step editor's.
   return (
-    <EDialog label={`Edit step ${step.step_order}`} eyebrow={`Step ${step.step_order}`} title="Change wording" onClose={saving ? null : onClose}
+    <EDialog label={`Edit step ${step.step_order}`} eyebrow={`Step ${step.step_order}`} title={previewing ? 'Preview' : 'Change wording'} onClose={saving ? null : onClose}
       footer={<>
         <EBtn onClick={onClose} disabled={saving}>Cancel</EBtn>
+        <EBtn onClick={() => setPreviewing(p => !p)} disabled={saving}>{previewing ? 'Back to editing' : 'Preview'}</EBtn>
         <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</EBtn>
       </>}>
+      {previewing ? <>
+        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
+        {localErr && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
+      </> : <>
       <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
       <div style={{ display:'grid', gap:'12px' }}>
         <label style={{ display:'block' }}>
@@ -33463,9 +33526,11 @@ export function DripPathStepEditor({ step, onSave, onClose }) {
           <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />
           <span style={eHintStyle}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</span>
         </label>
-        <ButtonFields text={buttonText} link={buttonLink} onText={setButtonText} onLink={setButtonLink} />
+        <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
+          alignReady={alignReady} links={links} />
         {localErr && <p style={{ margin:0, fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </div>
+      </>}
     </EDialog>
   )
 }

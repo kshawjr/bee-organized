@@ -445,7 +445,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
       signature,
       style: emailOptions.style,
       heading: rendered.subject,
-      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
+      button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: tplExtras.buttonAlign } : null,
     },
     { html: footer.html, text: footer.text },
   )

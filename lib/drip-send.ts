@@ -446,7 +446,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   const look = {
     style: emailOptions.style,
     heading: rendered.subject,
-    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body } : null,
+    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: stepExtras.buttonAlign } : null,
   }
   const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look })
   const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look })
