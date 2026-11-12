@@ -37,3 +37,12 @@ export function jobChannelsLine(r: { not_set_up_yet?: boolean; archived: number;
   if (r.not_set_up_yet) return '[cron job-channels] not set up yet — engagements has no slack_channel columns'
   return `[cron job-channels] archived ${r.archived}, unarchived ${r.unarchived}, gone ${r.gone}, no slack ${r.no_slack}` + (r.reconcile_problems ? `, bee problems stored for owners ${r.reconcile_problems}` : '') + (r.failed ? `, failed ${r.failed}` : '')
 }
+
+// The crew sweep, same route, its own line (lib/jobber-crew-mirror.ts).
+export function jobCrewsLine(r: { checked: number; changed: number; added: number; removed: number; unread: number; deferred: number; slack_problems: number; ok: boolean }): string {
+  return `[cron job-channels] crews checked ${r.checked}, changed ${r.changed} (+${r.added} -${r.removed})` +
+    (r.unread ? `, Jobber did not answer for ${r.unread}` : '') +
+    (r.deferred ? `, left for next run ${r.deferred}` : '') +
+    (r.slack_problems ? `, bee problems stored for owners ${r.slack_problems}` : '') +
+    (r.ok ? '' : ', failed')
+}

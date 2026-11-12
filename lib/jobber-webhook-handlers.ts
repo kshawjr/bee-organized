@@ -164,6 +164,7 @@ import { readLeadMoneyTotals } from './lead-paid-total'
 import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/invoiceDeleted'
 import { JOB_DELETED, isDeletedJob } from '@/components/hive/shared/jobDeleted'
 import type { LocationRow } from './jobber-webhook'
+import { CREW_RETRY_MARK, crewNote, handleVisitNotice, isRetryable, mirrorCrewSafely } from './jobber-crew-mirror'
 
 export type HandlerCtx = {
   topic: string
@@ -653,6 +654,11 @@ async function handleJobCore(
       // a no-op on every other deal).
       await reopenIfClosedByJobDeletion(engId)
       await maybeAdvanceEngagementStage(engId)
+      // Who is on the job, from Jobber's visits (lib/jobber-crew-mirror.ts).
+      // Here as well as on the visit notices because a visit notice can land
+      // BEFORE this job exists in Bee Hub, when it has nothing to attach to.
+      // Never throws and never fails the job write.
+      await mirrorCrewSafely(supabaseService, engId)
     }
   } catch (err: any) {
     console.error('[engagements] job dual-write failed', err?.message || err)
@@ -1756,6 +1762,35 @@ export async function handleAppDisconnect(ctx: HandlerCtx): Promise<HandlerResul
   }
 }
 
+// ── VISIT_CREATE / VISIT_UPDATE / VISIT_COMPLETE / VISIT_DESTROY ─────────────
+// Jobber's crew lives on the visits, and owners set it there. Each visit
+// notice re-reads who is on the job's unfinished visits and makes the job's
+// bees, and its Slack channel if it has one, match (lib/jobber-crew-mirror.ts).
+// READ ONLY towards Jobber. Until 2026-11-12 these four topics were discarded
+// as unknown: about 5,700 notices a month.
+//
+//   · job not in Bee Hub (a visit can arrive before its job) → nothing is
+//     created or changed; the note says so. JOB_CREATE mirrors the crew.
+//   · Jobber could not be read → NOT a silent drop: the row is an error and
+//     carries a crew_retry mark the 15-minute sweep picks up.
+export async function handleVisitEvent(ctx: HandlerCtx): Promise<HandlerResult> {
+  const out = await handleVisitNotice(supabaseService, { locationSlug: ctx.location.location_id, visitId: ctx.itemId })
+  if (out.status === 'unknown_job') {
+    return { processed: true, note: `visit of job ${out.jobberJobId ?? 'unknown'} — that job is not in Bee Hub (yet); nothing changed` }
+  }
+  if (out.status === 'visit_gone') {
+    return { processed: true, note: 'visit deleted in Jobber before Bee Hub saw it; the 15-minute crew sweep covers its job' }
+  }
+  if (out.status === 'visit_unreadable') {
+    return { processed: false, error: 'crew_read_failed', note: 'visit not read from Jobber; the 15-minute crew sweep covers its job' }
+  }
+  const r = out.result
+  if (isRetryable(r)) {
+    return { processed: false, error: 'crew_read_failed', note: `${crewNote(r)} — ${CREW_RETRY_MARK}${r.engagementId}` }
+  }
+  return { processed: true, note: crewNote(r) }
+}
+
 // ── dispatch table ────────────────────────────────────────────
 
 export const TOPIC_HANDLERS: Record<string, (ctx: HandlerCtx) => Promise<HandlerResult>> = {
@@ -1781,6 +1816,10 @@ export const TOPIC_HANDLERS: Record<string, (ctx: HandlerCtx) => Promise<Handler
   PROPERTY_UPDATE:    handlePropertyUpdate,
   PROPERTY_DESTROY:   handlePropertyDestroy,
   ASSESSMENT_DESTROY: handleAssessmentDestroy,
+  VISIT_CREATE:       handleVisitEvent,
+  VISIT_UPDATE:       handleVisitEvent,
+  VISIT_COMPLETE:     handleVisitEvent,
+  VISIT_DESTROY:      handleVisitEvent,
   APP_DISCONNECT:     handleAppDisconnect,
 }
 

@@ -135,9 +135,9 @@ describe('INVOICE_UPDATE is wired (not skipped)', () => {
   it('genuinely-unknown topics stay OUT of the map (route skip fallback still fires)', () => {
     // The route skips any topic not in SUPPORTED_TOPICS; these must never
     // sneak in just because we widened invoice coverage.
-    expect(SUPPORTED_TOPICS).not.toContain('VISIT_COMPLETE')
+    expect(SUPPORTED_TOPICS).not.toContain('PAYMENT_CREATE')
     expect(SUPPORTED_TOPICS).not.toContain('INVOICE_FROBNICATE')
-    expect(TOPIC_HANDLERS['VISIT_COMPLETE']).toBeUndefined()
+    expect(TOPIC_HANDLERS['PAYMENT_CREATE']).toBeUndefined()
   })
 })
 

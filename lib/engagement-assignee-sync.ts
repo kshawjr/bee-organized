@@ -1,6 +1,6 @@
 // lib/engagement-assignee-sync.ts
 // ─────────────────────────────────────────────────────────────
-// Engagement-level assignees → Jobber TEAM/CREW push.
+// Engagement-level assignees → Jobber ASSESSMENT TEAM push.
 //
 // Assignees are the people who DO the work — the assessment team and the
 // job crew — PLURAL. They are NOT the deal's salesperson (Kevin 7/11).
@@ -26,7 +26,7 @@
 //     SAME teamMemberIdsToAssign field the send path assigns with at create
 //     (issue 144), and — critically — its result is VERIFIED by reading back
 //     assignedUsers, because a clean userErrors array is not proof here.
-//   · Job crew: NOT a field on the job. JobEditInput carries only
+//   · Job crew (READ ONLY now — see below): NOT a field on the job. JobEditInput carries only
 //       salespersonId (singular) — no crew. The crew lives on the job's
 //       VISITS. Read job(id).visits.nodes { id isComplete }, then per visit:
 //       visitEditAssignedUsers(visitId, VisitEditAssignedUsersInput)
@@ -39,13 +39,15 @@
 //       and breadcrumb. (Open decision for Kevin: keep owner-as-salesperson
 //       on the request? Default = no.)
 //
-// So: the SAME full set of mapped assignees goes onto the assessment AND
-// every (non-completed) visit of every linked job. An empty set clears the
-// visit crew (visitEditAssignedUsers accepts an explicit [] as a clear); it
-// does NOT clear the assessment team — teamMemberIdsToAssign is assign-oriented
-// and is omitted for an empty list (issue 147; see the assessment leg). Completed
-// visits are left untouched — crew is about who WILL do the work, not a rewrite
-// of finished history.
+// So: the full set of mapped assignees goes onto the ASSESSMENT, and nowhere
+// else. An empty set does not clear the assessment team — teamMemberIdsToAssign
+// is assign-oriented and is omitted for an empty list (issue 147).
+//
+// JOB VISITS ARE NOT WRITTEN (2026-11-12). Until then the same set was also
+// pushed onto every unfinished visit of every linked job with
+// visitEditAssignedUsers, and an empty set cleared them. That stopped: owners
+// set each visit's crew in Jobber, and Bee Hub mirrors it into the job's bees
+// and Slack channel (lib/jobber-crew-mirror.ts). See THE JOB LEG IS GONE below.
 //
 // SCHEDULE PRESERVATION (issue 147): teamMemberIdsToAssign rides inside
 // ScheduledItemAttributes, the same object that carries startAt/endAt. Those
@@ -82,7 +84,6 @@
 // and rides the API response so the toast can tell the truth.
 // ─────────────────────────────────────────────────────────────
 
-import { liveJobs } from '@/components/hive/shared/jobDeleted'
 import { supabaseService } from './supabase-service'
 import { jobberMutation, jobberGraphQL } from './jobber'
 import { encodeJobberId } from './jobber-import'
@@ -94,30 +95,14 @@ import { formatInTimeZone } from 'date-fns-tz'
 // an empty list); diffAssessmentAssignment proves the team actually applied.
 import { applyTeamToSchedule, diffAssessmentAssignment } from './jobber-assessment-assign'
 
-// Read a job's visits so we can push the crew onto each. first: 100 covers
-// every real one-off/recurring job; if a job somehow has more we log the
-// cap rather than silently under-assign (see VISIT_PAGE below).
-const JOB_VISITS_QUERY = `
-  query JobVisitsForCrew($jobId: EncodedId!) {
-    job(id: $jobId) {
-      id
-      visits(first: 100) {
-        totalCount
-        nodes { id isComplete }
-      }
-    }
-  }
-`
-const VISIT_PAGE = 100
-
-const VISIT_EDIT_ASSIGNED_USERS_MUTATION = `
-  mutation VisitEditCrew($visitId: EncodedId!, $input: VisitEditAssignedUsersInput!) {
-    visitEditAssignedUsers(visitId: $visitId, input: $input) {
-      visit { id }
-      userErrors { message path }
-    }
-  }
-`
+// THE JOB LEG IS GONE (2026-11-12, Kevin). This file used to read each
+// linked job's visits and call visitEditAssignedUsers on every unfinished
+// one. That mutation REPLACES a visit's crew, so a tick in Bee Hub wiped
+// whatever the owner had set in Jobber, visit by visit. Jobber is now the
+// source of truth for who is on a job; Bee Hub reads it
+// (lib/jobber-crew-mirror.ts) and never writes a visit. There is no visit
+// query and no visit mutation in this file, on purpose — pinned by
+// lib/beta-assignee-push-fingerprint.test.ts.
 
 // issue 147 — read the assessment's CURRENT schedule so the edit can re-send
 // startAt/endAt UNCHANGED (see the SCHEDULE PRESERVATION note in the header).
@@ -344,74 +329,12 @@ export async function syncEngagementAssignmentToJobber(
   // but possible (re-founds); apply the crew to each. Assessments carry the
   // appointment id in jobber_assessment_id. Requests are intentionally NOT
   // read — the team model doesn't assign pre-work.
-  const [jobRes, assessRes] = await Promise.all([
-    // never a job deleted in Jobber (components/hive/shared/jobDeleted.js) — pushing a crew to it can only fail
-    supabaseService.from('jobs').select('jobber_job_id, status').eq('engagement_id', engagementId).not('jobber_job_id', 'is', null),
-    supabaseService.from('assessments').select('jobber_assessment_id').eq('engagement_id', engagementId).not('jobber_assessment_id', 'is', null),
-  ])
-  const jobIds = liveJobs(jobRes.data ?? []).map((j: any) => j.jobber_job_id).filter(Boolean)
+  const assessRes = await supabaseService.from('assessments').select('jobber_assessment_id').eq('engagement_id', engagementId).not('jobber_assessment_id', 'is', null)
   const apptIds = (assessRes.data ?? []).map((a: any) => a.jobber_assessment_id).filter(Boolean)
 
-  // Job CREW (multi) — the crew lives on the job's visits, not the job.
-  // For each linked job: read its visits, then push ALL mapped assignees
-  // onto every non-completed visit. Completed visits are left as-is (crew
-  // is about who WILL do the work, not a rewrite of finished history).
-  // An empty set clears the crew. A failed visit push flips the job to
-  // 'failed' but never throws.
-  let jobFailed = false
-  let jobPushed = false
-  for (const jobId of jobIds) {
-    let visitNodes: Array<{ id: string; isComplete: boolean }> = []
-    try {
-      // jobber_job_id is stored numeric (extractJobberId at import); the
-      // EncodedId! arg needs the base64 global id, so re-encode at the call.
-      // Feeding the bare number is rejected ("'<n>' is not a valid EncodedId").
-      const { data, errors } = await jobberGraphQL(locationSlug, JOB_VISITS_QUERY, {
-        jobId: encodeJobberId('Job', jobId),
-      })
-      if (errors?.length) {
-        jobFailed = true
-        console.warn('[assignee-sync] job visits read errors', JSON.stringify(errors))
-        continue
-      }
-      const conn = data?.job?.visits
-      visitNodes = (conn?.nodes ?? []).filter(Boolean)
-      const total = conn?.totalCount ?? visitNodes.length
-      if (total > VISIT_PAGE) {
-        console.warn(`[assignee-sync] job ${jobId} has ${total} visits; crew pushed to first ${VISIT_PAGE} only`)
-      }
-    } catch (err: any) {
-      jobFailed = true
-      console.warn('[assignee-sync] job visits read threw', err?.message || err)
-      continue
-    }
-
-    // Only touch visits that aren't done yet.
-    const targetVisitIds = visitNodes.filter(v => !v.isComplete).map(v => v.id)
-    for (const visitId of targetVisitIds) {
-      try {
-        const r = await jobberMutation(locationSlug, VISIT_EDIT_ASSIGNED_USERS_MUTATION, {
-          visitId,
-          input: { assignedUserIds: allJobberUserIds },
-        })
-        if (r.userErrors?.length) {
-          jobFailed = true
-          console.warn('[assignee-sync] visitEditAssignedUsers userErrors', JSON.stringify(r.userErrors))
-        } else {
-          jobPushed = true
-          result.visitsTouched++
-        }
-      } catch (err: any) {
-        jobFailed = true
-        console.warn('[assignee-sync] visitEditAssignedUsers threw', err?.message || err)
-      }
-    }
-  }
-  if (jobIds.length) {
-    result.job = jobFailed ? 'failed'
-      : jobPushed ? (allJobberUserIds.length ? 'synced' : 'cleared')
-      : 'none' // linked job(s) but no targetable (non-completed) visit
-  }
+  // Job crew: NOT pushed. result.job stays 'none' and visitsTouched stays 0
+  // for every call — the fields are kept so the response shape the screen
+  // reads (AssigneeSyncStatus) does not change. See THE JOB LEG IS GONE above.
 
   // Assessment team (multi) via assessmentEdit — ALL mapped assignees. issue 147.
   //
@@ -520,7 +443,7 @@ export async function syncEngagementAssignmentToJobber(
   // Breadcrumb — one row per sync, mirroring the send-path convention.
   // Only write when there was actually a linked work record to touch (a
   // local engagement with no Jobber trail is a pure junction write).
-  if (jobIds.length || apptIds.length) {
+  if (apptIds.length) {
     await writeSyncLog({
       location_id: locationSlug,
       entity_id: engagementId,
@@ -529,7 +452,7 @@ export async function syncEngagementAssignmentToJobber(
       status: (result.job === 'failed' || result.assessment === 'failed') ? 'error' : 'success',
       message:
         `[engagement:assignee-sync] mapped=${mappedCount} unmapped=${unmappedCount}` +
-        ` job=${result.job}(${result.visitsTouched} visit${result.visitsTouched === 1 ? '' : 's'}) assessment=${result.assessment} request=skipped` +
+        ` job=not_pushed assessment=${result.assessment} request=skipped` +
         (unmappedCount ? ` — ${unmappedCount} assignee(s) not linked to Jobber, internal-only` : ''),
     })
   }

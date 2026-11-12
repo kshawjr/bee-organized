@@ -263,6 +263,9 @@ function topicToEntityType(
   if (topic.startsWith('REQUEST_'))   return 'request'
   if (topic.startsWith('QUOTE_'))     return 'quote'
   if (topic.startsWith('JOB_'))       return 'job'
+  // A visit belongs to a job; sync_log has no 'visit' type (its check
+  // constraint lists the types) and these rows are about the job's crew.
+  if (topic.startsWith('VISIT_'))     return 'job'
   if (topic.startsWith('INVOICE_'))   return 'invoice'
   if (topic.startsWith('PROPERTY_'))  return 'property'
   if (topic.startsWith('ASSESSMENT_')) return 'assessment'

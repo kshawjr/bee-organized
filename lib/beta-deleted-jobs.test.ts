@@ -187,14 +187,15 @@ describe('a deleted job is not work: no stage, chip, activity or screen counts i
     expect(lastActivityTs(e)).toBe(Date.parse('2026-08-01T00:00:00Z'))
   })
 
-  it('every screen fetch leaves deleted jobs out (panel, board, Home/people, person, timeline, client card, crew push)', () => {
+  it('every screen fetch leaves deleted jobs out (panel, board, Home/people, person, timeline, client card, crew read)', () => {
     const pins: [string, RegExp][] = [
       ['app/api/engagements/[id]/route.ts', /from\('jobs'\)\.select\('\*'\)\.eq\('engagement_id', id\)\.neq\('status', 'deleted'\)/],     // deal panel + drift
       ['app/api/engagements/route.ts', /byEng\(jobsRaw\.filter\(\(j: any\) => j\.status !== 'deleted'\)\)/],                           // board / list chips
       ['app/api/leads/[id]/route.ts', /from\('jobs'\)\.select\('\*'\)\.eq\('lead_id', id\)\.neq\('status', 'deleted'\)/],                 // person refetch
       ['app/api/leads/[id]/timeline/route.ts', /completed_at, created_at, engagement_id'\)\s*\.eq\('lead_id', id\)\s*\.neq\('status', 'deleted'\)/], // timeline
       ['app/api/clients/[id]/profile/route.ts', /from\('jobs'\)\.select\('id, engagement_id, status, title, scheduled_start, completed_at'\)\.in\('engagement_id', openIds\)\.neq\('status', 'deleted'\)/], // client card
-      ['lib/engagement-assignee-sync.ts', /liveJobs\(jobRes\.data/],                                                                   // never push a crew to a deleted job
+      // The crew is no longer PUSHED to a job (2026-11-12); it is READ from Jobber, and a deleted job is never read.
+      ['lib/jobber-crew-mirror.ts', /filter\(j => !isDeletedJob\(j\)\)/],
     ]
     for (const [f, re] of pins) expect(readFileSync(f, 'utf8'), f).toMatch(re)
     const hub = readFileSync('app/_hub-page.tsx', 'utf8')                                                                             // Home / people load

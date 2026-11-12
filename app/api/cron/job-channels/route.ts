@@ -13,6 +13,13 @@
 // to run twice — a stamped row no longer matches. A job with no channel is
 // never read.
 //
+// Then the CREW sweep (lib/jobber-crew-mirror sweepJobCrews): re-reads who is
+// on each open job's unfinished visits in Jobber and makes the job's bees and
+// Slack channel match. The visit notices do this within seconds when they
+// fire; this is the backstop for the ones that do not, or whose Jobber read
+// failed. Read-only towards Jobber. It runs AFTER the archive sweep and its
+// failure never fails that one.
+//
 // Auth: same convention as the other crons — Vercel sends
 // `Authorization: Bearer <CRON_SECRET>`; manual testing also accepts
 // `?secret=<value>`. Missing CRON_SECRET is fail-closed (500).
@@ -25,7 +32,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { sweepJobChannels } from '@/lib/engagement-bees'
-import { jobChannelsLine } from '@/lib/cron-log-lines'
+import { sweepJobCrews } from '@/lib/jobber-crew-mirror'
+import { jobChannelsLine, jobCrewsLine } from '@/lib/cron-log-lines'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -48,7 +56,16 @@ export async function GET(req: NextRequest) {
     const result = await sweepJobChannels(supabaseService)
     // EVERY run logs one line, even all zeros (Kevin, 20 Oct 2026).
     console.log(jobChannelsLine(result))
-    return NextResponse.json(result, { status: result.ok ? 200 : 500 })
+    // The crew sweep is its own step with its own line: a Jobber outage must
+    // not stop channels being archived, and must be visible when it happens.
+    let crews = null
+    try {
+      crews = await sweepJobCrews(supabaseService)
+      console.log(jobCrewsLine(crews))
+    } catch (err: any) {
+      console.error('[cron job-channels] crew sweep failed —', err?.message || err)
+    }
+    return NextResponse.json({ ...result, crews }, { status: result.ok ? 200 : 500 })
   } catch (err: any) {
     console.error('[cron job-channels] sweep failed —', err?.message || err)
     return NextResponse.json({ ok: false, error: 'sweep_failed' }, { status: 500 })
