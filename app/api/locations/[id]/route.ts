@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { isValidTimezoneValue, normalizeTimezoneLabel } from '@/lib/us-timezones'
-import { safeHttpUrl } from '@/lib/email-signature'
+import { safeHttpUrl, instagramUrl } from '@/lib/email-signature'
 import { senderAddressProblem, replyToSaveProblem } from '@/lib/sender-domain'
 import { getSendableDomains } from '@/lib/sendable-domains'
 import { formatPhone } from '@/lib/phone'
@@ -103,7 +103,8 @@ export async function PATCH(
       const v = body?.[field]
       if (typeof v !== 'string') continue
       if (!v.trim()) { patch[field] = null; continue }
-      const url = safeHttpUrl(v)
+      // Instagram may be typed as @handle (lib/email-signature.ts instagramUrl).
+      const url = field === 'instagram_url' ? instagramUrl(v) : safeHttpUrl(v)
       if (!url) {
         return NextResponse.json(
           { error: `${SIGNATURE_LINK_NOUNS[field]} must be a web address, like https://www.facebook.com/yourpage` },

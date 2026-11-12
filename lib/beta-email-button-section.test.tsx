@@ -62,52 +62,54 @@ const { DripPathStepEditor, EmailTemplateEditor } = BeeHub as any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 // ─── 1 · byte-identical to main ─────────────────────────────────────────
-// Computed on 9449681 (current main) from exactly these inputs, before any
-// change in this slice. A no-button email, a null button, a half-filled one,
-// and a centred one — every look plus the default — HTML and plain text.
+// Computed on 9449681 (main before this slice) from exactly these inputs. A
+// no-button email, a null button, a half-filled one, and a centred one — every
+// look plus the default — HTML and plain text. Re-taken on 1b3df84 on
+// 2026-10-31 with NO signature, so the signature's own redesign (Lovable,
+// pinned in lib/beta-email-signature.test.ts) can't move this pin.
 const MAIN: Record<string, string> = {
-  'none:soft': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'none-text:soft': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:soft': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'halfbutton:soft': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'centre:soft': '51939593e46ff256ec1fec00ec8e0342c7a779f7197bcadd88454ed980785cb4',
-  'centre-text:soft': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
-  'none:outline': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'none-text:outline': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:outline': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'halfbutton:outline': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'centre:outline': 'ab9cd750a5f2da1f3570eda66a5081405cfb03fff69513574e36862241af3c53',
-  'centre-text:outline': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
-  'none:bold': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'none-text:bold': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:bold': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'halfbutton:bold': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'centre:bold': '1baf4823fb71c846c0a9bf15a294808f7326cd8e5c0733cbe2a4780662764608',
-  'centre-text:bold': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
-  'none:rounded': 'db6c2cb7d38d643caeb48672c468430e3ed8f9415f829488f36128649007efbd',
-  'none-text:rounded': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:rounded': 'db6c2cb7d38d643caeb48672c468430e3ed8f9415f829488f36128649007efbd',
-  'halfbutton:rounded': 'db6c2cb7d38d643caeb48672c468430e3ed8f9415f829488f36128649007efbd',
-  'centre:rounded': '68f8c5a136e6fee88be4e0ceeee5f6e87a82a66242a9da0c1d2eb42e94d04ff8',
-  'centre-text:rounded': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
-  'none:classic': 'ffb49f649f6a7ac3e53053ec64911d26b4aa9fc7d1d260b9a5b0955c48acb372',
-  'none-text:classic': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:classic': 'ffb49f649f6a7ac3e53053ec64911d26b4aa9fc7d1d260b9a5b0955c48acb372',
-  'halfbutton:classic': 'ffb49f649f6a7ac3e53053ec64911d26b4aa9fc7d1d260b9a5b0955c48acb372',
-  'centre:classic': '8b6e60ba1158cc4b2d68f51d289d8cd8c335c318c0135fa2b6bb0d5b7160d67c',
-  'centre-text:classic': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
-  'none:null': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'none-text:null': 'fff30a3da3e752d69694ad1e2f48e983f55d47513c54743a518faa807653e7be',
-  'nullbutton:null': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'halfbutton:null': '8b5a11f00314e1c4520b86ebebd9d1a13e3fbc75c4bd98cb10bffcb47c34626d',
-  'centre:null': '51939593e46ff256ec1fec00ec8e0342c7a779f7197bcadd88454ed980785cb4',
-  'centre-text:null': 'c77e463f4eed3904d7ad7f03c0a889ef390c4567c055b6fb606b625942615424',
+  'none:soft': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'none-text:soft': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:soft': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'halfbutton:soft': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'centre:soft': '2893f920ec3c7bcfe9b9537089d027e762e79f99ecf099c2ee8301575f3813a1',
+  'centre-text:soft': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
+  'none:outline': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'none-text:outline': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:outline': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'halfbutton:outline': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'centre:outline': '809222b37f9d44693711acc98b4154a704d3edbcc57688047d22bd05dc435614',
+  'centre-text:outline': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
+  'none:bold': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'none-text:bold': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:bold': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'halfbutton:bold': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'centre:bold': '4c0e60f72b39421530ca9742d99abf50c95847a638879aa4c19b57d0033d1064',
+  'centre-text:bold': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
+  'none:rounded': '1206aedc62aaea42764d936e930e546329fecc4cc405bd6dee288be5e1a40cc8',
+  'none-text:rounded': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:rounded': '1206aedc62aaea42764d936e930e546329fecc4cc405bd6dee288be5e1a40cc8',
+  'halfbutton:rounded': '1206aedc62aaea42764d936e930e546329fecc4cc405bd6dee288be5e1a40cc8',
+  'centre:rounded': '696b801a7e92bc862fbbe262c34a7a90cd4d9331200639d71d2df049c94c3742',
+  'centre-text:rounded': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
+  'none:classic': '019c2ff873887d003c9455118bd051fbc7e2be99aff2a9acc55d84e0cf0b7a8f',
+  'none-text:classic': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:classic': '019c2ff873887d003c9455118bd051fbc7e2be99aff2a9acc55d84e0cf0b7a8f',
+  'halfbutton:classic': '019c2ff873887d003c9455118bd051fbc7e2be99aff2a9acc55d84e0cf0b7a8f',
+  'centre:classic': '6cf74bceec29f73196986b729b3862d9637f564fc79ea73146134001679ee9e1',
+  'centre-text:classic': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
+  'none:null': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'none-text:null': 'be25b3ac05b3cb3202fb18d8a780bd62b34d62d8e5d48b38d6e202fb7118eca1',
+  'nullbutton:null': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'halfbutton:null': 'ce5323ba3fa0d46ef408ea0cb327f01c7ef5c238a552bfd81458ba19efb70a39',
+  'centre:null': '2893f920ec3c7bcfe9b9537089d027e762e79f99ecf099c2ee8301575f3813a1',
+  'centre-text:null': '9ee6b3faba1af739098b613fa4095437107a2f6eda7c19236aac2cf4d1f2c105',
 }
 
 const SIG = { name: 'Lynette Ewy', title: 'Owner', email: 'l@x.com', mobile: '(816) 555-0100', photoPath: null, websiteUrl: 'https://beeorganized.com/kc', facebookUrl: null, instagramUrl: null, linkedinUrl: null }
 const BODY = `Hi Jordan,\n\nThanks for reaching out.\n\nThank you,\n${SIGNATURE_MARKER}`
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
-const base = (st: string | null) => ({ location_name: 'Kansas City', location_phone: '(816) 555-0100', reviews_link: 'https://g.page/r/kc', signature: SIG, style: st, heading: 'Welcome' })
+const base = (st: string | null) => ({ location_name: 'Kansas City', location_phone: '(816) 555-0100', reviews_link: 'https://g.page/r/kc', signature: null, style: st, heading: 'Welcome' })
 const CENTRE = { label: 'Book Your Assessment', href: 'https://cal.example.com/kc' }
 
 describe('an email with no button renders byte-identically to main', () => {
@@ -381,7 +383,7 @@ describe('Preview', () => {
       button: { label: 'Book a Video Assessment', href: 'https://cal.example.com/video', align: 'right' },
     })
     expect(html).toBe(expected)
-    expect(html).toContain('Lynette Ewy</strong>')
+    expect(html).toContain('Lynette Ewy</td>')
     // "Back to editing" loses nothing.
     await click(button('Back to editing'))
     expect((container.querySelector('input[type="text"]') as HTMLInputElement).value).toBe('A new subject')

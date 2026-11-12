@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
-import { SIGNATURE_MARKER, safeHttpUrl } from '@/lib/email-signature'
+import { SIGNATURE_MARKER, SIGNATURE_ICON_PATHS, safeHttpUrl, linkedinFor, signatureInitials } from '@/lib/email-signature'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
 
@@ -97,6 +97,10 @@ const EMAILS_CSS = `
 [data-emails-ui] [data-handler-q]{flex:1 1 100%;min-width:0}
 [data-emails-ui] [data-handler-qs]{flex:1 1 100%;min-width:0}
 @media (min-width:640px){[data-emails-ui] [data-handler-q]{flex:0 0 224px}[data-emails-ui] [data-handler-qs]{flex:0 1 auto}}
+[data-emails-ui] [data-efield] input:focus-visible{box-shadow:none!important}
+[data-sig-pair],[data-sig-trio]{display:grid;gap:12px}
+@media (min-width:480px){[data-sig-pair]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+@media (min-width:640px){[data-sig-trio]{grid-template-columns:repeat(3,minmax(0,1fr))}}
 `
 
 // The export's three web fonts and the CSS above. A plain <link> and <style>
@@ -347,7 +351,7 @@ export function CorporateTag() {
 //                1px border, 12px padding, muted on hover, a chevron that
 //                turns. `defaultOpen` false starts it shut (the corporate
 //                library — 26 templates, 12 headings).
-export function ESection({ id, eyebrow, title, intro, right, children, corporate, collapsible = false, defaultOpen = true }) {
+export function ESection({ id, eyebrow, title, intro, right, children, corporate, collapsible = false, defaultOpen = true, tint = null }) {
   const [open, setOpen] = React.useState(defaultOpen)
   const shut = collapsible && !open
   const eyebrowStyle = { margin:'0 0 4px', display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.14em', color:ET.gold, fontFamily:EF.ui }
@@ -355,7 +359,8 @@ export function ESection({ id, eyebrow, title, intro, right, children, corporate
   const introStyle = { margin:'4px 0 0', maxWidth:'672px', fontFamily:EF.body, fontSize:'13px', lineHeight:1.6, color:ET.mutedFg }
   return (
     <section id={id} data-section-open={collapsible ? String(open) : undefined}
-      style={{ scrollMarginTop:'112px', borderRadius:ER.xxl, border:`1px ${corporate ? 'dashed' : 'solid'} ${corporate ? alpha(ET.corporate, 0.3) : ET.border}`, background:ET.card, padding:'20px', minWidth:0 }}>
+      style={{ scrollMarginTop:'112px', borderRadius:ER.xxl, border:`1px ${corporate ? 'dashed' : 'solid'} ${corporate ? alpha(ET.corporate, 0.3) : tint === 'sage' ? alpha(ET.sage, 0.7) : ET.border}`,
+        background: tint === 'sage' ? alpha(ET.sageSoft, 0.6) : ET.card, padding:'20px', minWidth:0 }}>
       {collapsible ? (
         <h2 style={{ margin: shut ? 0 : '0 0 20px', fontSize:'inherit', fontWeight:'inherit' }}>
           <button type="button" aria-expanded={open} aria-controls={`${id}-body`} data-fold-header data-ehover="muted" onClick={() => setOpen(o => !o)}
@@ -499,7 +504,7 @@ export function EmailStatusPanel({ sending, locationName, fromEmail, held, activ
 }
 
 export function EmailsJumpNav({ corporate }) {
-  const items = [['sender', 'Sending'], ['details', 'Your details'], ['style', 'Look'], ['signature', 'Signature'], ['emails', 'The emails'], ...(corporate ? [['masters', 'Bee Organized versions']] : [])]
+  const items = [['sender', 'Sending'], ['details', 'Your details'], ['style', 'Look'], ['emails', 'The emails'], ...(corporate ? [['masters', 'Bee Organized versions']] : []), ['signature', 'Signature']]
   return (
     <nav aria-label="On this page" data-jumpnav style={{ position:'sticky', top:0, zIndex:30, display:'flex', gap:'4px', overflowX:'auto', borderBottom:`1px solid ${ET.border}`, background:alpha(ET.background, 0.95), backdropFilter:'blur(6px)' }}>
       {items.map(([id, l]) => (
@@ -766,19 +771,89 @@ export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, 
   )
 }
 
-// ── Signature (export SignatureSection) ───────────────────────────────────
-// One signature, one place. The headshot and title (hub_users, PATCH
-// /api/signature) and the location's website and social links (PATCH
-// /api/locations/[id]) used to live on Profile and Location. Name, email and
-// mobile are the signer's PROFILE — shown here, changed on Profile, so there
-// is never a second editable copy of a person's name or phone.
-//   onSignature(sig)  hands the resolved signature up for the email previews
+// ── Signature (export SignatureSection, 2026-10-31 to Lovable's design) ──
+// One signature, one place, LAST on the page. The headshot and title
+// (hub_users, PATCH /api/signature) and the location's website and social
+// links (PATCH /api/locations/[id]). Name, email and mobile are the signer's
+// ACCOUNT — shown here, changed on Profile — so there is never a second
+// editable copy of a person's name, email or phone. (Lovable made the email
+// editable; Bee Hub's signature email IS the sign-in address, hub_users.email.)
+//
+// The preview is the real email signature HTML (buildSignatureHtml, built by
+// GET /api/signature) in a frame — never a second web-only layout.
+//
+// 2026-10-31, Kevin's redesign: ONE column — fields, then the preview under
+// them — and the section is LAST on the page. Field icons: the email's own sage marks for
+// the three socials; drawn ones for the rest (the email has no icons there).
+const SIG_ICON = (key) => <img src={SIGNATURE_ICON_PATHS[key]} alt="" width={20} height={20} style={{ display:'block', width:'20px', height:'20px', flexShrink:0 }} />
+const LineIcon = ({ children }) => (
+  <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>{children}</svg>
+)
+const FIELD_ICONS = {
+  email: <LineIcon><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></LineIcon>,
+  phone: <LineIcon><rect x="7" y="2.5" width="10" height="19" rx="2" /><path d="M11 18h2" /></LineIcon>,
+  website: <LineIcon><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18" /></LineIcon>,
+}
+const PersonIcon = ({ size = 18 }) => (
+  <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+    <circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
+  </svg>
+)
+const BriefcaseIcon = () => (
+  <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+    <rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+  </svg>
+)
+const MailIcon = () => (
+  <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" />
+  </svg>
+)
 const LINK_FIELDS = [
-  { key:'website_url', label:'Website', placeholder:'beeorganized.com/your-town' },
-  { key:'facebook_url', label:'Facebook', placeholder:'Optional' },
-  { key:'instagram_url', label:'Instagram', placeholder:'Optional' },
-  { key:'linkedin_url', label:'LinkedIn', placeholder:'Optional' },
+  { key:'facebook_url', label:'Facebook', icon:'facebook', placeholder:'Facebook page address' },
+  { key:'instagram_url', label:'Instagram', icon:'instagram', placeholder:'@yourhandle' },
+  // Kept although Lovable's design has none: 6 locations have one set. The
+  // location's is in everyone's signature here; a person's own is offered
+  // below only while the location has none.
+  { key:'linkedin_url', label:'LinkedIn', icon:'linkedin', placeholder:'LinkedIn profile address' },
 ]
+
+// A signature field: at least 44px, bordered, white, its icon inside the
+// border on the left; the gold focus ring is on the wrapper ([data-efield]
+// in EMAILS_CSS), not the input. Saves on blur or Enter, like EField.
+export function SigField({ id, label, icon, value, placeholder, readOnly, hint, onSave, type = 'text' }) {
+  const [draft, setDraft] = React.useState(value ?? '')
+  const [state, setState] = React.useState(null)
+  React.useEffect(() => { setDraft(value ?? '') }, [value])
+  const commit = async () => {
+    if (readOnly || !onSave || (draft ?? '') === (value ?? '')) return
+    setState('saving')
+    const err = await onSave(draft)
+    setState(err ? { err } : 'saved')
+    if (!err) setTimeout(() => setState(st => (st === 'saved' ? null : st)), 1600)
+  }
+  const err = state && state.err
+  return (
+    <label style={{ display:'block', minWidth:0 }}>
+      <span style={{ marginBottom:'4px', display:'flex', alignItems:'center', gap:'8px', fontSize:'14px', fontWeight:600, color:ET.foreground, fontFamily:EF.ui }}>
+        {label}
+        {state === 'saving' && <span style={{ fontSize:'11px', fontWeight:400, color:ET.mutedFg }}>Saving…</span>}
+        {state === 'saved' && <span style={{ fontSize:'11px', fontWeight:600, color:ET.success }}>Saved</span>}
+      </span>
+      <span data-efield data-sig-field style={{ display:'flex', alignItems:'center', gap:'8px', minHeight:'44px', boxSizing:'border-box', padding:'0 12px',
+        borderRadius:ER.lg, border:`1px solid ${err ? ET.destructive : ET.border}`, background: readOnly ? ET.muted : ET.card, color:ET.mutedFg }}>
+        {icon}
+        <input id={id} type={type} value={draft} placeholder={placeholder} readOnly={readOnly}
+          onChange={e => setDraft(e.target.value)} onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } }}
+          style={{ flex:1, minWidth:0, border:0, outline:'none', background:'transparent', padding:'10px 0', fontSize:'14px', lineHeight:'20px', color:ET.foreground, fontFamily:EF.ui }} />
+      </span>
+      {err
+        ? <span style={{ marginTop:'4px', display:'block', fontSize:'12px', fontWeight:500, color:ET.destructive, fontFamily:EF.ui }}>⚠ {err}</span>
+        : hint && <span style={{ marginTop:'4px', display:'block', fontSize:'12px', color:ET.mutedFg, fontFamily:EF.ui }}>{hint}</span>}
+    </label>
+  )
+}
 
 export function useSignature(locationId, skip = false) {
   const [data, setData] = React.useState(null)
@@ -804,9 +879,23 @@ export function signatureFromData(data) {
   return {
     name: p.name ?? null, title: p.title ?? null, email: p.email ?? null, mobile: p.mobile ?? null,
     photoPath: p.photoPath ?? null,
-    websiteUrl: l.website_url ?? null, facebookUrl: l.facebook_url ?? null, instagramUrl: l.instagram_url ?? null, linkedinUrl: l.linkedin_url ?? null,
+    websiteUrl: l.website_url ?? null, facebookUrl: l.facebook_url ?? null, instagramUrl: l.instagram_url ?? null,
+    // The location's LinkedIn, else the signer's own (linkedinFor, the send's rule).
+    linkedinUrl: linkedinFor(l.linkedin_url, p.linkedinUrl),
     locationName: data.location?.name ?? null,
   }
+}
+
+// The signature HTML exactly as the route built it, in a frame sized to its
+// content (allow-same-origin lets onLoad measure it; no scripts run).
+export function SignatureFrame({ html }) {
+  const ref = React.useRef(null)
+  const [h, setH] = React.useState(220)
+  const onLoad = () => {
+    try { const d = ref.current && ref.current.contentDocument; if (d) setH(d.documentElement.scrollHeight) } catch { /* cross-origin */ }
+  }
+  return <iframe ref={ref} data-sig-preview title="Signature preview" sandbox="allow-same-origin" srcDoc={html} onLoad={onLoad}
+    style={{ display:'block', width:'100%', minWidth:'440px', height:`${h}px`, border:0, background:'#FFFFFF' }} />
 }
 
 export function EmailSignatureSection({ locationId, sig }) {
@@ -819,6 +908,10 @@ export function EmailSignatureSection({ locationId, sig }) {
   const canEdit = !!(target && target.canEdit) && !(data?.storageReady && data.storageReady.person === false)
   const linksOff = !!(data?.storageReady && data.storageReady.links === false)
   const photoUrl = person?.photoUrl || null
+  const fromAccount = 'From the account — change it on Settings → Profile.'
+  const initials = signatureInitials(person?.name)
+  const locationLinkedin = !blank(data?.links?.linkedin_url)
+  const personLinkedinReady = !!(data?.storageReady && data.storageReady.personLinkedin)
 
   async function patchSignature(body) {
     const res = await fetch('/api/signature', { method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' },
@@ -844,40 +937,74 @@ export function EmailSignatureSection({ locationId, sig }) {
     catch (err) { setProblem(err.message || String(err)) }
     finally { setBusy(null) }
   }
+  const subhead = { margin:'0 0 12px', fontSize:'14px', fontWeight:600, color:ET.foreground, fontFamily:EF.ui }
 
   return (
-    <ESection id="signature" eyebrow="Signature" title="How you sign off" intro="Added to the bottom of any email that includes your signature.">
+    <ESection id="signature" tint="sage" eyebrow="Signature" title="How you sign off" intro="Added to the bottom of any email that includes your signature.">
       {error && <p style={{ fontSize:'12px', color:ET.destructive, fontFamily:EF.ui }}>Couldn’t load the signature: {error}</p>}
       {!data && !error && <p style={{ fontSize:'12px', color:ET.mutedFg, fontFamily:EF.ui }}>Loading signature…</p>}
       {data && !target && <p style={{ fontSize:'12px', color:ET.mutedFg, fontFamily:EF.ui }}>Open a location to see its email signature.</p>}
       {data && target && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'24px' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'16px' }}>
-            {target.explainer && !target.isSelf && <p style={{ gridColumn:'1 / -1', margin:0, fontSize:'12px', color:ET.warning, fontFamily:EF.ui }}>{target.heading} — {target.explainer}</p>}
-            <div style={{ gridColumn:'1 / -1', display:'flex', alignItems:'center', gap:'12px' }}>
+        <div style={{ minWidth:0, display:'grid', gap:'20px' }}>
+          {target.explainer && !target.isSelf && <p style={{ margin:0, fontSize:'12px', color:ET.warning, fontFamily:EF.ui }}>{target.heading} — {target.explainer}</p>}
+          {/* Photo row: a 64×56 sage chip — the real photo when there is
+              one, else the initials the email will show, else a person. */}
+          <div data-sig-photo-row style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'12px', paddingBottom:'20px', borderBottom:`1px solid ${alpha(ET.sage, 0.4)}` }}>
+            <span data-sig-chip style={{ display:'grid', placeItems:'center', width:'64px', height:'56px', flexShrink:0, overflow:'hidden', borderRadius:ER.md, background:ET.sage, color:ET.ink, fontSize:'18px', fontWeight:700, fontFamily:EF.ui }}>
               {photoUrl
-                ? <img src={photoUrl} alt={`${person?.name || 'Signature'} headshot`} width={56} height={56} style={{ width:'56px', height:'56px', borderRadius:'999px', objectFit:'cover' }} />
-                : <span style={{ display:'grid', placeItems:'center', height:'56px', width:'56px', borderRadius:'999px', border:`2px dashed ${ET.border}`, fontSize:'12px', color:ET.mutedFg, fontFamily:EF.ui }}>None</span>}
-              {canEdit && <>
-                <input ref={fileRef} type="file" accept="image/*" onChange={onPick} style={{ display:'none' }} />
-                <EBtn disabled={!!busy} onClick={() => fileRef.current && fileRef.current.click()}>{busy || (photoUrl ? 'Change photo' : 'Add a photo')}</EBtn>
-                {photoUrl && !busy && <EBtn variant="ghost" onClick={() => patchSignature({ signature_photo_path: '' })}>Remove</EBtn>}
-              </>}
-            </div>
-            <EField label="Name" value={person?.name || ''} readOnly hint="From the profile — change it on Settings → Profile." />
-            <EField label="Job title" value={person?.title || ''} placeholder="Owner & Lead Organizer" readOnly={!canEdit}
-              onSave={v => patchSignature({ signature_title: v.trim() })} />
-            <EField label="Phone" value={person?.mobile || ''} readOnly hint="From the profile — change it on Settings → Profile." />
-            {LINK_FIELDS.map(f => (
-              <EField key={f.key} label={f.label} value={data.links?.[f.key] || ''} placeholder={f.placeholder} readOnly={linksOff}
-                onSave={v => saveLink(f.key, v)} />
-            ))}
-            {problem && <p style={{ gridColumn:'1 / -1', margin:0, fontSize:'12px', color:ET.destructive, fontFamily:EF.ui }}>⚠ {problem}</p>}
+                ? <img src={photoUrl} alt={`${person?.name || 'Signature'} headshot`} width={64} height={56} style={{ width:'64px', height:'56px', objectFit:'cover' }} />
+                : initials ? <span aria-hidden>{initials}</span> : <PersonIcon size={24} />}
+            </span>
+            <span style={{ flex:'1 1 120px', minWidth:0, fontSize:'14px', fontWeight:600, color:ET.foreground, fontFamily:EF.ui }}>Profile photo</span>
+            {canEdit && <>
+              <input ref={fileRef} type="file" accept="image/*" onChange={onPick} style={{ display:'none' }} />
+              {photoUrl
+                ? <EBtn disabled={!!busy} onClick={() => patchSignature({ signature_photo_path: '' })}>{busy || 'Remove photo'}</EBtn>
+                : <EBtn disabled={!!busy} onClick={() => fileRef.current && fileRef.current.click()}>{busy || 'Add a photo'}</EBtn>}
+            </>}
           </div>
-          <div style={{ borderRadius:ER.xl, background:ET.band, padding:'16px' }}>
-            <p style={{ margin:'0 0 12px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:ET.mutedFg, fontFamily:EF.ui }}>Clients see</p>
+          <div data-sig-pair>
+            <SigField label="Name" icon={<PersonIcon />} value={person?.name || ''} readOnly hint={fromAccount} />
+            <SigField label="Job title" icon={<BriefcaseIcon />} value={person?.title || ''} placeholder="Owner & Lead Organizer" readOnly={!canEdit}
+              onSave={v => patchSignature({ signature_title: v.trim() })} />
+          </div>
+          <div>
+            <p style={subhead}>Contact details</p>
+            <div style={{ display:'grid', gap:'12px' }}>
+              <div data-sig-pair>
+                <SigField label="Email" icon={FIELD_ICONS.email} value={person?.email || ''} readOnly hint={fromAccount} />
+                <SigField label="Phone" icon={FIELD_ICONS.phone} value={person?.mobile || ''} readOnly hint={fromAccount} />
+              </div>
+              <SigField label="Website" icon={FIELD_ICONS.website} value={data.links?.website_url || ''} placeholder="beeorganized.com/your-town" readOnly={linksOff}
+                onSave={v => saveLink('website_url', v)} />
+            </div>
+          </div>
+          <div style={{ paddingTop:'20px', borderTop:`1px solid ${alpha(ET.sage, 0.4)}` }}>
+            <p style={subhead}>Social links <span style={{ fontWeight:400, color:ET.mutedFg }}>· Optional</span></p>
+            <div data-sig-trio>
+              {LINK_FIELDS.map(f => (
+                <SigField key={f.key} label={f.label} icon={SIG_ICON(f.icon)} value={data.links?.[f.key] || ''} placeholder={f.placeholder} readOnly={linksOff}
+                  hint={f.key === 'linkedin_url' ? (locationLinkedin ? 'In everyone’s signature at this location.' : 'Add the location’s and it’s used in everyone’s signature here.') : undefined}
+                  onSave={v => saveLink(f.key, v)} />
+              ))}
+              {/* The person's own: only while the location has none (it would
+                  never be used otherwise), and only once
+                  migrations/signature_linkedin.sql has run. */}
+              {!locationLinkedin && personLinkedinReady && (
+                <SigField label={target.isSelf ? 'Your own LinkedIn' : `${person?.name || 'Their'}’s own LinkedIn`} icon={SIG_ICON('linkedin')}
+                  value={person?.linkedinUrl || ''} placeholder="linkedin.com/in/yourname" readOnly={!canEdit}
+                  hint={target.isSelf ? 'Only in your signature, while the location has no LinkedIn.' : 'Only in their signature, while the location has no LinkedIn.'}
+                  onSave={v => patchSignature({ signature_linkedin_url: v.trim() })} />
+              )}
+            </div>
+          </div>
+          {problem && <p style={{ margin:0, fontSize:'12px', color:ET.destructive, fontFamily:EF.ui }}>⚠ {problem}</p>}
+          <div data-sig-preview-block style={{ paddingTop:'20px', borderTop:`1px solid ${alpha(ET.sage, 0.4)}` }}>
+            <p style={{ margin:'0 0 8px', display:'flex', alignItems:'center', gap:'6px', fontSize:'12px', fontWeight:600, color:ET.mutedFg, fontFamily:EF.ui }}><MailIcon /> How it looks in your emails</p>
             {data.preview?.html
-              ? <iframe title="Signature preview" sandbox="" srcDoc={data.preview.html} style={{ width:'100%', height:'200px', border:0, background:'white', borderRadius:'8px' }} />
+              ? <div data-sig-card style={{ maxWidth:'512px', overflowX:'auto', boxSizing:'border-box', background:'#FFFFFF', border:`1px solid ${ET.border}`, borderRadius:ER.md, padding:'12px 16px', boxShadow:ESHADOW.btn }}>
+                  <SignatureFrame html={data.preview.html} />
+                </div>
               : <p style={{ fontSize:'12px', color:ET.mutedFg }}>No signature yet.</p>}
           </div>
         </div>

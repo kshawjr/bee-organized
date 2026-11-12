@@ -56,7 +56,7 @@ describe('every tag offered to an owner renders something', () => {
       name: 'Lynette Ewy', title: null, email: 'l@x.com', mobile: null, photoPath: null,
       websiteUrl: null, facebookUrl: null, instagramUrl: null, linkedinUrl: null,
     } })
-    expect(html).toContain('Lynette Ewy</strong>')
+    expect(html).toContain('Lynette Ewy</td>')
   })
 })
 

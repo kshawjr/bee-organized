@@ -3,7 +3,15 @@
 //   GET   /api/signature[?locationId=<uuid>]
 //         → { target, person, location, links, hasLinks, preview, storageReady }
 //   PATCH /api/signature
-//         { locationId?, targetUserId, signature_title?, signature_photo_path? }
+//         { locationId?, targetUserId, signature_title?, signature_photo_path?,
+//           signature_linkedin_url? }
+//
+// signature_linkedin_url (2026-10-31, migrations/signature_linkedin.sql) is
+// the signer's OWN LinkedIn, used only where the location has none
+// (lib/email-signature-resolve.ts linkedinFor). Same target rule as the title
+// and photo: your own, or — for super_admin/admin — the signer you are
+// viewing. Before the migration runs, storageReady.personLinkedin is false
+// and the screen doesn't offer it.
 //
 // The Settings signature card reads and writes ONLY through here, and both
 // directions resolve WHOSE signature it is the same way — resolveEmailSigner
@@ -31,11 +39,12 @@ import { supabaseService } from '@/lib/supabase-service'
 import {
   buildSignatureHtml,
   buildSignatureText,
+  safeHttpUrl,
   isValidSignaturePhotoPath,
   signaturePhotoUrl,
   SIGNATURE_PHOTO_BUCKET,
 } from '@/lib/email-signature'
-import { loadLocationSignatureLinks } from '@/lib/email-signature-resolve'
+import { loadLocationSignatureLinks, loadPersonLinkedin } from '@/lib/email-signature-resolve'
 import {
   locationHasSignatureLinks,
   normalizeSignatureTitle,
@@ -79,13 +88,18 @@ export async function GET(req: NextRequest) {
           title: signer.signature_title ?? null,
           photoPath: signer.signature_photo_path ?? null,
           photoUrl: signaturePhotoUrl(signer.signature_photo_path),
+          linkedinUrl: signer.signature_linkedin_url ?? null,
         }
       : null,
     location: { id: locationId, name: locationName },
     links,
     hasLinks: locationHasSignatureLinks(links),
     preview: { html: buildSignatureHtml(resolved.signature), text: buildSignatureText(resolved.signature) },
-    storageReady: { person: !personProbe.error, links: !linksProbe.error },
+    storageReady: {
+      person: !personProbe.error,
+      links: !linksProbe.error,
+      personLinkedin: signer ? (await loadPersonLinkedin(signer.id)).ready : false,
+    },
   })
 }
 
@@ -99,6 +113,7 @@ export async function PATCH(req: NextRequest) {
     targetUserId?: string
     signature_title?: string
     signature_photo_path?: string
+    signature_linkedin_url?: string
   }
 
   const ctx = await resolveSignatureEditContext(hubUser, typeof body.locationId === 'string' ? body.locationId : null)
@@ -130,11 +145,23 @@ export async function PATCH(req: NextRequest) {
       patch.signature_photo_path = p
     }
   }
+  if (typeof body.signature_linkedin_url === 'string') {
+    const v = body.signature_linkedin_url.trim()
+    if (!v) patch.signature_linkedin_url = null
+    else {
+      const url = safeHttpUrl(v)
+      if (!url) return NextResponse.json({ error: 'LinkedIn must be a web address, like https://www.linkedin.com/in/yourname' }, { status: 400 })
+      patch.signature_linkedin_url = url
+    }
+  }
   if (Object.keys(patch).length === 1) return NextResponse.json({ error: 'Nothing to save' }, { status: 400 })
 
   const { error } = await supabaseService.from('hub_users').update(patch).eq('id', targetId)
   if (error) {
     console.error('[/api/signature PATCH]', error.message)
+    if (/signature_linkedin_url/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+      return NextResponse.json({ error: 'Your own LinkedIn isn’t switched on yet — migrations/signature_linkedin.sql has not been run.' }, { status: 503 })
+    }
     if (/signature_(title|photo_path)/.test(error.message) && /does not exist/i.test(error.message)) {
       return NextResponse.json({ error: 'Email signature storage is not enabled yet — migrations/email_signatures.sql has not been run.' }, { status: 503 })
     }

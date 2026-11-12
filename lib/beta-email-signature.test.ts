@@ -131,8 +131,10 @@ const FULL: EmailSignature = {
 // attribute string.
 // 2026-10-30 design: <strong> (the name) and class — whose ONLY allowed value
 // is the layout's own dark-mode hook "dm-text" (checked below) — were added.
-const OK_TAGS = new Set(['table', 'tr', 'td', 'div', 'a', 'img', 'p', 'br', 'strong'])
-const OK_ATTRS = new Set(['role', 'cellpadding', 'cellspacing', 'border', 'style', 'valign', 'href', 'src', 'width', 'height', 'alt', 'class'])
+// 2026-10-31 (Kevin's redesign): align and bgcolor for the photo box, <span>
+// for the "m:" and the initials, aria-label on each social square.
+const OK_TAGS = new Set(['table', 'tr', 'td', 'div', 'a', 'img', 'p', 'br', 'strong', 'span'])
+const OK_ATTRS = new Set(['role', 'cellpadding', 'cellspacing', 'border', 'style', 'valign', 'href', 'src', 'width', 'height', 'alt', 'class', 'align', 'bgcolor', 'aria-label'])
 function assertOnlyLayoutMarkup(html: string) {
   const tagRe = /<\/?([a-zA-Z0-9]+)([^>]*)>/g
   let m: RegExpExecArray | null
@@ -169,54 +171,56 @@ function assertOnlyLayoutMarkup(html: string) {
 describe('a person with everything set renders the full layout', () => {
   const html = buildSignatureHtml(FULL)
 
-  // 2026-10-30 design: ROUND 80px photo, no vertical rule, name in sage Arvo,
-  // title line names the location, "Mobile:" instead of "m:".
-  it('headshot on the left: round, fixed size, from OUR domain, alt = their name', () => {
-    expect(html).toContain(`<img src="${APP}${SIGNATURE_PHOTO_ROUTE}/${PHOTO}" width="80" height="80" alt="Jane Smith"`)
-    expect(html).toContain('border-radius:40px')
+  // 2026-10-31, Kevin's redesign: the photo in a 90×112 box, a 4px sage bar,
+  // the name 22px bold sage. The detailed pins are in
+  // lib/beta-signature-design.test.tsx; these keep this file's own guards.
+  it('headshot on the left, in its box, from OUR domain, alt = their name', () => {
+    // PHOTO is an earlier SQUARE upload: 90×90, centred in the 90×112 box.
+    expect(html).toContain(`<img src="${APP}${SIGNATURE_PHOTO_ROUTE}/${PHOTO}" width="90" height="90" alt="Jane Smith"`)
     expect(html).not.toContain('supabase.co')
     // photo cell comes before the text cell
-    expect(html.indexOf(SIGNATURE_PHOTO_ROUTE)).toBeLessThan(html.indexOf('Jane Smith</strong>'))
+    expect(html.indexOf(SIGNATURE_PHOTO_ROUTE)).toBeLessThan(html.indexOf('Jane Smith</td>'))
   })
 
-  it('no vertical rule between photo and text (the old layout had one)', () => {
-    expect(html).not.toContain('border-left')
+  it('the text sits behind a 4px sage bar', () => {
+    expect(html).toContain('border-left:4px solid #A8C9C4')
   })
 
-  it('name in the pale green brand colour, in Arvo, larger', () => {
-    expect(html).toContain(`<strong style="font-size:20px;color:${SIGNATURE_NAME_COLOR};font-family:Arvo, Georgia, 'Times New Roman', serif;font-weight:400;">Jane Smith</strong>`)
+  it('name 22px bold sage', () => {
+    expect(SIGNATURE_NAME_COLOR).toBe('#A8C9C4')
+    expect(html).toContain('font-size:22px;line-height:28px;font-weight:bold;color:#A8C9C4;">Jane Smith</td>')
   })
 
-  it('title on its own line in the text grey, naming the location when it is known', () => {
-    expect(html).toContain('<br>Owner &amp; Lead Organizer<br>')
+  it('title on its own row in the grey, naming the location when it is known', () => {
+    expect(html).toContain('>Owner &amp; Lead Organizer</td>')
     expect(html).toContain(`color:${SIGNATURE_TITLE_COLOR};`)
-    expect(buildSignatureHtml({ ...FULL, locationName: 'Boulder' })).toContain('<br>Owner &amp; Lead Organizer, Bee Organized Boulder<br>')
+    expect(buildSignatureHtml({ ...FULL, locationName: 'Boulder' })).toContain('>Owner &amp; Lead Organizer, Bee Organized Boulder</td>')
     // No title → no line, even with a location (never ", Bee Organized Boulder").
     expect(buildSignatureHtml({ ...FULL, title: null, locationName: 'Boulder' })).not.toContain(', Bee Organized Boulder')
   })
 
-  it('email linked, "Mobile:" then the mobile linked, website linked', () => {
+  it('email linked, "m:" then the mobile linked, website linked', () => {
     expect(html).toContain('href="mailto:jane@beeorganized.com"')
     expect(html).toContain('>jane@beeorganized.com</a>')
-    expect(html).toContain('Mobile: <a href="tel:+13035550147"')
+    expect(html).toMatch(/>m:<\/span> <a href="tel:\+13035550147"/)
     expect(html).toContain('>(303) 555-0147</a>')
     expect(html).toContain('href="https://beeorganized.com/boulder"')
     expect(html).toContain('>beeorganized.com/boulder</a>')
   })
 
-  it('Facebook, Instagram and LinkedIn icons in a row, in that order, each alt-labelled', () => {
+  it('Facebook, Instagram and LinkedIn squares in a row, in that order, each labelled', () => {
     const fb = html.indexOf('alt="Facebook"')
     const ig = html.indexOf('alt="Instagram"')
     const li = html.indexOf('alt="LinkedIn"')
     expect(fb).toBeGreaterThan(-1)
     expect(ig).toBeGreaterThan(fb)
     expect(li).toBeGreaterThan(ig)
-    expect(html).toContain(`src="${APP}/email-signature/facebook.png" width="24" height="24"`)
+    expect(html).toContain(`src="${APP}/email-signature/facebook-mark.png" width="20" height="20"`)
     expect(html).toContain('href="https://www.instagram.com/beeorganizedboulder"')
   })
 
   it('field order: name, title, email, mobile, website, socials', () => {
-    const order = ['Jane Smith', 'Owner &amp;', 'mailto:', 'Mobile: ', 'beeorganized.com/boulder</a>', 'alt="Facebook"'].map((s) => html.indexOf(s))
+    const order = ['Jane Smith', 'Owner &amp;', 'mailto:', 'tel:', 'beeorganized.com/boulder</a>', 'alt="Facebook"'].map((s) => html.indexOf(s))
     expect(order.every((v) => v > -1)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
@@ -244,9 +248,10 @@ describe('a person with everything set renders the full layout', () => {
 describe('a person with no photo still renders and reads properly', () => {
   const html = buildSignatureHtml({ ...FULL, photoPath: null })
 
-  it('no photo cell and no orphan rule — the text stands alone', () => {
+  it('no photo — the initials box instead, and the sage bar still there', () => {
     expect(html).not.toContain(SIGNATURE_PHOTO_ROUTE)
-    expect(html).not.toContain('border-left')
+    expect(html).toContain('>JS</span>')
+    expect(html).toContain('border-left:4px solid #A8C9C4')
     expect(html).not.toContain('alt="Jane Smith"')
   })
 
@@ -267,7 +272,7 @@ describe('a person with no photo still renders and reads properly', () => {
 
   it('a name alone is still a signature; nothing at all is empty', () => {
     const nameOnly = buildSignatureHtml({ ...EMPTY_SIGNATURE, name: 'Bee Organized Boulder' })
-    expect(nameOnly).toContain('>Bee Organized Boulder</strong>')
+    expect(nameOnly).toContain('>Bee Organized Boulder</td>')
     expect(buildSignatureHtml(EMPTY_SIGNATURE)).toBe('')
     expect(buildSignatureText(EMPTY_SIGNATURE)).toBe('')
   })
@@ -401,7 +406,7 @@ describe('the fallback chain: assignee active HERE → primary owner active HERE
       const sig = await resolveEmailSignature({ locationId: LOC, locationName: 'Boulder', assigneeUserId: JANE })
       expect(sig.name).toBe('Bee Organized Boulder')
       expect(sig.email).toBeNull()
-      expect(buildSignatureHtml(sig)).toContain('>Bee Organized Boulder</strong>')
+      expect(buildSignatureHtml(sig)).toContain('>Bee Organized Boulder</td>')
     })
 
     it('before the migration runs: name, email and mobile only — no title, no photo, no links', async () => {
@@ -452,7 +457,7 @@ describe('both email layouts render it — where it was typed, once, and nowhere
   const count = (h: string, s: string) => h.split(s).length - 1
 
   function checkPlacement(html: string) {
-    expect(count(html, '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px 0;">')).toBe(1)
+    expect(count(html, '<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="dm-text" style="margin:8px 0;font-family:')).toBe(1)
     const thanks = html.indexOf('Thank you,')
     const sig = html.indexOf(SIGNATURE_PHOTO_ROUTE)
     const reviews = html.indexOf('Be sure to check out')
@@ -460,7 +465,7 @@ describe('both email layouts render it — where it was typed, once, and nowhere
     expect(sig).toBeGreaterThan(thanks)
     expect(reviews).toBeGreaterThan(sig)
     // signs ONCE: the name appears exactly once (alt text aside)
-    expect(count(html, 'Jane Smith</strong>')).toBe(1)
+    expect(count(html, 'Jane Smith</td>')).toBe(1)
     expect(html).not.toContain(SIGNATURE_MARKER)
   }
 
@@ -572,7 +577,7 @@ describe('nothing an owner typed is ever rendered as HTML', () => {
       expect(out).toContain('&lt;b&gt;Hi&lt;/b&gt;')
       expect(out).toContain('&lt;script&gt;alert(9)&lt;/script&gt;')
       // exactly one signature table, and it is the layout's
-      expect(out.split('style="margin:8px 0 20px 0;"').length - 1).toBe(1)
+      expect(out.split('class="dm-text" style="margin:8px 0;font-family:').length - 1).toBe(1)
     }
   })
 

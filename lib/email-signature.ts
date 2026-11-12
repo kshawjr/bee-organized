@@ -7,17 +7,28 @@
 // type plain values into Settings, and THIS file is the only place signature
 // HTML is ever built.
 //
-//   ╭────────╮  Jane Smith                              ← sage Arvo, 20px
-//   │ photo  │  Owner & Lead Organizer, Bee Organized Boulder
-//   │ 80 × 80│  jane@beeorganized.com                   ← mailto:
-//   ╰────────╯  Mobile: (303) 555-0147                  ← tel:
-//               beeorganized.com/boulder                ← the LOCATION's website
-//               [f] [ig] [in]                           ← the LOCATION's social links
+//   ┌────────┐ ┃ Jane Smith                         ← 22px bold sage
+//   │ photo  │ ┃ Owner, Bee Organized Boulder       ← 16px bold italic grey
+//   │ 90×112 │ ┃ jane@beeorganized.com              ← dark teal, underlined
+//   │        │ ┃ m: (303) 555-0147                  ← "m:" sage, number grey
+//   └────────┘ ┃ beeorganized.com/boulder           ← grey, underlined
+//              ┃ [f] [ig] [in]                      ← 28px sage-framed squares
 //
-// 2026-10-30: the designer's version (round photo, no vertical rule, name in
-// sage Arvo, "Mobile:"). The website line is kept although the export's email
-// HTML leaves it out — the export's own signature preview and settings form
-// both carry it, and dropping it would silently lose a link owners set.
+// 2026-10-31, KEVIN'S REDESIGN (replaces the Lovable version built earlier
+// that day). Arial throughout; sage #A8C9C4 and grey #7A7C79; a 4px sage bar
+// down the left of the text. Always light — Bee Hub has no dark mode.
+//
+// THE PHOTO BOX is 90×112 on #E6EFED. Kevin's rulings: a real photo when
+// there is one, the initials (sage, 30px bold) when not, and no box at all
+// when the name yields no initials. Photos uploaded before this were cropped
+// SQUARE (160×160), so they sit as a 90×90 square in the box — never
+// stretched; new uploads are cropped to the box's own portrait shape and say
+// so in their file name ("-p", isPortraitSignaturePhotoPath).
+//
+// THE SOCIALS are the design's 28px sage-bordered square holding each
+// network's symbol as a sage outline mark (SIGNATURE_ICON_PATHS) rather than
+// its "f" / "ig" / "in" letters — Kevin's call over the earlier dark-circle
+// logos. A social with no link is left out.
 //
 // PURE: no DB, no env reads except the app origin for image URLs. The
 // send-time resolver (who signs, with what) is lib/email-signature-resolve.ts.
@@ -52,18 +63,31 @@
 import { telHref as phoneTelHref } from '@/lib/phone'
 import { escHtml, escAttr } from './email-escape'
 
-// The brand's pale green (sage) — the same hex the design tokens call
-// brand.sage. Name line only.
-export const SIGNATURE_NAME_COLOR = '#A8C9C4'
-export const SIGNATURE_TITLE_COLOR = '#60625F'
-export const SIGNATURE_TEXT_COLOR = '#60625F'
-export const SIGNATURE_LINK_COLOR = '#60625F'
-export const SIGNATURE_NAME_FONT = `Arvo, Georgia, 'Times New Roman', serif`
+// The email's sage. NOTE: the Emails SCREEN's design token is #A2C7C1; every
+// email ever sent uses this one, so it stays (2026-10-31, deliberately left).
+export const SIGNATURE_SAGE = '#A8C9C4'
+export const SIGNATURE_GREY = '#7A7C79'
+// THE EMAIL ADDRESS ONLY (Kevin, 2026-11-12). Sage on white is 1.78:1 — too
+// faint to read at 15px in the Welcome Email. Nothing sage in the email
+// palette reaches the 4.5:1 small text needs (#7FA8A2 is 2.62:1), so this is
+// the brand's dark teal, 9.57:1 — the same hex as DRIP_BRAND_TEAL in
+// lib/drip-email-layout.ts (a test holds the two together; not imported, that
+// file imports this one). The name, the bar, the "m:", the initials and the
+// social frames stay SIGNATURE_SAGE.
+export const SIGNATURE_EMAIL_LINK = '#054E4A'
+export const SIGNATURE_PHOTO_BG = '#E6EFED'
+export const SIGNATURE_FONT = 'Arial, Helvetica, sans-serif'
+export const SIGNATURE_NAME_COLOR = SIGNATURE_SAGE
+export const SIGNATURE_TITLE_COLOR = SIGNATURE_GREY
+export const SIGNATURE_TEXT_COLOR = SIGNATURE_GREY
 
-// Display size of the headshot. Uploads are shrunk in the browser to 2× this
-// (lib/signature-photo.js) so it stays sharp on high-density screens.
-export const SIGNATURE_PHOTO_PX = 80
-export const SIGNATURE_ICON_PX = 24
+// The photo box (display size). Portrait uploads are stored at 2×.
+export const SIGNATURE_PHOTO_W = 90
+export const SIGNATURE_PHOTO_H = 112
+// The social squares: 28px inside a 2px sage border, the mark centred in it.
+export const SIGNATURE_SOCIAL_PX = 28
+export const SIGNATURE_SOCIAL_LOGO_PX = 20
+
 
 // Where an uploaded headshot lives: the PUBLIC email-signatures bucket
 // (migrations/email_signatures.sql). Mail clients fetch it without a login,
@@ -76,11 +100,15 @@ export const SIGNATURE_PHOTO_BUCKET = 'email-signatures'
 // sending brand's own domain.
 export const SIGNATURE_PHOTO_ROUTE = '/email-signature-photos'
 
-// Social icons are self-hosted in public/, like the drip logo.
+// Social marks are self-hosted in public/, like the drip logo: the symbol
+// alone in sage, drawn as 24×24 stroke-2 line icons like the Settings screen's
+// own, rendered at 2× (40×40 PNGs for the 20px slot). New names, never the old
+// facebook.png / instagram.png / linkedin.png: inboxes and image proxies cache
+// by address, so reusing a path could keep serving the dark-circle logo.
 export const SIGNATURE_ICON_PATHS = {
-  facebook: '/email-signature/facebook.png',
-  instagram: '/email-signature/instagram.png',
-  linkedin: '/email-signature/linkedin.png',
+  facebook: '/email-signature/facebook-mark.png',
+  instagram: '/email-signature/instagram-mark.png',
+  linkedin: '/email-signature/linkedin-mark.png',
 } as const
 
 // A private-use code point pair no keyboard produces. renderTemplate emits it
@@ -145,6 +173,51 @@ export function safeHttpUrl(raw: string | null | undefined): string | null {
   return u.href
 }
 
+// Instagram: owners type handles, not addresses (Lovable's signatureUrl).
+// "@handle" → https://instagram.com/handle; anything else as safeHttpUrl.
+const INSTAGRAM_HANDLE_RE = /^@([A-Za-z0-9._]{1,30})$/
+export function instagramUrl(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const m = raw.trim().match(INSTAGRAM_HANDLE_RE)
+  return m ? `https://instagram.com/${m[1]}` : safeHttpUrl(raw)
+}
+
+// Lovable's signatureInitials: the first letter of the first two words,
+// uppercased. Only letters and digits count, so "(Jane) Smith" is "JS" and a
+// name with neither — "—", "???" — yields '' and the email shows no circle at
+// all rather than an empty one.
+// (Built with new RegExp: the project's TypeScript target refuses the /u flag
+// in a literal, though every runtime we ship to supports it.)
+const LETTER_OR_DIGIT = new RegExp('[\\p{L}\\p{N}]', 'u')
+export function signatureInitials(name: string | null | undefined): string {
+  if (typeof name !== 'string') return ''
+  return name.trim().split(/\s+/)
+    .map((w) => (w.match(LETTER_OR_DIGIT) || [''])[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}
+
+// LINKEDIN: THE LOCATION'S FIRST, THE PERSON'S ONLY AS A FALLBACK (Kevin,
+// 2026-10-31: "1 linkedin makes sense for all signatures … if not people can
+// do individuals"). Everyone signing for a location carries its one LinkedIn;
+// a person's own appears only where the location has none.
+//
+// THIS IS THE OPPOSITE DIRECTION TO resolveOwnerBookingLink (lib/
+// booking-link.ts), which tries the person first and falls back to the
+// location. Deliberate — do not "make them consistent".
+//
+// The renderer still runs the winner through safeHttpUrl. Used by the
+// send-time resolver (assembleSignature) and the screen's own previews
+// (signatureFromData), so the two can't disagree.
+export function linkedinFor(locationUrl: string | null | undefined, personUrl: string | null | undefined): string | null {
+  const loc = typeof locationUrl === 'string' ? locationUrl.trim() : ''
+  if (loc) return loc
+  const own = typeof personUrl === 'string' ? personUrl.trim() : ''
+  return own || null
+}
+
 // What the website line SHOWS: no scheme, no "www.", no trailing slash.
 export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '')
@@ -164,12 +237,17 @@ export function telHref(raw: string | null | undefined): string | null {
   return phoneTelHref(raw)
 }
 
-// A stored photo path must be exactly "<uuid>/<uuid>.jpg|png" — the shape the
-// upload route mints. Anything else (a URL, a traversal, a stray value) yields
-// no photo rather than an image pointing somewhere we didn't choose.
-const PHOTO_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/
+// A stored photo path must be exactly "<uuid>/<uuid>[-p].jpg|png" — the shape
+// the upload route mints. Anything else (a URL, a traversal, a stray value)
+// yields no photo rather than an image pointing somewhere we didn't choose.
+// "-p" marks a PORTRAIT upload (90×112 at 2×, from 2026-10-31); without it
+// the photo is one of the earlier SQUARE ones.
+const PHOTO_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(-p)?\.(jpg|png)$/
 export function isValidSignaturePhotoPath(path: string | null | undefined): path is string {
   return typeof path === 'string' && PHOTO_PATH_RE.test(path)
+}
+export function isPortraitSignaturePhotoPath(path: string | null | undefined): boolean {
+  return isValidSignaturePhotoPath(path) && /-p\.(jpg|png)$/.test(path)
 }
 
 function appOrigin(env: NodeJS.ProcessEnv = process.env): string {
@@ -191,7 +269,6 @@ function clean(s: string | null | undefined): string | null {
   return t ? t : null
 }
 
-const FONT = `'Helvetica Neue', Helvetica, Arial, sans-serif`
 
 // The title line: "Owner, Bee Organized Boulder"; title alone without a
 // location; nothing without a title.
@@ -203,10 +280,11 @@ function titleLine(sig: EmailSignature): string | null {
 }
 
 // ── HTML ──────────────────────────────────────────────────────────────────
-// Table layout (the only thing every mail client agrees on). The photo cell
-// appears only when there is a photo; without one the text simply stands alone.
-// The photo is ROUND by border-radius — Outlook desktop ignores that and shows
-// it square, which is harmless.
+// Table layout (the only thing every mail client agrees on): the photo box,
+// then the text behind a 4px sage bar. Every value poured in is escaped (text)
+// or validated-then-escaped (links).
+const ROW_TEXT = 'font-size:15px;line-height:22px;font-weight:bold;font-style:italic;word-break:break-word;overflow-wrap:anywhere;'
+
 export function buildSignatureHtml(sig: EmailSignature, env: NodeJS.ProcessEnv = process.env): string {
   const name = clean(sig.name)
   const title = titleLine(sig)
@@ -215,46 +293,55 @@ export function buildSignatureHtml(sig: EmailSignature, env: NodeJS.ProcessEnv =
   const mobileHref = telHref(mobile)
   const website = safeHttpUrl(sig.websiteUrl)
   const photo = signaturePhotoUrl(sig.photoPath, env)
+  const SAGE = SIGNATURE_SAGE, GREY = SIGNATURE_GREY
 
-  const linkStyle = `color:${SIGNATURE_LINK_COLOR};`
-  const lines: string[] = []
-  if (name) {
-    lines.push(`<strong style="font-size:20px;color:${SIGNATURE_NAME_COLOR};font-family:${SIGNATURE_NAME_FONT};font-weight:400;">${escHtml(name)}</strong>`)
-  }
-  if (title) {
-    lines.push(escHtml(title))
-  }
-  if (email) {
-    lines.push(`<a href="${escAttr(`mailto:${email}`)}" style="${linkStyle}">${escHtml(email)}</a>`)
-  }
+  const rows: string[] = []
+  const row = (padding: string, style: string, inner: string) =>
+    rows.push(`<tr><td style="padding:${padding};${style}">${inner}</td></tr>`)
+  if (name) row('0 0 8px 0', `font-size:22px;line-height:28px;font-weight:bold;color:${SAGE};`, escHtml(name))
+  if (title) row('0 0 10px 0', `font-size:16px;line-height:22px;font-weight:bold;font-style:italic;color:${GREY};`, escHtml(title))
+  if (email) row('0 0 10px 0', ROW_TEXT, `<a href="${escAttr(`mailto:${email}`)}" style="color:${SIGNATURE_EMAIL_LINK};text-decoration:underline;">${escHtml(email)}</a>`)
   if (mobile) {
     const shown = escHtml(mobile)
-    lines.push(`Mobile: ${mobileHref ? `<a href="${escAttr(mobileHref)}" style="${linkStyle}">${shown}</a>` : shown}`)
+    const number = mobileHref ? `<a href="${escAttr(mobileHref)}" style="color:${GREY};text-decoration:underline;">${shown}</a>` : `<span style="color:${GREY};">${shown}</span>`
+    row('0 0 10px 0', ROW_TEXT, `<span style="color:${SAGE};">m:</span> ${number}`)
   }
-  if (website) {
-    lines.push(`<a href="${escAttr(website)}" style="${linkStyle}">${escHtml(displayUrl(website))}</a>`)
-  }
+  if (website) row('0 0 10px 0', ROW_TEXT, `<a href="${escAttr(website)}" style="color:${GREY};text-decoration:underline;">${escHtml(displayUrl(website))}</a>`)
 
   const socials: string[] = []
-  const social = (key: keyof typeof SIGNATURE_ICON_PATHS, raw: string | null, label: string) => {
-    const url = safeHttpUrl(raw)
+  const social = (key: keyof typeof SIGNATURE_ICON_PATHS, url: string | null, label: string) => {
     if (!url) return
+    const B = SIGNATURE_SOCIAL_PX, L = SIGNATURE_SOCIAL_LOGO_PX
     socials.push(
-      `<a href="${escAttr(url)}"><img src="${escAttr(iconUrl(key, env))}" width="${SIGNATURE_ICON_PX}" height="${SIGNATURE_ICON_PX}" alt="${label}" style="display:inline-block;border:0;margin:8px 6px 0 0;"></a>`,
+      `<a href="${escAttr(url)}" aria-label="${label}" style="display:inline-block;width:${B}px;height:${B}px;line-height:${B}px;margin:0 7px 0 0;border:2px solid ${SAGE};border-radius:6px;text-align:center;text-decoration:none;">` +
+        `<img src="${escAttr(iconUrl(key, env))}" width="${L}" height="${L}" alt="${label}" style="display:inline-block;width:${L}px;height:${L}px;border:0;vertical-align:middle;"></a>`,
     )
   }
-  social('facebook', sig.facebookUrl, 'Facebook')
-  social('instagram', sig.instagramUrl, 'Instagram')
-  social('linkedin', sig.linkedinUrl, 'LinkedIn')
+  social('facebook', safeHttpUrl(sig.facebookUrl), 'Facebook')
+  social('instagram', instagramUrl(sig.instagramUrl), 'Instagram')
+  social('linkedin', safeHttpUrl(sig.linkedinUrl), 'LinkedIn')
+  if (socials.length) rows.push(`<tr><td style="padding:8px 0 0 0;">${socials.join('')}</td></tr>`)
 
-  if (!lines.length && !socials.length) return ''
+  if (!rows.length) return ''
 
-  const textCell = `<td valign="top" class="dm-text" style="font-family:${FONT};font-size:16px;line-height:24px;color:${SIGNATURE_TEXT_COLOR};">${lines.join('<br>')}${socials.length ? `${lines.length ? '<br>' : ''}${socials.join('')}` : ''}</td>`
-  const photoCell = photo
-    ? `<td valign="top" width="${SIGNATURE_PHOTO_PX}" style="padding-right:16px;"><img src="${escAttr(photo)}" width="${SIGNATURE_PHOTO_PX}" height="${SIGNATURE_PHOTO_PX}" alt="${escHtml(name ?? '')}" style="display:block;width:${SIGNATURE_PHOTO_PX}px;height:${SIGNATURE_PHOTO_PX}px;border-radius:${SIGNATURE_PHOTO_PX / 2}px;border:0;"></td>`
+  const textCell = `<td valign="top" style="border-left:4px solid ${SAGE};padding:8px 0 8px 18px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0">${rows.join('')}</table></td>`
+
+  // The photo box: a portrait upload fills it; an earlier SQUARE upload sits
+  // as a 90×90 square in it; no photo → the initials; no initials → no box.
+  const W = SIGNATURE_PHOTO_W, H = SIGNATURE_PHOTO_H
+  const initials = photo ? '' : signatureInitials(name)
+  let boxInner = ''
+  if (photo) {
+    const [iw, ih] = isPortraitSignaturePhotoPath(sig.photoPath) ? [W, H] : [W, W]
+    boxInner = `<img src="${escAttr(photo)}" width="${iw}" height="${ih}" alt="${escHtml(name ?? '')}" style="display:block;width:${iw}px;height:${ih}px;border:0;">`
+  } else if (initials) {
+    boxInner = `<span style="font-size:30px;line-height:30px;font-weight:bold;color:${SAGE};">${escHtml(initials)}</span>`
+  }
+  const photoCell = boxInner
+    ? `<td valign="top" style="padding:6px 16px 0 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="${W}" height="${H}" align="center" valign="middle" bgcolor="${SIGNATURE_PHOTO_BG}" style="width:${W}px;height:${H}px;background:${SIGNATURE_PHOTO_BG};">${boxInner}</td></tr></table></td>`
     : ''
 
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px 0;"><tr>${photoCell}${textCell}</tr></table>`
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="dm-text" style="margin:8px 0;font-family:${SIGNATURE_FONT};color:${GREY};"><tr>${photoCell}${textCell}</tr></table>`
 }
 
 // ── Plain text (the text/plain half of the email) ─────────────────────────
@@ -271,7 +358,7 @@ export function buildSignatureText(sig: EmailSignature): string {
   if (mobile) out.push(`Mobile: ${mobile}`)
   if (website) out.push(displayUrl(website))
   const fb = safeHttpUrl(sig.facebookUrl)
-  const ig = safeHttpUrl(sig.instagramUrl)
+  const ig = instagramUrl(sig.instagramUrl)
   const li = safeHttpUrl(sig.linkedinUrl)
   if (fb) out.push(`Facebook: ${fb}`)
   if (ig) out.push(`Instagram: ${ig}`)

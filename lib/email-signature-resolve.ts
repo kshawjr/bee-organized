@@ -22,6 +22,8 @@
 // Whoever signs, the WEBSITE and SOCIAL links are always the LOCATION's —
 // Kevin's ruling: location specific, not corporate. A location with none set
 // shows none; nothing falls back to beeorganized.com's corporate accounts.
+// ONE exception, LinkedIn (2026-10-31): the location's, else the signer's own
+// (hub_users.signature_linkedin_url) — linkedinFor in lib/email-signature.ts.
 //
 // NEVER THROWS, and never blanks the name: the columns this reads arrive with
 // migrations/email_signatures.sql, and every read tolerates their absence
@@ -30,7 +32,7 @@
 
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
-import { EMPTY_SIGNATURE, type EmailSignature } from './email-signature'
+import { EMPTY_SIGNATURE, linkedinFor, type EmailSignature } from './email-signature'
 
 export type SignaturePersonRow = {
   id: string
@@ -42,6 +44,7 @@ export type SignaturePersonRow = {
   location_id: string | null
   signature_title?: string | null
   signature_photo_path?: string | null
+  signature_linkedin_url?: string | null
 }
 
 export type SignatureCandidate = {
@@ -89,6 +92,10 @@ export function locationDisplayName(locationName: string | null | undefined): st
   return /^bee organized\b/i.test(n) ? n : `Bee Organized ${n}`
 }
 
+// LinkedIn: the location's first, the person's only as a fallback — the
+// rule is linkedinFor in lib/email-signature.ts (pure, so the screen's own
+// previews use it too). The OPPOSITE direction to resolveOwnerBookingLink.
+
 export function assembleSignature(
   person: SignaturePersonRow | null,
   links: LocationSignatureLinks,
@@ -110,6 +117,7 @@ export function assembleSignature(
     mobile: person.phone ?? null,
     photoPath: person.signature_photo_path ?? null,
     ...locationLinks,
+    linkedinUrl: linkedinFor(links.linkedin_url, person.signature_linkedin_url),
     // "Owner & Lead Organizer, Bee Organized Boulder" — the title line names
     // the location (2026-10-30 design).
     locationName: locationName?.trim() || null,
@@ -159,6 +167,23 @@ async function loadPersonSignatureFields(userId: string): Promise<{ signature_ti
     }
   } catch {
     return { signature_title: null, signature_photo_path: null }
+  }
+}
+
+// Its own read for the same reason: signature_linkedin_url arrives with
+// migrations/signature_linkedin.sql, and naming it beside the title and photo
+// would lose those too until it runs. Absent → null → the location's only.
+export async function loadPersonLinkedin(userId: string): Promise<{ value: string | null; ready: boolean }> {
+  try {
+    const { data, error } = await supabaseService
+      .from('hub_users')
+      .select('signature_linkedin_url')
+      .eq('id', userId)
+      .maybeSingle()
+    if (error) return { value: null, ready: false }
+    return { value: (data as any)?.signature_linkedin_url ?? null, ready: true }
+  } catch {
+    return { value: null, ready: false }
   }
 }
 
@@ -212,7 +237,9 @@ export async function resolveEmailSigner(args: {
       person = chooseSignaturePerson({ locationId, assignee, owner: ownerCandidate })
       reason = person ? 'primary_owner' : null
     }
-    const personWithFields = person ? { ...person, ...(await loadPersonSignatureFields(person.id)) } : null
+    const personWithFields = person
+      ? { ...person, ...(await loadPersonSignatureFields(person.id)), signature_linkedin_url: (await loadPersonLinkedin(person.id)).value }
+      : null
     const links = await loadLocationSignatureLinks(locationId)
     return { signer: personWithFields, reason, signature: assembleSignature(personWithFields, links, locationName) }
   } catch {

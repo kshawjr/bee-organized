@@ -7,8 +7,12 @@
 
 export const SIGNATURE_PHOTO_MAX_BYTES = 1024 * 1024 // 1 MB — the browser sends ~20–60 KB
 export const SIGNATURE_PHOTO_TYPES = ['image/jpeg', 'image/png'] as const
-// Stored at 2× the 80px display size so it stays sharp on high-density screens.
+// Uploads before 2026-10-31: a 160×160 square (2× the old 80px circle).
 export const SIGNATURE_PHOTO_STORED_PX = 160
+// From 2026-10-31 (Kevin's redesign): a PORTRAIT at 2× the 90×112 box, so it
+// fills the box exactly. The route marks these paths "-p".
+export const SIGNATURE_PORTRAIT_W = 180
+export const SIGNATURE_PORTRAIT_H = 224
 
 export const HEIC_MESSAGE =
   'That photo is in Apple’s HEIC format, which this browser can’t read. On an iPhone, pick it from Photos in Safari (it converts automatically), or save it as a JPEG first and upload that.'

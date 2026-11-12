@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  let body: { type?: unknown; size?: unknown; locationId?: unknown; targetUserId?: unknown }
+  let body: { type?: unknown; size?: unknown; locationId?: unknown; targetUserId?: unknown; shape?: unknown }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 }) }
 
   const type = String(body.type ?? '').toLowerCase()
@@ -50,7 +50,11 @@ export async function POST(req: NextRequest) {
   if (guard) return guard
 
   const ext = type === 'image/png' ? 'png' : 'jpg'
-  const path = `${ctx!.target.targetId}/${crypto.randomUUID()}.${ext}`
+  // "-p": the browser cropped it to the signature's portrait box (lib/
+  // signature-photo.js). A page loaded before that change still uploads a
+  // square and says nothing, so it gets an unmarked path and shows squared.
+  const portrait = body.shape === 'portrait' ? '-p' : ''
+  const path = `${ctx!.target.targetId}/${crypto.randomUUID()}${portrait}.${ext}`
   const { data, error } = await supabaseService.storage.from(SIGNATURE_PHOTO_BUCKET).createSignedUploadUrl(path)
   if (error || !data?.token) {
     console.error('[signature photo sign]', error)

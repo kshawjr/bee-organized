@@ -24435,8 +24435,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <EmailStyleSection style={es.style} ready={emailSettings.ready.style}
                 onPick={id => saveEmailSettings({ email_style: id })} />
 
-              <EmailSignatureSection locationId={realLocId} sig={emailSig} />
-
               <ESection id="emails" eyebrow="The emails" title="Every email a client can receive"
                 intro="They go out on their own, in this order. Tap the day on any email to change when it goes out.">
                 {realLocId && <FollowupsSwitch state={followupsState} onSetOff={setFollowupsOff} />}
@@ -24471,6 +24469,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   <MasterTemplatesEditor design />
                 </ESection>
               )}
+
+              {/* Last on the page (Lovable's SignatureSection, 2026-10-31). */}
+              <EmailSignatureSection locationId={realLocId} sig={emailSig} />
             </div>
             {/* ── issue 240 step 11 — RETIRED HERE ───────────────────────
                 Removed from this tab: the two sequence tiles and everything
