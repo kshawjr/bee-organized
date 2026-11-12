@@ -79,6 +79,8 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
+import BookAssessment from './BookAssessment'
+import { canBookAssessment } from './shared/bookAssessmentGate'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn, rowActionBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
@@ -463,6 +465,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     children.service_requests.length === 0 && children.quotes.length === 0 &&
     children.jobs.length === 0 && children.invoices.length === 0 &&
     (children.assessments || []).length === 0
+
+  // Book assessment (2026-11) — a SENT request with no assessment yet. The
+  // "Request only" send waiting on a time; booking here puts the assessment on
+  // THAT request instead of the owner making a second one in Jobber (the
+  // twin-card cause). Never shows with Send to Jobber. shared/bookAssessmentGate.
+  const canBook = !!data && canBookAssessment({ eng, children, readOnly })
+  // After a booking, re-read the card so the Assessment milestone appears and
+  // the button goes (the gate sees the new assessment row).
+  const refetchAfterBooking = () => {
+    fetch(`/api/engagements/${engagementId}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) setData(d) })
+      .catch(() => {})
+  }
 
   // The stage's record family — single-homed in stageConfig (the same
   // map the milestone arc derives from). Terminal stages own nothing
@@ -981,6 +997,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
             <IconSend size={14} /> Send to Jobber
           </button>
+        )}
+        {/* Mounted only when it shows — ActionRow sizes its grid by counting
+            children, so a hidden element would still take a column. */}
+        {canBook && (
+          <BookAssessment
+            show
+            engagementId={engagementId}
+            assignees={assignees}
+            busy={busy}
+            onBooked={(_json, pick) => {
+              setToast({ kind: 'success', msg: `Assessment booked in Jobber — ${pick.date} at ${pick.time}` })
+              refetchAfterBooking()
+            }}
+          />
         )}
         {jobberHref && (
           <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>

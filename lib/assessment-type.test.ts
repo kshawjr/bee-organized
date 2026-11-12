@@ -162,9 +162,15 @@ describe('the webhook copy-back leaves assessment_type alone', () => {
 describe('wiring', () => {
   const route = readFileSync('app/api/leads/[id]/send-to-jobber/route.ts', 'utf8')
   it('send route: instructions only when there are some (in-person input unchanged)', () => {
-    expect(route).toContain('...(assessmentInstructions(assessment_type)')
-    expect(route).toContain('? { instructions: assessmentInstructions(assessment_type) }')
-    expect(route).toContain(': {}),')
+    // The create moved to lib/jobber-assessment-create.ts (shared with Book
+    // assessment, 2026-11). The route passes its type through; the helper
+    // adds instructions only when there are some.
+    // …into the shared create call itself, not merely somewhere in the file
+    expect(route).toMatch(/createAssessmentOnRequest\(\{[^}]*assessmentType: assessment_type,[^}]*\}\)/)
+    const create = readFileSync('lib/jobber-assessment-create.ts', 'utf8')
+    expect(create).toContain('...(assessmentInstructions(assessmentType)')
+    expect(create).toContain('? { instructions: assessmentInstructions(assessmentType) }')
+    expect(create).toContain(': {}),')
   })
   it('send route: records the type, non-fatal, reusing a pre-written SR', () => {
     expect(route).toContain('recordSentAssessmentType({')

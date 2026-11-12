@@ -38,12 +38,10 @@
 // webhook founds under rule 1 exactly as before.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { formatInTimeZone } from 'date-fns-tz'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
-import { requireIanaTimezone } from '@/lib/drip-time'
 import { isLocationReadOnly } from '@/lib/read-only-access'
 import { upsertServiceRequest, upsertJob, encodeJobberId } from '@/lib/jobber-import'
 import { attachToEngagement, isFallbackTitle } from '@/lib/engagements'
@@ -56,7 +54,8 @@ import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } fro
 import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
 import { leadSourceForJobber, JOBBER_NO_SOURCE } from '@/lib/lead-source'
-import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
+import { summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
+import { createAssessmentOnRequest } from '@/lib/jobber-assessment-create'
 import {
   buildAddressChoices,
   resolveAddressChoice,
@@ -64,7 +63,6 @@ import {
   type AddressChoice,
 } from '@/lib/address-choice'
 import { formatPhone } from '@/lib/phone'
-import { assessmentInstructions } from '@/lib/assessment-type'
 import { missingVisitAddressParts, describeMissing, pickPrimaryAddress } from '@/lib/visit-address'
 import { recordSentAssessmentType } from '@/lib/assessment-type-record'
 
@@ -119,19 +117,6 @@ function fail(stage: Stage, error: string, status = 500, extra: object = {}) {
     { success: false, error, stage, ...extra },
     { status },
   )
-}
-
-// Jobber's ScheduledItemAttributes uses LocalDateTimeAttributes { date,
-// time, timezone } for startAt/endAt — not an ISO 8601 string. Convert the
-// stored UTC ISO timestamp into the location's local wall-clock pieces so
-// Jobber renders the appointment in the right zone.
-function toLocalDateTime(iso: string, timezone: string) {
-  const ms = new Date(iso).getTime()
-  return {
-    date:     formatInTimeZone(ms, timezone, 'yyyy-MM-dd'),
-    time:     formatInTimeZone(ms, timezone, 'HH:mm:ss'),
-    timezone,
-  }
 }
 
 // ── Jobber GraphQL operations ────────────────────────────────────────────────
@@ -236,31 +221,8 @@ const REQUEST_CREATE_MUTATION = /* GraphQL */ `
   }
 `
 
-// Jobber moved `requestId` out of AssessmentCreateInput and onto the
-// mutation as a top-level arg; the input now only carries `instructions`
-// and `schedule: ScheduledItemAttributes`. Inside schedule, startAt/endAt
-// are LocalDateTimeAttributes objects, not ISO strings.
-// issue 144 — the team is assigned AT CREATION via schedule.
-// teamMemberIdsToAssign (see the schedule build below). We read back
-// assignedUsers here so the caller can VERIFY the create applied the team:
-// the reason the old post-create appointmentEditAssignment failure went
-// unnoticed for 22 sends is that nothing ever checked the result.
-// assignedUsers is a UserConnection (introspected live 2026-07-31), hence
-// the { nodes { id } } selection.
-const ASSESSMENT_CREATE_MUTATION = /* GraphQL */ `
-  mutation AssessmentCreate(
-    $requestId: EncodedId!,
-    $input: AssessmentCreateInput!
-  ) {
-    assessmentCreate(requestId: $requestId, input: $input) {
-      assessment {
-        id
-        assignedUsers { nodes { id } }
-      }
-      userErrors { message path }
-    }
-  }
-`
+// assessmentCreate lives in lib/jobber-assessment-create.ts (shared with
+// Book assessment) — see createAssessmentOnRequest.
 
 // Path 2 (job-only): create a job directly, skipping request + estimate.
 // Live-schema introspection (2026-07-21, scripts/introspect-jobber-schema.mjs)
@@ -1008,76 +970,42 @@ export async function POST(
     }
 
     if (creation_type === 'request_with_assessment') {
-      // Assessments are time-boxed; Jobber's UI defaults to 1hr if endAt
-      // is omitted. We mirror that by sending a 1hr endAt explicitly so
-      // calendar views render with a sensible block.
-      const startMs = new Date(scheduled_assessment_at!).getTime()
-      const endMs   = startMs + 60 * 60 * 1000
-      // Jobber's LocalDateTimeAttributes requires an IANA timezone. The
-      // locations.timezone column historically stores friendly labels like
-      // "Eastern Time (ET)"; requireIanaTimezone translates known labels and
-      // throws on anything it can't confidently resolve. No silent fallback —
-      // a wrong zone misplaces appointments on the customer's calendar.
-      let tz: string
-      try {
-        tz = requireIanaTimezone((location as any).timezone)
-      } catch (err: any) {
+      // The assessment half lives in lib/jobber-assessment-create.ts — the
+      // ONE implementation, shared with Book assessment on a card whose
+      // request was sent earlier as "Request only". Same timezone rule
+      // (requireIanaTimezone, no silent fallback), same one-hour block, same
+      // team-at-creation (issue 144), same virtual instructions.
+      const booked = await createAssessmentOnRequest({
+        locationSlug,
+        requestGlobalId: jobberRequestGlobalId,
+        scheduledAtIso: scheduled_assessment_at!,
+        timezoneLabel: (location as any).timezone,
+        teamJobberIds: allAssigneeJobberIds,
+        assessmentType: assessment_type,
+      })
+      if (!booked.ok && booked.stage === 'validation') {
         return fail(
           'validation',
-          `Cannot send to Jobber: ${err?.message || 'invalid location timezone'}. ` +
+          `Cannot send to Jobber: ${booked.error}. ` +
           `Update Settings → Location → Timezone.`,
           400,
         )
       }
-      // issue 144 — assign the team AT CREATION. The old flow created the
-      // assessment and THEN called appointmentEditAssignment(appointmentId);
-      // live read-back proved it never applied (0 of 22 sent assessments
-      // carried the assigned person). ScheduledItemAttributes.
-      // teamMemberIdsToAssign is [EncodedId!] (introspected live 2026-07-31);
-      // allAssigneeJobberIds are already-encoded User gids. An empty/unresolved
-      // list omits the field entirely — an explicit [] would read as a
-      // deliberate clear. notifyTeam is deliberately left UNSET: turning on
-      // anything that emails a franchise team member needs Kevin's ok first.
-      const schedule = applyTeamToSchedule(
-        {
-          startAt: toLocalDateTime(new Date(startMs).toISOString(), tz),
-          endAt:   toLocalDateTime(new Date(endMs).toISOString(),   tz),
-        },
-        allAssigneeJobberIds,
-      )
-      const assessCreate = await jobberMutation(
-        locationSlug,
-        ASSESSMENT_CREATE_MUTATION,
-        {
-          requestId: jobberRequestGlobalId,
-          // Virtual → the field team's note in Jobber (the only place they
-          // see the type). In-person → no instructions key at all, so the
-          // input is exactly what it was before (lib/assessment-type.ts).
-          input: {
-            schedule,
-            ...(assessmentInstructions(assessment_type)
-              ? { instructions: assessmentInstructions(assessment_type) }
-              : {}),
-          },
-        },
-      )
-      if (assessCreate.userErrors?.length) {
-        return fail('assessment_create', assessCreate.userErrors[0].message)
+      if (!booked.ok) {
+        return fail('assessment_create', booked.error)
       }
-      const createdAssessment = assessCreate.data?.assessmentCreate?.assessment || null
-      jobberAssessmentGlobalId = createdAssessment?.id || null
+      const startMs = booked.startMs
+      jobberAssessmentGlobalId = booked.assessmentGlobalId
 
       // issue 144 — VERIFY the create actually applied the team. Nothing
       // checked before, which is why the silent failure survived 22 sends.
-      // Compare what we asked to assign against assessment.assignedUsers and
-      // surface any mismatch loudly (console + sync_log) instead of swallowing
-      // it. Non-fatal: the assessment and request already exist; a mismatch is
-      // a data-quality alarm for follow-up, not a reason to fail the whole send.
-      if (allAssigneeJobberIds.length > 0) {
-        const diff = diffAssessmentAssignment(
-          allAssigneeJobberIds,
-          createdAssessment?.assignedUsers?.nodes,
-        )
+      // The helper diffs what we asked to assign against
+      // assessment.assignedUsers; here we surface any mismatch loudly
+      // (console + sync_log) instead of swallowing it. Non-fatal: the
+      // assessment and request already exist; a mismatch is a data-quality
+      // alarm for follow-up, not a reason to fail the whole send.
+      if (booked.diff) {
+        const diff = booked.diff
         // issue 158 — the team count the terminal row reports is the READ-BACK
         // count, never the requested one. `returned` is what Jobber says it
         // holds; `requested` is only what we asked. On a mismatch the send is

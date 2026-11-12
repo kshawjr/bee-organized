@@ -98,8 +98,13 @@ describe('send-to-jobber send-time resolution wiring (issue 150)', () => {
   it('PIN: allAssigneeJobberIds still reaches teamMemberIdsToAssign (issue 144)', () => {
     // applyTeamToSchedule attaches teamMemberIdsToAssign from allAssigneeJobberIds
     // — the whole point is that a first send now populates it.
-    expect(route).toContain('const schedule = applyTeamToSchedule(')
-    expect(route).toContain('        allAssigneeJobberIds,\n      )')
+    // The assessment half moved to lib/jobber-assessment-create.ts (shared
+    // with Book assessment, 2026-11): the route hands the ids to it, and it
+    // builds the schedule from them.
+    expect(route).toContain('teamJobberIds: allAssigneeJobberIds,')
+    const create = readFileSync('lib/jobber-assessment-create.ts', 'utf8')
+    expect(create).toContain('const schedule = applyTeamToSchedule(')
+    expect(create).toContain('    teamJobberIds,\n  )')
   })
 
   it('PIN: comments use the "issue 150" form, never the "#150" hex-sweep trap', () => {

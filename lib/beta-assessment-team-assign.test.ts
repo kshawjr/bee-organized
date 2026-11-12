@@ -36,6 +36,7 @@ import {
 } from '@/lib/jobber-assessment-assign'
 
 const ROUTE = 'app/api/leads/[id]/send-to-jobber/route.ts'
+const CREATE = 'lib/jobber-assessment-create.ts'
 
 // ── 1) applyTeamToSchedule — the field is present iff assignees resolve ─────
 describe('applyTeamToSchedule', () => {
@@ -136,29 +137,43 @@ describe('diffAssessmentAssignment', () => {
 // repo pins route wiring this way, see jobber-request-form.test.ts).
 describe('send-to-jobber route wiring (issue 144)', () => {
   const route = readFileSync(ROUTE, 'utf8')
+  // 2026-11: the assessment half moved, unchanged, to the shared helper that
+  // Book assessment also uses. The create lives THERE; the route calls it and
+  // keeps its own breadcrumbs. Each pin below reads whichever file owns it.
+  const create = readFileSync(CREATE, 'utf8')
+
+  it('the route books through the ONE shared create, handing it the resolved team', () => {
+    expect(route).toContain("import { createAssessmentOnRequest } from '@/lib/jobber-assessment-create'")
+    expect(route).toContain('const booked = await createAssessmentOnRequest({')
+    expect(route).toContain('teamJobberIds: allAssigneeJobberIds,')
+    // and the route no longer carries a copy of its own
+    expect(route).not.toContain('ASSESSMENT_CREATE_MUTATION')
+    expect(route).not.toContain('assessmentCreate(requestId')
+  })
 
   it('the assessmentCreate response reads back assignedUsers so the result can be verified', () => {
-    expect(route).toContain('assessmentCreate(requestId: $requestId, input: $input)')
-    expect(route).toContain('assignedUsers { nodes { id } }')
+    expect(create).toContain('assessmentCreate(requestId: $requestId, input: $input)')
+    expect(create).toContain('assignedUsers { nodes { id } }')
   })
 
   it('the team is assigned AT CREATION — schedule built via applyTeamToSchedule from the resolved ids', () => {
     // issue 145 added summarizeAssignmentOutcome to this same import — assert
     // the two 144 symbols are imported from the module rather than pinning the
     // exact symbol list (which now also carries the 145 helper).
-    expect(route).toContain("from '@/lib/jobber-assessment-assign'")
-    expect(route).toContain('applyTeamToSchedule')
-    expect(route).toContain('diffAssessmentAssignment')
-    expect(route).toContain('const schedule = applyTeamToSchedule(')
-    expect(route).toContain('allAssigneeJobberIds,')
+    expect(create).toContain("from '@/lib/jobber-assessment-assign'")
+    expect(create).toContain('applyTeamToSchedule')
+    expect(create).toContain('diffAssessmentAssignment')
+    expect(create).toContain('const schedule = applyTeamToSchedule(')
+    expect(create).toContain('teamJobberIds,')
     // the create input is fed the schedule that (conditionally) carries the
     // team — beside the optional virtual-assessment note (lib/assessment-type.ts)
-    expect(route).toMatch(/input: \{\s*schedule,\s*\.\.\.\(assessmentInstructions\(assessment_type\)/)
+    expect(create).toMatch(/input: \{\s*schedule,\s*\.\.\.\(assessmentInstructions\(assessmentType\)/)
   })
 
   it('the returned assignedUsers are diffed against the requested set and a mismatch is SURFACED', () => {
-    expect(route).toContain('diffAssessmentAssignment(')
-    expect(route).toContain('createdAssessment?.assignedUsers?.nodes')
+    expect(create).toContain('diffAssessmentAssignment(teamJobberIds, createdAssessment?.assignedUsers?.nodes)')
+    // the route acts on the read-back whenever a team was asked for
+    expect(route).toContain('      if (booked.diff) {\n        const diff = booked.diff')
     expect(route).toContain('if (!diff.ok)')
     // surfaced two ways: a loud console warn AND a sync_log breadcrumb...
     expect(route).toContain('assessment team mismatch')
@@ -171,16 +186,21 @@ describe('send-to-jobber route wiring (issue 144)', () => {
     // the mutation const and its unique input field must not survive
     expect(route).not.toContain('APPOINTMENT_EDIT_ASSIGNMENT_MUTATION')
     expect(route).not.toContain('assignedUserIds')
+    expect(create).not.toContain('APPOINTMENT_EDIT_ASSIGNMENT_MUTATION')
+    expect(create).not.toContain('assignedUserIds')
   })
 
   it('notifyTeam is NEVER set — team emails wait for Kevin', () => {
     // the word appears in an explanatory comment, but never as an input key
     expect(route).not.toMatch(/notifyTeam\s*:/)
+    expect(create).not.toMatch(/notifyTeam\s*:/)
   })
 
   it('comments use the "issue 144" form, never the "#144" hex-sweep trap', () => {
     expect(route).toContain('issue 144')
     expect(route).not.toContain('#144')
+    expect(create).toContain('issue 144')
+    expect(create).not.toContain('#144')
   })
 })
 
