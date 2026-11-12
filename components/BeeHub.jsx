@@ -18264,6 +18264,7 @@ import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shar
 import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
 import PhoneInput from '@/components/hive/shared/PhoneInput'
 import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS } from '@/lib/merge-tags'
+import { safeHttpUrl } from '@/lib/email-signature'
 import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
@@ -23314,6 +23315,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     const [stateKey, column] = EMAILS_LOCATION_FIELDS[kind] || []
     if (!column) return 'That can’t be saved here.'
     if (!realLocId) return 'You’re viewing this location — open the real location to change it.'
+    // The in-home link is a web address, like the other two booking links
+    // (safeHttpUrl; the route refuses it too). Blank still clears.
+    if (kind === 'booking' && String(v ?? '').trim() && !safeHttpUrl(String(v))) return 'In-home assessment link must be a web address, like https://calendly.com/you'
     try {
       const res = await fetch(`/api/locations/${realLocId}`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },

@@ -14,6 +14,14 @@
 //   • an optional link that isn't a web address is refused; nothing is stored
 //   • the switch cannot be turned on with no in-home link
 //   • the rate switch writes exactly what it wrote before (fingerprint from main)
+//
+// LATER THE SAME DAY — EVERY LINK IS CHECKED. The in-home link was the one
+// booking link stored as free text. It is now a web address too (safeHttpUrl):
+// in the panel, in the field further down, and on both routes that store it.
+// Pinned at the foot of this file, with the proof that nothing else about the
+// panel moved (fingerprints from main 2cc7183) and that NOTHING requires a
+// discovery link — that idea is parked on the branch
+// parked/discovery-link-required until the emails invite a discovery call.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -21,13 +29,41 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+
+const h = vi.hoisted(() => {
+  const LOC_ID = '2b3c4d5e-1111-4222-8333-444455556666'
+  const state = { updates: [] as { table: string; patch: any }[] }
+  const from = (table: string) => {
+    const b: any = { _patch: null as any }
+    for (const m of ['select', 'eq', 'in', 'is', 'order', 'limit']) b[m] = () => b
+    b.update = (p: any) => { state.updates.push({ table, patch: p }); b._patch = p; return b }
+    const row = () => ({ id: LOC_ID, role: 'owner', location_id: LOC_ID, ...(b._patch || {}) })
+    b.maybeSingle = () => Promise.resolve({ data: row(), error: null })
+    b.single = b.maybeSingle
+    b.then = (res: any, rej: any) => Promise.resolve({ data: [], error: null }).then(res, rej)
+    return b
+  }
+  return { state, from, LOC_ID }
+})
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.from(t) } }))
+vi.mock('@/lib/auth', () => ({
+  requireAuth: vi.fn(async () => ({ id: 'auth-1' })),
+  getHubUser: vi.fn(async () => ({ id: 'u1', role: 'owner', location_id: h.LOC_ID })),
+  isAdmin: (r: string) => r === 'super_admin' || r === 'admin',
+}))
+vi.mock('@/lib/sendable-domains', () => ({ getSendableDomains: vi.fn(async () => ['beeorganized.com']) }))
+
 import * as BeeHubModule from '@/components/BeeHub'
+import * as EmailsScreenModule from '@/components/settings/EmailsScreen'
 import { safeHttpUrl } from './email-signature'
+import { PATCH as locationPATCH } from '@/app/api/locations/[id]/route'
+import { POST as pathsPOST } from '@/app/api/locations/[id]/paths/route'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 // BeeHub.jsx is untyped JavaScript: taken as one value so this file adds
 // nothing to the project's type-error count.
-const { SettingsScreen } = BeeHubModule as any
+const { SettingsScreen, variantPrerequisiteMissing } = BeeHubModule as any
+const { EmailDetailsSection } = EmailsScreenModule as any
 
 const LOC = '2b3c4d5e-1111-4222-8333-444455556666'
 const selectedLoc = (over: any = {}) => ({
@@ -344,5 +380,237 @@ describe('the switch cannot be turned on with no in-home link', () => {
     // the button's own gate reads the in-home value and nothing else
     expect(es).toContain("<EBtn variant=\"primary\" disabled={!value.trim() || busy} onClick={confirm}>")
     expect(es).toMatch(/const confirm = async \(\) => \{\n    const v = value\.trim\(\)\n    if \(!v\) return\n/)
+  })
+})
+
+// ═══════════════ every link is checked; nothing else moved ═══════════════
+
+const IN_HOME = 'https://calendly.com/kc/in-home'
+const DISCOVERY = 'https://calendly.com/kc/discovery'
+const VIDEO = 'https://calendly.com/kc/video'
+const BAD = ['not a link', 'javascript:alert(1)', 'mailto:me@x.com', 'http://', 'ftp://x.com/a']
+const IN_HOME_SENTENCE = 'In-home assessment link must be a web address, like https://calendly.com/you'
+const remount = () => { act(() => root.unmount()); root = createRoot(container) }
+const details = () => (container.querySelector('#details') as HTMLElement).textContent
+const blur = async (el: HTMLInputElement) => { await act(async () => { el.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); el.dispatchEvent(new FocusEvent('blur')) }); for (let i = 0; i < 3; i++) await act(async () => {}) }
+
+// Scripts that must give the same answer on main (2cc7183) and here. The
+// first two and the rate one are the scripts the three fingerprints below
+// were first taken with, unchanged.
+const alreadyOn = async (o: Opts) => {
+  await mount({ general: 'organizing-d', move: 'moving-d', loc: { bookingLink: IN_HOME }, ...o })
+  const seen: any[] = [details(), isOn('link'), isOn('rate'), !!panel('link')]
+  await click(sw('rate'))                       // d → b: a rate flip on a location that is on
+  seen.push(details(), isOn('link'), isOn('rate'), !!panel('link'), !!panel('rate'))
+  await click(sw('link'))                       // …and switching the link off: b → a
+  seen.push(details(), isOn('link'), isOn('rate'), !!panel('link'))
+  return { seen, writes: writes(), server: { ...server } }
+}
+const rateScript = async () => {
+  await mount({ loc: { ratePerHour: '', bookingLink: IN_HOME } })
+  await click(sw('rate'))
+  const text = panel('rate')!.textContent
+  await type(needed('rate'), '$90')
+  await click(Array.from(panel('rate')!.querySelectorAll('button')).find(b => (b.textContent ?? '').startsWith('Turn it on'))!)
+  return { text, writes: writes(), on: isOn('rate') }
+}
+// The turn-on panel itself: its whole markup as it opens (empty, and with
+// links already stored), then every good-address path through it — the
+// screen after each, and every write.
+const panelScript = async () => {
+  const out: any[] = []
+  await mount()
+  await click(sw('link'))
+  out.push(panel('link')!.outerHTML)
+  await type(needed('link'), IN_HOME)
+  out.push(panel('link')!.outerHTML, turnOn('link').disabled)
+  await click(turnOn('link'))
+  out.push(details(), writes(), isOn('link'))
+  remount()
+  await mount({ discovery: DISCOVERY })
+  await click(sw('link'))
+  out.push(panel('link')!.outerHTML)
+  await type(needed('link'), IN_HOME)
+  await type(optional('discovery_booking_link'), 'https://calendly.com/kc/discovery-2')
+  await type(optional('virtual_booking_link'), VIDEO)
+  await click(turnOn('link'))
+  out.push(details(), writes(), isOn('link'), { ...server })
+  remount()
+  await mount()
+  await click(sw('link'))
+  await type(optional('virtual_booking_link'), VIDEO)   // optional only: the button stays shut
+  out.push(turnOn('link').disabled, panel('link')!.outerHTML)
+  await click(Array.from(panel('link')!.querySelectorAll('button')).find(b => b.textContent === 'Cancel')!)
+  out.push(details(), writes())
+  return out
+}
+
+describe('the turn-on panel is what it was on main, apart from the address check', () => {
+  it('its markup, every good-address path through it, and every write: one fingerprint, taken on 2cc7183', async () => {
+    expect(fingerprint(await panelScript())).toBe('3a59580c3144b6a1')   // from main 2cc7183, same script
+  })
+  it('a location already on, in-home link only: untouched', async () => {
+    expect(fingerprint(await alreadyOn({}))).toBe('2a5c4db0ff701800')
+  })
+  it('a location already on, all three links: untouched', async () => {
+    expect(fingerprint(await alreadyOn({ discovery: DISCOVERY, video: VIDEO }))).toBe('c560e0a3c042e77c')
+  })
+  it('the rate switch: untouched', async () => {
+    expect(fingerprint(await rateScript())).toBe('0c7ae05f1bc3695c')
+  })
+})
+
+describe('the in-home link is refused when it is not a web address', () => {
+  it('the panel: refused in words before ANYTHING is saved — with or without the optional links filled', async () => {
+    for (const bad of BAD) {
+      expect(safeHttpUrl(bad)).toBeNull()
+      for (const withOptional of [false, true]) {
+        remount()
+        await mount()
+        await click(sw('link'))
+        await type(needed('link'), bad)
+        if (withOptional) { await type(optional('discovery_booking_link'), DISCOVERY); await type(optional('virtual_booking_link'), VIDEO) }
+        await click(turnOn('link'))
+        expect(writes(), bad).toEqual([])
+        expect(server).toMatchObject({ calendar: null, discovery: null, video: null, general: 'organizing-c', move: 'moving-c' })
+        expect(isOn('link')).toBe(false)
+        expect(container.querySelector('[data-variant-switch="both-link"]')!.textContent).toContain(IN_HOME_SENTENCE)
+        expect(needed('link').value).toBe(bad)                    // still there to fix
+      }
+    }
+    // fixed → goes through, exactly as a good one always did
+    await type(needed('link'), IN_HOME)
+    await click(turnOn('link'))
+    expect(isOn('link')).toBe(true)
+    expect(server.calendar).toBe(IN_HOME)
+  })
+
+  it('the panel’s OWN check, on its own: the in-home save is never even asked for (it does not lean on the field’s check behind it)', async () => {
+    const onSaveLocation = vi.fn(async () => null), onSaveOption = vi.fn(async () => null), onVariant = vi.fn(async () => null)
+    await act(async () => {
+      root.render(<EmailDetailsSection rate="$95" calendarLink="" reviewsLink="" options={{ discoveryBookingLink: '', virtualBookingLink: '' }} ready={{ style: true, links: true }}
+        counts={{}} waiting={{}} nothingWaiting={false} onSaveLocation={onSaveLocation} onSaveOption={onSaveOption}
+        variant={{ split: false, sequences: [{ key: 'both', label: null, rate: false, link: false }] }} onVariant={onVariant} />)
+    })
+    await click(sw('link'))
+    for (const bad of BAD) {
+      await type(needed('link'), bad)
+      await type(optional('discovery_booking_link'), DISCOVERY)
+      await click(turnOn('link'))
+      expect(onSaveLocation, bad).not.toHaveBeenCalled()
+      expect(onSaveOption, bad).not.toHaveBeenCalled()
+      expect(onVariant, bad).not.toHaveBeenCalled()
+      expect(container.querySelector('[data-variant-switch="both-link"]')!.textContent).toContain(IN_HOME_SENTENCE)
+    }
+    await type(needed('link'), IN_HOME)
+    await click(turnOn('link'))
+    expect(onSaveLocation.mock.calls).toEqual([['booking', IN_HOME]])
+    expect(onSaveOption.mock.calls).toEqual([[{ discovery_booking_link: DISCOVERY }]])
+    expect(onVariant.mock.calls).toEqual([['both', { link: true }, { locationCalendarLink: IN_HOME }]])
+  })
+
+  it('the panel before the optional columns exist (in-home asked alone): refused the same way', async () => {
+    await mount({ linksReady: false })
+    await click(sw('link'))
+    await type(needed('link'), 'not a link')
+    await click(turnOn('link'))
+    expect(writes()).toEqual([])
+    expect(isOn('link')).toBe(false)
+    expect(container.querySelector('[data-variant-switch="both-link"]')!.textContent).toContain(IN_HOME_SENTENCE)
+  })
+
+  it('the field further down the screen: refused before it is sent; a good one saves as it always did', async () => {
+    await mount({ general: 'organizing-d', move: 'moving-d', loc: { bookingLink: IN_HOME } })
+    const field = container.querySelector('#field-booking') as HTMLInputElement
+    for (const bad of BAD) {
+      await type(field, bad)
+      await blur(field)
+      expect(writes(), bad).toEqual([])
+      expect(server.calendar).toBe(IN_HOME)
+      expect(details()).toContain(IN_HOME_SENTENCE)
+    }
+    await type(field, 'https://calendly.com/kc/new')
+    await blur(field)
+    expect(writes()).toEqual([`PATCH /api/locations/${LOC} {"calendar_link":"https://calendly.com/kc/new"}`])
+    // …and emptying it still clears, exactly as before — a blank is not "malformed"
+    await type(field, '')
+    await blur(field)
+    expect(writes()).toEqual([
+      `PATCH /api/locations/${LOC} {"calendar_link":"https://calendly.com/kc/new"}`,
+      `PATCH /api/locations/${LOC} {"calendar_link":""}`,
+    ])
+    expect(server.calendar).toBeNull()
+  })
+
+  describe('the server', () => {
+    const patchLocation = (body: any) => locationPATCH(new Request(`http://x/api/locations/${LOC}`, { method: 'PATCH', body: JSON.stringify(body) }) as any, { params: { id: LOC } })
+    const postPaths = (body: any) => pathsPOST(new Request(`http://x/api/locations/${LOC}/paths`, { method: 'POST', body: JSON.stringify(body) }) as any, { params: { id: LOC } })
+    for (const [name, call] of [['PATCH /api/locations/[id]', patchLocation], ['POST /api/locations/[id]/paths (onboarding)', postPaths]] as const) {
+      it(`${name}: a malformed in-home link is refused and nothing is written`, async () => {
+        for (const bad of BAD) {
+          h.state.updates = []
+          const res = await call({ calendar_link: bad, default_drip_path: 'organizing-d' })
+          expect(res.status, bad).toBe(400)
+          expect((await res.json()).error).toBe(IN_HOME_SENTENCE)
+          expect(h.state.updates, bad).toEqual([])
+        }
+      })
+      it(`${name}: a good one is stored as a full web address; blank still clears`, async () => {
+        h.state.updates = []
+        expect((await call({ calendar_link: ' calendly.com/kc/in-home ' })).status).toBe(200)
+        expect(h.state.updates.map(u => u.patch.calendar_link)).toEqual([IN_HOME])
+        h.state.updates = []
+        expect((await call({ calendar_link: IN_HOME })).status).toBe(200)
+        expect(h.state.updates.map(u => u.patch.calendar_link)).toEqual([IN_HOME])
+        h.state.updates = []
+        await call({ calendar_link: '', default_drip_path: 'organizing-c' })
+        expect(h.state.updates.map(u => u.patch.calendar_link)).toEqual([null])
+      })
+    }
+  })
+})
+
+describe('no stored link is changed, and none would be refused', () => {
+  it('every in-home link stored in production on 2026-11-12 (13 locations) passes the rule', () => {
+    const stored = ['https://calendar.app.google/pmJixDgNb3xwV7dPA', 'https://calendar.app.google/C1Ho7KFf4ShsAUkn7', 'https://calendly.com/linda-beeorganized', 'https://calendly.com/lvoytovich-beeorganized/30min', 'https://calendly.com/christina-beeorganized/60min', 'https://calendar.app.google/qrd8iKsRwWZh12Vx5', 'https://calendar.app.google/rCoh7DkvGgZYX6fg9', 'https://calendar.app.google/6fATo1bdAEokX87S7', 'https://calendar.app.google/v6n1xpirqLXY7ZPd9', 'https://beeorganized.com/pages/southwest-austin#schedule', 'https://test.com', 'https://calendly.com/jamie-beeorganized/30min', 'https://calendly.com/csullivan-beeorganized/30min']
+    expect(stored.filter(s => safeHttpUrl(s) === null)).toEqual([])
+  })
+  it('the check runs only on a save that carries the link: a route call without it writes no calendar_link', async () => {
+    h.state.updates = []
+    await locationPATCH(new Request(`http://x/api/locations/${LOC}`, { method: 'PATCH', body: JSON.stringify({ rate_per_hour: '$90' }) }) as any, { params: { id: LOC } })
+    expect(h.state.updates.length).toBe(1)
+    expect('calendar_link' in h.state.updates[0].patch).toBe(false)
+  })
+})
+
+describe('nothing requires a discovery link, anywhere', () => {
+  it('turning on with the in-home link alone works; a discovery link alone does not open the button', async () => {
+    await mount()
+    await click(sw('link'))
+    await type(optional('discovery_booking_link'), DISCOVERY)
+    expect(turnOn('link').disabled).toBe(true)
+    await type(optional('discovery_booking_link'), '')
+    await type(needed('link'), IN_HOME)
+    await click(turnOn('link'))
+    expect(isOn('link')).toBe(true)
+    expect(server).toMatchObject({ calendar: IN_HOME, discovery: null })
+  })
+  it('a location that is off with an in-home link and no discovery link (Southwest Austin) turns on in one click', async () => {
+    await mount({ loc: { bookingLink: IN_HOME } })
+    await click(sw('link'))
+    expect(panel('link')).toBeNull()
+    expect(isOn('link')).toBe(true)
+    expect(writes()).toEqual([
+      `PATCH /api/locations/${LOC}/drip-paths {"default":"organizing-d"}`,
+      `PATCH /api/locations/${LOC}/drip-paths {"default_move":"moving-d"}`,
+    ])
+  })
+  it('the guard behind the switch knows only the in-home link, as before', () => {
+    expect(variantPrerequisiteMissing('online', 'call', { locationCalendarLink: IN_HOME })).toEqual([])
+    expect(variantPrerequisiteMissing('online', 'call', { locationCalendarLink: '', discoveryBookingLink: DISCOVERY, turningLinkOn: true })).toEqual(['link'])
+    for (const f of ['components/BeeHub.jsx', 'components/settings/EmailsScreen.jsx']) {
+      const src = readFileSync(join(__dirname, '..', f), 'utf8')
+      expect(src, f).not.toMatch(/Add your discovery call link first|turningLinkOn|BookingLinkSwitch|discoveryReady|in-home emails will wait/)
+    }
   })
 })

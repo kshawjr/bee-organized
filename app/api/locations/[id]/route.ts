@@ -99,6 +99,23 @@ export async function PATCH(
     // Universal phone shape (lib/phone.ts).
     if ('phone' in patch) patch.phone = formatPhone(patch.phone)
 
+    // THE IN-HOME ASSESSMENT LINK IS A WEB ADDRESS (2026-11-12). It is what
+    // {{booking_link}} / {{book_assessment_link}} become in a client email —
+    // the link most emails depend on — and it was the one link stored as free
+    // text. Same rule, same sentence shape, as the discovery and video links
+    // (email-settings/route.ts): safeHttpUrl, stored normalised; blank still
+    // clears. Checked on SAVE only — a stored value is never re-judged.
+    if (typeof patch.calendar_link === 'string') {
+      const url = safeHttpUrl(patch.calendar_link)
+      if (!url) {
+        return NextResponse.json(
+          { error: 'In-home assessment link must be a web address, like https://calendly.com/you' },
+          { status: 400 },
+        )
+      }
+      patch.calendar_link = url
+    }
+
     for (const field of SIGNATURE_LINK_FIELDS) {
       const v = body?.[field]
       if (typeof v !== 'string') continue

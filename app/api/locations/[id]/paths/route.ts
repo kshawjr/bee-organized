@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
+import { safeHttpUrl } from '@/lib/email-signature'
 
 // POST /api/locations/[id]/paths
 // Body: { default_drip_path?, default_move_drip_path?, calendar_link?,
@@ -70,6 +71,19 @@ export async function POST(
     // a calendar-requiring path to one that doesn't.
     if (typeof calendar_link === 'string') {
       patch.calendar_link = calendar_link.trim() || null
+      // …and when it is given, it is a web address — the rule every booking
+      // link is saved under (lib/email-signature.ts safeHttpUrl, 2026-11-12).
+      // Refused before anything is written.
+      if (patch.calendar_link) {
+        const url = safeHttpUrl(patch.calendar_link)
+        if (!url) {
+          return NextResponse.json(
+            { error: 'In-home assessment link must be a web address, like https://calendly.com/you' },
+            { status: 400 },
+          )
+        }
+        patch.calendar_link = url
+      }
     }
     // rate_per_hour: free-form TEXT ("$95"), rendered verbatim into drip
     // emails as {{rate_per_hour}}. Write-only-when-provided — the wizard

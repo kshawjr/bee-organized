@@ -707,6 +707,10 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
   const confirm = async () => {
     const v = value.trim()
     if (!v) return
+    // The in-home link is a web address too (2026-11-12) — the same rule and
+    // sentence as the two optional links, checked before ANYTHING is saved.
+    // It was the one booking link an owner could fill with anything.
+    if (need === 'link' && !safeHttpUrl(v)) { setProblem('In-home assessment link must be a web address, like https://calendly.com/you'); return }
     // Only an optional link the owner actually changed is written; a blank
     // one that was blank is left out, so the in-home-only path sends exactly
     // what it always sent.
