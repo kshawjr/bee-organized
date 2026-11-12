@@ -18795,7 +18795,9 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
     <EDialog label="Add another email" title="Add another email" onClose={busy ? null : onCancel}
       footer={<>
         <EBtn onClick={onCancel} disabled={busy}>Cancel</EBtn>
-        <EBtn variant="primary" onClick={() => onConfirm(pick === 'blank' ? null : chosen)} disabled={busy}>{busy ? 'Adding…' : 'Add this email'}</EBtn>
+        {/* Blank writes NOTHING here: it goes on to the editor, and the step
+            is only made once it has a subject and a message (2026-11-12). */}
+        <EBtn variant="primary" onClick={() => onConfirm(pick === 'blank' ? null : chosen)} disabled={busy}>{busy ? 'Adding…' : pick === 'blank' ? 'Write this email' : 'Add this email'}</EBtn>
       </>}>
       <p style={{ fontSize:'14px', color:ET.foreground, margin:'0 0 4px', lineHeight:1.55 }}>
         It goes at the <b>end</b> of the sequence, {pos.delay_days} days after someone first gets in touch — {ADD_STEP_INTERVAL_DAYS} days after the last one.
@@ -18807,7 +18809,7 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
       <p style={{ ...eLabelStyle, marginBottom:'8px' }}>Start from</p>
       <button type="button" aria-pressed={pick === 'blank'} data-ehover={pick === 'blank' ? undefined : 'muted'} onClick={() => setPick('blank')} style={card(pick === 'blank')}>
         <b style={{ display:'block', fontSize:'14px', fontWeight:600 }}>A blank email</b>
-        <span style={{ fontSize:'12px', color:ET.mutedFg }}>Write it yourself.</span>
+        <span style={{ fontSize:'12px', color:ET.mutedFg }}>Write it yourself. Nothing is added until you save it with a subject and a message.</span>
       </button>
       {offerable.map(t => (
         <button key={t.dbId} type="button" aria-pressed={pick === t.dbId} data-ehover={pick === t.dbId ? undefined : 'muted'} onClick={() => setPick(t.dbId)} style={card(pick === t.dbId)}>
@@ -19150,9 +19152,72 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
+// THE STEP AN APPEND CREATES (2026-11-12). The only place one is built.
+//
+// A picked template is a LIVE LINK: master_template_id set, subject/body null,
+// resolved fresh at send time. Not a copy.
+//
+// A blank email is built ONLY from wording the owner has already written. It
+// used to be created with subject '' and body '' and no editor in between —
+// which the save route refuses (an email with no subject is held at send
+// time), so "+ Add an email here" failed at every location, always. This
+// THROWS rather than build a step that cannot send: there is no half-made
+// step to reach the sequence, whatever calls it.
+export function newEmailStep(steps, template, draft = null, now = Date.now()) {
+  const pos = appendedStepPosition(steps)
+  const base = { id: `new_${now}`, order: pos.order, type: 'email', delay: daysToDelayLabel(pos.delay_days), delay_days: pos.delay_days, origin: 'added' }
+  if (template) {
+    return { ...base, templateId: template.legacyId || template.dbId, masterTemplateId: template.dbId, subject: null, body: null, name: template.name }
+  }
+  const subject = typeof draft?.subject === 'string' ? draft.subject.trim() : ''
+  const body = typeof draft?.body === 'string' ? draft.body : ''
+  if (!subject) throw new Error('The email subject can’t be empty.')
+  if (!body.trim()) throw new Error('The email body can’t be empty.')
+  return {
+    ...base, templateId: null, masterTemplateId: null, subject, body, name: subject,
+    ...(draft.button_text ? { buttonText: draft.button_text, buttonLink: draft.button_link || '', buttonAlign: draft.button_align ?? null } : {}),
+  }
+}
+
+// WHAT A FAILED SAVE SAYS. The save routes answer in codes (subject_required,
+// forbidden_read_only, HTTP 500 …) and those used to be shown as they came —
+// "Could not add it: subject_required". A code, or a bare HTTP status, never
+// reaches the screen: it is turned into a sentence here. Anything that is
+// already a sentence passes through untouched.
+const STEP_SAVE_PROBLEMS = {
+  subject_required: 'one of these emails has no subject line. Give it a subject and save again.',
+  first_email_always_sends: 'the first email always sends, so it can’t be removed or paused.',
+  not_set_up_yet: 'that isn’t switched on for your location yet. Nothing was changed.',
+  unauthorized: 'you’ve been signed out. Sign in again and retry.',
+  path_not_found: 'these emails couldn’t be found. Reload the page and try again.',
+}
+export function stepSaveProblemInWords(raw) {
+  const msg = String(raw instanceof Error ? raw.message : (raw ?? '')).trim()
+  if (STEP_SAVE_PROBLEMS[msg]) return STEP_SAVE_PROBLEMS[msg]
+  if (/^forbidden(_[a-z0-9_]+)?$/.test(msg)) return 'you don’t have permission to change these emails.'
+  if (!msg || /^[a-z0-9]+(_[a-z0-9]+)+$/.test(msg) || /^HTTP \d+$/.test(msg)) return 'something went wrong on our side and nothing was changed. Please try again.'
+  return msg
+}
+
 // The design's "Moving clients" box (export EmailList :517-533), wired to the
 // real sequences: two radio option cards — a SETTING. Choosing "the same"
 // while they are separate is confirmed inline first.
+//
+// WHAT THE SETTING IS (wording corrected 2026-11-12). It used to read "Get the
+// same emails as organizing clients" / "Get their own set of emails", which
+// was false: moving clients ALWAYS get the moving emails — their own wording,
+// in both modes (46 of 53 live locations differ; none are equal). The choice
+// is only whether those emails take the same two answers as organizing — the
+// hourly rate shared or not, booking by link or by reply — i.e. the same
+// letter (emailsChooseMovingSame). The labels now say that, and a standing
+// line says the wording is always theirs.
+//
+// THE CONFIRM is shown only when choosing "the same way" will really move the
+// moving emails to another version (moving.split; asked unless it is known
+// to be false, so a caller that forgets to say errs towards asking). When the two already
+// match there is nothing to replace and nothing to warn about — the old
+// "Replace the moving emails?" appeared there too and was untrue. What gets
+// WRITTEN is unchanged in every case.
 //
 // Below it, separately, which list is on screen — a VIEW that writes nothing.
 // Shown in BOTH modes, unlike the design: "same" means the same promises
@@ -19161,6 +19226,16 @@ export function appendedStepPosition(steps) {
 // step 7b). Drawn as the export library's tabs (ui/tabs.tsx: a muted track,
 // the chosen one raised on the card colour), not as pills, so it reads as a
 // way of looking at the list and not as a second setting.
+export const MOVING_CHOICE_WORDS = {
+  always: 'Moving clients always get their own emails, written for a move. They are never sent the organizing ones. Read or change them under Moving, below.',
+  question: 'Should the moving emails handle your hourly rate and booking the same way as your organizing emails?',
+  same: 'Yes, the same way as organizing',
+  own: 'No, set them separately',
+  confirmTitle: 'Switch the moving emails to match organizing?',
+  confirmBody: 'From now on, moving clients get the version of the moving emails that handles your hourly rate and booking the way your organizing emails do. They are still the moving emails, with their own wording — not the organizing ones. Anyone partway through keeps the emails they started on. If you changed the wording of the moving emails you send today, your changes are saved but won’t be sent while this is on.',
+  confirmYes: 'Yes, match organizing',
+}
+
 function MovingClientsChoice({ moving, view, onView }) {
   const [confirmSame, setConfirmSame] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
@@ -19177,23 +19252,25 @@ function MovingClientsChoice({ moving, view, onView }) {
       {moving && (
         <div data-moving-choice style={{ marginBottom:'16px', borderRadius:ER.xl, border:`1px solid ${ET.border}`, padding:'16px' }}>
           <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:ET.foreground }}>Moving clients</p>
+          <p data-moving-always style={{ margin:'4px 0 0', fontSize:'13px', lineHeight:1.5, color:ET.mutedFg }}>{MOVING_CHOICE_WORDS.always}</p>
+          <p style={{ margin:'10px 0 0', fontSize:'13px', fontWeight:600, color:ET.foreground }}>{MOVING_CHOICE_WORDS.question}</p>
           <div role="radiogroup" aria-label="Moving clients" style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
-            {[{ v: true, l: 'Get the same emails as organizing clients' }, { v: false, l: 'Get their own set of emails' }].map(o => {
+            {[{ v: true, l: MOVING_CHOICE_WORDS.same }, { v: false, l: MOVING_CHOICE_WORDS.own }].map(o => {
               const on = moving.same === o.v
               return (
                 <ERadioCard key={String(o.v)} on={on} disabled={busy}
-                  onClick={() => { if (on) return; if (o.v) setConfirmSame(true); else choose(false) }}>
+                  onClick={() => { if (on) return; if (o.v && moving.split !== false) setConfirmSame(true); else choose(o.v) }}>
                   {o.l}
                 </ERadioCard>
               )
             })}
           </div>
           {confirmSame && (
-            <div role="alertdialog" aria-label="Replace the moving emails?" style={{ marginTop:'12px', borderRadius:ER.lg, border:`1px solid ${alpha(ET.warning, 0.5)}`, background:ET.warningSoft, padding:'12px', fontSize:'14px' }}>
-              <p style={{ margin:0, fontWeight:600, color:ET.foreground }}>Replace the moving emails?</p>
-              <p style={{ margin:'2px 0 0', color:alpha(ET.foreground, 0.8) }}>Moving clients will get the same emails as organizing clients from now on. Anyone partway through keeps the emails they started on, and any wording you changed only in the moving emails is kept, just not used.</p>
+            <div role="alertdialog" aria-label={MOVING_CHOICE_WORDS.confirmTitle} style={{ marginTop:'12px', borderRadius:ER.lg, border:`1px solid ${alpha(ET.warning, 0.5)}`, background:ET.warningSoft, padding:'12px', fontSize:'14px' }}>
+              <p style={{ margin:0, fontWeight:600, color:ET.foreground }}>{MOVING_CHOICE_WORDS.confirmTitle}</p>
+              <p style={{ margin:'2px 0 0', color:alpha(ET.foreground, 0.8) }}>{MOVING_CHOICE_WORDS.confirmBody}</p>
               <div style={{ marginTop:'8px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
-                <EBtn variant="primary" disabled={busy} onClick={() => choose(true)}>{busy ? 'Saving…' : 'Yes, use the same'}</EBtn>
+                <EBtn variant="primary" disabled={busy} onClick={() => choose(true)}>{busy ? 'Saving…' : MOVING_CHOICE_WORDS.confirmYes}</EBtn>
                 <EBtn disabled={busy} onClick={() => setConfirmSame(false)}>Keep them separate</EBtn>
               </div>
             </div>
@@ -22571,7 +22648,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           body: JSON.stringify({ master_id: master.id }),
         })
         const j = await res.json().catch(()=>({}))
-        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        if (!res.ok) throw new Error(stepSaveProblemInWords(j?.error || `HTTP ${res.status}`))
         dbPath = { id: j.path.id, name: j.path.name, is_default: !!j.path.is_default, location_uuid: realLocId }
         setDbPaths(prev => ({ ...prev, [pathId]: dbPath }))
       }
@@ -22610,7 +22687,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         body: JSON.stringify({ steps: payload }),
       })
       const j2 = await res2.json().catch(()=>({}))
-      if (!res2.ok) throw new Error(j2?.error || `HTTP ${res2.status}`)
+      if (!res2.ok) throw new Error(stepSaveProblemInWords(j2?.error || `HTTP ${res2.status}`))
       // Re-read so the panel reflects the rows that now exist (step dbIds,
       // the "Customized" badge, and the saved content).
       await loadLocationPaths()
@@ -22704,9 +22781,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  // "Moving clients get the same emails / their own set".
-  //   their own → no write; each sequence just gets its own switches.
-  //   same      → (confirmed in the list) moving takes organizing's letter.
+  // "Should the moving emails handle rate and booking the same way as
+  // organizing?" (MOVING_CHOICE_WORDS — never "the same emails": the moving
+  // wording is always its own.)
+  //   separately → no write; each sequence just gets its own switches.
+  //   same way   → (confirmed in the list when it really moves) moving takes
+  //                organizing's letter.
   async function emailsChooseMovingSame(same) {
     if (!same) { setMovingOwnChosen(true); return null }
     if (!realLocId) return 'You’re viewing this location — open the real location to change it.'
@@ -22803,38 +22883,44 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setAddEmailState({ pathKey, ownsPath: owned, liveLeadCount, busy: false, err: '' })
   }
 
+  // The step itself. A template appends its live link; a blank one appends
+  // ONLY the wording the editor hands over (newEmailStep throws without it).
+  // Rejects — never hangs — when the owner backs out of making their own copy.
+  function appendEmailStep(pathKey, template, draft = null) {
+    return new Promise((resolve, reject) => {
+      ensureOwnedThen(pathKey, async (steps) => {
+        try {
+          await commitSteps(pathKey, [...steps, newEmailStep(steps, template, draft)])
+          resolve()
+        } catch (e) { reject(e) }
+      }, e => reject(e || new Error('Nothing was added — these emails were left as they are.')))
+    })
+  }
+
+  // The dialog's button. A ready-made email is added there and then. A BLANK
+  // one writes nothing: it opens the editor (stage 'write'), and the step is
+  // created by saveNewEmail, from a subject and a message, or not at all.
+  // Closing the editor drops addEmailState — no copy made, no step, no save.
   async function confirmAddEmail(template) {
+    if (!template) { setAddEmailState(st => st && ({ ...st, stage: 'write', err: '' })); return }
     const { pathKey } = addEmailState
     setAddEmailState(st => ({ ...st, busy: true, err: '' }))
     try {
-      await new Promise((resolve, reject) => {
-        ensureOwnedThen(pathKey, async (steps) => {
-          try {
-            const pos = appendedStepPosition(steps)
-            const next = [...steps, {
-              id: `new_${Date.now()}`,
-              order: pos.order,
-              type: 'email',
-              delay: daysToDelayLabel(pos.delay_days),
-              delay_days: pos.delay_days,
-              // A picked template is a LIVE LINK: master_template_id set,
-              // subject/body null, resolved fresh at send time. Not a copy.
-              templateId: template ? template.legacyId || template.dbId : null,
-              masterTemplateId: template ? template.dbId : null,
-              subject: template ? null : '',
-              body: template ? null : '',
-              name: template ? template.name : 'New email',
-              origin: 'added',
-            }]
-            await commitSteps(pathKey, next)
-            resolve()
-          } catch (e) { reject(e) }
-        })
-      })
+      await appendEmailStep(pathKey, template)
       setAddEmailState(null)
     } catch (e) {
-      setAddEmailState(st => st && ({ ...st, busy: false, err: 'Could not add it: ' + (e?.message || e) }))
+      setAddEmailState(st => st && ({ ...st, busy: false, err: 'Could not add it: ' + stepSaveProblemInWords(e) }))
     }
+  }
+
+  // The new-email editor's Save. Throws so the editor shows the problem in
+  // place and keeps what was typed; the sequence is untouched on any failure
+  // (commitSteps restores it, and the route refuses before it deletes).
+  async function saveNewEmail(patch) {
+    const { pathKey } = addEmailState
+    try { await appendEmailStep(pathKey, null, patch) }
+    catch (e) { throw new Error('Could not add it: ' + stepSaveProblemInWords(e)) }
+    setAddEmailState(null)
   }
 
   // ─── Remove / put back one email, and the after-the-first switch ───
@@ -23098,7 +23184,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  function ensureOwnedThen(pathId, proceed) {
+  // onCancel (optional): told when the owner declines the copy, or the copy
+  // fails — so a caller waiting on proceed is never left waiting for ever.
+  function ensureOwnedThen(pathId, proceed, onCancel = null) {
     if (!realLocId) {
       // Demo session: no DB, no fork — mutate the local preview directly.
       proceed(pathSteps[pathId] || [])
@@ -23108,7 +23196,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       proceed(pathSteps[pathId] || [])
       return
     }
-    setForkConfirm({ pathId, proceed })
+    setForkConfirm({ pathId, proceed, onCancel })
   }
 
   // Confirmed fork: clone the master, re-read the location's paths, then hand
@@ -23122,7 +23210,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     const { pathId, proceed } = pending
     const master = dbMasters[pathId]
     if (!master) {
-      alert(`No master found for ${pathId}.`)
+      if (pending.onCancel) pending.onCancel(new Error('The Bee Organized version of these emails couldn’t be found. Reload the page and try again.'))
+      else alert(`No master found for ${pathId}.`)
       return
     }
     try {
@@ -23138,7 +23227,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       const clonedSteps = fresh?.steps?.[pathId]
       proceed(clonedSteps && clonedSteps.length ? clonedSteps : (pathSteps[pathId] || []))
     } catch (e) {
-      alert('Could not customize these emails: ' + (e?.message || e))
+      const words = 'Could not customize these emails: ' + stepSaveProblemInWords(e)
+      if (pending.onCancel) pending.onCancel(new Error(words)); else alert(words)
     }
   }
 
@@ -24454,7 +24544,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   sending={senderAddressSet}
                   locationId={realLocId}
                   preview={{ style: es.style, values: previewValues, signature: signatureFromData(emailSig.data) }}
-                  moving={realLocId ? { same: movingSame, onChoose: emailsChooseMovingSame } : null}
+                  moving={realLocId ? { same: movingSame, split: variantSplit, onChoose: emailsChooseMovingSame } : null}
                 />
               </ESection>
 
@@ -24554,7 +24644,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         />
       )}
       {/* issue 240 step 9b — append an email. */}
-      {addEmailState && (
+      {addEmailState && addEmailState.stage !== 'write' && (
         <AddEmailModal
           templates={templates}
           steps={pathSteps[addEmailState.pathKey] || []}
@@ -24566,6 +24656,21 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           onConfirm={confirmAddEmail}
         />
       )}
+      {/* …and a BLANK one is written here first. Nothing exists until Save:
+          closing this leaves the sequence, and the location's copy of it,
+          exactly as they were. */}
+      {addEmailState && addEmailState.stage === 'write' && (() => {
+        const pos = appendedStepPosition(pathSteps[addEmailState.pathKey] || [])
+        return (
+          <DripPathStepEditor
+            {...emailsEditorProps()}
+            isNew
+            step={{ step_order: pos.order, subject: '', body: '', delay_days: pos.delay_days, button_text: '', button_link: '', button_align: null }}
+            onSave={saveNewEmail}
+            onClose={() => setAddEmailState(null)}
+          />
+        )
+      })()}
       {/* Remove one email after the first (lib/drip-followups.ts). */}
       {removeEmailState && (
         <RemoveEmailModal
@@ -24613,7 +24718,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         <ForkConfirmModal
           pathName={(PATH_STYLES.find(st => forkConfirm.pathId.endsWith(st.id.replace('path-',''))) || {}).label || 'these emails'}
           onConfirm={confirmFork}
-          onCancel={()=>setForkConfirm(null)}
+          onCancel={()=>{ const pending = forkConfirm; setForkConfirm(null); pending?.onCancel?.() }}
         />
       )}
       {/* Edit-in-place editor for a step's subject/body/delay. Saves commit
@@ -33372,7 +33477,7 @@ function MasterDripPathsEditor() {
         body: JSON.stringify(patch),
       })
       const j = await res.json().catch(()=>({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      if (!res.ok) throw new Error(stepSaveProblemInWords(j?.error || `HTTP ${res.status}`))
       // Merge updated step back into masters
       setMasters(prev => prev.map(p => ({
         ...p,
@@ -33492,7 +33597,11 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // Used by both Admin → Content (master steps, saved via the per-step PATCH)
 // and Settings → Communications (the owner's customized copies, saved via
 // commitSteps' bulk replace — the owner surface never writes per-step).
-export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null }) {
+// isNew (2026-11-12): the same editor writing an email that does not exist
+// yet (+ Add an email here → A blank email). Same two refusals — no subject,
+// no message — so the step is only ever created whole. Its day is fixed by
+// where it lands (appendedStepPosition), so the delay field is not offered.
+export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null, isNew = false }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
   // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
@@ -33550,16 +33659,17 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
   // 2026-10-30 follow-up — the Emails screen's dialog (EDialog), the
   // design's fields. Also the corporate master step editor's.
   return (
-    <EDialog label={`Edit step ${step.step_order}`} eyebrow={`Step ${step.step_order}`} title={previewing ? 'Preview' : 'Change wording'} onClose={saving ? null : onClose}
+    <EDialog label={isNew ? 'Write your new email' : `Edit step ${step.step_order}`} eyebrow={isNew ? 'New email' : `Step ${step.step_order}`} title={previewing ? 'Preview' : isNew ? 'Write your new email' : 'Change wording'} onClose={saving ? null : onClose}
       footer={<>
         <EBtn onClick={onClose} disabled={saving}>Cancel</EBtn>
         <EBtn onClick={() => setPreviewing(p => !p)} disabled={saving}>{previewing ? 'Back to editing' : 'Preview'}</EBtn>
-        <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</EBtn>
+        <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? (isNew ? 'Adding…' : 'Saving…') : (isNew ? 'Add this email' : 'Save')}</EBtn>
       </>}>
       {previewing ? <>
         <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
         {localErr && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </> : <>
+      {isNew && <p data-new-email-note style={{ ...eHintStyle, margin:'0 0 8px' }}>It’s added to the end of your emails when you press “Add this email” — it needs a subject and a message first. Cancel and nothing is added.</p>}
       <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
       <div style={{ display:'grid', gap:'12px' }}>
         <label style={{ display:'block' }}>
@@ -33572,11 +33682,11 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
             style={{ ...eTextareaStyle, fontFamily:EF.body, color:ET.ink }} />
         </label>
         <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
-        <label style={{ display:'block' }}>
+        {!isNew && <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Delay (days after the lead comes in)</span>
           <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />
           <span style={eHintStyle}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</span>
-        </label>
+        </label>}
         <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
           alignReady={alignReady} links={links} />
         {localErr && <p style={{ margin:0, fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}

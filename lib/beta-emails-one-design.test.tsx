@@ -159,7 +159,7 @@ describe('the Moving choice', () => {
     await mountList(false)
     const box = container.querySelector('[data-moving-choice]') as HTMLElement
     const cards = Array.from(box.querySelectorAll('[role="radio"]')) as HTMLElement[]
-    expect(cards.map(c => c.textContent)).toEqual(['Get the same emails as organizing clients', 'Get their own set of emails'])
+    expect(cards.map(c => c.textContent)).toEqual(['Yes, the same way as organizing', 'No, set them separately'])   // reworded 2026-11-12: never "the same emails"
     for (const c of cards) {
       expect(c.style.borderRadius).toBe('10px')
       expect(c.querySelector('span[aria-hidden]')).toBeTruthy()          // the dot
@@ -173,16 +173,16 @@ describe('the Moving choice', () => {
     for (const t of Array.from(view.querySelectorAll('[role="tab"]')) as HTMLElement[]) expect(t.style.borderRadius).not.toBe('999px')
   })
 
-  it('merging a split asks first — nothing is written until "Yes, use the same"', async () => {
+  it('merging a split asks first — nothing is written until "Yes, match organizing"', async () => {
     const onChoose = await mountList(false)
     const same = container.querySelector('[data-moving-choice] [role="radio"]') as HTMLElement
     await act(async () => { same.click() })
     expect(onChoose).not.toHaveBeenCalled()
-    expect((container.querySelector('[data-moving-choice] [role="alertdialog"]') as HTMLElement).textContent).toContain('Replace the moving emails?')
+    expect((container.querySelector('[data-moving-choice] [role="alertdialog"]') as HTMLElement).textContent).toContain('Switch the moving emails to match organizing?')
     await act(async () => { button('Keep them separate').click() })
     expect(onChoose).not.toHaveBeenCalled()
     await act(async () => { same.click() })
-    await act(async () => { button('Yes, use the same').click() })
+    await act(async () => { button('Yes, match organizing').click() })
     expect(onChoose).toHaveBeenCalledWith(true)
   })
 })

@@ -157,6 +157,40 @@ export async function POST(
   if (!path_key) return NextResponse.json({ error: 'path_key_required' }, { status: 400 })
   if (!name) return NextResponse.json({ error: 'name_required' }, { status: 400 })
 
+  // NO EMAIL STEP WITHOUT A SUBJECT, HERE EITHER (2026-11-12). The two step
+  // routes (PATCH /api/drip-paths/[id]/steps and /api/drip-path-steps/[stepId])
+  // already refuse one; the optional seed steps below were the remaining way
+  // to create a step that would be HELD at every send (missing_subject). Same
+  // rule as theirs — the step's own subject, else its linked template's; an
+  // empty string shadows the template — and checked BEFORE the path row is
+  // made, so a refused request creates nothing at all.
+  if (Array.isArray(body.steps) && body.steps.length > 0) {
+    const seeds = body.steps as Array<Record<string, unknown>>
+    const isEmail = (s: Record<string, unknown>) => s?.channel !== 'sms'
+    const tplIds = Array.from(new Set(seeds
+      .filter(s => isEmail(s) && typeof s?.subject !== 'string' && typeof s?.master_template_id === 'string')
+      .map(s => s.master_template_id as string)))
+    const tplSubjects = new Map<string, string | null>()
+    if (tplIds.length) {
+      const { data: tpls, error: tplErr } = await supabaseService.from('templates').select('id, subject').in('id', tplIds)
+      if (tplErr) {
+        console.error('[/api/locations/[id]/drip-paths POST] template lookup error:', tplErr.message)
+        return NextResponse.json({ error: 'template_lookup_failed' }, { status: 500 })
+      }
+      for (const t of tpls ?? []) tplSubjects.set((t as any).id, (t as any).subject ?? null)
+    }
+    for (let i = 0; i < seeds.length; i++) {
+      const s = seeds[i]
+      if (!s || typeof s !== 'object' || !isEmail(s)) continue
+      const effective = typeof s.subject === 'string'
+        ? s.subject
+        : (typeof s.master_template_id === 'string' ? tplSubjects.get(s.master_template_id) ?? null : null)
+      if (!effective || !effective.trim()) {
+        return NextResponse.json({ error: 'subject_required', step_order: typeof s.step_order === 'number' ? s.step_order : i + 1 }, { status: 400 })
+      }
+    }
+  }
+
   const { data: pathRow, error: pathErr } = await supabaseService
     .from('drip_paths')
     .insert({

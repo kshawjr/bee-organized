@@ -287,7 +287,9 @@ describe('a picker with nothing to offer renders its empty state', () => {
     expect(t).not.toContain('Test Custom')
     // And the modal is still operable.
     const labels = Array.from(container.querySelectorAll('button')).map(b => b.textContent)
-    expect(labels).toContain('Add this email')
+    // Blank is the pick, and blank goes on to the editor rather than saving
+    // an email with no subject (2026-11-12).
+    expect(labels).toContain('Write this email')
     expect(labels).toContain('Cancel')
   })
 })

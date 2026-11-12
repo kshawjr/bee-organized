@@ -104,10 +104,10 @@ describe('a location with no split behaves exactly as today', () => {
     expect(on('both', 'rate')).toBe(false)
     expect(on('both', 'link')).toBe(true)
   })
-  it('the moving choice reads "the same emails"', async () => {
+  it('the moving choice reads "the same way as organizing" (never "the same emails" — reworded 2026-11-12)', async () => {
     await mount('organizing-b', 'moving-b')
     const same = container.querySelector('[data-moving-choice] [role="radio"]') as HTMLElement
-    expect(same.textContent).toContain('Get the same emails as organizing clients')
+    expect(same.textContent).toContain('Yes, the same way as organizing')
     expect(same.getAttribute('aria-checked')).toBe('true')
   })
 })
@@ -116,7 +116,7 @@ describe('an existing organizing/moving split is never silently merged', () => {
   it('loc_kc (organizing-a / moving-c) loads as "their own", each sequence showing its own answers', async () => {
     await mount('organizing-a', 'moving-c')
     const radios = Array.from(container.querySelectorAll('[data-moving-choice] [role="radio"]')) as HTMLElement[]
-    expect(radios[1].textContent).toContain('Get their own set of emails')
+    expect(radios[1].textContent).toContain('No, set them separately')
     expect(radios[1].getAttribute('aria-checked')).toBe('true')
     expect(sw('both', 'rate')).toBeNull()
     expect([on('organizing', 'rate'), on('organizing', 'link')]).toEqual([true, false])     // a
@@ -137,13 +137,13 @@ describe('an existing organizing/moving split is never silently merged', () => {
     await mount('organizing-a', 'moving-c')
     const same = (Array.from(container.querySelectorAll('[data-moving-choice] [role="radio"]')) as HTMLElement[])[0]
     await click(same)
-    expect(container.textContent).toContain('Replace the moving emails?')
+    expect(container.textContent).toContain('Switch the moving emails to match organizing?')
     expect(variantWrites()).toEqual([])
     await click(button('Keep them separate'))
     expect(variantWrites()).toEqual([])
     expect(server.move).toBe('moving-c')
     await click(same)
-    await click(button('Yes, use the same'))
+    await click(button('Yes, match organizing'))
     expect(variantWrites()).toEqual([{ default_move: 'moving-a' }])
     expect(server).toEqual({ general: 'organizing-a', move: 'moving-a' })
     expect(sw('both', 'rate')).toBeTruthy()

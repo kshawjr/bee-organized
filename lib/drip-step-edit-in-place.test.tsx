@@ -344,7 +344,9 @@ describe('a commit failure leaves the sequence unchanged', () => {
     // The PATCH was attempted and refused; the editor stays open with the error.
     expect(stepsPatches()).toHaveLength(1)
     expect(container.querySelector('textarea'), 'editor stays open on failure').toBeTruthy()
-    expect(container.textContent).toContain('insert_failed')
+    // In words, never the route's code (2026-11-12, stepSaveProblemInWords).
+    expect(container.textContent).toContain('something went wrong on our side and nothing was changed')
+    expect(container.textContent).not.toContain('insert_failed')
 
     await clickText('Cancel')
     const t = container.textContent || ''
