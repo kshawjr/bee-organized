@@ -22287,7 +22287,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // are the "who hears" half. The sending identity is three rows on Emails;
   // Slack is one card. Someone arriving on an old 'yourteam' link is far more
   // likely to be after routing than after a Reply-To address.
-  const SETTINGS_RETIRED_SECTIONS = { billing:'team', paths:'emails', templates:'emails', yourteam:'newleads' }
+  const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'newleads' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
   // ── Emails › which sequence is on screen (issue 303) ──────────────────────
@@ -23557,6 +23557,14 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // unknown or future franchiseRole now fails CLOSED to Profile-only.
   const ownerConfig = franchiseRole === 'owner'
   const canManageOwnTags = franchiseRole === 'owner' || franchiseRole === 'manager'
+  // Team and Seats is one screen with two halves and two gates. ALLOWLISTS,
+  // like everything above: an unknown role sees neither half and no nav item.
+  //   · canSeeSeats — the Seats half (roster of logins, invites, billing).
+  //     Owner only, exactly who saw the whole screen before it had two halves.
+  //   · canSeeBees  — the Bees half. Owner and manager (the bees routes' rule).
+  const canSeeSeats = canManageTeam
+  const canSeeBees = canManageOwnTags
+  const canSeeTeamScreen = canSeeSeats || canSeeBees
   // ─── issue 240 step 4 — one template renderer, two tabs ───
   //
   // The old Templates tab rendered three collapsible type sections from one
@@ -23776,11 +23784,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // 'My Location' in the mobile select — the same surface with two names
       // depending on the width of your screen.
       ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
-      ...(canManageTeam ? [{ key:'team',     label:'Team and seats', icon:'👥' }] : []),
-      // Bees (2026-11-04): the people who work the jobs — a roster, not
-      // logins. Owner AND manager, like Tags (same server check); Team and
-      // seats stays owner-only because seats cost money and bees don't.
-      ...(canManageOwnTags ? [{ key:'bees', label:'Bees', icon:'🐝' }] : []),
+      // Team and Seats (2026-11-12): ONE screen, two halves. Seats (logins,
+      // billed) stay owner-only — `canSeeSeats` gates that half INSIDE the
+      // screen and the seats routes refuse a manager on the server. Bees (a
+      // roster: no logins, nobody billed) are owner AND manager, like Tags.
+      // So a manager gets this item and sees the Bees half only.
+      ...(canSeeTeamScreen ? [{ key:'team', label:'Team and Seats', icon:'👥' }] : []),
       // A location's own tags (2026-10-16): owner AND manager — the same
       // people who may create them. Allowlist, like ownerConfig.
       ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
@@ -23986,9 +23995,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         {activeSection==='tags'&&(
           <OwnTagsSettings locationId={realLocId} locationName={settings.location.name || ''} />
         )}
-        {activeSection==='bees'&&(
-          <BeeRosterSettings locationId={realLocId} locationName={settings.location.name || ''} />
-        )}
         {activeSection==='location'&&(
           <>
             <div style={{ padding:'16px 16px 8px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -24135,8 +24141,39 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             summaryBody  = `Next renewal: ${billingRenewalLabel}. ${formatCurrency(billingAnnual, { showCents:'never' })}/year.`
             summaryAccent = '#22c55e'
           }
+          // ── Team and Seats: one screen, two halves (2026-11-12) ──────────
+          // Heading, then SEATS (owner only — `canSeeSeats`), then BEES (owner
+          // and manager — `canSeeBees`). Each half says what makes it
+          // different: seats sign in and are billed, bees do neither.
+          //
+          // The Seats half is everything this section rendered before it had
+          // two halves, UNCHANGED and unindented on purpose, inside
+          // [data-team-seats]. A manager gets none of it: not the roster, not
+          // the invite button, not the billing strip, and TeamSection never
+          // mounts for them, so its seat and invite fetches never fire. The
+          // server is still the real gate (the seats routes refuse a manager);
+          // this is the screen not offering what the server would refuse.
           return (
-            <>
+            <div data-team-screen style={{ padding:'20px 16px 0', display:'flex', flexDirection:'column', gap:'28px' }}>
+              <div>
+                {/* Eyebrow in brand.goldText, the gold driven dark enough for
+                    small text on white — not the decorative gold. */}
+                <p style={{ margin:'0 0 4px', fontSize:'11px', fontWeight:700, letterSpacing:'1.2px', textTransform:'uppercase', color:HT.brand.goldText }}>Your business</p>
+                <h1 style={{ margin:0, fontSize:'26px', fontWeight:600, color:HT.ink.primary, letterSpacing:'-0.2px' }}>Team and Seats</h1>
+                <p data-team-lede style={{ margin:'6px 0 0', fontSize:'14px', lineHeight:1.55, color:HT.ink.muted, maxWidth:'620px' }}>
+                  {canSeeSeats
+                    ? 'Who can sign in to Bee Hub, and who works your jobs. Two different lists.'
+                    : 'The people who work your jobs.'}
+                </p>
+              </div>
+
+              {canSeeSeats && (
+              <section data-team-seats-section aria-labelledby="team-seats-title">
+                <div>
+                  <h2 id="team-seats-title" style={{ margin:0, fontSize:'17px', fontWeight:600, color:HT.ink.primary }}>Seats</h2>
+                  <p style={{ margin:'3px 0 0', fontSize:'13px', lineHeight:1.55, color:HT.ink.muted }}>People who sign in. Each seat is billed.</p>
+                </div>
+            <div data-team-seats style={{ margin:'0 -12px' }}>
               {/* Payment status summary strip */}
               <div style={{ padding:'16px 12px 0' }}>
                 <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', borderLeft:`4px solid ${summaryAccent}`, padding:'14px 16px', marginBottom:'12px' }}>
@@ -24325,7 +24362,14 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <TierPlansInline />
                 </>
               )}
-            </>
+            </div>
+              </section>
+              )}
+
+              {canSeeSeats && canSeeBees && <div aria-hidden style={{ height:'1px', background:HT.hairline.soft }} />}
+
+              {canSeeBees && <BeeRosterSettings locationId={realLocId} />}
+            </div>
           )
         })()}
 

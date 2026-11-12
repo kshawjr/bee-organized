@@ -208,7 +208,7 @@ describe('the Slack check', () => {
     expect(j.slackCheck).toBe('not_found')
     expect(h.db.bees[0]).toMatchObject({ slack_user_id: null })
     expect(h.db.bees[0].slack_checked_at).toBeTruthy()
-    expect(beeSlackLine(j.bee)).toEqual({ kind: 'not_found', text: 'Not found in your Slack. Use the email they sign in to Slack with — tap Edit to change it.' })
+    expect(beeSlackLine(j.bee)).toEqual({ kind: 'not_found', chip: 'Not in Slack', text: 'That email isn’t in your Slack. Use the one they sign in to Slack with.', action: 'Check again' })
   })
 
   it('8) a location with no Slack connection saves bees with no Slack message at all', async () => {
@@ -334,30 +334,126 @@ describe('Settings › Bees', () => {
   }
   const bee = (o: any) => ({ id: 'b1', name: 'Sam', email: 'sam@bee.com', is_active: true, removed_at: null, slack_user_id: null, slack_checked_at: null, ...o })
 
-  it('with Slack: found / not found / not checked each say so', async () => {
+  // The Slack state is ONE chip on the row. The sentence that explains it
+  // appears once, under the row that needs it, with its button beside it.
+  it('with Slack: each bee carries one chip — In your Slack / Not in Slack / Not checked', async () => {
     const { host, root } = await mount({ slackConnected: true, bees: [
       bee({ id: 'b1', name: 'Ann', slack_user_id: 'U1', slack_checked_at: 'x' }),
       bee({ id: 'b2', name: 'Bo', email: 'bo@gmail.com', slack_checked_at: 'x' }),
       bee({ id: 'b3', name: 'Cy', email: 'cy@x.com' }),
     ] })
-    expect(host.querySelector('[data-bee="b1"] [data-bee-slack]')?.textContent).toBe('✓ Found in your Slack')
-    expect(host.querySelector('[data-bee="b2"] [data-bee-slack]')?.textContent).toMatch(/^Not found in your Slack\. Use the email they sign in to Slack with/)
-    expect(host.querySelector('[data-bee="b3"] [data-bee-slack]')?.textContent).toBe('Not checked against your Slack yet.')
+    const chip = (id: string) => host.querySelectorAll(`[data-bee="${id}"] [data-bee-slack]`)
+    expect(Array.from(chip('b1')).map(c => c.textContent)).toEqual(['In your Slack'])
+    expect(Array.from(chip('b2')).map(c => c.textContent)).toEqual(['Not in Slack'])
+    expect(Array.from(chip('b3')).map(c => c.textContent)).toEqual(['Not checked'])
+    expect(chip('b1')[0].getAttribute('data-bee-slack')).toBe('found')
+    expect(chip('b2')[0].getAttribute('data-bee-slack')).toBe('not_found')
+    expect(chip('b3')[0].getAttribute('data-bee-slack')).toBe('unchecked')
     act(() => root.unmount())
   })
 
-  it('without Slack: not a word about Slack', async () => {
-    const { host, root } = await mount({ slackConnected: false, bees: [bee({ slack_checked_at: 'x' })] })
+  it('the explanation appears once, under the row that needs it, with Check again beside it — a found bee has none', async () => {
+    const { host, root } = await mount({ slackConnected: true, bees: [
+      bee({ id: 'b1', name: 'Ann', slack_user_id: 'U1', slack_checked_at: 'x' }),
+      bee({ id: 'b2', name: 'Bo', email: 'bo@gmail.com', slack_checked_at: 'x' }),
+    ] })
+    expect(host.querySelector('[data-bee="b1"] [data-bee-slack-note]')).toBeNull()
+    expect(host.querySelector('[data-bee="b1"] [data-bee-recheck]')).toBeNull()
+    const notes = host.querySelectorAll('[data-bee="b2"] [data-bee-slack-note]')
+    expect(notes.length).toBe(1)
+    expect(notes[0].textContent).toBe('That email isn’t in your Slack. Use the one they sign in to Slack with.Check again')
+    expect((host.textContent!.match(/That email isn’t in your Slack/g) || []).length).toBe(1)
+
+    // The button really asks: one PATCH { recheck: true } for THAT bee.
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true, slackConnected: true, slackCheck: 'found', bee: bee({ id: 'b2', name: 'Bo', email: 'bo@gmail.com', slack_user_id: 'U2', slack_checked_at: 'y' }) }) }))
+    vi.stubGlobal('fetch', f)
+    await act(async () => { (notes[0].querySelector('[data-bee-recheck]') as HTMLButtonElement).click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(f.mock.calls.map((c: any[]) => [String(c[0]), c[1]?.method, c[1]?.body])).toEqual([[`/api/locations/${LOC}/bees/b2`, 'PATCH', JSON.stringify({ recheck: true })]])
+    expect(host.querySelector('[data-bee="b2"] [data-bee-slack]')!.textContent).toBe('In your Slack')
+    expect(host.querySelector('[data-bee="b2"] [data-bee-slack-note]')).toBeNull()
+    act(() => root.unmount())
+  })
+
+  it('a row reads as a person: initials, the name at 15px, the email at 13px, and labelled Edit and Remove icon buttons', async () => {
+    const { host, root } = await mount({ slackConnected: false, bees: [bee({ name: 'Maria Santos', email: 'maria@bee.com' })] })
+    const row = host.querySelector('[data-bee="b1"]') as HTMLElement
+    expect(row.querySelector('[aria-hidden="true"]')!.textContent).toBe('MS')
+    expect((row.querySelector('[data-bee-name]') as HTMLElement).style.fontSize).toBe('15px')
+    expect((row.querySelector('[data-bee-email]') as HTMLElement).style.fontSize).toBe('13px')
+    const edit = row.querySelector('button[aria-label="Edit Maria Santos"]') as HTMLElement
+    const remove = row.querySelector('button[aria-label="Remove Maria Santos"]') as HTMLElement
+    expect(edit && remove).toBeTruthy()
+    for (const b of [edit, remove]) { expect(b.style.minHeight).toBe('36px'); expect(b.style.minWidth).toBe('36px'); expect(b.textContent).toBe('') }
+    act(() => root.unmount())
+  })
+
+  it('"Add a bee" is a button that reveals a labelled form — the form is not on screen until asked for', async () => {
+    const { host, root } = await mount({ slackConnected: true, bees: [] })
+    expect(host.querySelector('[data-bee-add]')).toBeNull()
+    expect(host.querySelector('input')).toBeNull()
+    const open = host.querySelector('[data-bee-add-open]') as HTMLButtonElement
+    expect(open.textContent).toBe('Add a bee')
+    expect(open.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => { open.click() })
+    expect(open.getAttribute('aria-expanded')).toBe('true')
+    const labels = Array.from(host.querySelectorAll('[data-bee-add] label')).map(l => l.querySelector('span')!.textContent)
+    expect(labels).toEqual(['Name', 'Email they use for Slack'])
+    expect(Array.from(host.querySelectorAll('[data-bee-add] label input')).length).toBe(2)
+    act(() => root.unmount())
+  })
+
+  it('Edit swaps the row for the same labelled fields and saves with one PATCH; Remove asks first and sends active:false', async () => {
+    const { host, root } = await mount({ slackConnected: false, bees: [bee({ name: 'Sam' })] })
+    const f = vi.fn(async (_u: any, init: any) => ({ ok: true, status: 200, json: async () => ({ ok: true, slackConnected: false, bee: bee({ name: 'Sam', ...(JSON.parse(init.body).active === false ? { is_active: false, removed_at: 'x' } : {}) }) }) }))
+    vi.stubGlobal('fetch', f)
+    await act(async () => { (host.querySelector('button[aria-label="Edit Sam"]') as HTMLButtonElement).click() })
+    expect(Array.from(host.querySelectorAll('[data-bee-edit] label span')).map(s => s.textContent)).toEqual(['Name', 'Email'])
+    await act(async () => { (host.querySelector('[data-bee-edit] button[type="submit"]') as HTMLButtonElement).click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(f.mock.calls.map((c: any[]) => [c[1].method, c[1].body])).toEqual([['PATCH', JSON.stringify({ name: 'Sam', email: 'sam@bee.com' })]])
+
+    await act(async () => { (host.querySelector('button[aria-label="Remove Sam"]') as HTMLButtonElement).click() })
+    expect(f.mock.calls.length).toBe(1)                       // nothing sent until confirmed
+    const dialog = host.querySelector('[role="dialog"][aria-label="Remove Sam"]')!
+    expect(dialog.textContent).toContain('You can bring them back any time')
+    await act(async () => { (Array.from(dialog.querySelectorAll('button')).find(b => b.textContent === 'Remove') as HTMLButtonElement).click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(f.mock.calls[1][1].body).toBe(JSON.stringify({ active: false }))
+    expect(host.querySelector('[data-bee-removed] [data-bee="b1"]')).toBeTruthy()
+    act(() => root.unmount())
+  })
+
+  it('without Slack: not a word about Slack — the list, the add form and the edit form included', async () => {
+    const { host, root } = await mount({ slackConnected: false, bees: [bee({ slack_checked_at: 'x' }), bee({ id: 'b2', name: 'Bo', email: 'bo@x.com' })] })
     expect(host.querySelector('[data-bee-slack]')).toBeNull()
-    expect(host.textContent).not.toMatch(/Slack/)
+    expect(host.querySelector('[data-bee-slack-note]')).toBeNull()
+    expect(host.querySelector('[data-bee-recheck]')).toBeNull()
+    expect(host.textContent).not.toMatch(/Slack/i)
+    await act(async () => { (host.querySelector('[data-bee-add-open]') as HTMLButtonElement).click() })
+    await act(async () => { (host.querySelector('button[aria-label="Edit Bo"]') as HTMLButtonElement).click() })
+    expect(host.querySelector('[data-bee-add]') && host.querySelector('[data-bee-edit]')).toBeTruthy()
+    expect(host.textContent).not.toMatch(/Slack/i)
+    expect(host.innerHTML).not.toMatch(/Slack/i)
     act(() => root.unmount())
   })
 
-  it('removed bees sit under Removed with Bring back', async () => {
-    const { host, root } = await mount({ slackConnected: true, bees: [bee({ is_active: false, removed_at: 'x' })] })
-    const row = host.querySelector('[data-bee="b1"]')!
+  it('removed bees collapse behind a "Removed bees (n)" disclosure, each with Bring back and no Slack chip', async () => {
+    const { host, root } = await mount({ slackConnected: true, bees: [bee({ is_active: false, removed_at: 'x' }), bee({ id: 'b2', name: 'Bo', email: 'bo@x.com', is_active: false, removed_at: 'x' })] })
+    const details = host.querySelector('details[data-bee-removed]') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.querySelector('summary')!.textContent).toBe('Removed bees (2)')
+    const row = details.querySelector('[data-bee="b1"]')!
     expect(row.textContent).toContain('Bring back')
     expect(row.querySelector('[data-bee-slack]')).toBeNull()
+    expect(host.querySelectorAll('[data-bee]').length).toBe(2)   // nowhere else on the screen
+    act(() => root.unmount())
+  })
+
+  it('says what makes bees different from seats: nobody signs in, nobody is billed', async () => {
+    const { host, root } = await mount({ slackConnected: false, bees: [] })
+    expect(host.querySelector('h2')!.textContent).toBe('Bees')
+    expect(host.querySelector('[data-bee-intro]')!.textContent).toBe('The people who work your jobs. Not seats — nobody here signs in to Bee Hub and nobody is billed.')
     act(() => root.unmount())
   })
 })
