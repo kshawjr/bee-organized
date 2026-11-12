@@ -895,6 +895,79 @@ describe('the Bees cell', () => {
     expect(iType).toBeGreaterThan(iCorner)
   })
 
+  // 2026-11-12, seen in a browser: "Add bees" and "Put this job in Slack" sat
+  // on ONE line, touching, the button's border cutting through the text. The
+  // cell was a plain block; the faces are an inline-flex span and the button
+  // is inline, so they flowed together — and a top margin does nothing on an
+  // inline box. Every test before this asserted the pieces were PRESENT;
+  // none could see where they were. This cannot see pixels either (no test
+  // here lays anything out) — it pins the one property that makes each piece
+  // its own row. The real check is a rendered screenshot.
+  it('the cell is a COLUMN: the faces, the channel line, the button and every message are each their own row', async () => {
+    getBody.slack.reconcile = null
+    await mount()
+    const cell = host.querySelector('[data-bee-bees]') as HTMLElement
+    expect(cell.style.display).toBe('flex')
+    expect(cell.style.flexDirection).toBe('column')
+    expect(cell.style.alignItems).toBe('flex-start')
+    // The button is a direct child of that column (so it is a flex item, and its marginTop is real)…
+    const btn = host.querySelector('[data-bee-make-channel]') as HTMLElement
+    expect(btn.parentElement).toBe(cell)
+    expect(btn.style.marginTop).toBe('8px')
+    // …and it comes AFTER the faces in the column, never beside them.
+    const kids = Array.from(cell.children)
+    const faces = host.querySelector('[data-bee-bees-trigger]')!.parentElement!
+    expect(faces.parentElement).toBe(cell)
+    expect(kids.indexOf(faces)).toBeLessThan(kids.indexOf(btn))
+    expect(faces.contains(btn)).toBe(false)
+  })
+
+  it('the channel line, the reconnect line, the Slack answer and the reopen box are rows of the same column', async () => {
+    getBody.slack = { connected: true, canManageChannels: false, canReconnect: true, channelsSetUp: true, channel: null, closed: false }
+    await mount()
+    let cell = host.querySelector('[data-bee-bees]')!
+    expect(host.querySelector('[data-bee-reconnect]')!.parentElement).toBe(cell)
+    // "Settings › Slack." never breaks across two lines.
+    expect((host.querySelector('[data-bee-reconnect] span') as HTMLElement).style.whiteSpace).toBe('nowrap')
+    act(() => root.unmount()); host.remove()
+
+    getBody.slack = { connected: true, canManageChannels: true, canReconnect: true, channelsSetUp: true, closed: false,
+      channel: { id: 'C1', name: 'a-very-long-channel-name-that-will-not-fit-on-a-phone', archived: false },
+      reconcile: { at: 'x', items: [{ status: 'still_in_channel', bee: 'Sam Bee', channel: 'c', bee_id: 'r1' }] } }
+    await mount()
+    cell = host.querySelector('[data-bee-bees]')!
+    const chan = host.querySelector('[data-bee-channel]') as HTMLElement
+    expect(chan.parentElement).toBe(cell)
+    expect(chan.style.maxWidth).toBe('100%')          // a long name clips inside the cell instead of pushing it wide
+    expect(chan.style.textOverflow).toBe('ellipsis')
+    expect(host.querySelector('[data-bee-reconcile]')!.parentElement).toBe(cell)
+    // "Got it" is a small action, not a 16px button (the global floor) under 12px text.
+    expect(host.querySelector('[data-bee-reconcile-ok]')!.className).toContain('bee-small-action')
+  })
+
+  it('faces sit side by side — never overlapped, which cut the second initial off every face but the last', async () => {
+    getBody.bees = mkBees(3)
+    await mount()
+    const faces = Array.from(host.querySelectorAll('[data-bee-face]')) as HTMLElement[]
+    expect(faces.length).toBe(3)
+    for (const f of faces) expect(parseFloat(f.style.marginLeft || '0')).toBeGreaterThanOrEqual(0)
+  })
+
+  it('the picker slides left to stay on a narrow screen', async () => {
+    const realW = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
+    try {
+      await mount()
+      const trigger = host.querySelector('[data-bee-bees-trigger]') as HTMLElement
+      trigger.getBoundingClientRect = () => ({ left: 111, right: 193, top: 0, bottom: 18, width: 82, height: 18, x: 111, y: 0, toJSON() {} }) as any
+      await click(trigger)
+      const pop = host.querySelector('[data-bee-bees-popover]') as HTMLElement
+      const left = parseFloat(pop.style.left), width = parseFloat(pop.style.width)
+      expect(111 + left + width).toBeLessThanOrEqual(390 - 16)   // its right edge is on screen, with a margin
+      expect(111 + left).toBeGreaterThanOrEqual(0)
+    } finally { Object.defineProperty(window, 'innerWidth', { value: realW, configurable: true }) }
+  })
+
   it('shows at most 3 faces then +N, and 15 bees renders tidily (three faces, "+12", every name in the title)', async () => {
     getBody.bees = mkBees(15)
     await mount()

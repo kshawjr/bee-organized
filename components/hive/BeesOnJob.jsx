@@ -45,6 +45,7 @@ import { WizardShell, wizAccentBtn, wizQuietBtn } from './shared/CloseWizardKit'
 import { slackJobChannelName } from '@/lib/slack-channel-name'
 
 export const MAX_BEE_FACES = 3
+const POPOVER_W = 290
 export const RECONNECT_LINE = 'Reconnect Slack to turn on channels for your jobs.'
 
 export default function BeesOnJob({
@@ -58,6 +59,7 @@ export default function BeesOnJob({
 }) {
   const [state, setState] = useState(null) // GET body
   const [open, setOpen] = useState(false)
+  const [popLeft, setPopLeft] = useState(0) // px the picker slides left so it stays on screen
   const [dialog, setDialog] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -178,8 +180,11 @@ export default function BeesOnJob({
   ) : (
     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
       {bees.slice(0, MAX_BEE_FACES).map((b, i) => (
-        <span key={b.id} data-bee-face style={{ display: 'inline-flex', marginLeft: i ? '-6px' : 0 }}>
-          <MiniAvatar id={b.id} name={b.name} title={b.name} size={size} font={font} ring />
+        // Side by side, NOT overlapped: at this 18px size an overlap (the
+        // corner's idiom, at 24px) cut the second letter off every face but
+        // the last — "AB" read "AE". Seen in a browser, 2026-11-12.
+        <span key={b.id} data-bee-face style={{ display: 'inline-flex', marginLeft: i ? '3px' : 0 }}>
+          <MiniAvatar id={b.id} name={b.name} title={b.name} size={size} font={font} />
         </span>
       ))}
       {n > MAX_BEE_FACES && (
@@ -209,13 +214,29 @@ export default function BeesOnJob({
   const previewName = slackJobChannelName(clientName, projectType)
 
   return (
-    <div data-bee-bees style={{ flex: '0 1 auto', minWidth: 0 }}>
+    // A COLUMN, on purpose. This was a plain block, and the faces (an
+    // inline-flex span) and "Put this job in Slack" (an inline button) flowed
+    // onto ONE line, touching — a top margin does nothing on an inline box.
+    // As a flex column every piece below the label is its own row, its
+    // marginTop is real, and nothing can sit beside the faces.
+    // alignItems:flex-start keeps the button its own width; maxWidth:100% on
+    // the rows that can be long lets them wrap or clip inside the cell.
+    <div data-bee-bees style={{ flex: '0 1 auto', minWidth: 0, maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       <MicroLabel>Bees</MicroLabel>
       <span style={{ position: 'relative', display: 'inline-flex' }}>
         {readOnly ? (
           <span title={n === 0 ? 'No bees on this job' : allNames} style={{ display: 'inline-flex', alignItems: 'center' }}>{cluster}</span>
         ) : (
-          <button type="button" onClick={() => setOpen(v => !v)} data-bee-bees-trigger
+          <button type="button" data-bee-bees-trigger
+            onClick={(e) => {
+              // The picker opens under the faces, POPOVER_W wide. On a phone
+              // the cell can start a third of the way across, and the picker
+              // ran off the right edge — so slide it left by the overhang.
+              const left = e.currentTarget.getBoundingClientRect?.().left || 0
+              const w = Math.min(POPOVER_W, (window.innerWidth || POPOVER_W + 32) - 32)
+              setPopLeft(Math.max(0, Math.round(left + w + 16 - (window.innerWidth || Infinity))))
+              setOpen(v => !v)
+            }}
             aria-label={n === 0 ? 'Add bees to this job' : `Bees on this job: ${allNames} — edit`}
             aria-haspopup="true" aria-expanded={open}
             title={n === 0 ? 'Add bees' : allNames}
@@ -226,8 +247,10 @@ export default function BeesOnJob({
         {open && !readOnly && (
           <div onClick={e => e.stopPropagation()} data-bee-bees-popover
             style={{
-              position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010,
-              width: '250px', maxHeight: '46vh', overflowY: 'auto',
+              position: 'absolute', left: -popLeft, top: 'calc(100% + 6px)', zIndex: 10010,
+              // Wide enough for a name beside its "not in Slack" mark and for
+              // the add row on one line; never wider than a phone.
+              width: `${POPOVER_W}px`, maxWidth: 'calc(100vw - 32px)', maxHeight: '46vh', overflowY: 'auto',
               background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset,
               boxShadow: T.shadow.pop, padding: '8px 12px',
             }}>
@@ -241,7 +264,7 @@ export default function BeesOnJob({
       </span>
 
       {slack.channel && (
-        <p data-bee-channel style={{ marginTop: '6px', fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+        <p data-bee-channel style={{ marginTop: '6px', maxWidth: '100%', fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
           title="This job’s Slack channel">
           #{slack.channel.name}{slack.channel.archived ? ' · archived' : ''}
         </p>
@@ -254,18 +277,18 @@ export default function BeesOnJob({
       )}
       {showReconnect && (
         <p data-bee-reconnect style={{ marginTop: '6px', fontSize: '12px', color: T.ink.muted, maxWidth: '40ch' }}>
-          {RECONNECT_LINE} Settings › Slack.
+          {RECONNECT_LINE} <span style={{ whiteSpace: 'nowrap' }}>Settings › Slack.</span>
         </p>
       )}
       <BeeSlackStatus sync={sync} />
       {reconcile && (
         <div data-bee-reconcile style={{ marginTop: '8px' }}>
-          <p style={{ margin: 0, fontSize: '12px', fontWeight: 600, color: T.ink.secondary }}>
+          <p style={{ margin: 0, maxWidth: '52ch', fontSize: '12px', fontWeight: 600, lineHeight: 1.4, color: T.ink.secondary }}>
             When this job reopened, Bee Hub brought its Slack channel back in line with the bees here, except:
           </p>
           <BeeSlackStatus sync={reconcile} />
           {!readOnly && (
-            <button type="button" data-bee-reconcile-ok onClick={clearReconcile} disabled={clearing}
+            <button type="button" className="bee-small-action" data-bee-reconcile-ok onClick={clearReconcile} disabled={clearing}
               style={{ ...quietBtn(T.ink.muted), minHeight: 0, padding: '4px 10px', marginTop: '6px' }}>
               {clearing ? 'Clearing…' : 'Got it'}
             </button>
