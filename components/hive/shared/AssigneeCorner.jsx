@@ -45,6 +45,13 @@ import { T } from './tokens'
 import MiniAvatar from './MiniAvatar'
 
 const MAX_FACES = 3
+// How far each face tucks under the one before it. It was 8px, and at this
+// 24px size that cut the second initial off every face but the last: "OO"
+// read "OC", "AB" read "AE", "MM" read "MN" (seen in a browser, 2026-11-12 —
+// the same fault the bees had at 18px that morning). 4px tucks only the
+// white ring, so the stack still reads as one cluster and every letter shows.
+// Shared with the bees row under this corner (BeesOnJob.jsx): one treatment.
+export const FACE_OVERLAP = '-4px'
 
 export default function AssigneeCorner({
   assignees = [],
@@ -146,7 +153,7 @@ export default function AssigneeCorner({
   ) : (
     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
       {assignees.slice(0, MAX_FACES).map((a, i) => (
-        <span key={a.hub_user_id} style={{ display: 'inline-flex', marginLeft: i ? '-8px' : 0 }}>
+        <span key={a.hub_user_id} style={{ display: 'inline-flex', marginLeft: i ? FACE_OVERLAP : 0 }}>
           <MiniAvatar id={a.hub_user_id} name={nameOf(a)} title={nameOf(a)} size={size} font={font} ring />
         </span>
       ))}

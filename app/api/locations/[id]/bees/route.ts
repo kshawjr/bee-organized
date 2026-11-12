@@ -1,6 +1,6 @@
 // app/api/locations/[id]/bees/route.ts
 //
-// The bee roster for one location (Settings › Bees). lib/location-bees.ts
+// The bee roster for one location (Settings › Team and Seats, the Bees half). lib/location-bees.ts
 // holds the rules; this route is the door.
 //
 //   GET  → { bees: PublicBee[], slackConnected }
@@ -52,7 +52,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: "Couldn't load your bees." }, { status: 500 })
     }
     const slack = await readLocationSlack(supabaseService, params.id)
-    return NextResponse.json({ bees: ((data || []) as BeeRow[]).map(toPublicBee), slackConnected: slack.connected })
+    // The location's name, so the heading can say WHOSE bees these are even
+    // when the screen was not handed one (an admin looking at a location).
+    // Best effort: a failed read leaves the plain heading.
+    let locationName: string | null = null
+    try {
+      const { data: loc } = await supabaseService.from('locations').select('name').eq('id', params.id).maybeSingle()
+      locationName = typeof loc?.name === 'string' && loc.name.trim() ? loc.name.trim() : null
+    } catch { /* plain heading */ }
+    return NextResponse.json({ bees: ((data || []) as BeeRow[]).map(toPublicBee), slackConnected: slack.connected, locationName })
   } catch (err: any) {
     console.error('[/api/locations/[id]/bees GET] error:', err?.message || err)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

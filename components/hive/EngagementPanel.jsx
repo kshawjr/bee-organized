@@ -79,7 +79,7 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
-import BeesOnJob from './BeesOnJob'
+import { useJobBees, BeeCorner, BeeSlackLines, BeeChannelDialog, beeChannelMenuItem } from './BeesOnJob'
 import BookAssessment from './BookAssessment'
 import { canBookAssessment } from './shared/bookAssessmentGate'
 import { describeJoinedRequests } from './shared/joinedRequests'
@@ -295,6 +295,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   useMotionKeyframes()
 
   const isMobile = useIsMobile()
+  // The job's bees (a mirror of Jobber's visit crews) and its Slack channel.
+  // One read per open job, shared by the faces under the assignee corner,
+  // the Slack lines, the ··· menu item and its dialog (BeesOnJob.jsx).
+  const jobBees = useJobBees(engagementId, { readOnly, setToast })
 
   useEffect(() => {
     let dead = false
@@ -642,6 +646,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     // Reminders (2026-09-30) — in the menu AND the action bar (Kevin wants
     // both). Not behind readOnly: a reminder is personal.
     reminderMenuItem(reminder),
+    // "Put this job in Slack" (2026-11-12 — it was a button in the Type band).
+    // A record action, so it lives here and the bottom bar stays at five.
+    // null — no item at all — when it must not be offered: not reconnected,
+    // no Slack, a channel already exists, the job is closed, or read-only.
+    beeChannelMenuItem(jobBees),
     // Always present once the record has loaded — non-mutating, so it rides
     // read-only surfaces too (everyone can report a problem). It also means the
     // menu is never empty, read-only surfaces included. Hands an ID-ONLY context up to BeeHub's feedback modal
@@ -1180,18 +1189,30 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 drives the Jobber crew sync, so unmapped-to-Jobber users are
                 marked in the picker. Empty → a dashed ghost. Gated on the
                 fetch so it doesn't flash a ghost before assignees load. */}
+            {/* WHO IS ON THIS, top-right, two rows:
+                  1. the assignee corner (above) — hub users, click to assign;
+                  2. the BEES, directly under it and wearing its treatment
+                     (2026-11-12, Kevin: "same row as the assignee … same
+                     formatting, same style, just one row lower"). Read-only:
+                     the crew comes from the job's visits in Jobber. They
+                     used to be a labelled cell in the Type band below.
+                Right-aligned as one column so both clusters end on the same
+                edge whatever their widths. */}
             {data && (
-              <AssigneeCorner
-                assignees={assignees}
-                users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
-                endpoint={`/api/engagements/${engagementId}/assignees`}
-                mode="toggle"
-                jobberConnected={!!client?.jobber_connected}
-                onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
-                onJobberSync={setAssignSync}
-                setToast={setToast}
-                readOnly={readOnly}
-              />
+              <div data-masthead-people style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+                <AssigneeCorner
+                  assignees={assignees}
+                  users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
+                  endpoint={`/api/engagements/${engagementId}/assignees`}
+                  mode="toggle"
+                  jobberConnected={!!client?.jobber_connected}
+                  onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
+                  onJobberSync={setAssignSync}
+                  setToast={setToast}
+                  readOnly={readOnly}
+                />
+                <BeeCorner ctl={jobBees} isMobile={isMobile} />
+              </div>
             )}
             {/* Masthead ··· overflow menu (Part 1) — portal-rendered so
                 the overlay card's rounding/overflow can't clip it. Houses
@@ -1206,6 +1227,15 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               the identity row that holds the AssigneeCorner picker; silent on
               a clean push, speaks up only on a failed leg or unmapped people. */}
           <AssigneeSyncStatus sync={assignSync} />
+          {/* Then the job's Slack lines — its #channel, the reconnect line,
+              what Slack refused, the "when this job reopened" box. SAME ORDER
+              as the faces they belong to: assignees above bees in the corner,
+              the assignee line above the bees' lines here. The assignee line
+              is also the answer to a click just made, so it stays nearest the
+              thing that was clicked. Nothing renders when there is nothing to
+              say, and never a word about Slack where there is no Slack. */}
+          <BeeSlackLines ctl={jobBees} />
+          <BeeChannelDialog ctl={jobBees} clientName={eng.client_name || client?.name || null} projectType={eng.project_type || null} isMobile={isMobile} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span title={displayTitle(eng)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}
@@ -1222,7 +1252,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               </span>
             )}
           </div>
-          {/* Deal meta band — Type only now. Assigned moved OUT of this
+          {/* Deal meta band — Type only, full width. (The bees sat here as a
+              second cell for one morning, 2026-11-12; they are in the
+              masthead's top-right now, under the assignee corner.)
+              Assigned moved OUT of this
               row and up to the masthead's top-right corner (AssigneeCorner,
               the SAME faces-only click-to-assign door the lead card wears —
               Kevin 7/24), so the band no longer has to balance two cells.
@@ -1248,22 +1281,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 )}
               />
             </div>
-            {/* Bees on this job (Slack job channels, slice 3). NOT the
-                assignee corner: bees sync to Slack, assignees to Jobber, so
-                bees live HERE — labelled, in the deal band — and the corner
-                stays the one unlabelled face cluster. See BeesOnJob's header.
-                Renders nothing until migrations/engagement_bees.sql runs. */}
-            {data && eng.id && (
-              <BeesOnJob
-                engagementId={engagementId}
-                locationUuid={eng.location_uuid}
-                clientName={eng.client_name || client?.name || null}
-                projectType={eng.project_type || null}
-                readOnly={readOnly}
-                isMobile={isMobile}
-                setToast={setToast}
-              />
-            )}
           </div>
         </div>
       )}

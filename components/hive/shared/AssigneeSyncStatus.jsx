@@ -13,7 +13,9 @@
 //
 // SILENT ON SUCCESS. No checkmark, no "synced." The line appears ONLY when
 // there is something the person needs to know:
-//   · a leg FAILED  → saved here, Jobber didn't take the crew, try again
+//   · the assessment leg FAILED → saved here, Jobber didn't take the team,
+//     try again. (It is the ONLY leg since 2026-11-12: the picker no longer
+//     writes a job's visits, so the line no longer says "or job".)
 //   · unmapped > 0  → saved, but N people aren't linked to Jobber
 // A null sync (location not connected to Jobber — assignment is internal-
 // only there BY DESIGN) and a clean, fully-synced push both render NOTHING.
@@ -46,7 +48,7 @@ export function assigneeSyncNote(sync) {
   if (failed) {
     return {
       tone: 'fail',
-      text: 'Saved here, but couldn’t update Jobber — the crew may not show on the assessment or job yet. Try again shortly.',
+      text: 'Saved here, but couldn’t update Jobber — the team may not show on the assessment yet. Try again shortly.',
     }
   }
 

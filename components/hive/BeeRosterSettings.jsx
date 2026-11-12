@@ -89,6 +89,7 @@ function Avatar({ name, size = '36px', font = '13px', quiet = false }) {
 export default function BeeRosterSettings({ locationId = null, locationName = '' }) {
   const [bees, setBees] = useState(null)     // null = loading
   const [slackConnected, setSlackConnected] = useState(false)
+  const [serverName, setServerName] = useState('')   // the location's name, as the server knows it
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)      // a calm line (Slack unreachable)
   const [adding, setAdding] = useState(false)
@@ -105,6 +106,7 @@ export default function BeeRosterSettings({ locationId = null, locationName = ''
       if (!res.ok) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
       setBees(j.bees || [])
       setSlackConnected(j.slackConnected === true)
+      setServerName(typeof j.locationName === 'string' ? j.locationName : '')
     } catch (e) {
       setError(`Couldn't load your bees: ${e.message}`); setBees([])
     }
@@ -239,7 +241,7 @@ export default function BeeRosterSettings({ locationId = null, locationName = ''
         <div style={{ flex: '1 1 300px', minWidth: 0 }}>
           {/* Named for the location: an admin looking at one location's
               settings must be able to tell whose bees these are. */}
-          <h2 id="team-bees-title" style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: T.ink.primary }}>{locationName ? `${locationName}’s bees` : 'Bees'}</h2>
+          <h2 id="team-bees-title" style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: T.ink.primary }}>{(locationName || serverName) ? `${locationName || serverName}’s bees` : 'Bees'}</h2>
           <p data-bee-intro style={{ margin: '3px 0 0', fontSize: '13px', lineHeight: 1.55, color: T.ink.muted, maxWidth: '560px' }}>
             The people who work your jobs. <strong style={{ fontWeight: 600, color: T.ink.primary }}>Not seats</strong> — nobody here signs in to Bee Hub and nobody is billed.
             {slackConnected ? ' Use the email each bee signs in to Slack with, so you can add them to a job’s Slack channel.' : ''}

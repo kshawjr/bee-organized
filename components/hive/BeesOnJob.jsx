@@ -1,74 +1,79 @@
 // components/hive/BeesOnJob.jsx
 // ─────────────────────────────────────────────────────────────
-// The Bees cell on the engagement panel (Slack job channels, slice 3).
+// The bees on a job, on the engagement panel — a MIRROR (2026-11-12).
 //
-// BEES ARE NOT ASSIGNEES (Kevin: "Assignee is different. That's a Jobber
-// function."). Assignees are hub users who sync to Jobber crews and live in
-// the masthead's top-right AssigneeCorner — faces only, no label, because
-// there assignee IS identity. Bees are a roster with no logins who sync to
-// Slack. So this cell FOLLOWS the corner's idiom (faces, ghost +, checklist
-// popover, immediate write, max 3 faces then +N, unsyncable people marked)
-// but does NOT sit with it. It is made unmistakable three ways:
-//   · PLACE — the deal meta band, below the masthead's hairline, beside
-//     Type: a fact about this job, not about who owns the record.
-//   · LABEL — a "Bees" micro-label, the band's own label for every field.
-//     The corner stays label-free; it's the only unlabelled face cluster.
-//   · SIZE — the 18px inline disc, a step under the corner's 24px.
-// Empty reads "Add bees" beside the dashed ghost, as the band's Type reads
-// "Add type".
+// Jobber owns who is on a job: an owner puts people on the job's visits
+// there, and lib/jobber-crew-mirror.ts makes the job's bees and its Slack
+// channel match. So nothing here changes who is on a job. There is no picker,
+// no tick and no write of a bee — on purpose: a tick in Bee Hub would either
+// do nothing, or fight Jobber, or have to write visits back to Jobber, which
+// is the leg that was deleted. Typing a bee by hand lives in Settings › Team
+// and Seats.
 //
-// Under the faces, the job's Slack line:
-//   · a channel → its #name (archived when the job is closed)
-//   · no channel, Slack ready → "Put this job in Slack" — opens the dialog
-//     (THE SAME BeePicker, pre-ticked, plus Make the channel). Never auto.
-//   · Slack connected without channels:manage → the reconnect line, shown
-//     ONLY to someone who can reconnect (the owner or an admin)
-//   · not connected → nothing; bees still assign (Part A works everywhere)
-// And, when the job reopened and the unattended sweep couldn't bring the
-// channel in line (e.g. a bee taken off it whom the workspace won't let apps
-// remove), the lines it stored — same wording as the live toggle, under a
-// "When this job reopened" lead-in — until the owner taps Got it.
+// Four pieces, one shared state (useJobBees), placed by EngagementPanel:
+//
+//   BeeCorner         the faces, DIRECTLY UNDER the assignee corner in the
+//                     masthead's top-right, wearing ITS treatment
+//                     (AssigneeCorner.jsx): MiniAvatar at T.avatar.corner,
+//                     ringed, overlapped, at most three then +N, a dashed
+//                     ghost when empty. One thing differs, so two unlabelled
+//                     face clusters are not stacked: a quiet "Bees" label to
+//                     the left (dropped on a phone when there are faces —
+//                     it was costing the client's name). Clicking it opens a
+//                     small card, headed "Bees on this job", that names
+//                     everyone (a hover title does not exist on a phone) and
+//                     says, in one line, that the crew comes from Jobber.
+//   BeeSlackLines     under the identity row: the job's #channel, the
+//                     reconnect line, what Slack refused, and the "when this
+//                     job reopened" box. Silent when there is nothing to say,
+//                     and never a word about Slack where there is no Slack.
+//   beeChannelMenuItem  "Put this job in Slack", for the masthead's ··· menu
+//                     (RecordMenu drops a falsy item, so "hidden" is exactly
+//                     what it was as a button: no item at all).
+//   BeeChannelDialog  the confirm it opens.
+//
+// WHEN THE ROW SHOWS AT ALL: when the job has bees, or the location's Slack
+// is reconnected for job channels (the only locations the mirror runs for).
+// Anywhere else an empty row would be a ghost nobody can ever fill.
+//
 // Before migrations/engagement_bees.sql runs the GET says setUp:false and
-// this renders nothing at all — the panel is exactly as it was.
+// every piece renders nothing — the panel is exactly as it was.
 //
 // §8.5 props only, no context. Token-pure.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { IconSend } from '@/components/ui/icons'
 import { T } from './shared/tokens'
 import MiniAvatar from './shared/MiniAvatar'
-import BeePicker from './shared/BeePicker'
+import { FACE_OVERLAP } from './shared/AssigneeCorner'
 import BeeSlackStatus from './shared/BeeSlackStatus'
 import { MicroLabel, quietBtn } from './shared/cardKit'
 import { WizardShell, wizAccentBtn, wizQuietBtn } from './shared/CloseWizardKit'
 import { slackJobChannelName } from '@/lib/slack-channel-name'
 
-export const MAX_BEE_FACES = 3
-const POPOVER_W = 290
+export const MAX_BEE_FACES = 3 // the assignee corner's own limit
 export const RECONNECT_LINE = 'Reconnect Slack to turn on channels for your jobs.'
+// The one line an owner who clicks expecting a picker reads.
+export const BEES_FROM_JOBBER = 'Bees come from Jobber: whoever is on this job’s visits. Change it there.'
+export const NO_BEES_YET = 'Nobody is on this job’s visits in Jobber yet.'
+export const PUT_IN_SLACK = 'Put this job in Slack'
 
-export default function BeesOnJob({
-  engagementId,
-  locationUuid,
-  clientName = null,
-  projectType = null,
-  readOnly = false,
-  isMobile = false,
-  setToast = () => {},
-}) {
+// ── The shared state ─────────────────────────────────────────
+// One GET per open job. Returns a controller the four pieces read; every
+// field is safe to read before the answer arrives (ready:false).
+export function useJobBees(engagementId, { readOnly = false, setToast = () => {} } = {}) {
   const [state, setState] = useState(null) // GET body
-  const [open, setOpen] = useState(false)
-  const [popLeft, setPopLeft] = useState(0) // px the picker slides left so it stays on screen
   const [dialog, setDialog] = useState(false)
-  const [busyId, setBusyId] = useState(null)
   const [creating, setCreating] = useState(false)
   const [sync, setSync] = useState(null)
   const [clearing, setClearing] = useState(false)
 
   useEffect(() => {
     let dead = false
-    setState(null); setSync(null); setOpen(false); setDialog(false)
+    setState(null); setSync(null); setDialog(false)
+    if (!engagementId) return undefined
     fetch(`/api/engagements/${engagementId}/bees`)
       .then(r => (r.ok ? r.json() : null))
       .then(j => { if (!dead) setState(j) })
@@ -76,58 +81,9 @@ export default function BeesOnJob({
     return () => { dead = true }
   }, [engagementId])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
-
-  if (!state || !state.setUp) return null
-
-  const bees = state.bees || []
-  const roster = state.roster || []
-  const slack = state.slack || {}
-  const assignedIds = bees.map(b => b.id)
-
-  async function toggle(bee, forceAdd = false) {
-    if (busyId) return
-    const adding = forceAdd || !assignedIds.includes(bee.id)
-    setBusyId(bee.id)
-    try {
-      const res = adding
-        ? await fetch(`/api/engagements/${engagementId}/bees`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bee_id: bee.id }),
-          })
-        : await fetch(`/api/engagements/${engagementId}/bees?bee_id=${encodeURIComponent(bee.id)}`, { method: 'DELETE' })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
-      setState(s => {
-        const next = { ...s, bees: Array.isArray(j.bees) ? j.bees : s.bees }
-        if (j.slack_sync?.status === 'channel_gone') next.slack = { ...s.slack, channel: null }
-        if (j.slack_sync?.status === 'scope_lost') next.slack = { ...s.slack, canManageChannels: false }
-        // The server drops a stored reopen line about a bee the owner just re-ticked.
-        const rec = next.slack?.reconcile
-        if (rec?.items?.some(p => p.bee_id === bee.id)) {
-          const items = rec.items.filter(p => p.bee_id !== bee.id)
-          next.slack = { ...next.slack, reconcile: items.length ? { ...rec, items } : null }
-        }
-        return next
-      })
-      setSync(j.slack_sync ?? null)
-      setToast({ kind: 'success', msg: `${adding ? 'Added' : 'Took off'} ${bee.name}` })
-    } catch (e) {
-      setSync(null)
-      setToast({ kind: 'error', msg: `Bee ${adding ? 'add' : 'remove'} failed: ${e.message}` })
-    } finally { setBusyId(null) }
-  }
-
-  // A bee typed in from the picker: into the roster, then onto this job.
-  async function added(bee) {
-    setState(s => ({ ...s, roster: [...(s.roster || []).filter(b => b.id !== bee.id), bee].sort((a, b) => a.name.localeCompare(b.name)) }))
-    await toggle(bee, true)
-  }
+  const ready = !!state && !!state.setUp
+  const bees = ready ? state.bees || [] : []
+  const slack = ready ? state.slack || {} : {}
 
   async function createChannel() {
     if (creating) return
@@ -160,31 +116,52 @@ export default function BeesOnJob({
     } finally { setClearing(false) }
   }
 
-  const reconcile = slack.reconcile?.items?.length ? slack.reconcile.items : null
+  // Exactly the conditions the button had (it was a button until 2026-11-12).
+  const showCreate = ready && !readOnly && !slack.channel && !!slack.connected && !!slack.canManageChannels && !!slack.channelsSetUp && !slack.closed
+  // Only to someone who can act on it (the owner, or an admin): a manager or a
+  // read-only user has no Slack settings to go to, and an instruction nobody
+  // can follow is noise. The server decides (slack.canReconnect).
+  const showReconnect = ready && !readOnly && !!slack.canReconnect && !slack.channel && !!slack.connected && !slack.canManageChannels
+  // Bees to show, or a location the mirror actually fills.
+  const showRow = ready && (bees.length > 0 || (!!slack.connected && !!slack.canManageChannels))
 
+  return {
+    ready, readOnly, bees, slack, sync,
+    reconcile: slack.reconcile?.items?.length ? slack.reconcile.items : null,
+    showRow, showCreate, showReconnect,
+    dialog, openDialog: () => setDialog(true), closeDialog: () => { if (!creating) setDialog(false) },
+    creating, createChannel, clearing, clearReconcile,
+  }
+}
+
+// ── The faces, under the assignee corner ─────────────────────
+export function BeeCorner({ ctl, isMobile = false, size = T.avatar.corner, font = T.avatar.cornerFont }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!ctl?.showRow) return null
+  const bees = ctl.bees
   const n = bees.length
   const allNames = bees.map(b => b.name).join(', ')
-  const size = T.avatar.inline
-  const font = T.avatar.inlineFont
 
+  // The corner's own cluster, mark for mark (AssigneeCorner.jsx). The ghost
+  // carries no "+": nothing is added here.
   const cluster = n === 0 ? (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-      <span aria-hidden style={{
-        width: size, height: size, borderRadius: T.radius.round,
-        border: `1px dashed ${T.hairline.control}`, color: T.ink.faint,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: `calc(${size} * 0.6)`, fontWeight: 400, lineHeight: 1, flexShrink: 0,
-      }}>+</span>
-      <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.quiet }}>Add bees</span>
-    </span>
+    <span aria-hidden data-bee-ghost style={{
+      width: size, height: size, borderRadius: T.radius.round,
+      border: `1px dashed ${T.hairline.control}`, flexShrink: 0, display: 'inline-flex',
+    }} />
   ) : (
     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
       {bees.slice(0, MAX_BEE_FACES).map((b, i) => (
-        // Side by side, NOT overlapped: at this 18px size an overlap (the
-        // corner's idiom, at 24px) cut the second letter off every face but
-        // the last — "AB" read "AE". Seen in a browser, 2026-11-12.
-        <span key={b.id} data-bee-face style={{ display: 'inline-flex', marginLeft: i ? '3px' : 0 }}>
-          <MiniAvatar id={b.id} name={b.name} title={b.name} size={size} font={font} />
+        <span key={b.id} data-bee-face style={{ display: 'inline-flex', marginLeft: i ? FACE_OVERLAP : 0 }}>
+          <MiniAvatar id={b.id} name={b.name} title={b.name} size={size} font={font} ring />
         </span>
       ))}
       {n > MAX_BEE_FACES && (
@@ -193,90 +170,77 @@ export default function BeesOnJob({
     </span>
   )
 
-  const picker = (
-    <BeePicker
-      roster={roster}
-      assignedIds={assignedIds}
-      busyId={busyId}
-      onToggle={(b) => toggle(b)}
-      slackConnected={!!slack.connected}
-      canAdd={!!state.canAddBees && !readOnly}
-      locationUuid={locationUuid}
-      onAdded={added}
-    />
-  )
-
-  const showCreate = !readOnly && !slack.channel && slack.connected && slack.canManageChannels && slack.channelsSetUp && !slack.closed
-  // Only to someone who can act on it (the owner, or an admin): a manager or a
-  // read-only user has no Slack settings to go to, and an instruction nobody
-  // can follow is noise. The server decides (slack.canReconnect).
-  const showReconnect = !readOnly && !!slack.canReconnect && !slack.channel && slack.connected && !slack.canManageChannels
-  const previewName = slackJobChannelName(clientName, projectType)
-
   return (
-    // A COLUMN, on purpose. This was a plain block, and the faces (an
-    // inline-flex span) and "Put this job in Slack" (an inline button) flowed
-    // onto ONE line, touching — a top margin does nothing on an inline box.
-    // As a flex column every piece below the label is its own row, its
-    // marginTop is real, and nothing can sit beside the faces.
-    // alignItems:flex-start keeps the button its own width; maxWidth:100% on
-    // the rows that can be long lets them wrap or clip inside the cell.
-    <div data-bee-bees style={{ flex: '0 1 auto', minWidth: 0, maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-      <MicroLabel>Bees</MicroLabel>
-      <span style={{ position: 'relative', display: 'inline-flex' }}>
-        {readOnly ? (
-          <span title={n === 0 ? 'No bees on this job' : allNames} style={{ display: 'inline-flex', alignItems: 'center' }}>{cluster}</span>
-        ) : (
-          <button type="button" data-bee-bees-trigger
-            onClick={(e) => {
-              // The picker opens under the faces, POPOVER_W wide. On a phone
-              // the cell can start a third of the way across, and the picker
-              // ran off the right edge — so slide it left by the overhang.
-              const left = e.currentTarget.getBoundingClientRect?.().left || 0
-              const w = Math.min(POPOVER_W, (window.innerWidth || POPOVER_W + 32) - 32)
-              setPopLeft(Math.max(0, Math.round(left + w + 16 - (window.innerWidth || Infinity))))
-              setOpen(v => !v)
-            }}
-            aria-label={n === 0 ? 'Add bees to this job' : `Bees on this job: ${allNames} — edit`}
-            aria-haspopup="true" aria-expanded={open}
-            title={n === 0 ? 'Add bees' : allNames}
-            style={{ display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
-            {cluster}
+    <span data-bee-bees style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      <button type="button" data-bee-bees-trigger onClick={() => setOpen(v => !v)}
+        aria-label={n === 0 ? 'Bees on this job: nobody yet' : `Bees on this job: ${allNames}`}
+        aria-haspopup="true" aria-expanded={open}
+        title={n === 0 ? 'No bees on this job' : allNames}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '6px', border: 'none', background: 'transparent',
+          padding: '4px', borderRadius: T.radius.pill, cursor: 'pointer', fontFamily: 'inherit',
+        }}>
+        {/* The label costs about 35px of the client's name. On a phone the
+            name was being cut to "Sarah …" for it, so there the faces go
+            unlabelled, exactly like the assignee row above, and the card they
+            open carries the heading. An EMPTY ring keeps its label at every
+            width: a bare dashed circle says nothing. */}
+        {(!isMobile || n === 0) && (
+          <span data-bee-label style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, lineHeight: 1 }}>Bees</span>
+        )}
+        {cluster}
+      </button>
+      {open && (
+        <div data-bee-bees-popover role="dialog" aria-label="Bees on this job" onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 10010,
+            width: '250px', maxWidth: 'calc(100vw - 32px)', maxHeight: '46vh', overflowY: 'auto',
+            background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset,
+            boxShadow: T.shadow.pop, padding: '10px 12px 8px',
+          }}>
+          <MicroLabel>Bees on this job</MicroLabel>
+          {n === 0 ? (
+            <p data-bee-none style={{ margin: 0, fontSize: '12px', fontWeight: 500, color: T.ink.secondary }}>{NO_BEES_YET}</p>
+          ) : (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              {bees.map(b => (
+                <li key={b.id} data-bee-name style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <MiniAvatar id={b.id} name={b.name} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: '12px', fontWeight: 500, color: T.ink.primary, overflowWrap: 'anywhere' }}>{b.name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p data-bee-from-jobber style={{ margin: '9px 0 0', paddingTop: '8px', borderTop: T.border.thin, fontSize: '12px', lineHeight: 1.45, color: T.ink.muted }}>
+            {BEES_FROM_JOBBER}
+          </p>
+          {/* bee-small-action: without it the app-wide 16px button floor makes
+              "Done" bigger than the card's own text (seen in a browser). */}
+          <button type="button" className="bee-small-action" data-bee-card-done onClick={() => setOpen(false)}
+            style={{ display: 'block', width: '100%', marginTop: '4px', padding: '6px 0 2px', border: 'none', background: 'transparent', color: T.ink.muted, fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'right' }}>
+            Done
           </button>
-        )}
-        {open && !readOnly && (
-          <div onClick={e => e.stopPropagation()} data-bee-bees-popover
-            style={{
-              position: 'absolute', left: -popLeft, top: 'calc(100% + 6px)', zIndex: 10010,
-              // Wide enough for a name beside its "not in Slack" mark and for
-              // the add row on one line; never wider than a phone.
-              width: `${POPOVER_W}px`, maxWidth: 'calc(100vw - 32px)', maxHeight: '46vh', overflowY: 'auto',
-              background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset,
-              boxShadow: T.shadow.pop, padding: '8px 12px',
-            }}>
-            {picker}
-            <button type="button" onClick={() => setOpen(false)}
-              style={{ display: 'block', width: '100%', marginTop: '6px', padding: '6px 8px', border: 'none', borderTop: T.border.thin, background: 'transparent', color: T.ink.muted, fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'right' }}>
-              Done
-            </button>
-          </div>
-        )}
-      </span>
+        </div>
+      )}
+    </span>
+  )
+}
 
+// ── The Slack lines, under the identity row ──────────────────
+export function BeeSlackLines({ ctl }) {
+  if (!ctl?.ready) return null
+  const { slack, sync, reconcile, showReconnect, readOnly, clearing, clearReconcile } = ctl
+  if (!slack.channel && !showReconnect && !sync && !reconcile) return null
+  return (
+    <div data-bee-slack-lines style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       {slack.channel && (
-        <p data-bee-channel style={{ marginTop: '6px', maxWidth: '100%', fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-          title="This job’s Slack channel">
-          #{slack.channel.name}{slack.channel.archived ? ' · archived' : ''}
+        <p data-bee-channel title="This job’s Slack channel"
+          style={{ margin: 0, maxWidth: '100%', fontSize: '12px', color: T.ink.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          Slack channel <span style={{ color: T.ink.secondary, fontWeight: 500 }}>#{slack.channel.name}</span>{slack.channel.archived ? ' · archived' : ''}
         </p>
       )}
-      {showCreate && (
-        <button type="button" className="bee-small-action" data-bee-make-channel onClick={() => { setOpen(false); setDialog(true) }}
-          style={{ ...quietBtn(T.accent.deep), minHeight: 0, padding: '5px 10px', marginTop: '8px' }}>
-          Put this job in Slack
-        </button>
-      )}
       {showReconnect && (
-        <p data-bee-reconnect style={{ marginTop: '6px', fontSize: '12px', color: T.ink.muted, maxWidth: '40ch' }}>
+        <p data-bee-reconnect style={{ margin: 0, fontSize: '12px', color: T.ink.muted, maxWidth: '52ch' }}>
           {RECONNECT_LINE} <span style={{ whiteSpace: 'nowrap' }}>Settings › Slack.</span>
         </p>
       )}
@@ -295,23 +259,42 @@ export default function BeesOnJob({
           )}
         </div>
       )}
-
-      {dialog && (
-        <WizardShell isMobile={isMobile} onClose={() => !creating && setDialog(false)} title="Put this job in Slack" maxWidth={440}
-          footer={(
-            <>
-              <button type="button" onClick={() => setDialog(false)} disabled={creating} style={wizQuietBtn()}>Cancel</button>
-              <button type="button" data-bee-make-channel-confirm onClick={createChannel} disabled={creating} style={wizAccentBtn(creating)}>
-                {creating ? 'Making…' : 'Make the channel'}
-              </button>
-            </>
-          )}>
-          <p style={{ fontSize: '13px', color: T.ink.secondary, lineHeight: 1.5 }}>
-            A public channel called <strong style={{ color: T.ink.primary }}>#{previewName}</strong> (or close to it, if Slack already has one), with the bees you tick below. The location owner is added too, as long as Slack knows the email they use for Bee Hub. Changing bees here later changes the channel straight away.
-          </p>
-          {picker}
-        </WizardShell>
-      )}
     </div>
+  )
+}
+
+// ── "Put this job in Slack", for the ··· menu ────────────────
+// null when it must not be offered; RecordMenu drops a falsy item.
+export function beeChannelMenuItem(ctl) {
+  if (!ctl?.showCreate) return null
+  return { key: 'bee-slack-channel', label: PUT_IN_SLACK, icon: <IconSend size={15} />, onClick: ctl.openDialog }
+}
+
+export function BeeChannelDialog({ ctl, clientName = null, projectType = null, isMobile = false }) {
+  if (!ctl?.dialog) return null
+  const { bees, creating } = ctl
+  const previewName = slackJobChannelName(clientName, projectType)
+  return (
+    <WizardShell isMobile={isMobile} onClose={ctl.closeDialog} title={PUT_IN_SLACK} maxWidth={440}
+      footer={(
+        <>
+          <button type="button" onClick={ctl.closeDialog} disabled={creating} style={wizQuietBtn()}>Cancel</button>
+          <button type="button" data-bee-make-channel-confirm onClick={ctl.createChannel} disabled={creating} style={wizAccentBtn(creating)}>
+            {creating ? 'Making…' : 'Make the channel'}
+          </button>
+        </>
+      )}>
+      <p style={{ fontSize: '13px', color: T.ink.secondary, lineHeight: 1.5 }}>
+        A public channel called <strong style={{ color: T.ink.primary }}>#{previewName}</strong> (or close to it, if Slack already has one). The bees on this job are added, and the location owner too, as long as Slack knows the email they use for Bee Hub.
+      </p>
+      <p data-bee-dialog-who style={{ marginTop: '10px', fontSize: '13px', color: T.ink.secondary, lineHeight: 1.5 }}>
+        {bees.length
+          ? <>On this job now: <strong style={{ color: T.ink.primary, fontWeight: 600 }}>{bees.map(b => b.name).join(', ')}</strong>.</>
+          : <>{NO_BEES_YET} The channel is made now and they are added when they are.</>}
+      </p>
+      <p style={{ marginTop: '10px', fontSize: '12px', color: T.ink.muted, lineHeight: 1.5 }}>
+        When the people on this job’s visits change in Jobber, the channel follows.
+      </p>
+    </WizardShell>
   )
 }
