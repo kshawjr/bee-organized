@@ -1143,6 +1143,10 @@ export default async function HubPage({
   // Set when the leads load hits MAX_LEADS. Shipped to the client so the
   // shortfall is stated on screen rather than inferred from a log.
   let leadsTruncated = false
+  // Home's numbers for a location whose leads load was cut off — the 'All
+  // Locations' server reduction, fenced to that one location. Null whenever
+  // the load was complete (every location but Philadelphia Suburbs today).
+  let initialScopedOverview: any = null
 
   if (!overviewOnly) {
     // Paginated load — a single .limit(1000) silently truncated locations
@@ -1173,6 +1177,13 @@ export default async function HubPage({
           .from('leads')
           .select('*')
           .order('created_at', { ascending: false })
+          // Tiebreaker, same as the engagements load below. Paging by
+          // created_at alone is not a stable order: rows sharing a timestamp
+          // can come back in a different order on each page request, so a lead
+          // can appear on two pages and another on none. Bulk imports stamp
+          // thousands of leads alike — 18,483 of Philadelphia Suburbs' 18,931
+          // share a created_at with another lead.
+          .order('id', { ascending: true })
           .range(from, from + PAGE - 1),
       )
 
@@ -1497,6 +1508,36 @@ export default async function HubPage({
           if (error) console.error('[hub-page] closed-won count error:', error.message)
           else initialEngagementsClosedWonCount = count ?? 0
         }
+      }
+    }
+
+    // ── A cut-off location gets SERVER counts for Home ────────────────────
+    // The people graph above holds only the newest MAX_LEADS leads, so any
+    // Home number derived from it can be short (Outstanding, the aging and
+    // new-uncontacted cards). Rather than render those short and say so, the
+    // server reduces them exactly — buildAllOverview, fenced to this location,
+    // reading only the bounded working sets (enquiries, unpaid invoices), never
+    // every lead. Home takes the leads-derived numbers from here, and the
+    // banner fires only if THIS reduction hit one of its own limits.
+    //
+    // Only on a cut-off load: a complete load's people graph is already exact,
+    // so the other 45 locations do no extra work and render as before.
+    if (leadsTruncated && scopeLocationUuid) {
+      // A franchise scope carries no slug; every lead in a location shares one
+      // (verified 2026-11-12: 0 location_uuids with more than one location_id),
+      // so the loaded rows supply it.
+      const slug = scope.locationSlug || (leadsRaw && leadsRaw[0]?.location_id) || null
+      try {
+        initialScopedOverview = await buildAllOverview(
+          supabaseService, initialEngagements, Date.now(), { uuid: scopeLocationUuid, slug },
+        )
+        console.log(
+          `[hub-page] scoped-overview for ${scopeLocationUuid}: leads load was cut off, ` +
+          `Home counts come from the server` + (initialScopedOverview.truncated ? ' — TRUNCATED' : '')
+        )
+      } catch (e: any) {
+        // Null keeps the banner up: the leads-derived numbers are still short.
+        console.error('[hub-page] scoped-overview build failed:', e?.message || e)
       }
     }
   } else {
@@ -1925,6 +1966,8 @@ export default async function HubPage({
       // True when the leads load hit MAX_LEADS and the counts on this page are
       // therefore short. Rendered as a banner, never left implicit.
       initialLeadsTruncated={leadsTruncated}
+      // Server counts for Home when the leads load was cut off (null otherwise).
+      initialScopedOverview={initialScopedOverview}
       initialTransferPeople={initialTransferPeople}
       // The scope the server ACTUALLY used, so the client can reconcile the
       // cookie to it after hydration (a Server Component cannot write cookies).

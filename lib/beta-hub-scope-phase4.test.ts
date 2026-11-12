@@ -309,7 +309,7 @@ describe('BeeHub wiring — Phase 4', () => {
 
   it('Home reads the server overview on "all" instead of the people graph', () => {
     expect(src).toContain('if (allOverview) {')
-    expect(src).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials])')
+    expect(src).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])')
   })
 
   it('the hero cards read explicit COUNTS, so both paths share one shape', () => {
@@ -322,7 +322,7 @@ describe('BeeHub wiring — Phase 4', () => {
   })
 
   it('truncation is rendered, not just logged', () => {
-    expect(src).toContain('{(leadsTruncated || overviewTruncated) && (')
+    expect(src).toContain('{countsShort && (')
     expect(src).toContain("Some records weren&apos;t loaded")
   })
 

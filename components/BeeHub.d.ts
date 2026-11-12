@@ -191,6 +191,21 @@ interface BeeHubProps {
   } | null
   // True when the leads load hit MAX_LEADS, so the page's counts are short.
   initialLeadsTruncated?: boolean
+  // Home's numbers for a location whose leads load hit MAX_LEADS — the same
+  // server reduction as initialAllOverview, fenced to that one location. Null
+  // when the load was complete.
+  initialScopedOverview?: {
+    newUncontacted: { count: number; oldestDays: number }
+    estimateFollowUps: { count: number; oldestDays: number }
+    upcomingAssessments: Array<{ id: string; scheduled_at: string; client: string }>
+    agingInvoices: { count: number; total: number; oldestDays: number }
+    openEngagementsCount: number
+    activeClientsCount: number
+    newThisWeekCount: number
+    outstandingTotal: number
+    leadCount: number
+    truncated: boolean
+  } | null
   // True when the partners/companies load hit MAX_NETWORK_ROWS — the Network
   // screen states the shortfall instead of rendering a quietly short list.
   initialNetworkTruncated?: boolean

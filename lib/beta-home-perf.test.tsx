@@ -41,7 +41,7 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     // reads the SERVER-computed overview instead of the people graph, so a new
     // overview must recompute the block. Still no clock/time value — that
     // omission is the point of the memo and is asserted below.
-    expect(dash).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials])')
+    expect(dash).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])')
     // The whole point: no time value in the deps (that would bust the memo on
     // every render/tick and defeat the fix). nowHome is captured INSIDE.
     expect(dash).not.toMatch(/\}, \[[^\]]*\bnow\b[^\]]*\]\)/)
@@ -54,7 +54,7 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     // derivation (changing a rendered number) fails here.
     expect(dash).toContain('const nowHome = Date.now()')
     expect(dash).toContain('const openEngagementsCount = openEngsH.length')
-    expect(dash).toContain('const activeClientsCount = scopedPeopleH.filter(p => openClientIdsH.has(p.id)).length')
+    expect(dash).toContain('const activeClientsCount = new Set(openEngsH.map(e=>e.client_id).filter(Boolean)).size')  // from open engagements, not a people lookup — the lookup undercounted a cut-off load (Philadelphia Suburbs 19 for 22)
     expect(dash).toContain("deriveClientStatus(p, openClientIdsH, nowHome, wonClientIdsH) === 'New'")
     // 22 Oct 2026: the estimate rule moved into ONE shared function
     // (shared/noticed.js estimateFollowUpDays) — Home asks it, inside the memo.

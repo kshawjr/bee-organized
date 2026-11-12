@@ -49,6 +49,7 @@ import {
   INVOICE_AGING_DAYS,
   ASSESSMENT_HORIZON_DAYS,
 } from '@/components/hive/shared/attentionThresholds'
+import { childLocationFilter } from '@/lib/hub-scope'
 
 const DAY_MS = 86400000
 const daysSince = (iso: string | null | undefined, now: number): number => {
@@ -105,16 +106,35 @@ async function pageAll(
   return { rows, truncated: true }
 }
 
+// One location, for a scoped load whose people graph was cut off at MAX_LEADS
+// (Philadelphia Suburbs: 18,931 active leads against a 5,000-row load). The
+// same numbers, computed the same way, fenced to that location — exact
+// instead of short. `uuid` fences the leads (location_uuid); `slug`
+// ('loc_phillysuburbs') fences invoices, whose location column is the slug
+// (CHILD_LOCATION_SCOPE in lib/hub-scope.ts). Omitted = the whole tenant, the
+// 'All Locations' overview this was written for.
+export type OverviewLocation = { uuid: string; slug: string | null }
+
 // Build the corporate overview.
 //
 // `openEngagements` is the board set the caller has already loaded (292 rows) —
 // passed in rather than re-queried so the overview and the board can never
-// disagree about what is open.
+// disagree about what is open. On a location-fenced build it must be that
+// location's open board (the caller's initialEngagements).
 export async function buildAllOverview(
   db: any,
   openEngagements: any[],
   nowMs: number = Date.now(),
+  location: OverviewLocation | null = null,
 ): Promise<AllOverview> {
+  // Leads are fenced on location_uuid. Invoices are fenced on the SLUG; with no
+  // slug they cannot be fenced at all, and reading the whole tenant's invoices
+  // for one location would OVER-count Outstanding. So no slug = no invoice
+  // read, and the overview says it is incomplete rather than guessing.
+  const onLeads = (q: any) => (location ? q.eq('location_uuid', location.uuid) : q)
+  const invoiceFence = location ? childLocationFilter('invoices', location) : null
+  const invoicesUnfenceable = !!location && !invoiceFence
+  const onInvoices = (q: any) => (invoiceFence ? q.eq(invoiceFence.column, invoiceFence.value) : q)
   const since30 = new Date(nowMs - 30 * DAY_MS).toISOString()
   const since7 = new Date(nowMs - 7 * DAY_MS).toISOString()
   const agingBefore = new Date(nowMs - INVOICE_AGING_DAYS * DAY_MS).toISOString()
@@ -142,7 +162,7 @@ export async function buildAllOverview(
   if (resubTrunc) leadsTrunc = true
   const { rows: manualLeads, truncated: manualTrunc } = await pageAll(
     db, 'leads',
-    (q: any) => q.not('is_junk', 'is', true).is('archived_at', null).eq('import_source', 'manual'),
+    (q: any) => onLeads(q.not('is_junk', 'is', true).is('archived_at', null).eq('import_source', 'manual')),
     CANDIDATE_MAX,
   )
   if (manualTrunc) leadsTrunc = true
@@ -150,7 +170,9 @@ export async function buildAllOverview(
   const resubOnlyIds = Array.from(new Set(resubTouches.map((t: any) => t.lead_id).filter((id: string) => id && !manualIds.has(id))))
   const resubLeads: any[] = []
   for (let i = 0; i < resubOnlyIds.length; i += 200) {
-    const { data, error } = await db.from('leads').select('*').not('is_junk', 'is', true).is('archived_at', null).in('id', resubOnlyIds.slice(i, i + 200))
+    // The resubmission touchpoints above are read tenant-wide (a few dozen
+    // rows); the location fence is applied here, on the lead itself.
+    const { data, error } = await onLeads(db.from('leads').select('*').not('is_junk', 'is', true).is('archived_at', null).in('id', resubOnlyIds.slice(i, i + 200)))
     if (error) { console.error(`[all-overview] resubmitter leads read failed: ${error.message}`); leadsTrunc = true; break }
     resubLeads.push(...(data || []))
   }
@@ -264,9 +286,10 @@ export async function buildAllOverview(
   // A SUM is required and PostgREST aggregates are disabled project-wide, so
   // the rows are fetched and reduced here. Bounded by the same filter the card
   // renders: unpaid AND issued more than INVOICE_AGING_DAYS ago (8 rows today).
-  const { rows: agingRows, truncated: agingTrunc } = await pageAll(
+  const noRows = { rows: [] as any[], truncated: true }
+  const { rows: agingRows, truncated: agingTrunc } = invoicesUnfenceable ? noRows : await pageAll(
     db, 'invoices',
-    (q: any) => q.gt('balance_owing', 0).lt('issued_at', agingBefore).neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
+    (q: any) => onInvoices(q).gt('balance_owing', 0).lt('issued_at', agingBefore).neq('status', 'deleted'), // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
     CANDIDATE_MAX,
   )
   let agingTotal = 0
@@ -282,17 +305,17 @@ export async function buildAllOverview(
   // ── calm metrics ─────────────────────────────────────────────────────────
   // Outstanding is EVERY unpaid balance, not just the aging ones — a different
   // number from agingTotal on purpose, exactly as the scoped Home computes it.
-  const { rows: unpaidRows, truncated: unpaidTrunc } = await pageAll(
-    db, 'invoices', (q: any) => q.gt('balance_owing', 0).neq('status', 'deleted'), CANDIDATE_MAX, // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
+  const { rows: unpaidRows, truncated: unpaidTrunc } = invoicesUnfenceable ? noRows : await pageAll(
+    db, 'invoices', (q: any) => onInvoices(q).gt('balance_owing', 0).neq('status', 'deleted'), CANDIDATE_MAX, // never an invoice deleted in Jobber (components/hive/shared/invoiceDeleted.js)
   )
   const outstandingTotal = unpaidRows.reduce(
     (s: number, i: any) => s + (Number(i.balance_owing) > 0 ? Number(i.balance_owing) : 0), 0)
 
   const counts = await Promise.all([
-    db.from('leads').select('id', { count: 'exact', head: true })
-      .not('is_junk', 'is', true).gte('created_at', since7),
-    db.from('leads').select('id', { count: 'exact', head: true })
-      .not('is_junk', 'is', true),
+    onLeads(db.from('leads').select('id', { count: 'exact', head: true })
+      .not('is_junk', 'is', true).gte('created_at', since7)),
+    onLeads(db.from('leads').select('id', { count: 'exact', head: true })
+      .not('is_junk', 'is', true)),
   ])
   const newThisWeekCount = counts[0]?.count ?? 0
   const leadCount = counts[1]?.count ?? 0

@@ -24939,7 +24939,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, scopedOverview=null, scopedOverviewLocId=null, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -25084,7 +25084,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       activeClientsCount: ov.activeClientsCount,
       newThisWeekCount: ov.newThisWeekCount,
       outstandingTotal: ov.outstandingTotal,
-      overviewTruncated: !!ov.truncated,
+      countsShort: !!ov.truncated,
     }
   }
   // Client-side location scope (mirrors HiveShell.filtered): effectiveLocId null
@@ -25107,6 +25107,16 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     deriveClientStatus(p, openClientIdsH, nowHome, wonClientIdsH) === 'New')
   const newUncontactedOldest = newUncontacted.reduce((m,p)=>{
     const a = enquiryDateOf(p) || p.created; const d = a ? sharedDaysSince(a, nowHome) : 0; return d>m?d:m }, 0)
+
+  // ── A cut-off people graph (the leads load hit MAX_LEADS) ──
+  // `people` then holds only the newest MAX_LEADS leads, so every number read
+  // from it below can be short. The server sends exact replacements for those
+  // (the All Locations reduction, fenced to this location) — used only when it
+  // was built for the location on screen. Engagement-derived numbers need no
+  // replacement: the open-engagement load has no ceiling.
+  const serverH = (leadsTruncated && scopedOverview
+    && (!effectiveLocId || !scopedOverviewLocId || effectiveLocId === scopedOverviewLocId))
+    ? scopedOverview : null
 
   // RED · Estimates awaiting follow-up — THE shared rule (shared/noticed.js
   // estimateFollowUpDays): open Estimate-stage, no quote approved, latest quote
@@ -25172,11 +25182,19 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // Open engagements — open engagement RECORD count in scope (SAME source as the
   // Engagements tab badge). Distinct from Active clients (people count).
   const openEngagementsCount = openEngsH.length
-  // Active clients — distinct PEOPLE with ≥1 open engagement (deriveClientStatus
-  // 'Active'). A repeat client with two open deals = ONE active client but TWO
-  // open engagements: the numbers are honestly different, hence two labels.
-  const activeClientsCount = scopedPeopleH.filter(p => openClientIdsH.has(p.id)).length
-  // New this week — leads created within 7 days (real: people.created).
+  // Active clients — distinct PEOPLE with ≥1 open engagement. A repeat client
+  // with two open deals = ONE active client but TWO open engagements: the
+  // numbers are honestly different, hence two labels.
+  //
+  // Counted from the open ENGAGEMENTS, exactly as All Locations does
+  // (lib/hub-all-overview.ts openIds.size), not by looking each client up in
+  // the people graph. That lookup missed every client whose lead fell outside
+  // a cut-off load: Philadelphia Suburbs showed 19 for 22 — three clients with
+  // open deals whose leads predate the newest 5,000.
+  const activeClientsCount = new Set(openEngsH.map(e=>e.client_id).filter(Boolean)).size
+  // New this week — leads created within 7 days (real: people.created). Safe
+  // on a cut-off load: the leads load reads newest first, so the rows it drops
+  // are always older than this window.
   const newThisWeekCount = scopedPeopleH.filter(p => {
     if (!p.created) return false
     const t = new Date(p.created).getTime(); return !isNaN(t) && (nowHome - t) < 7*86400000 }).length
@@ -25190,19 +25208,29 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // Counts are returned EXPLICITLY alongside the arrays so the cards below
     // read one shape on both paths — the 'all' branch has numbers without rows
     // and must not have to fabricate array elements to satisfy `.length`.
-    newUncontacted, newCount: newUncontacted.length, newUncontactedOldest,
+    // On a cut-off load the PEOPLE-derived counts come from serverH.
+    newUncontacted,
+    newCount: serverH ? serverH.newUncontacted.count : newUncontacted.length,
+    newUncontactedOldest: serverH ? serverH.newUncontacted.oldestDays : newUncontactedOldest,
     estimateFollowUps, estimateCount: estimateFollowUps.length, estimateOldest,
     upcomingAssessments, assessDetail,
-    agingInvoices, agingCount: agingInvoices.length, agingTotal, agingOldest,
+    agingInvoices,
+    agingCount: serverH ? serverH.agingInvoices.count : agingInvoices.length,
+    agingTotal: serverH ? serverH.agingInvoices.total : agingTotal,
+    agingOldest: serverH ? serverH.agingInvoices.oldestDays : agingOldest,
     transferLeads,
-    openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
-    overviewTruncated: false,
+    openEngagementsCount, activeClientsCount, newThisWeekCount,
+    outstandingTotal: serverH ? serverH.outstandingTotal : outstandingTotal,
+    // Are any numbers on screen short? Decided by where each number came from:
+    // a complete load → no; a cut-off load → only if the server replacement is
+    // missing (failed, or built for another location) or hit its own limits.
+    countsShort: leadsTruncated ? (!serverH || !!serverH.truncated) : false,
   }
   // Deps = every value the block READS. `nowHome` (Date.now()) is deliberately
   // NOT a dep: keeping it out is the whole point — the block must not recompute
   // on the clock tick. `engagements` is the stable server prop; `people` is App
   // state (new ref only on a real change); the rest are primitives/booleans.
-  }, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials])
+  }, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])
   const {
     newCount, newUncontactedOldest,
     estimateCount, estimateOldest,
@@ -25210,7 +25238,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     agingCount, agingTotal, agingOldest,
     transferLeads,
     openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
-    overviewTruncated,
+    countsShort,
   } = homeDerived
 
   // Home-scoped collapse memory for the info lists (Tier 2d) — REUSES the
@@ -25564,8 +25592,11 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
             A load that hit its row ceiling used to whisper into Vercel's logs
             and render short numbers as if they were complete — the exact
             silent-failure mode this whole effort is retiring. If the counts
-            below are under-counted, the page says so. */}
-        {(leadsTruncated || overviewTruncated) && (
+            below are under-counted, the page says so.
+            countsShort follows the numbers, not the load: a location whose
+            leads load was cut off but whose numbers came exact from the server
+            shows nothing, because nothing on screen is short. */}
+        {countsShort && (
           <div style={{ padding:'11px 14px', borderRadius:'12px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', display:'flex', gap:'10px', alignItems:'flex-start' }}>
             <span style={{ fontSize:'15px', lineHeight:1.2 }}>⚠️</span>
             <div>
@@ -37119,6 +37150,7 @@ export default function App({
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
   initialAllOverview,        // Fix 2 Phase 4: server-reduced corporate overview for 'All Locations' (null on a scoped load) — replaces the people graph on that scope
   initialLeadsTruncated,     // true when the leads load hit MAX_LEADS; rendered as a banner so a short count is never presented as complete
+  initialScopedOverview,     // server counts for Home when the leads load hit MAX_LEADS (null otherwise) — the leads-derived numbers come from here instead of the short people graph
   initialNetworkTruncated,   // true when the partners/companies load hit MAX_NETWORK_ROWS; the Network screen states the shortfall
   initialTransferPeople,     // loc_other unrouted leads — fetched OUTSIDE the selected scope so the routing queue survives a location switch (Fix 2 Phase 2). Elevated only; [] for franchise.
   initialScopeLocationId,    // the location the SERVER actually scoped to (null = all) — the client reconciles its cookie to this after hydration
@@ -38532,6 +38564,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           transferPeople={transferPeople}
           allOverview={initialAllOverview}
           leadsTruncated={!!initialLeadsTruncated}
+          scopedOverview={initialScopedOverview || null}
+          scopedOverviewLocId={initialScopeLocationId || null}
           networkTruncated={!!initialNetworkTruncated}
           locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}

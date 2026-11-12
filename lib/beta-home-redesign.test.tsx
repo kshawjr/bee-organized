@@ -66,7 +66,7 @@ describe('T1b — two honestly-labeled counts, separate sources', () => {
     expect(dash).toContain('label="Open engagements" value={openEngagementsCount}')
   })
   it('Active clients = distinct PEOPLE with an open engagement (not the record count)', () => {
-    expect(dash).toContain('const activeClientsCount = scopedPeopleH.filter(p => openClientIdsH.has(p.id)).length')
+    expect(dash).toContain('const activeClientsCount = new Set(openEngsH.map(e=>e.client_id).filter(Boolean)).size')  // from open engagements, not a people lookup — the lookup undercounted a cut-off load (Philadelphia Suburbs 19 for 22)
     expect(dash).toContain('label="Active clients" value={activeClientsCount}')
   })
 })
