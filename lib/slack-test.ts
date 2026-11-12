@@ -48,10 +48,10 @@ export function slackTestFailureMessage(result: { skipped?: string; error?: stri
       return (
         'The test didn’t arrive: Bee Hub can’t post to your channel. This usually means it’s a ' +
         'private channel — open Slack, go to that channel, type /invite and add the Bee Hub app, ' +
-        'then try the test again. Or use Reconnect and pick a public channel.'
+        'then try the test again. Or Disconnect, then Add to Slack again and pick a public channel.'
       )
     case 'is_archived':
-      return 'The test didn’t arrive: your channel is archived in Slack. Use Reconnect and pick an active channel.'
+      return 'The test didn’t arrive: your channel is archived in Slack. Disconnect, then Add to Slack again and pick an active channel.'
     case 'invalid_auth':
     case 'token_revoked':
     case 'account_inactive':

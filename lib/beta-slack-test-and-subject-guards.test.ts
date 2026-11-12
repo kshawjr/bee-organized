@@ -128,11 +128,17 @@ describe('buildSlackTestMessage — obviously a test, never mistakable for a lea
 })
 
 describe('slackTestFailureMessage — owner-actionable words, never a bare code', () => {
-  it('channel_not_found → invite the app to the private channel, or reconnect public', () => {
+  // "Reconnect and pick a public channel" stopped being true on 2026-11-12:
+  // a reconnect to the same workspace now KEEPS the lead channel
+  // (lib/slack-lead-channel.ts). The way to change it is Disconnect, then
+  // Add to Slack again — and the advice has to say so.
+  it('channel_not_found → invite the app to the private channel, or disconnect and connect again to a public one', () => {
     const m = slackTestFailureMessage({ error: 'channel_not_found' })
     expect(m).toMatch(/private channel/)
     expect(m).toMatch(/invite/i)
-    expect(m).toMatch(/Reconnect/i)
+    expect(m).toMatch(/Disconnect, then Add to Slack again and pick a public channel/)
+    expect(m).not.toMatch(/use Reconnect/i)
+    expect(slackTestFailureMessage({ error: 'is_archived' })).toMatch(/Disconnect, then Add to Slack again and pick an active channel/)
     expect(m).not.toBe('channel_not_found')
   })
 

@@ -450,9 +450,26 @@ describe('Settings › Bees', () => {
     act(() => root.unmount())
   })
 
+  it('with no location name to hand the heading is plain "Bees"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ slackConnected: false, bees: [] }) })))
+    const host = document.createElement('div'); document.body.appendChild(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(<BeeRosterSettings {...({ locationId: LOC } as any)} />) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(host.querySelector('h2')!.textContent).toBe('Bees')
+    act(() => root.unmount())
+  })
+
+  it('with Slack connected the intro says what the email is for: adding them to a job’s Slack channel', async () => {
+    const { host, root } = await mount({ slackConnected: true, bees: [] })
+    expect(host.querySelector('[data-bee-intro]')!.textContent).toBe('The people who work your jobs. Not seats — nobody here signs in to Bee Hub and nobody is billed. Use the email each bee signs in to Slack with, so you can add them to a job’s Slack channel.')
+    act(() => root.unmount())
+  })
+
   it('says what makes bees different from seats: nobody signs in, nobody is billed', async () => {
     const { host, root } = await mount({ slackConnected: false, bees: [] })
-    expect(host.querySelector('h2')!.textContent).toBe('Bees')
+    // Named for the location, so an admin looking at one location can tell whose bees these are.
+    expect(host.querySelector('h2')!.textContent).toBe('Kansas City’s bees')
     expect(host.querySelector('[data-bee-intro]')!.textContent).toBe('The people who work your jobs. Not seats — nobody here signs in to Bee Hub and nobody is billed.')
     act(() => root.unmount())
   })

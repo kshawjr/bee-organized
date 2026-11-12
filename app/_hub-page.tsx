@@ -734,6 +734,20 @@ export default async function HubPage({
       }
     }
 
+    // slack_scopes (migrations/slack_scopes.sql) — what the location's Slack
+    // install granted. Same error-tolerant shape: a missing column reads as
+    // null, which lib/slack-scopes treats as not-ready. A scope list, not a
+    // credential — the bot token is still never selected here.
+    let currentSlackScopes: string | null = null
+    {
+      const { data: scRow, error: scErr } = await supabase
+        .from('locations')
+        .select('slack_scopes')
+        .eq('id', hubUser.location_id)
+        .maybeSingle()
+      if (!scErr && scRow) currentSlackScopes = (scRow as any).slack_scopes || null
+    }
+
     // default_assessment_type (migrations/assessment_type.sql) — same
     // error-tolerant shape: a missing column reads as 'in-person', what the
     // Send to Jobber screen started on before the default existed.
@@ -774,6 +788,7 @@ export default async function HubPage({
         slack_team_name: locRow.slack_team_name || null,
         slack_channel_name: locRow.slack_channel_name || null,
         slack_invite_url: currentSlackInviteUrl,
+        slack_scopes: currentSlackScopes,
         default_assessment_type: currentAssessmentDefault,
         // Mailchimp display fields (token + server prefix never leave the
         // server; sync_live is never surfaced to an owner).
@@ -901,6 +916,20 @@ export default async function HubPage({
       if (!inviteErr && Array.isArray(inviteRows)) {
         for (const r of inviteRows as any[]) {
           if (r?.slack_invite_url) slackInviteById[r.id] = r.slack_invite_url
+        }
+      }
+    }
+
+    // slack_scopes (migrations/slack_scopes.sql) — own error-tolerant query so
+    // a not-yet-run migration can never take the invite links down with it.
+    const slackScopesById: Record<string, string> = {}
+    {
+      const { data: scRows, error: scErr } = await supabaseService
+        .from('locations')
+        .select('id, slack_scopes')
+      if (!scErr && Array.isArray(scRows)) {
+        for (const r of scRows as any[]) {
+          if (r?.slack_scopes) slackScopesById[r.id] = r.slack_scopes
         }
       }
     }
@@ -1078,6 +1107,7 @@ export default async function HubPage({
         slackTeamName: row.slack_team_name || null,
         slackChannelName: row.slack_channel_name || null,
         slackInviteUrl: slackInviteById[row.id] || null,
+        slackScopes: slackScopesById[row.id] || null,
         assessmentType: assessmentDefaultById[row.id] || 'in-person',
         // Mailchimp display fields (token never leaves the server).
         mailchimpConnected: !!row.mailchimp_connected,

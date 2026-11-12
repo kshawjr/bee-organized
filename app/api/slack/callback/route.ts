@@ -2,7 +2,9 @@
 // "Add to Slack" OAuth v2 callback. Supabase-primary bot-token storage.
 //
 // Stores the per-location BOT token + team + the channel Slack's own consent
-// screen picked (incoming_webhook.channel_id/channel). No refresh token, no
+// screen picked (incoming_webhook.channel_id/channel) — EXCEPT on a reconnect
+// to the same workspace, which keeps the lead channel the location already
+// had (lib/slack-lead-channel.ts). No refresh token, no
 // expiry: rotation is OFF, bot tokens don't expire. SKIPS the Jobber callback's
 // Zoho dual-write + team-roster sync (both Jobber-specific).
 //
@@ -27,6 +29,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { leadChannelOnConnect } from '@/lib/slack-lead-channel'
 import {
   SLACK_OAUTH_STATE_COOKIE,
   authorizeSlackConnect,
@@ -97,7 +100,10 @@ export async function GET(request: NextRequest) {
     //    from the SIGNED record — the state string is never a lookup key.
     const { data: supaLoc, error: supaErr } = await supabaseService
       .from('locations')
-      .select('id, location_id, name')
+      // The slack_* columns are what this location was connected to BEFORE this
+      // install — read here, before anything is written, so step 6 can tell a
+      // reconnect from a first connection.
+      .select('id, location_id, name, slack_connected, slack_team_id, slack_channel_id, slack_channel_name')
       .eq('id', locationUuid)
       .single()
 
@@ -128,12 +134,16 @@ export async function GET(request: NextRequest) {
     try {
       payload = JSON.parse(tokenText)
     } catch {
-      console.error('[slack-callback] token parse error:', tokenText.slice(0, 300))
+      // Length only, never the body: a truncated success body would still hold
+      // the access_token near its start.
+      console.error('[slack-callback] token parse error: unparseable body, length', tokenText.length)
       return redirectHome(request, { slack: 'error', reason: 'token_parse_failed', loc: locationUuid })
     }
 
     if (!payload?.ok || !payload?.access_token) {
-      console.error('[slack-callback] oauth.v2.access not ok:', payload?.error || payload)
+      // Never the whole payload: an ok-less body that still carried an
+      // access_token would print the token.
+      console.error('[slack-callback] oauth.v2.access not ok:', payload?.error || 'no_access_token')
       return redirectHome(request, {
         slack: 'error',
         reason: payload?.error || 'no_access_token',
@@ -145,35 +155,68 @@ export async function GET(request: NextRequest) {
     const botToken = payload.access_token as string // xoxb-…
     const teamId = payload.team?.id ?? null
     const teamName = payload.team?.name ?? null
-    const channelId = payload.incoming_webhook?.channel_id ?? null
-    const channelName = payload.incoming_webhook?.channel ?? null
+    // THE LEAD CHANNEL. Slack's screen always makes the owner pick one. On a
+    // reconnect to the workspace this location is already connected to, that
+    // pick is IGNORED and the channel it already posts leads to stays — a
+    // reconnect is for the new permission, and must never move or break lead
+    // posts that work. A first connection, or a different workspace, takes the
+    // pick as before. The whole rule: lib/slack-lead-channel.ts.
+    const lead = leadChannelOnConnect(supaLoc as any, {
+      teamId,
+      channelId: payload.incoming_webhook?.channel_id,
+      channelName: payload.incoming_webhook?.channel,
+    })
+    // What Slack actually GRANTED (comma-separated bot scopes) — the only way to
+    // tell a reconnected workspace from one installed before channels:manage
+    // was asked for. Absent → null, which lib/slack-scopes reads as not-ready.
+    const grantedScopes =
+      typeof payload.scope === 'string' && payload.scope.trim() ? payload.scope.trim() : null
 
     // 6. Supabase write — REQUIRED (source of truth). PK-keyed on the uuid,
     //    mirroring the Jobber callback. slack_bot_token is server-only.
-    const { error: writeErr } = await supabaseService
+    const patch: Record<string, unknown> = {
+      slack_bot_token: botToken,
+      slack_team_id: teamId,
+      slack_team_name: teamName,
+      // Kept channel → the two columns are not in the write at all (not
+      // re-written with the old values), so this can never race a change.
+      ...(lead.keep ? {} : { slack_channel_id: lead.channelId, slack_channel_name: lead.channelName }),
+      slack_scopes: grantedScopes,
+      slack_connected: true,
+      updated_at: new Date().toISOString(),
+    }
+    let { error: writeErr } = await supabaseService
       .from('locations')
-      .update({
-        slack_bot_token: botToken,
-        slack_team_id: teamId,
-        slack_team_name: teamName,
-        slack_channel_id: channelId,
-        slack_channel_name: channelName,
-        slack_connected: true,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq('id', supaLoc.id)
 
+    // Before migrations/slack_scopes.sql runs the column does not exist. Same
+    // shape as button_align: drop it and write the rest, so connecting keeps
+    // working — the location simply reads as not-ready until it reconnects
+    // after the migration.
+    if (writeErr && /slack_scopes/.test(writeErr.message || '') && /does not exist|schema cache/i.test(writeErr.message || '')) {
+      delete patch.slack_scopes
+      ;({ error: writeErr } = await supabaseService
+        .from('locations')
+        .update(patch)
+        .eq('id', supaLoc.id))
+    }
+
     if (writeErr) {
-      console.error('[slack-callback] Supabase write failed:', writeErr)
+      // Message + code only: the error object can echo the row being written,
+      // and that row carries the bot token.
+      console.error('[slack-callback] Supabase write failed:', writeErr.code || '', writeErr.message)
       return redirectHome(request, { slack: 'error', reason: 'supabase_write_failed', loc: locationUuid })
     }
-    console.log('✓ Slack connected for', supaLoc.location_id || supaLoc.id, '→', teamName, channelName)
+    console.log('✓ Slack connected for', supaLoc.location_id || supaLoc.id, '→', teamName, lead.channelName, `(lead channel: ${lead.reason})`)
 
     return redirectHome(request, {
       slack: 'connected',
       loc: supaLoc.location_id || supaLoc.id,
       team: teamName || '',
-      channel: channelName || '',
+      // The channel leads actually go to — the kept one on a reconnect, never
+      // the one that was picked and ignored.
+      channel: lead.channelName || '',
     })
   } catch (err) {
     console.error('[slack-callback] error:', err)

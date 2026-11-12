@@ -79,6 +79,7 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
+import BeesOnJob from './BeesOnJob'
 import BookAssessment from './BookAssessment'
 import { canBookAssessment } from './shared/bookAssessmentGate'
 import { describeJoinedRequests } from './shared/joinedRequests'
@@ -1247,6 +1248,22 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 )}
               />
             </div>
+            {/* Bees on this job (Slack job channels, slice 3). NOT the
+                assignee corner: bees sync to Slack, assignees to Jobber, so
+                bees live HERE — labelled, in the deal band — and the corner
+                stays the one unlabelled face cluster. See BeesOnJob's header.
+                Renders nothing until migrations/engagement_bees.sql runs. */}
+            {data && eng.id && (
+              <BeesOnJob
+                engagementId={engagementId}
+                locationUuid={eng.location_uuid}
+                clientName={eng.client_name || client?.name || null}
+                projectType={eng.project_type || null}
+                readOnly={readOnly}
+                isMobile={isMobile}
+                setToast={setToast}
+              />
+            )}
           </div>
         </div>
       )}

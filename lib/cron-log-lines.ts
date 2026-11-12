@@ -32,3 +32,8 @@ export function zohoTopupLine(r: { locations: number; planned: number; inserted:
 export function importSweeperQuietLine(): string {
   return '[import-sweeper] checked 0, resumed 0 — no stalled imports'
 }
+
+export function jobChannelsLine(r: { not_set_up_yet?: boolean; archived: number; unarchived: number; gone: number; no_slack: number; failed: number; reconcile_problems?: number }): string {
+  if (r.not_set_up_yet) return '[cron job-channels] not set up yet — engagements has no slack_channel columns'
+  return `[cron job-channels] archived ${r.archived}, unarchived ${r.unarchived}, gone ${r.gone}, no slack ${r.no_slack}` + (r.reconcile_problems ? `, bee problems stored for owners ${r.reconcile_problems}` : '') + (r.failed ? `, failed ${r.failed}` : '')
+}

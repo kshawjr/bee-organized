@@ -36,8 +36,17 @@ const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 // hands back its id/name, and users:read + users:read.email so users.info can
 // resolve a clicking Slack user → email for touchpoint attribution (the email
 // field requires users:read.email AND users.info itself requires users:read).
+//
+// channels:manage — job channels (create, invite, kick, archive, unarchive) for
+// PUBLIC channels only. Slack fixes scopes at install, so every workspace that
+// connected before this must reconnect to get it; the callback records what
+// was actually granted in locations.slack_scopes (see lib/slack-scopes.ts).
+// groups:write (private channels) is deliberately NOT asked for: job channels
+// are public by Kevin's decision, and asking 44 independent owners for write
+// access to their private channels for something never used is a bigger trust
+// ask than it is worth. Private channels later = a second round of reinstalls.
 const SLACK_SCOPES =
-  'chat:write,chat:write.public,channels:read,incoming-webhook,users:read,users:read.email'
+  'chat:write,chat:write.public,channels:read,channels:manage,incoming-webhook,users:read,users:read.email'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)

@@ -86,7 +86,7 @@ function Avatar({ name, size = '36px', font = '13px', quiet = false }) {
   )
 }
 
-export default function BeeRosterSettings({ locationId = null }) {
+export default function BeeRosterSettings({ locationId = null, locationName = '' }) {
   const [bees, setBees] = useState(null)     // null = loading
   const [slackConnected, setSlackConnected] = useState(false)
   const [error, setError] = useState(null)
@@ -237,10 +237,12 @@ export default function BeeRosterSettings({ locationId = null }) {
     <section data-testid="bee-roster-settings" data-team-bees aria-labelledby="team-bees-title" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-          <h2 id="team-bees-title" style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: T.ink.primary }}>Bees</h2>
+          {/* Named for the location: an admin looking at one location's
+              settings must be able to tell whose bees these are. */}
+          <h2 id="team-bees-title" style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: T.ink.primary }}>{locationName ? `${locationName}’s bees` : 'Bees'}</h2>
           <p data-bee-intro style={{ margin: '3px 0 0', fontSize: '13px', lineHeight: 1.55, color: T.ink.muted, maxWidth: '560px' }}>
             The people who work your jobs. <strong style={{ fontWeight: 600, color: T.ink.primary }}>Not seats</strong> — nobody here signs in to Bee Hub and nobody is billed.
-            {slackConnected ? ' Use the email each bee signs in to Slack with, so Bee Hub can find them there.' : ''}
+            {slackConnected ? ' Use the email each bee signs in to Slack with, so you can add them to a job’s Slack channel.' : ''}
           </p>
         </div>
         <button type="button" data-bee-add-open style={primaryBtn(false)} aria-expanded={adding}

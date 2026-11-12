@@ -274,7 +274,7 @@ describe('/api/slack/callback — an unverifiable state must never reach a write
     expect(h.state.updates).toHaveLength(0)
   })
 
-  it('happy path — writes the same seven columns as before, keyed on the signed uuid', async () => {
+  it('happy path — writes the same seven columns as before plus slack_scopes, keyed on the signed uuid', async () => {
     const { cookie, state } = await startFlow()
     mockTokenExchange(TOKEN_OK)
 
@@ -291,6 +291,7 @@ describe('/api/slack/callback — an unverifiable state must never reach a write
       'slack_channel_id',
       'slack_channel_name',
       'slack_connected',
+      'slack_scopes',
       'slack_team_id',
       'slack_team_name',
       'updated_at',

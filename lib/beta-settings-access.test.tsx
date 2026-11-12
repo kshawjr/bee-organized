@@ -255,6 +255,8 @@ describe('Team and Seats — two halves, two gates', () => {
   }
   const LOC_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const BEES_URL = `/api/locations/${LOC_UUID}/bees`
+  // The Bees half is named for the location (so an admin can tell whose it is).
+  const BEES_HEADING = 'Test Territory’s bees'
   const urls = () => fetchMock.mock.calls.map((a: any[]) => String(a[0]))
   const headings = () => Array.from(container.querySelectorAll('[data-team-screen] h2')).map(h => h.textContent)
 
@@ -267,7 +269,7 @@ describe('Team and Seats — two halves, two gates', () => {
 
   it('an owner sees both halves, Seats first, each saying what makes it different', async () => {
     await mount('owner', 'team')
-    expect(headings()).toEqual(['Seats', 'Bees'])
+    expect(headings()).toEqual(['Seats', BEES_HEADING])
     const seats = container.querySelector('[data-team-seats]')!
     const bees = container.querySelector('[data-team-bees]')!
     expect(seats.compareDocumentPosition(bees) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -285,7 +287,7 @@ describe('Team and Seats — two halves, two gates', () => {
     await mount('manager', 'team')
     expect(currentKey()).toBe('team')
     expect(container.textContent).not.toContain("You don't have access to this section")
-    expect(headings()).toEqual(['Bees'])
+    expect(headings()).toEqual([BEES_HEADING])
     expect(container.querySelector('[data-team-bees]')).toBeTruthy()
     expect(container.querySelector('[data-team-lede]')!.textContent).toBe('The people who work your jobs.')
     // Their half is live — it asked for this location's roster…
@@ -300,14 +302,14 @@ describe('Team and Seats — two halves, two gates', () => {
     act(() => root.unmount()); root = createRoot(container)
     await mount('manager', 'billing')
     expect(currentKey()).toBe('team')
-    expect(headings()).toEqual(['Bees'])
+    expect(headings()).toEqual([BEES_HEADING])
     expectNoSeats('manager on billing')
   })
 
   it("the day-old 'bees' key is an alias for the screen, for owner and manager", async () => {
     await mount('manager', 'bees')
     expect(currentKey()).toBe('team')
-    expect(headings()).toEqual(['Bees'])
+    expect(headings()).toEqual([BEES_HEADING])
     expectNoSeats('manager on bees')
   })
 

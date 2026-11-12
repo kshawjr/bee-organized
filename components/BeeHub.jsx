@@ -18267,6 +18267,7 @@ import PhoneInput from '@/components/hive/shared/PhoneInput'
 import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS } from '@/lib/merge-tags'
 import { safeHttpUrl } from '@/lib/email-signature'
 import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
+import { slackCanManageChannels } from '@/lib/slack-scopes'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -21636,7 +21637,14 @@ function CommsLabel({ children }) {
 // JobberCard's status-strip + one-primary-action + Manage-connection expander,
 // minus the import machinery, styled to the Comms tab (0.5px borders, small
 // radii, flat fills, outline icon, no shadows on controls).
-function SlackCard({ settings, updateLocation, readOnly = false }) {
+//
+// Job channels (slice 1): a CONNECTED location whose install predates the
+// channels:manage permission — or whose stored grant is unknown (null) — gets
+// one quiet line + a Reconnect Slack button inside this card. Nowhere else: no
+// banner, no other screen. Ready and not-connected cards are unchanged. The
+// answer comes from the shared lib/slack-scopes helper, the same one the
+// server will use.
+export function SlackCard({ settings, updateLocation, readOnly = false }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy]       = useState(false)
   const [error, setError]     = useState(null)
@@ -21652,6 +21660,10 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
   const connected   = !!settings.location.slackConnected
   const teamName    = settings.location.slackTeamName || ''
   const channelName = settings.location.slackChannelName || ''
+  const needsChannelsReconnect = connected && !slackCanManageChannels({
+    slack_connected: connected,
+    slack_scopes: settings.location.slackScopes || null,
+  })
 
   // Team invite link — a shareable Slack invite URL the owner pastes + saves,
   // then copies to hand to teammates. LOCATION invite only (no corporate link).
@@ -21805,6 +21817,22 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
             : 'Post a message to your team’s Slack channel every time a new lead comes in — on top of the email.'}
         </p>
 
+        {needsChannelsReconnect && !readOnly && (
+          <div data-slack-channels-reconnect style={{ marginTop:'10px', padding:'10px 11px', borderRadius:'10px', background:'rgba(74,21,75,0.04)', border:'0.5px solid rgba(74,21,75,0.18)' }}>
+            {/* TRUE because of lib/slack-lead-channel.ts: a reconnect to the
+                same workspace keeps the lead channel whatever is picked. The
+                owner is told the pick is coming so it does not look like a
+                question whose answer matters. */}
+            <p data-slack-reconnect-words style={{ fontSize:'12px', color:'#4a154b', lineHeight:1.5, marginBottom:'8px' }}>
+              Reconnect Slack to turn on channels for your jobs. Slack will ask you to pick a channel. It doesn’t matter which one: your lead posts stay in {channelLabel || 'the channel they go to now'}.
+            </p>
+            <button onClick={goConnect} disabled={busy}
+              style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+              Reconnect Slack
+            </button>
+          </div>
+        )}
+
         {!connected && (
           <button onClick={goConnect} disabled={busy}
             style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
@@ -21871,7 +21899,7 @@ function SlackCard({ settings, updateLocation, readOnly = false }) {
             {managing && (
               <div style={{ marginTop:'6px', padding:'11px', borderRadius:'8px', background:'rgba(0,0,0,0.02)', border:'0.5px solid rgba(26,46,43,0.08)' }}>
                 <p style={{ fontSize:'11px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'9px' }}>
-                  Posting to a different channel or workspace? Reconnect. Stopping Slack posts? Disconnect — your email notifications are unaffected.
+                  Moving lead posts to another channel? Disconnect, then connect again and pick it. Reconnect keeps the channel you have, unless you choose a different workspace. Stopping Slack posts? Disconnect — your email notifications are unaffected.
                 </p>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
                   <button onClick={goConnect} disabled={busy}
@@ -22127,6 +22155,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       slackTeamName:    currentLocationCtx.slack_team_name || '',
       slackChannelName: currentLocationCtx.slack_channel_name || '',
       slackInviteUrl:   currentLocationCtx.slack_invite_url || '',
+      slackScopes:      currentLocationCtx.slack_scopes || null,
       // Mailchimp display fields (token + server prefix stay server-side).
       mailchimpConnected:   !!currentLocationCtx.mailchimp_connected,
       mailchimpAccountName: currentLocationCtx.mailchimp_account_name || '',
@@ -22181,6 +22210,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     slackTeamName:    selectedLoc.slackTeamName || '',
     slackChannelName: selectedLoc.slackChannelName || '',
     slackInviteUrl:   selectedLoc.slackInviteUrl || '',
+    slackScopes:      selectedLoc.slackScopes || null,
     // Mailchimp display fields (token + server prefix stay server-side).
     mailchimpConnected:   !!selectedLoc.mailchimpConnected,
     mailchimpAccountName: selectedLoc.mailchimpAccountName || '',
@@ -24368,7 +24398,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
               {canSeeSeats && canSeeBees && <div aria-hidden style={{ height:'1px', background:HT.hairline.soft }} />}
 
-              {canSeeBees && <BeeRosterSettings locationId={realLocId} />}
+              {canSeeBees && <BeeRosterSettings locationId={realLocId} locationName={settings.location.name || ''} />}
             </div>
           )
         })()}
