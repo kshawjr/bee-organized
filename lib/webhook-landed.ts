@@ -54,9 +54,17 @@
 //   APP_DISCONNECT     → locations row shows jobber_connected=false
 //   CLIENT_UPDATE      → 'na' (field refresh; no intended state transition)
 //   everything else    → 'na' (processed-only)
-//   errored rows       → 'na' (the ✗ + inline error already tell that
-//                        story; 'not_landed' is reserved for
-//                        processed-without-error-but-record-wrong)
+//   failed FETCH       → 'not_landed' (2026-11). The handler never got the
+//                        record out of Jobber — `<entity>_fetch: …` (in
+//                        practice always no_valid_jobber_token) or a thrown
+//                        `Jobber GraphQL HTTP …`. The webhook route answers
+//                        200 regardless, so Jobber never sends it again:
+//                        nothing landed and nothing will. These used to be
+//                        'na', which hid the largest single cause of records
+//                        not landing from the one column built to show it.
+//   other errored rows → 'na' (the ✗ + inline error already tell that
+//                        story — no matching lead, record gone from Jobber:
+//                        there was nothing to land)
 //
 // A crash inside the check itself records 'na' (never blocks the 200
 // back to Jobber or the sync_log write).
@@ -78,6 +86,19 @@ import {
 import { isRetiredAddress } from './lead-address'
 
 export type LandedStatus = 'landed' | 'not_landed' | 'na'
+
+// Did the handler fail to FETCH the record from Jobber (as opposed to fetching
+// it and finding nothing to do)? Matched on the handlers' own error strings:
+// every fetch failure is `${entity}_fetch: ${reason}` (jobber-webhook-handlers
+// — request/quote/job/invoice/client/property), and a non-2xx GraphQL reply is
+// thrown by lib/jobber as `Jobber GraphQL HTTP <status>: …`. Deliberately NOT
+// matched: `*_not_found_in_jobber`, `*_no_matching_lead`, `request_missing_client`
+// — the fetch worked; there was simply nothing to land.
+export function isFailedFetch(error: string | null | undefined): boolean {
+  if (!error) return false
+  return /^(request|quote|job|invoice|client|property)_fetch: /.test(error) ||
+    /^Jobber GraphQL HTTP \d/.test(error)
+}
 
 const rankOf = (stage: string | null | undefined): number =>
   stage ? (ENGAGEMENT_STAGE_RANK[stage as EngagementStage] ?? 0) : 0
@@ -153,7 +174,10 @@ export async function checkLanded(
   result: HandlerResult,
 ): Promise<LandedStatus> {
   try {
-    // Errored rows: landed is moot — the ✗ row carries the error.
+    // A fetch that failed did not land, and (the route answers 200) never
+    // will on its own — say so. Every other errored row: landed is moot, the
+    // ✗ row carries the error.
+    if (isFailedFetch(result.error)) return 'not_landed'
     if (result.error || !result.processed) return 'na'
 
     const topic = ctx.topic

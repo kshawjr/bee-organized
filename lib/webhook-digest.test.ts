@@ -101,7 +101,10 @@ describe('never landed', () => {
     expect(d.suppressed).toBe(false)
     expect(d.neverLanded).toBe(1)
     expect(d.headline).toBe(':clipboard: Daily check — 1 Jobber change never landed')
-    expect(d.text).toContain('Carmel: Karie Johnson — Request updated: the Jobber connection blipped and no retry came')
+    expect(d.text).toContain('Carmel: Karie Johnson — Request updated: the Jobber connection blipped and no later update came through')
+    // Jobber never resends a webhook we answered 200 to — the digest must not
+    // describe a recovery mechanism that does not exist.
+    expect(d.text).not.toMatch(/retry/i)
     expect(d.text).toContain('/admin?adminTab=webhooks&whFilter=failures&whWindow=24h')
     expect(d.text).not.toMatch(/healthy|self-heal|token expired|reconnect/i)
   })
@@ -310,7 +313,10 @@ describe('cron route + registration pins', () => {
   })
 
   it('queries the 24h window (daily cadence — issue 159)', () => {
-    expect(route).toContain("fetchWebhookLogEvents({ window: '24h' })")
+    expect(route).toMatch(/fetchWebhookLogEvents\(\{\s*window: '24h',\s*maxRows: DIGEST_MAX_ROWS,\s*\}\)/)
+    // …and never the bare newest-1,000 read again (it hid ~40% of a busy day)
+    expect(route).not.toContain("fetchWebhookLogEvents({ window: '24h' })")
+    expect(route).toContain('coverage: truncated ? { checked: DIGEST_MAX_ROWS, total: totalInWindow ?? null } : undefined')
     expect(route).toContain("windowLabel: 'last 24h'")
   })
 
@@ -332,5 +338,63 @@ describe('cron route + registration pins', () => {
 
   it('vercel.json registers the once-daily schedule (issue 159)', () => {
     expect(vercel).toContain('"path": "/api/cron/webhook-digest", "schedule": "0 10 * * *"')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// A day too big to read whole (2026-11). The digest used to read the newest
+// 1,000 inbound rows and report on them as if they were the day; on
+// 2026-11-12 the day held 1,732 and two never-landed changes sat in the
+// unread part. It now reads the whole window — and if even the ceiling is
+// hit, it SAYS how much it checked rather than staying quiet.
+// ─────────────────────────────────────────────────────────────
+describe('a day only partly checked says so', () => {
+  it('nothing else wrong, but the read stopped short → posts, with the two numbers', () => {
+    const d = buildWebhookDigest({
+      events: [ev({})], appUrl: 'https://app.test', nowMs: NOW,
+      coverage: { checked: 10_000, total: 12_345 },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.partlyChecked).toBe(true)
+    expect(d.headline).toBe(':clipboard: Daily check — not every Jobber event was checked')
+    expect(d.text).toContain('only the newest 10,000 of 12,345 Jobber events were checked')
+    expect(d.text).toContain('The oldest 2,345 were not looked at')
+  })
+
+  it('sits alongside a never-landed line without replacing it', () => {
+    const d = buildWebhookDigest({
+      events: [fail({ jobber_item: '77' })], appUrl: 'https://app.test', nowMs: NOW,
+      coverage: { checked: 10_000, total: 10_001 },
+    })
+    expect(d.neverLanded).toBe(1)
+    expect(d.headline).toBe(':clipboard: Daily check — 1 Jobber change never landed · not every Jobber event was checked')
+    expect(d.text).toContain('Never landed')
+    expect(d.text).toContain('The oldest 1 were not looked at')
+  })
+
+  it('when the count itself failed it still says the read was short, without inventing a total', () => {
+    const d = buildWebhookDigest({
+      events: [ev({})], appUrl: 'https://app.test', nowMs: NOW,
+      coverage: { checked: 10_000, total: null },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.text).toContain('only the newest 10,000 Jobber events were checked. Older ones were not looked at')
+    expect(d.text).not.toMatch(/of \d/)
+  })
+
+  it('a whole day read (no coverage) stays silent when nothing is wrong', () => {
+    const d = buildWebhookDigest({ events: [ev({})], appUrl: 'https://app.test', nowMs: NOW })
+    expect(d.suppressed).toBe(true)
+    expect(d.partlyChecked).toBe(false)
+    expect(d.text).toBe('')
+  })
+
+  it('coverage that turns out to be complete is not a problem', () => {
+    const d = buildWebhookDigest({
+      events: [ev({})], appUrl: 'https://app.test', nowMs: NOW,
+      coverage: { checked: 10_000, total: 10_000 },
+    })
+    expect(d.suppressed).toBe(true)
+    expect(d.partlyChecked).toBe(false)
   })
 })

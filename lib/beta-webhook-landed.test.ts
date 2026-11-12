@@ -9,8 +9,10 @@
 //   — JOB_COMPLETE requires rank ≥ 'Job in Progress', NOT ≥ 'Final
 //     Processing' (a sibling job still open legitimately holds the
 //     engagement — that is not stuck)
-//   — errored results record 'na' (the ✗ row carries the story), and
-//     the check does zero DB reads for them
+//   — a FAILED FETCH from Jobber records 'not_landed' (2026-11): the record
+//     never arrived and, since the route answers 200, never will on its own.
+//     Every OTHER errored result still records 'na' (the ✗ row carries the
+//     story). Zero DB reads either way.
 //   — CLIENT_UPDATE is processed-only → 'na', zero DB reads
 //   — destroys verify the DESTROY_SPECS columns are actually null on
 //     the matched lead; a no-op destroy (no lead matched) is 'na'
@@ -62,7 +64,7 @@ vi.mock('@/lib/jobber-disconnect', () => ({
 vi.mock('@/lib/jobber', () => ({ jobberGraphQL: vi.fn() }))
 
 import { readFileSync } from 'node:fs'
-import { checkLanded } from '@/lib/webhook-landed'
+import { checkLanded, isFailedFetch } from '@/lib/webhook-landed'
 import { DESTROY_SPECS } from '@/lib/jobber-webhook-handlers'
 import { isUnbookedJobStatus } from '@/lib/jobber-import'
 
@@ -187,13 +189,72 @@ describe('checkLanded — JOB_CREATE (unbooked carve-out mirrors the handler)', 
 })
 
 describe('checkLanded — errored + processed-only results', () => {
-  it('errored result → na, zero DB reads', async () => {
-    const res = await checkLanded(
-      ctx('JOB_COMPLETE'),
-      { processed: false, error: 'job_fetch: boom' },
-    )
+  // ── a failed fetch did not land ────────────────────────────────
+  // 432 of these were logged 'na' over ten weeks — every one a webhook whose
+  // record was never fetched (no_valid_jobber_token) — which is why the one
+  // column built to show "didn't land" never showed the biggest cause of it.
+  it.each([
+    ['REQUEST_CREATE',  'request_fetch: no_valid_jobber_token'],
+    ['REQUEST_UPDATE',  'request_fetch: no_valid_jobber_token'],
+    ['QUOTE_UPDATE',    'quote_fetch: no_valid_jobber_token'],
+    ['JOB_COMPLETE',    'job_fetch: no_valid_jobber_token'],
+    ['INVOICE_UPDATE',  'invoice_fetch: no_valid_jobber_token'],
+    ['CLIENT_UPDATE',   'client_fetch: no_valid_jobber_token'],
+    ['PROPERTY_CREATE', 'property_fetch: no_valid_jobber_token'],
+    ['QUOTE_CREATE',    'request_fetch: jobber_reauth_required'],   // parent-request fallback
+    ['JOB_UPDATE',      'job_fetch: Throttled'],                     // any GraphQL error on the fetch
+    ['JOB_UPDATE',      'Jobber GraphQL HTTP 503: upstream'],        // thrown by lib/jobber, caught by the route
+  ])('%s failing with "%s" → not_landed, zero DB reads', async (topic, error) => {
+    const res = await checkLanded(ctx(topic), { processed: false, error })
+    expect(res).toBe('not_landed')
+    expect(h.state.calls.length).toBe(0)
+  })
+
+  it.each([
+    'quote_no_matching_lead',
+    'job_no_matching_lead',
+    'invoice_no_matching_lead',
+    'job_not_found_in_jobber',
+    'request_not_found_in_jobber',
+    'request_missing_client',
+    'app_disconnect_write: boom',
+    'TypeError: cannot read properties of undefined',
+  ])('errored for another reason ("%s") → still na, zero DB reads', async (error) => {
+    const res = await checkLanded(ctx('JOB_COMPLETE'), { processed: false, error })
     expect(res).toBe('na')
     expect(h.state.calls.length).toBe(0)
+  })
+
+  it('processed=false with no error text → na', async () => {
+    expect(await checkLanded(ctx('JOB_COMPLETE'), { processed: false })).toBe('na')
+  })
+
+  it('isFailedFetch matches the strings the handlers and lib/jobber really produce', () => {
+    const handlers = readFileSync(new URL('./jobber-webhook-handlers.ts', import.meta.url), 'utf8')
+    for (const entity of ['request', 'quote', 'job', 'invoice', 'client', 'property']) {
+      expect(handlers, entity).toContain('`' + entity + '_fetch: ${')
+      expect(isFailedFetch(`${entity}_fetch: anything`), entity).toBe(true)
+    }
+    const jobber = readFileSync(new URL('./jobber.ts', import.meta.url), 'utf8')
+    expect(jobber).toContain('throw new Error(`Jobber GraphQL HTTP ${res.status}:')
+    expect(isFailedFetch(null)).toBe(false)
+    expect(isFailedFetch('')).toBe(false)
+  })
+
+  // The absorbers. A failed fetch is now BOTH status='error' AND not_landed;
+  // two readers would otherwise say the wrong thing about it.
+  it('health tiles: the not-landed count leaves out rows that errored (no double count)', () => {
+    const src = readFileSync(new URL('../app/api/admin/system-health/route.ts', import.meta.url), 'utf8')
+    expect(src).toContain(".eq('landed_status', 'not_landed').neq('status', 'error')")
+    // both tiles still add the two numbers — which is why the filter matters
+    for (const f of ['../components/hive/HomeSystemHealth.jsx', '../components/admin/SystemHealthScreen.jsx']) {
+      expect(readFileSync(new URL(f, import.meta.url), 'utf8')).toContain('(w.failed || 0) + (w.notLanded || 0)')
+    }
+  })
+
+  it('webhook dashboard: a failed row that did not land is not described as "Processed"', () => {
+    const src = readFileSync(new URL('../components/BeeHub.jsx', import.meta.url), 'utf8')
+    expect(src).toContain(`e.landed === 'stuck' ? (e.processed ? "Processed but didn't land — record not in expected state" : "Failed and didn't land — the record was never fetched from Jobber")`)
   })
 
   it('CLIENT_UPDATE (plain refresh, no note) → na, zero DB reads', async () => {

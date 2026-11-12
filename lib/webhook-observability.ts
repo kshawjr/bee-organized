@@ -17,8 +17,11 @@
 // three-state indicator:
 //   'landed'     → 'landed'  (✓)
 //   'not_landed' → 'stuck'   (▲ amber — processed without error but the
-//                             record never reached its intended state)
-//   'na' / NULL  → null      ('—': processed-only events, errored rows,
+//                             record never reached its intended state, OR
+//                             (2026-11) the fetch from Jobber failed, so the
+//                             record never arrived at all; `processed` tells
+//                             the two apart)
+//   'na' / NULL  → null      ('—': processed-only events, other errored rows,
 //                             and rows written before the
 //                             sync_log_landed_status.sql migration)
 // ─────────────────────────────────────────────────────────────
@@ -167,7 +170,31 @@ export const WINDOW_MS: Record<Exclude<FetchWindow, 'all'>, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000,
 }
 
+// One page of sync_log. Also the default ceiling: the admin dashboard and the
+// instant-alert rail read the newest FETCH_CAP rows and stop (the dashboard
+// shows its own "truncated" notice).
 const FETCH_CAP = 1000
+
+// The daily digest must see its WHOLE 24h window — a failure it cannot see is
+// a failure nobody is told about. On 2026-11-12 the window held 1,732 inbound
+// rows, so a 1,000-row read left the oldest ~40% of the day unchecked, every
+// day, silently. The digest now pages (maxRows: DIGEST_MAX_ROWS). The ceiling
+// is a runaway guard, not a working limit — ~5× the busiest day on record
+// (1,866) — and if it is ever hit the caller is told (truncated + totalInWindow)
+// so it can say so instead of quietly reporting on part of a day.
+export const DIGEST_MAX_ROWS = 10_000
+
+// .in() lists ride in the URL and the reply is capped at 1,000 rows. Measured
+// 2026-11-12: a full day resolved 605 distinct lead uuids (~22KB of URL) and
+// one request still worked — but a paged read can bring several times that, so
+// id lookups go in chunks rather than finding the limit in production. One
+// chunk when the list is small: the same single request as before.
+const IN_CHUNK = 200
+const chunked = <T,>(list: T[], size = IN_CHUNK): T[][] => {
+  const out: T[][] = []
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
+  return out
+}
 
 // Which subrecord table a topic resolves client names through. Fetched
 // for EVERY quote/job/invoice/request topic: a failed QUOTE_UPDATE still
@@ -197,24 +224,92 @@ export async function fetchWebhookLogEvents(opts: {
   window: FetchWindow
   locationId?: string | null
   limit?: number
-} = { window: '7d' }): Promise<{ events: WebhookLogEvent[]; truncated: boolean }> {
+  // Read past one page, up to this many rows (the digest passes
+  // DIGEST_MAX_ROWS). Unset → the single newest-`limit` read, unchanged.
+  maxRows?: number
+} = { window: '7d' }): Promise<{
+  events: WebhookLogEvent[]
+  truncated: boolean
+  // Paged reads only, and only when truncated: how many inbound rows the
+  // window really holds, so the caller can say "N of M". null = count failed.
+  totalInWindow?: number | null
+}> {
   const limit = Math.min(opts.limit ?? FETCH_CAP, FETCH_CAP)
+  const paged = (opts.maxRows ?? 0) > FETCH_CAP
+  const nowIso = new Date().toISOString()
+  const since = opts.window !== 'all'
+    ? new Date(Date.now() - WINDOW_MS[opts.window]).toISOString()
+    : null
 
-  let query = supabaseService
-    .from('sync_log')
-    .select('id, location_id, entity_id, entity_type, jobber_record_id, status, message, created_at, landed_status')
-    .eq('direction', 'inbound')
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (opts.window !== 'all') {
-    const since = new Date(Date.now() - WINDOW_MS[opts.window]).toISOString()
-    query = query.gte('created_at', since)
+  const SELECT = 'id, location_id, entity_id, entity_type, jobber_record_id, status, message, created_at, landed_status'
+  type Row = {
+    id: string; location_id: string | null; entity_id: string; entity_type: string | null
+    jobber_record_id: string | null; status: string; message: string | null
+    created_at: string; landed_status: string | null
   }
-  if (opts.locationId) query = query.eq('location_id', opts.locationId)
+  let rows: Row[] = []
+  let truncated = false
+  let totalInWindow: number | null | undefined
 
-  const { data: rows, error } = await query
-  if (error) throw new Error(`sync_log read: ${error.message}`)
-  const truncated = (rows?.length ?? 0) >= limit
+  if (!paged) {
+    let query = supabaseService
+      .from('sync_log')
+      .select(SELECT)
+      .eq('direction', 'inbound')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (since) query = query.gte('created_at', since)
+    if (opts.locationId) query = query.eq('location_id', opts.locationId)
+
+    const { data, error } = await query
+    if (error) throw new Error(`sync_log read: ${error.message}`)
+    rows = (data as Row[]) || []
+    truncated = rows.length >= limit
+  } else {
+    // Page newest-first until a short page or the ceiling. The window's upper
+    // edge is pinned (created_at <= now-at-start) and the order has an id
+    // tie-break, so rows arriving mid-read cannot shift a page boundary; ids
+    // are de-duplicated anyway.
+    const maxRows = opts.maxRows!
+    const seen = new Set<string>()
+    for (let from = 0; from < maxRows; from += FETCH_CAP) {
+      const to = Math.min(from + FETCH_CAP, maxRows) - 1
+      let query = supabaseService
+        .from('sync_log')
+        .select(SELECT)
+        .eq('direction', 'inbound')
+        .lte('created_at', nowIso)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to)
+      if (since) query = query.gte('created_at', since)
+      if (opts.locationId) query = query.eq('location_id', opts.locationId)
+
+      const { data, error } = await query
+      if (error) throw new Error(`sync_log read: ${error.message}`)
+      const page = (data as Row[]) || []
+      for (const r of page) {
+        if (seen.has(r.id)) continue
+        seen.add(r.id)
+        rows.push(r)
+      }
+      if (page.length < to - from + 1) break
+    }
+    truncated = rows.length >= maxRows
+    if (truncated) {
+      let count = supabaseService
+        .from('sync_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('direction', 'inbound')
+        .lte('created_at', nowIso)
+      if (since) count = count.gte('created_at', since)
+      if (opts.locationId) count = count.eq('location_id', opts.locationId)
+      const res = await count
+      totalInWindow = res.error ? null : res.count ?? null
+      // Exactly maxRows rows and no more is a full read, not a short one.
+      if (totalInWindow != null && totalInWindow <= rows.length) truncated = false
+    }
+  }
 
   type Working = {
     row: NonNullable<typeof rows>[number]
@@ -248,12 +343,14 @@ export async function fetchWebhookLogEvents(opts: {
         : table === 'quotes' ? 'jobber_quote_id'
         : table === 'jobs' ? 'jobber_job_id'
         : 'jobber_invoice_id'
-      const { data } = await supabaseService
-        .from(table)
-        .select(`${idCol}, lead_id`)
-        .in(idCol, Array.from(ids))
       const map = new Map<string, any>()
-      for (const r of (data as any[]) || []) map.set(String(r[idCol]), r)
+      await Promise.all(chunked(Array.from(ids)).map(async chunk => {
+        const { data } = await supabaseService
+          .from(table)
+          .select(`${idCol}, lead_id`)
+          .in(idCol, chunk)
+        for (const r of (data as any[]) || []) map.set(String(r[idCol]), r)
+      }))
       sub[table] = map
     }),
   )
@@ -269,11 +366,13 @@ export async function fetchWebhookLogEvents(opts: {
   })
   const leadName = new Map<string, string>()
   if (leadIds.size) {
-    const { data } = await supabaseService
-      .from('leads')
-      .select('id, name')
-      .in('id', Array.from(leadIds))
-    for (const l of data || []) leadName.set(l.id, l.name || '')
+    await Promise.all(chunked(Array.from(leadIds)).map(async chunk => {
+      const { data } = await supabaseService
+        .from('leads')
+        .select('id, name')
+        .in('id', chunk)
+      for (const l of data || []) leadName.set(l.id, l.name || '')
+    }))
   }
 
   // ── location names ──────────────────────────────────────────
@@ -322,5 +421,5 @@ export async function fetchWebhookLogEvents(opts: {
     }
   })
 
-  return { events, truncated }
+  return paged ? { events, truncated, totalInWindow } : { events, truncated }
 }

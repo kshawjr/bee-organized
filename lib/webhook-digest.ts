@@ -12,8 +12,16 @@
 //
 // WHAT IT CARRIES, each section only when non-zero:
 //   • NEVER LANDED — a Jobber change that failed (or processed but never
-//     reached its state) and never came through on a later retry. A record
-//     that recovered is not a problem and is not mentioned.
+//     reached its state) and was never put right by a LATER event for the
+//     same record. A record that recovered is not a problem and is not
+//     mentioned. Note what "recovered" is: Jobber does not resend — the
+//     webhook route answers 200 whatever happens — so the only thing that
+//     repairs a failed change is the next webhook for that record happening
+//     to arrive. Nothing here says "retry" for that reason.
+//   • NOT ALL CHECKED — only if the day held more Jobber events than the read
+//     ceiling (lib/webhook-observability DIGEST_MAX_ROWS). Says how many were
+//     checked out of how many, rather than reporting on part of a day as if
+//     it were the whole.
 //   • STUCK — imports stalled / bouncing / origin SSO-gated; locations whose
 //     sends are held for a missing rate or booking link; locations still
 //     waiting on a Jobber reconnect.
@@ -41,10 +49,14 @@ import type { WebhookLogEvent } from './webhook-observability'
 // (lib/failure-alerts ALERT_SETTLE_MS reuses this).
 export const SELF_HEAL_WINDOW_MS = 5 * 60 * 1000
 
-// A Jobber change that failed less than this long ago may still be retried —
-// Jobber retries with backoff, and one prod retry took 9m48s. Younger
-// failures are left for tomorrow's digest (its 24h window still covers them)
-// rather than reported as never-landed while a retry is on its way.
+// A Jobber change that failed less than this long ago may still be put right
+// by a later event for the same record. Jobber does NOT resend a webhook we
+// answered 200 to (and we always do) — but one edit in Jobber usually fires
+// several events, and the next one re-fetches the whole record; one such
+// follow-up in prod arrived 9m48s later. Younger failures are left for
+// tomorrow's digest (its 24h window still covers them, now that the digest
+// reads the whole window) rather than reported while a follow-up may be on
+// its way. The name predates knowing Jobber never retries.
 export const RETRY_GRACE_MS = 30 * 60 * 1000
 
 const TOKEN_ERR_RE = /reauth|no_valid_jobber_token|\b401\b/i
@@ -60,10 +72,13 @@ export type WebhookDigest = {
   leadsFailed: number
   jobberLanded: number
   jobberDidntLand: number   // = neverLanded (the digest_runs column name predates the rebuild)
-  selfHeals: number         // failures that recovered on a later retry
+  selfHeals: number         // failures put right by a later event for the same record
   locOtherLeads: number
   // what the digest reports
   neverLanded: number
+  // true when the day held more Jobber events than were read — the digest
+  // then says so (and posts, even if nothing else is wrong)
+  partlyChecked: boolean
   importFailed: number      // heartbeat only — failed imports alert instantly
   importStalled: number
   importOriginGated: boolean
@@ -308,7 +323,7 @@ export type NeverLanded = {
 
 const ts = (e: WebhookLogEvent) => Date.parse(e.created_at) || 0
 
-// A Jobber record is the same record whatever topic the retry arrives under
+// A Jobber record is the same record whatever topic the later event arrives under
 // (QUOTE_APPROVED fails, QUOTE_UPDATE lands) — so the key is the item alone.
 const itemKey = (e: WebhookLogEvent) => e.jobber_item || e.entity_id || e.id
 
@@ -354,7 +369,7 @@ export function findNeverLanded(
       reason: e.processed
         ? "processed but didn't reach its state"
         : TOKEN_ERR_RE.test(`${e.error || ''} ${e.reason || ''}`)
-          ? 'the Jobber connection blipped and no retry came'
+          ? 'the Jobber connection blipped and no later update came through'
           : (e.reason || e.error || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 120),
       at: ts(e),
     }))
@@ -375,6 +390,9 @@ export function buildWebhookDigest(opts: {
   bookingLinkHealth?: BookingLinkHealthDigestInput // missing-link hold rollup (lib/booking-link-health)
   reconnect?: ReconnectDigestInput   // locations still stamped RECONNECT REQUIRED
   unroutedWaiting?: UnroutedWaitingDigestInput // loc_other leads unrouted past a day
+  // Set when the read stopped at its ceiling: `checked` rows read, `total`
+  // rows the window really holds (null = the count itself failed).
+  coverage?: { checked: number; total: number | null }
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 24h'
@@ -396,9 +414,13 @@ export function buildWebhookDigest(opts: {
 
   // THE SILENCE RULE. Every reportable count, and nothing else: a day with
   // leads flowing and Jobber syncing but nothing wrong posts NOTHING.
+  // A day only partly read is itself reportable: "nothing wrong" would be a
+  // claim about events nobody looked at.
+  const cov = opts.coverage
+  const partlyChecked = !!cov && (cov.total == null || cov.total > cov.checked)
   const problems =
     neverLanded.length + (imp.hasProblems ? 1 : 0) + rate.missingCount +
-    booking.missingCount + reconnect.count + unrouted.count
+    booking.missingCount + reconnect.count + unrouted.count + (partlyChecked ? 1 : 0)
   const suppressed = problems === 0
 
   const parts: string[] = []
@@ -410,12 +432,13 @@ export function buildWebhookDigest(opts: {
   if (!imp.originGated && !imp.stalledCount && imp.hasProblems) parts.push('import re-pokes bouncing')
   if (rate.missingCount) parts.push(`${plural(rate.missingCount, 'location')} with sends held for no rate`)
   if (booking.missingCount) parts.push(`${plural(booking.missingCount, 'location')} with sends held for no booking link`)
+  if (partlyChecked) parts.push('not every Jobber event was checked')
   const headline = suppressed ? '' : `:clipboard: Daily check — ${parts.join(' · ')}`
 
   // ── never-landed section, grouped by location ──────────────
   const neverLines: string[] = []
   if (neverLanded.length) {
-    neverLines.push(`*:warning: Never landed* (${windowLabel}) — failed, and no retry came through`)
+    neverLines.push(`*:warning: Never landed* (${windowLabel}) — failed, and no later update for the same record came through`)
     const byLoc = new Map<string, NeverLanded[]>()
     for (const n of neverLanded) byLoc.set(n.location, [...(byLoc.get(n.location) || []), n])
     let shown = 0
@@ -431,7 +454,18 @@ export function buildWebhookDigest(opts: {
     neverLines.push(`<${appUrl}/admin?adminTab=webhooks&whFilter=failures&whWindow=24h|Open the webhook dashboard>`)
   }
 
-  const blocks = [unrouted.lines, neverLines, reconnect.lines, imp.lines, rate.lines, booking.lines]
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  const coverageLines: string[] = partlyChecked
+    ? [
+        `*:straight_ruler: Not all checked* (${windowLabel}) — only the newest ${fmt(cov!.checked)}` +
+          (cov!.total != null ? ` of ${fmt(cov!.total)}` : '') +
+          ` Jobber events were checked. ` +
+          (cov!.total != null ? `The oldest ${fmt(cov!.total - cov!.checked)} were` : 'Older ones were') +
+          ` not looked at, so a change that never landed among them is not listed here.`,
+      ]
+    : []
+
+  const blocks = [unrouted.lines, neverLines, coverageLines, reconnect.lines, imp.lines, rate.lines, booking.lines]
     .filter(l => l.length)
     .map(l => l.join('\n'))
   const text = suppressed ? '' : [headline, ...blocks].join('\n\n')
@@ -447,6 +481,7 @@ export function buildWebhookDigest(opts: {
     selfHeals: recoveredCount,
     locOtherLeads,
     neverLanded: neverLanded.length,
+    partlyChecked,
     importFailed: imp.failedCount,
     importStalled: imp.stalledCount,
     importOriginGated: imp.originGated,

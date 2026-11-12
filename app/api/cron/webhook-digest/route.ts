@@ -32,7 +32,7 @@
 // dashboard's Cron tab and Redeploy if the new daily cadence didn't take.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
+import { fetchWebhookLogEvents, DIGEST_MAX_ROWS } from '@/lib/webhook-observability'
 import { buildWebhookDigest, UNROUTED_WAIT_MS } from '@/lib/webhook-digest'
 import { LOC_OTHER_SLUG } from '@/lib/hub-scope'
 import { applyLeadActiveFilter } from '@/lib/lead-suppression'
@@ -76,7 +76,13 @@ export async function GET(req: NextRequest) {
   let digest
   try {
     const nowMs = Date.now()
-    const { events } = await fetchWebhookLogEvents({ window: '24h' })
+    // The WHOLE window, paged — not the newest 1,000 rows. A busy day holds
+    // ~1,700+, and a failure in the unread part was a failure nobody was told
+    // about. If even the ceiling is hit, the digest says so (coverage).
+    const { events, truncated, totalInWindow } = await fetchWebhookLogEvents({
+      window: '24h',
+      maxRows: DIGEST_MAX_ROWS,
+    })
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
@@ -155,6 +161,7 @@ export async function GET(req: NextRequest) {
 
     digest = buildWebhookDigest({
       events,
+      coverage: truncated ? { checked: DIGEST_MAX_ROWS, total: totalInWindow ?? null } : undefined,
       appUrl,
       windowLabel: 'last 24h',
       nowMs,

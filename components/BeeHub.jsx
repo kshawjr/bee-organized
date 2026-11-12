@@ -34098,7 +34098,7 @@ function AdminWebhookLogScreen() {
                   <span style={{ width:'70px', textAlign:'center', flexShrink:0 }}>
                     <WebhookStatusChip
                       kind={e.landed === 'landed' ? 'ok' : e.landed === 'stuck' ? 'stuck' : 'na'}
-                      label={e.landed === 'landed' ? 'Record reached its expected state' : e.landed === 'stuck' ? "Processed but didn't land — record not in expected state" : 'No landed state for this event'}
+                      label={e.landed === 'landed' ? 'Record reached its expected state' : e.landed === 'stuck' ? (e.processed ? "Processed but didn't land — record not in expected state" : "Failed and didn't land — the record was never fetched from Jobber") : 'No landed state for this event'}
                     />
                   </span>
                   <span style={{ width:'70px', textAlign:'right', fontSize:'11px', color:'#8a8a84', flexShrink:0 }}>

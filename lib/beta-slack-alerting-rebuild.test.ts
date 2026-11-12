@@ -50,6 +50,7 @@ vi.mock('@/lib/supabase-service', () => {
 const log = vi.hoisted(() => ({ events: [] as any[] }))
 vi.mock('@/lib/webhook-observability', () => ({
   fetchWebhookLogEvents: vi.fn(async () => ({ events: log.events, truncated: false })),
+  DIGEST_MAX_ROWS: 10_000, // the digest cron reads its whole window (paged)
 }))
 
 vi.mock('@/lib/slack', () => ({ postSlackMessage: vi.fn(async () => ({ ok: true })) }))

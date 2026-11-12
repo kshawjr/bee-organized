@@ -201,10 +201,15 @@ export async function GET(req: NextRequest) {
           .select('id', { count: 'exact', head: true })
           .eq('direction', 'inbound')
           .gte('created_at', since24h)
+      // notLanded counts only rows that did NOT error. Since 2026-11 a failed
+      // fetch from Jobber is recorded status='error' AND landed_status=
+      // 'not_landed' (lib/webhook-landed); every reader adds failed +
+      // notLanded, so without the status filter each of those rows would be
+      // counted twice on the health tiles.
       const [total, failed, notLanded] = await Promise.all([
         headCount(() => base()),
         headCount(() => base().eq('status', 'error')),
-        headCount(() => base().eq('landed_status', 'not_landed')),
+        headCount(() => base().eq('landed_status', 'not_landed').neq('status', 'error')),
       ])
       return { total, failed, notLanded }
     }),

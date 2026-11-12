@@ -178,6 +178,20 @@ export async function getLocation(locationId: string) {
 //      stamping we poll for a sibling's winning write and, if the token was
 //      rotated + is now valid, adopt it (webhook succeeds; no false stamp).
 //      Defences #1/#2 narrow the race; #5 makes losing it harmless.
+//   6. Busy-reply recovery (2026-11) — what a race loser ACTUALLY gets, almost
+//      every time, is not invalid_grant but 503 `temporarily_unavailable —
+//      "Retry the request."` (14 of 15 failure bursts sampled in prod logs over
+//      ten days; the 15th was a 520). Defences #4/#5 listen only for a
+//      rejection, so the 503 fell through to a plain throw that nothing
+//      retried: 432 `no_valid_jobber_token` webhook failures in ten weeks. Now
+//      any NON-rejection failure (5xx, network, odd shape) waits briefly for a
+//      sibling's winning write and adopts it; if none lands, it POSTs ONCE
+//      more. One retry per refresh, never a loop. A 400/401 never enters this
+//      path — a real reconnect is exactly as loud and as fast as before.
+//   7. Joiners don't inherit a failure blind — a caller sharing an in-flight
+//      refresh (#1) used to fail simply because that refresh failed, even when
+//      another instance had already stored a good token. Every caller (owner
+//      or joiner) now re-reads the stored token once before giving up.
 
 // Thrown when Jobber rejects the refresh token itself (dead / rotated away).
 // Code cannot recover this — the location owner must re-OAuth. Callers use
@@ -211,13 +225,26 @@ const inFlightRefresh = new Map<string, Promise<string>>()
 // ~485ms winner-write lag seen in prod. Exported (mutable) only so tests can
 // shrink the interval — never mutated in app code.
 export const __raceResolveTuning = { attempts: 4, intervalMs: 500 }
+
+// ── Busy-reply wait (defence #6) ────────────────────────────────────────
+// How long a refresh that got a 5xx / network failure waits for a sibling's
+// winning write before POSTing once more. 3 × 200ms: in the prod bursts the
+// winner's write landed 20–25ms after the loser's 503 (and ~485ms in the #102
+// measurement), so the FIRST 200ms look normally finds it — a failing webhook
+// costs ~0.2s extra, and a webhook that needed no refresh, or whose refresh
+// succeeded, costs nothing. Worst case (no winner, then the one retry) is
+// 0.6s + one OAuth round-trip. Kept well under the #102 window (2s) because
+// this runs inside the request that answers Jobber. Mutable for tests only.
+export const __transientRefreshTuning = { attempts: 3, intervalMs: 200 }
+
 async function awaitConcurrentRefresh(
   locId: string,
   postedRefreshToken: string,
+  tuning: { attempts: number; intervalMs: number } = __raceResolveTuning,
 ): Promise<string | null> {
   const fiveMinutes = 5 * 60 * 1000
-  for (let i = 0; i < __raceResolveTuning.attempts; i++) {
-    await sleep(__raceResolveTuning.intervalMs)
+  for (let i = 0; i < tuning.attempts; i++) {
+    await sleep(tuning.intervalMs)
     const after = await getLocation(locId).catch(() => null)
     if (!after) continue
     const rotated =
@@ -232,17 +259,44 @@ async function awaitConcurrentRefresh(
 
 async function doRefresh(location: any, opts: { force?: boolean } = {}): Promise<string> {
   const locId = location.location_id
-  const existing = inFlightRefresh.get(locId)
-  if (existing) {
+  let shared = inFlightRefresh.get(locId)
+  if (shared) {
     console.log('[jobber-token] joining in-flight refresh for', locId)
-    return existing
+  } else {
+    shared = performRefresh(location, opts).finally(() => inFlightRefresh.delete(locId))
+    inFlightRefresh.set(locId, shared)
   }
-  const p = performRefresh(location, opts).finally(() => inFlightRefresh.delete(locId))
-  inFlightRefresh.set(locId, p)
-  return p
+  // Defence #7 — owner and joiner alike: a failed refresh is not the last
+  // word if a good token is sitting in the row (another instance won).
+  return shared.catch(err => lastLookBeforeFailing(locId, err, opts))
 }
 
-async function performRefresh(location: any, opts: { force?: boolean }): Promise<string> {
+// One re-read of the stored token before a refresh failure is allowed to
+// stand. Never softens the two cases that must stay exactly as they were:
+//   · a rejected refresh token (JobberReauthRequiredError) — rethrown at once,
+//     no read, no delay; the reconnect signal is not this function's to hide.
+//   · a FORCED refresh — the caller is here because Jobber just 401'd the
+//     stored token, so "the stored token looks valid" proves nothing.
+async function lastLookBeforeFailing(
+  locId: string,
+  err: unknown,
+  opts: { force?: boolean },
+): Promise<string> {
+  if (err instanceof JobberReauthRequiredError || opts.force) throw err
+  const row = await getLocation(locId).catch(() => null)
+  const expiry = row?.token_expiry ? parseInt(row.token_expiry) : 0
+  if (row?.jobber_access_token && expiry > 0 && Date.now() < expiry - 5 * 60 * 1000) {
+    console.log('[jobber-token] refresh failed but a valid token is stored — using it for', locId)
+    return row.jobber_access_token
+  }
+  throw err
+}
+
+async function performRefresh(
+  location: any,
+  opts: { force?: boolean },
+  isRetry = false,
+): Promise<string> {
   const locId = location.location_id
   const fiveMinutes = 5 * 60 * 1000
 
@@ -264,17 +318,27 @@ async function performRefresh(location: any, opts: { force?: boolean }): Promise
   }
 
   console.log('Refreshing Jobber token for:', locId, opts.force ? '(forced)' : '')
-  const res = await fetch('https://api.getjobber.com/api/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type:    'refresh_token',
-      client_id:     process.env.JOBBER_CLIENT_ID!,
-      client_secret: process.env.JOBBER_CLIENT_SECRET!,
-      refresh_token: refreshToken,
-    }),
-    cache: 'no-store',
-  })
+  // A fetch that throws (DNS, reset, timeout) is the same kind of failure as a
+  // 5xx: nothing was decided about the token. Fold it into the transient path
+  // below as status 0 rather than letting it escape un-retried.
+  const res: { ok: boolean; status: number; text: () => Promise<string> } = await fetch(
+    'https://api.getjobber.com/api/oauth/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        client_id:     process.env.JOBBER_CLIENT_ID!,
+        client_secret: process.env.JOBBER_CLIENT_SECRET!,
+        refresh_token: refreshToken,
+      }),
+      cache: 'no-store',
+    },
+  ).catch((err: any) => ({
+    ok: false,
+    status: 0,
+    text: async () => `network error: ${err?.message || err}`,
+  }))
 
   // Defensive parse — Jobber returns plain-text bodies for OAuth errors
   // (e.g. expired refresh token → "The provided authorization grant is
@@ -320,7 +384,23 @@ async function performRefresh(location: any, opts: { force?: boolean }): Promise
       }).eq('location_id', locId)
       throw new JobberReauthRequiredError(locId, res.status, detail)
     }
-    // Transient (5xx / network / unexpected shape) — retryable, not a reconnect.
+    // Transient (5xx / network / unexpected shape) — retryable, not a reconnect,
+    // and (defence #6) actually retried. In practice this is the reply a
+    // concurrent-refresh LOSER gets: 503 temporarily_unavailable. So first
+    // look for the winner's write and adopt it; only if nothing was rotated
+    // do we POST again — once. The retry re-runs this function from the top,
+    // so it re-reads the row (reusing a token that landed meanwhile) and its
+    // own outcome goes through the same branches: success persists, a 400/401
+    // takes the reconnect path above, a second transient throws for good.
+    if (!isRetry) {
+      const raced = await awaitConcurrentRefresh(locId, refreshToken, __transientRefreshTuning)
+      if (raced) {
+        console.log(`[jobber-token] refresh got ${res.status} but a concurrent refresh won — adopting the winner’s token for`, locId)
+        return raced
+      }
+      console.warn(`[jobber-token] refresh got ${res.status} for ${locId} and no concurrent refresh landed — retrying once`)
+      return performRefresh(location, opts, true)
+    }
     throw new Error(`Jobber token refresh failed (${res.status}) for ${locId}: ${detail}`)
   }
 
