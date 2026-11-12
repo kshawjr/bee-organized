@@ -677,9 +677,23 @@ export function SendTestBar({ locationId, row, sending }) {
 //             known: values just saved here, so the guard sees them at once
 //   counts    { rate, discoveryBooking, booking, virtualBooking, reviews }
 //   waiting   { rate, discoveryBooking, booking, virtualBooking }
-export function VariantSwitch({ label, on, need, haveValue, onText, offText, disabled, onTurn, onSaveValue, testId }) {
+//
+// THE LINK SWITCH ALSO OFFERS THE TWO OPTIONAL LINKS WHILE IT ASKS (Kevin,
+// 2026-11-12: "it only gives me an option to add one link, after i save it
+// gives me the other two"). `extras` — [{ key, label, value }] — are the
+// discovery and video links; `onSaveExtras(patch)` is the same save the two
+// fields further down use (PATCH …/email-settings). The in-home link is still
+// the ONLY thing the switch needs: the extras never enable "Turn it on", a
+// blank one is never sent, and a failed extras save does not undo a switch
+// that turned on. One that isn't a web address is refused before ANYTHING is
+// saved — safeHttpUrl, the rule that route applies (lib/email-signature.ts).
+export function VariantSwitch({ label, on, need, haveValue, onText, offText, disabled, onTurn, onSaveValue, testId, extras = null, onSaveExtras = null }) {
   const [asking, setAsking] = React.useState(false)
   const [value, setValue] = React.useState('')
+  const offered = need === 'link' && onSaveExtras && Array.isArray(extras) ? extras : []
+  const [extraDrafts, setExtraDrafts] = React.useState({})
+  const extraValue = x => (x.key in extraDrafts ? extraDrafts[x.key] : (x.value || ''))
+  const closeAsk = () => { setAsking(false); setValue(''); setExtraDrafts({}) }
   const [busy, setBusy] = React.useState(false)
   const [problem, setProblem] = React.useState(null)
   const flip = async (next) => {
@@ -693,17 +707,29 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
   const confirm = async () => {
     const v = value.trim()
     if (!v) return
+    // Only an optional link the owner actually changed is written; a blank
+    // one that was blank is left out, so the in-home-only path sends exactly
+    // what it always sent.
+    const extrasPatch = {}
+    for (const x of offered) {
+      const next = extraValue(x).trim()
+      if (next === (x.value || '').trim()) continue
+      if (next && !safeHttpUrl(next)) { setProblem(`${x.label} must be a web address, like https://calendly.com/you`); return }
+      extrasPatch[x.key] = next
+    }
     setBusy(true); setProblem(null)
     const p1 = await onSaveValue(v)
     if (p1) { setBusy(false); setProblem(p1); return }
+    const pExtras = Object.keys(extrasPatch).length ? await onSaveExtras(extrasPatch) : null
     const p2 = await onTurn(true, need === 'rate' ? { ratePerHour: v } : { locationCalendarLink: v })
     setBusy(false)
     if (p2) { setProblem(p2); return }
-    setAsking(false); setValue('')
+    closeAsk()
+    if (pExtras) setProblem(`It’s on, but the optional links didn’t save: ${pExtras}`)
   }
-  // The link switch asks for the in-home link only: it is the one the
-  // emails we write for you link to, so it is what the guard needs. The
-  // discovery and video links are offered once the switch is on.
+  // The link switch NEEDS the in-home link only: it is the one the emails we
+  // write for you link to, so it is what the guard needs. The discovery and
+  // video links are offered beside it, marked optional, and never required.
   const what = need === 'rate' ? 'your hourly rate' : 'your in-home assessment link'
   return (
     <div data-variant-switch={testId}>
@@ -712,14 +738,30 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
         <div role="group" aria-label={`Add ${what}`} style={{ marginTop:'8px', borderRadius:ER.xl, border:`1px solid ${alpha(ET.warning, 0.5)}`, background:ET.warningSoft, padding:'12px', fontFamily:EF.ui }}>
           <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:ET.foreground }}>
             {need === 'rate' ? 'Your hourly rate' : 'Your in-home assessment link'}
+            {offered.length > 0 && <span data-needed style={{ marginLeft:'8px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:ET.warning }}>Needed</span>}
             <input autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder={need === 'rate' ? '$85' : 'https://calendly.com/…'}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirm() } }}
               style={{ ...eInputStyle, marginTop:'6px', background:ET.card, fontWeight:400 }} />
           </label>
-          <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.{need === 'rate' ? '' : ' Once it’s on you can add a discovery call link and a video assessment link too.'}</p>
+          <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.{offered.length > 0 ? ' It’s the only one you need.' : ''}</p>
+          {offered.length > 0 && (
+            <div data-optional-links style={{ marginTop:'12px', paddingTop:'10px', borderTop:`1px solid ${alpha(ET.warning, 0.3)}` }}>
+              <p style={{ margin:'0 0 8px', fontSize:'12px', color:ET.mutedFg }}>If you have these too, add them now. They’re optional — leave them blank and it still turns on, and you can add them later.</p>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'8px' }}>
+                {offered.map(x => (
+                  <label key={x.key} style={{ display:'block', fontSize:'13px', fontWeight:600, color:ET.foreground }}>
+                    {x.label} <span style={{ fontWeight:400, color:ET.mutedFg }}>· optional</span>
+                    <input data-optional-link={x.key} value={extraValue(x)} onChange={e => setExtraDrafts(d => ({ ...d, [x.key]: e.target.value }))} placeholder="https://calendly.com/…"
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirm() } }}
+                      style={{ ...eInputStyle, marginTop:'6px', background:ET.card, fontWeight:400 }} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ marginTop:'8px', display:'flex', gap:'8px' }}>
             <EBtn variant="primary" disabled={!value.trim() || busy} onClick={confirm}>{busy ? 'Saving…' : 'Turn it on'}</EBtn>
-            <EBtn onClick={() => { setAsking(false); setValue(''); setProblem(null) }}>Cancel</EBtn>
+            <EBtn onClick={() => { closeAsk(); setProblem(null) }}>Cancel</EBtn>
           </div>
         </div>
       )}
@@ -747,6 +789,10 @@ export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, 
               onText="Your rate is written into the first email." offText="No rate is mentioned. The first email still goes out, without the price line." />
             <VariantSwitch testId={`${q.key}-link`} label="Clients book through a link" on={q.link} need="link" haveValue={!blank(calendarLink)} disabled={!canSwitch}
               onTurn={(v, known) => onVariant(q.key, { link: v }, known)} onSaveValue={v => onSaveLocation('booking', v)}
+              extras={ready.links ? [
+                { key: 'discovery_booking_link', label: 'Discovery call link', value: options.discoveryBookingLink || '' },
+                { key: 'virtual_booking_link', label: 'Video assessment link', value: options.virtualBookingLink || '' },
+              ] : null} onSaveExtras={onSaveOption}
               onText="Emails include your booking links." offText="Clients reply to book instead — your emails ask them to reply rather than click a link." />
           </div>
         </div>
