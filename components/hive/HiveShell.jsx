@@ -174,6 +174,8 @@ export default function HiveShell({
   locations = [],
   locFilter = 'all',
   currentLocationUuid = null,
+  // True when the page's clients load hit its 5,000 ceiling (_hub-page).
+  leadsTruncated = false,
   currentUserId = null,
   // Role travels with the id so the client card can decide who may edit or
   // delete a note without reaching into context (§8.5). The ROUTE is still
@@ -973,6 +975,12 @@ export default function HiveShell({
           tags={tags}
           initialTagId={clientsInitialTag}
           onInitialTagConsumed={() => setClientsInitialTag(null)}
+          // Clients at scale, slice 1: the list's search also asks the server.
+          // leadsTruncated tells it the page load was cut short (so only the
+          // older clients need fetching); the location is a hint the server
+          // re-checks — a franchise user is fenced to their own regardless.
+          leadsTruncated={leadsTruncated}
+          searchLocationId={locFilter !== 'all' ? locFilter : (currentLocationUuid || null)}
         />
       ) : engView === 'list' ? (
         <EngagementGroupedList

@@ -38,10 +38,26 @@
 // screen showed.
 //   · location names resolve from the `locations` roster already loaded for
 //     the app switcher — no new query.
+//
+// SEARCH REACHES EVERY CLIENT (Clients at scale, slice 1 — 2026-11-12). The
+// page load stops at 5,000 clients, so at Philadelphia Suburbs (18,931) a
+// search of `people` alone could not find 13,931 of them. With a term in the
+// box the list ALSO asks GET /api/clients/search and adds the hits it does
+// not already hold. Two rules keep that honest:
+//   · the browser filter below is untouched and still answers first, so a
+//     search can never show FEWER rows than it did before this change — the
+//     server only ever adds.
+//   · a server hit arrives in the page load's own Person shape and goes
+//     through the SAME deriveClientStatus call as a loaded row, so it lands in
+//     its real band. Nothing here assigns a band by hand.
+// An empty box asks nothing and renders exactly as before.
+// The tag FILTER is still a filter over rows in hand: loaded clients plus
+// whatever the search brought in. When the load was cut short the screen says
+// so rather than letting a short tag list pass for the whole location.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
@@ -80,8 +96,17 @@ const STATUS_DEFS = {
   no_contact: "No email or phone on file, so there's no way to reach out.",
 }
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {} }) {
+// How long the box waits after the last keystroke before asking the server.
+export const CLIENT_SEARCH_DEBOUNCE_MS = 250
+const NO_REMOTE = { term: null, people: [], total: 0, capped: false, loading: false, failed: false }
+
+// Mirrors lib/client-search cleanClientSearchTerm — what the server will
+// actually search for, so a reply can be matched to the box that asked.
+const serverTerm = (raw) => (raw || '').replace(/\*/g, ' ').trim().slice(0, 80)
+
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null }) {
   const [search, setSearch] = useState('')
+  const [remote, setRemote] = useState(NO_REMOTE)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [tagFilter, setTagFilter] = useState([])     // tag ids — any-of
   const toggleTag = (id) => setTagFilter(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
@@ -126,12 +151,65 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   })), [scoped, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.trim().toLowerCase()
-  const visible = classified.filter(({ p }) =>
+  // THE BROWSER FILTER — unchanged, and never replaced by the server's answer.
+  const localVisible = classified.filter(({ p }) =>
     matchesTags(p, tagFilter) && (!q
       || (p.name || '').toLowerCase().includes(q)
       || (p.email || '').toLowerCase().includes(q)
       || (p.phone || '').toLowerCase().includes(q)
       || !!matchesTagSearch(p, q, tagById)))
+
+  // ── the server half ────────────────────────────────────────────────────
+  // When the page load was cut short, everything NEWER than the oldest loaded
+  // client is already in `scoped`; the server is asked only for that date and
+  // older, so its cap is spent on the clients this screen cannot see.
+  const term = serverTerm(search)
+  const olderThan = useMemo(() => {
+    if (!leadsTruncated) return null
+    let min = null
+    for (const p of scoped) if (p.created && (min === null || p.created < min)) min = p.created
+    return min
+  }, [leadsTruncated, scoped])
+  const reqSeq = useRef(0)
+  useEffect(() => {
+    if (!term) { setRemote(NO_REMOTE); return }
+    const seq = ++reqSeq.current
+    setRemote(r => ({ ...r, loading: true, failed: false }))
+    const t = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: term })
+        if (searchLocationId) params.set('location', searchLocationId)
+        if (olderThan) params.set('olderThan', olderThan)
+        const res = await fetch(`/api/clients/search?${params.toString()}`, { credentials: 'include' })
+        if (!res.ok) throw new Error(String(res.status))
+        const json = await res.json()
+        if (seq !== reqSeq.current) return
+        setRemote({ term, people: Array.isArray(json.people) ? json.people : [], total: Number(json.total) || 0, capped: !!json.capped, loading: false, failed: false })
+      } catch (e) {
+        // The loaded rows still show — but SAY the rest was not searched.
+        if (seq === reqSeq.current) setRemote({ ...NO_REMOTE, term, failed: true })
+      }
+    }, CLIENT_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [term, searchLocationId, olderThan])
+
+  // A reply only counts for the term it answered. Hits the page already holds
+  // are dropped (the loaded row is the live one); the rest are classified by
+  // the SAME derivation as every loaded row, then pass the same tag filter.
+  const remoteCurrent = remote.term === term && !!term
+  const loadedIds = useMemo(() => new Set(scoped.map(p => p.id)), [scoped])
+  const remoteExtra = useMemo(() => {
+    if (!remoteCurrent) return []
+    return remote.people
+      .filter(p => p && p.id && !loadedIds.has(p.id))
+      .map(p => ({ p, status: deriveClientStatus(p, openClientIds, nowMs, wonClientIds) }))
+  }, [remoteCurrent, remote.people, loadedIds, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = remoteExtra.length
+    ? [...localVisible, ...remoteExtra.filter(({ p }) => matchesTags(p, tagFilter))]
+    : localVisible
+  const searching = !!term && (remote.loading || !remoteCurrent) && !remote.failed
+  const searchFailed = !!term && remote.failed
+  const searchCapped = remoteCurrent && remote.capped
 
   // Bucket into status → rows, name-sorted within each group.
   const groups = useMemo(() => {
@@ -180,14 +258,46 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
         </div>
       )}
 
+      {/* What the search did and did not cover — said, never implied. */}
+      {searchFailed && (
+        <p role="alert" data-testid="clients-search-failed" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.primary }}>
+          Couldn't search all your clients just now. These are only matches from the clients already on this screen — try again in a moment.
+        </p>
+      )}
+      {searchCapped && (
+        <p role="status" data-testid="clients-search-capped" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
+          {olderThan
+            ? `Showing the newest ${remote.people.length.toLocaleString()} of ${remote.total.toLocaleString()} older clients that match.`
+            : `Showing the newest ${remote.people.length.toLocaleString()} of ${remote.total.toLocaleString()} clients that match.`}
+          {' '}Type more of the name, email or phone to narrow it down.
+          {tagFilter.length > 0 ? ' Your tag filter only narrows the ones shown.' : ''}
+        </p>
+      )}
+      {leadsTruncated && tagFilter.length > 0 && !term && (
+        <p role="status" data-testid="clients-tagfilter-partial" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
+          Tag filters only look through your newest {scoped.length.toLocaleString()} clients. To find anyone older, type in the search box.
+        </p>
+      )}
+
       {totalShown === 0 && (
-        tagFilter.length > 0
+        searching
+          ? (
+            <div data-testid="clients-search-loading" style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
+              Searching all your clients…
+            </div>
+          )
+          : tagFilter.length > 0
           ? <FilteredEmpty count={tagFilter.length} onClear={() => setTagFilter([])} noun="clients" />
           : (
             <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
               {q ? 'No clients match that search' : 'No clients in this view'}
             </div>
           )
+      )}
+      {totalShown > 0 && searching && (
+        <p role="status" data-testid="clients-search-loading" style={{ margin: '0 2px 10px', fontSize: '12px', color: T.ink.quiet }}>
+          Searching all your clients…
+        </p>
       )}
 
       {CLIENT_STATUS_ORDER.map(statusKey => {
