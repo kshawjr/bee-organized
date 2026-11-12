@@ -321,7 +321,9 @@ async function fetchAndUpsertRequest(
   // ASSESSMENT_CREATE/UPDATE webhook topics exist — they ride in on
   // REQUEST fetches). Additive: failures log, never bubble.
   try {
-    const ens = await ensureEngagementForServiceRequest(sr.id, lead.id)
+    // joinRecentRequest (fix 2, 2026-11): a second request minutes after the
+    // first joins its open, unworked card — see findJoinableCardForRequest.
+    const ens = await ensureEngagementForServiceRequest(sr.id, lead.id, { joinRecentRequest: true })
     if (ens?.id && assessmentDbId) {
       await attachToEngagement('assessments', assessmentDbId, ens.id)
     }

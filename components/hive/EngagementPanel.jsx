@@ -81,6 +81,7 @@ import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
 import BookAssessment from './BookAssessment'
 import { canBookAssessment } from './shared/bookAssessmentGate'
+import { describeJoinedRequests } from './shared/joinedRequests'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn, rowActionBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
@@ -779,8 +780,20 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   // LEFT column — the Jobber paper trail: the milestone rail + the
   // invoice detail inset (number/dates + honest deep-link actions).
+  // A second Jobber request joined this card (fix 2, 2026-11) — said in
+  // words, with the request number, above the records it adds to.
+  const joinedRequests = describeJoinedRequests(children.service_requests)
   const leftCol = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
+      {joinedRequests.map(j => (
+        <p key={j.jobberRequestId} data-joined-request={j.jobberRequestId}
+          style={{ fontSize: '12px', lineHeight: 1.45, color: T.family.amber.text, background: T.family.amber.bg, padding: '8px 10px', borderRadius: T.radius.control }}>
+          {j.text}
+          {j.href && (
+            <> <a href={j.href} target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 600 }}>Open REQ-{j.jobberRequestId} ↗</a></>
+          )}
+        </p>
+      ))}
       {/* Records — MILESTONE view (✓ done / ring current / hollow
           not-yet); the chronological version is the Timeline tab. */}
       <div>

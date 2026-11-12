@@ -1285,6 +1285,107 @@ export async function recoverEngagementStageDrift(
   return { corrected: true, stage: derived.stage, patch }
 }
 
+// ── second request joins the card (fix 2, 2026-11) ──────────────────
+//
+// WHY: one client, two Jobber requests minutes apart — owners re-typing a
+// request in Jobber, or making several in a row — each founded its own card;
+// the first never moved and sat on the board forever (41 pairs since 1 Sept).
+//
+// THE RULE — a new request joins an existing card only when ALL hold:
+//   · same client, and the card is at this client's location
+//     (engagements.location_uuid === leads.location_uuid: a card left at a
+//     location the client was transferred away from is not this one's);
+//   · the card is open (closed_at IS NULL) and still at stage 'Request';
+//   · the card has NO work: no quote, job, invoice or assessment row, and
+//     nothing invoiced (total_invoiced = 0);
+//   · the card already holds a request (an empty manual container is #67's,
+//     handled before this), and the NEW request's Jobber creation time is
+//     within JOIN_REQUEST_WINDOW_MS of the NEWEST request already on it.
+// Anything else founds a new card exactly as before.
+//
+// THE WINDOW, from production (REQUEST_CREATE webhooks since 15 Aug, 95
+// back-to-back pairs per client): 33 under 5 min, 7 at 5–10, none at 10–15,
+// 1 at 16 (first card already had work), 1 at 34 (twin-shaped: first stranded
+// at Request, second worked), 1 at 58, then 4 at 1–6 h — the first of those
+// (1.1 h, Philadelphia) had real work on BOTH cards, i.e. genuinely separate.
+// 60 minutes covers every twin seen (longest 34 min) and stops short of the
+// hours-apart repeat contact. Measuring from the NEWEST request on the card
+// means a run of requests (North Colorado: four in 17 min) all join one card.
+// A 47-day-old untouched card is far outside it.
+export const JOIN_REQUEST_WINDOW_MS = 60 * 60 * 1000
+
+const ts2 = (s: string | null | undefined) => {
+  const n = s ? Date.parse(s) : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+export async function findJoinableCardForRequest(
+  serviceRequestId: string,
+  leadId: string,
+): Promise<{
+  id: string
+  gapMs: number
+  locationSlug: string | null
+  jobberRequestId: string | null
+  anchorJobberRequestId: string | null
+} | null> {
+  const { data: sr } = await supabaseService
+    .from('service_requests')
+    .select('id, jobber_request_id, requested_at, created_at, engagement_id')
+    .eq('id', serviceRequestId)
+    .maybeSingle()
+  if (!sr || sr.engagement_id) return null
+  const newMs = ts2(sr.requested_at) ?? ts2(sr.created_at)
+  if (newMs == null) return null // no Jobber time to measure — never guess
+
+  const { data: lead } = await supabaseService
+    .from('leads')
+    .select('id, location_uuid, location_id')
+    .eq('id', leadId)
+    .maybeSingle()
+  if (!lead?.location_uuid) return null
+
+  const { data: cards } = await supabaseService
+    .from('engagements')
+    .select('id, stage, closed_at, total_invoiced, location_uuid, created_at')
+    .eq('client_id', leadId)
+    .eq('location_uuid', lead.location_uuid)
+    .eq('stage', 'Request')
+    .is('closed_at', null)
+    .order('created_at', { ascending: false })
+  for (const card of (cards || []) as any[]) {
+    if (Number(card.total_invoiced || 0) !== 0) continue
+    const has = async (table: string) => {
+      const { data } = await supabaseService.from(table).select('id').eq('engagement_id', card.id).limit(1)
+      return (data?.length ?? 0) > 0
+    }
+    if (await has('quotes') || await has('jobs') || await has('invoices') || await has('assessments')) continue
+    const { data: onCard } = await supabaseService
+      .from('service_requests')
+      .select('id, jobber_request_id, requested_at, created_at')
+      .eq('engagement_id', card.id)
+    const reqs = ((onCard || []) as any[]).filter(r => r.id !== serviceRequestId)
+    if (reqs.length === 0) continue // empty container: #67's, not this rule's
+    let anchor: any = null
+    let anchorMs = -Infinity
+    for (const r of reqs) {
+      const m = ts2(r.requested_at) ?? ts2(r.created_at)
+      if (m != null && m > anchorMs) { anchorMs = m; anchor = r }
+    }
+    if (!anchor) continue
+    const gapMs = Math.abs(newMs - anchorMs)
+    if (gapMs > JOIN_REQUEST_WINDOW_MS) continue
+    return {
+      id: card.id,
+      gapMs,
+      locationSlug: lead.location_id ?? null,
+      jobberRequestId: sr.jobber_request_id ?? null,
+      anchorJobberRequestId: anchor.jobber_request_id ?? null,
+    }
+  }
+  return null
+}
+
 // ── convenience: found-or-get for a service request (rule 1) ──────
 
 // Every service request founds exactly one engagement. Used by the
@@ -1292,8 +1393,11 @@ export async function recoverEngagementStageDrift(
 export async function ensureEngagementForServiceRequest(
   serviceRequestId: string,
   leadId: string,
-  opts: { title?: string | null } = {},
-): Promise<{ id: string; created: boolean } | null> {
+  // joinRecentRequest — the live webhook path only (fix 2, 2026-11). The
+  // import route never passes it: it ingests history, where requests minutes
+  // apart already have their own cards and re-deciding that is out of scope.
+  opts: { title?: string | null; joinRecentRequest?: boolean } = {},
+): Promise<{ id: string; created: boolean; joined?: boolean } | null> {
   const existing = await readEngagementIdOf('service_requests', serviceRequestId)
   if (existing) return { id: existing, created: false }
 
@@ -1320,6 +1424,34 @@ export async function ensureEngagementForServiceRequest(
       return { id: open.id, created: false }
     }
     // attach lost a race / conflict — fall through to a clean founding.
+  }
+
+  // Fix 2 (2026-11) — a SECOND request minutes after the first joins the
+  // first's card instead of founding a twin. See findJoinableCardForRequest
+  // for the guards. The request is never dropped: its row is attached to the
+  // card, the card shows it (EngagementPanel "second request" line), and the
+  // join is logged with both request numbers.
+  if (opts.joinRecentRequest) {
+    const target = await findJoinableCardForRequest(serviceRequestId, leadId)
+    if (target) {
+      const { attached } = await attachToEngagement('service_requests', serviceRequestId, target.id)
+      if (attached) {
+        await logFounding({
+          locationSlug: target.locationSlug,
+          engagementId: target.id,
+          foundedBy: 'request',
+          note:
+            `REQUEST_JOINED: request ${target.jobberRequestId ?? '?'} (SR ${serviceRequestId}) joined open unworked card ` +
+            `${target.id} — ${Math.round(target.gapMs / 60000)} min after request ${target.anchorJobberRequestId ?? '?'} ` +
+            `(window ${JOIN_REQUEST_WINDOW_MS / 60000} min); no second card founded`,
+        })
+        return { id: target.id, created: false, joined: true }
+      }
+      // Not attached: a concurrent delivery for the SAME request (CREATE +
+      // UPDATE) got there first. Fall through — foundEngagement re-reads the
+      // row, sees it already on a card and returns that card (its own
+      // idempotency check), so no second card is founded.
+    }
   }
 
   const founded = await foundEngagement({

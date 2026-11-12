@@ -1,0 +1,2471 @@
+{
+ "S01 brand-new client, single REQUEST_CREATE": {
+  "result": {
+   "processed": true,
+   "lead_id": "#1",
+   "lead_stage": "Request",
+   "prev_stage": null
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5999",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7001",
+      "request_url": "https://secure.getjobber.com/work_requests/7001",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#3",
+      "client_id": "#1",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7001",
+      "request_url": "https://secure.getjobber.com/work_requests/7001",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "engagement_id": "#3"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5999",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true,
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5999",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true,
+      "request_created_at": "2026-11-12T18:00:00.000Z",
+      "stage": "Request"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#3",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#2 for lead #1 at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "#3",
+    "client_id": "#1",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "#2",
+    "lead_id": "#1",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7001",
+    "request_url": "https://secure.getjobber.com/work_requests/7001",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T18:00:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "engagement_id": "#3"
+   }
+  ]
+ },
+ "S02 known client with no cards, single REQUEST_CREATE": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "New"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "New",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7002",
+      "request_url": "https://secure.getjobber.com/work_requests/7002",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7002",
+      "request_url": "https://secure.getjobber.com/work_requests/7002",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "New",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "lead_drip_progress",
+    "op": "update",
+    "rows": []
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": []
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7002",
+    "request_url": "https://secure.getjobber.com/work_requests/7002",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T18:00:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S03 second request minutes after a CLOSED card": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7003",
+      "request_url": "https://secure.getjobber.com/work_requests/7003",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:58:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:58:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:58:00.000Z",
+      "created_at": "2026-11-12T17:58:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7003",
+      "request_url": "https://secure.getjobber.com/work_requests/7003",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:58:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:58:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Closed Lost",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": "2026-11-12T17:55:00.000Z",
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z",
+    "closed_reason": "request_destroyed"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:58:00.000Z",
+    "created_at": "2026-11-12T17:58:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7003",
+    "request_url": "https://secure.getjobber.com/work_requests/7003",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:58:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:58:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S04 second request minutes after an open card that has a QUOTE": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7004",
+      "request_url": "https://secure.getjobber.com/work_requests/7004",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:57:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7004",
+      "request_url": "https://secure.getjobber.com/work_requests/7004",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:57:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7004",
+    "request_url": "https://secure.getjobber.com/work_requests/7004",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:57:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S05 new request three days after an open, untouched card": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7005",
+      "request_url": "https://secure.getjobber.com/work_requests/7005",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:59:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:59:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:59:00.000Z",
+      "created_at": "2026-11-12T17:59:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7005",
+      "request_url": "https://secure.getjobber.com/work_requests/7005",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:59:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:59:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-09T18:00:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:59:00.000Z",
+    "created_at": "2026-11-12T17:59:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-09T18:00:00.000Z",
+    "created_at": "2026-11-09T18:00:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7005",
+    "request_url": "https://secure.getjobber.com/work_requests/7005",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:59:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:59:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S06 REQUEST_UPDATE re-ingest of a request already on its card": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "sr-a",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "6001",
+      "engagement_id": "eng-a",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:50:00.000Z",
+      "created_at": "2026-11-12T17:50:00.000Z",
+      "request_url": "https://secure.getjobber.com/work_requests/6001",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:50:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z",
+    "request_url": "https://secure.getjobber.com/work_requests/6001",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ]
+ },
+ "S07 REQUEST_CREATE for a request Send to Jobber pre-wrote onto a card": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "sr-m",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7007",
+      "engagement_id": "eng-m",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "request_url": "https://secure.getjobber.com/work_requests/7007",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [],
+  "engagements": [
+   {
+    "id": "eng-m",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "manual",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-m",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7007",
+    "engagement_id": "eng-m",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "request_url": "https://secure.getjobber.com/work_requests/7007",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ]
+ },
+ "S08 empty manual container adopts the first request (#67)": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7008",
+      "request_url": "https://secure.getjobber.com/work_requests/7008",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:59:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:59:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7008",
+      "request_url": "https://secure.getjobber.com/work_requests/7008",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:59:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:59:00.000Z",
+      "engagement_id": "eng-m"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "unknown",
+    "entity_id": "eng-m",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] adopted SR #1 into open manual engagement (no duplicate founded — #67)"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-m",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "manual",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7008",
+    "request_url": "https://secure.getjobber.com/work_requests/7008",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:59:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:59:00.000Z",
+    "engagement_id": "eng-m"
+   }
+  ]
+ },
+ "S09 new client whose request already carries an assessment": {
+  "result": {
+   "processed": true,
+   "lead_id": "#1",
+   "lead_stage": "Request",
+   "prev_stage": null
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5998",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7009",
+      "request_url": "https://secure.getjobber.com/work_requests/7009",
+      "stage": "Request",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "assessments",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#3",
+      "service_request_id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7009",
+      "jobber_assessment_id": "8009",
+      "scheduled_at": "2026-11-20T16:00:00Z",
+      "status": "scheduled",
+      "completed_at": null,
+      "duration_minutes": 60,
+      "source": "jobber",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-20T16:00:00Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#4",
+      "client_id": "#1",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7009",
+      "request_url": "https://secure.getjobber.com/work_requests/7009",
+      "stage": "Request",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "engagement_id": "#4"
+     }
+    ]
+   },
+   {
+    "table": "assessments",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#3",
+      "service_request_id": "#2",
+      "lead_id": "#1",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7009",
+      "jobber_assessment_id": "8009",
+      "scheduled_at": "2026-11-20T16:00:00Z",
+      "status": "scheduled",
+      "completed_at": null,
+      "duration_minutes": 60,
+      "source": "jobber",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-20T16:00:00Z",
+      "engagement_id": "#4"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5998",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true,
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5998",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "company": null,
+      "email": "pat@example.com",
+      "phone": "(555) 111-2222",
+      "address": null,
+      "city": null,
+      "state": null,
+      "zip": null,
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "assigned_to": null,
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "import_source": "jobber_webhook",
+      "source": null,
+      "paused": true,
+      "request_created_at": "2026-11-12T18:00:00.000Z",
+      "stage": "Request"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#4",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#2 for lead #1 at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "#4",
+    "client_id": "#1",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "#2",
+    "lead_id": "#1",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7009",
+    "request_url": "https://secure.getjobber.com/work_requests/7009",
+    "stage": "Request",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T18:00:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "engagement_id": "#4"
+   }
+  ]
+ },
+ "S10 REQUEST_UPDATE for an archived request": {
+  "result": {
+   "processed": true,
+   "note": "REQUEST_UPDATE→archived; REQUEST_DESTROY: deleted stale SR sr-a; closed empty engagement eng-a (request_destroyed)"
+  },
+  "writes": [
+   {
+    "table": "assessments",
+    "op": "delete",
+    "rows": []
+   },
+   {
+    "table": "service_requests",
+    "op": "delete",
+    "rows": [
+     {
+      "id": "sr-a",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "6001",
+      "engagement_id": "eng-a",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:50:00.000Z",
+      "created_at": "2026-11-12T17:50:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "update",
+    "rows": [
+     {
+      "id": "eng-a",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Closed Lost",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "closed_at": "2026-11-12T18:00:00.000Z",
+      "total_invoiced": 0,
+      "created_at": "2026-11-12T17:50:00.000Z",
+      "closed_reason": "request_destroyed",
+      "closed_note": "Founding Jobber request was deleted; no other work on this engagement.",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Closed Lost",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": "2026-11-12T18:00:00.000Z",
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z",
+    "closed_reason": "request_destroyed",
+    "closed_note": "Founding Jobber request was deleted; no other work on this engagement.",
+    "stage_entered_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": []
+ },
+ "S11 second request minutes after an open card already at Estimate": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7011",
+      "request_url": "https://secure.getjobber.com/work_requests/7011",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:57:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7011",
+      "request_url": "https://secure.getjobber.com/work_requests/7011",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Estimate",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:57:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7011",
+    "request_url": "https://secure.getjobber.com/work_requests/7011",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:57:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S12 open untouched card minutes old, but at ANOTHER location (transferred)": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7012",
+      "request_url": "https://secure.getjobber.com/work_requests/7012",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:57:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7012",
+      "request_url": "https://secure.getjobber.com/work_requests/7012",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-x",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-other",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:57:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-x",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6012",
+    "engagement_id": "eng-x",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7012",
+    "request_url": "https://secure.getjobber.com/work_requests/7012",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:57:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S13 open card minutes old at Request stage with an ASSESSMENT booked": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7013",
+      "request_url": "https://secure.getjobber.com/work_requests/7013",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:57:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7013",
+      "request_url": "https://secure.getjobber.com/work_requests/7013",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 0,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:57:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7013",
+    "request_url": "https://secure.getjobber.com/work_requests/7013",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:57:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S14 UPDATE arrives before CREATE for one new request (concurrent)": {
+  "result": [
+   {
+    "processed": true,
+    "lead_id": "lead-pat",
+    "lead_stage": "Request",
+    "prev_stage": "Request"
+   },
+   {
+    "processed": true,
+    "lead_id": "lead-pat",
+    "lead_stage": "Request",
+    "prev_stage": "New"
+   }
+  ],
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "New",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "New",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7014",
+      "request_url": "https://secure.getjobber.com/work_requests/7014",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7014",
+      "request_url": "https://secure.getjobber.com/work_requests/7014",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#3",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7014",
+      "request_url": "https://secure.getjobber.com/work_requests/7014",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T18:00:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": []
+   },
+   {
+    "table": "engagements",
+    "op": "delete",
+    "rows": [
+     {
+      "id": "#3",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "New",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "lead_drip_progress",
+    "op": "update",
+    "rows": []
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": []
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7014",
+    "request_url": "https://secure.getjobber.com/work_requests/7014",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T18:00:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T18:00:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ },
+ "S15 open untouched card with an invoice total but no rows (money on it)": {
+  "result": {
+   "processed": true,
+   "lead_id": "lead-pat",
+   "lead_stage": "Request",
+   "prev_stage": "Request"
+  },
+  "writes": [
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "upsert",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7015",
+      "request_url": "https://secure.getjobber.com/work_requests/7015",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "engagements",
+    "op": "insert",
+    "rows": [
+     {
+      "id": "#2",
+      "client_id": "lead-pat",
+      "location_uuid": "loc-uuid-nc",
+      "stage": "Request",
+      "founded_by": "request",
+      "title": "Engagement – Nov 2026",
+      "stage_entered_at": "2026-11-12T17:57:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   },
+   {
+    "table": "service_requests",
+    "op": "update",
+    "rows": [
+     {
+      "id": "#1",
+      "lead_id": "lead-pat",
+      "location_id": "loc_northcolorado",
+      "jobber_request_id": "7015",
+      "request_url": "https://secure.getjobber.com/work_requests/7015",
+      "stage": "New",
+      "status": "active",
+      "source": "jobber",
+      "requested_at": "2026-11-12T17:57:00.000Z",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "created_at": "2026-11-12T17:57:00.000Z",
+      "engagement_id": "#2"
+     }
+    ]
+   },
+   {
+    "table": "leads",
+    "op": "update",
+    "rows": [
+     {
+      "id": "lead-pat",
+      "name": "Pat Lee",
+      "first_name": "Pat",
+      "last_name": "Lee",
+      "email": "pat@example.com",
+      "location_id": "loc_northcolorado",
+      "location_uuid": "loc-uuid-nc",
+      "jobber_client_id": "5001",
+      "stage": "Request",
+      "phone": "(555) 111-2222",
+      "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+      "updated_at": "2026-11-12T18:00:00.000Z",
+      "request_created_at": "2026-11-12T18:00:00.000Z"
+     }
+    ]
+   }
+  ],
+  "syncLog": [
+   {
+    "location_id": "loc_northcolorado",
+    "entity_id": "#2",
+    "entity_type": "engagement",
+    "status": "success",
+    "message": "[engagement:request] founded via service_requests/#1 for lead lead-pat at stage Request"
+   }
+  ],
+  "engagements": [
+   {
+    "id": "eng-a",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "closed_at": null,
+    "total_invoiced": 120,
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#2",
+    "client_id": "lead-pat",
+    "location_uuid": "loc-uuid-nc",
+    "stage": "Request",
+    "founded_by": "request",
+    "title": "Engagement – Nov 2026",
+    "stage_entered_at": "2026-11-12T17:57:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z"
+   }
+  ],
+  "service_requests": [
+   {
+    "id": "sr-a",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "6001",
+    "engagement_id": "eng-a",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:52:00.000Z",
+    "created_at": "2026-11-12T17:50:00.000Z"
+   },
+   {
+    "id": "#1",
+    "lead_id": "lead-pat",
+    "location_id": "loc_northcolorado",
+    "jobber_request_id": "7015",
+    "request_url": "https://secure.getjobber.com/work_requests/7015",
+    "stage": "New",
+    "status": "active",
+    "source": "jobber",
+    "requested_at": "2026-11-12T17:57:00.000Z",
+    "jobber_synced_at": "2026-11-12T18:00:00.000Z",
+    "updated_at": "2026-11-12T18:00:00.000Z",
+    "created_at": "2026-11-12T17:57:00.000Z",
+    "engagement_id": "#2"
+   }
+  ]
+ }
+}
