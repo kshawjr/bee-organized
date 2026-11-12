@@ -101,8 +101,7 @@ export async function readLocationSlackFull(db: Db, locationUuid: string): Promi
 export type EngagementForBees = {
   id: string
   location_uuid: string
-  client_id: string | null
-  client_name: string | null
+  client_id: string | null // leads.id — the engagement has NO name of its own
   project_type: string | null
   closed_at: string | null
   slack_channel_id: string | null
@@ -112,7 +111,12 @@ export type EngagementForBees = {
   channelColumns: boolean // false until migrations/engagement_slack_channel.sql runs
 }
 
-const ENG_BASE = 'id, location_uuid, client_id, client_name, project_type, closed_at'
+// REAL COLUMNS ONLY. `engagements` has client_id (→ leads.id) and no
+// client_name: the name lives on the lead (readClientName). Selecting a
+// column that does not exist fails the WHOLE read — which took the Bees cell
+// and the sweep down on 2026-11-12. lib/beta-db-columns.test.ts checks every
+// select in the app against the real schema so that cannot ship again.
+const ENG_BASE = 'id, location_uuid, client_id, project_type, closed_at'
 const ENG_CHANNEL = 'slack_channel_id, slack_channel_name, slack_channel_archived_at, slack_channel_problems'
 
 export async function loadEngagementForBees(db: Db, id: string): Promise<EngagementForBees | null> {
@@ -127,7 +131,6 @@ export async function loadEngagementForBees(db: Db, id: string): Promise<Engagem
     id: data.id,
     location_uuid: data.location_uuid,
     client_id: data.client_id ?? null,
-    client_name: data.client_name ?? null,
     project_type: data.project_type ?? null,
     closed_at: data.closed_at ?? null,
     slack_channel_id: channelColumns ? data.slack_channel_id ?? null : null,
@@ -135,6 +138,26 @@ export async function loadEngagementForBees(db: Db, id: string): Promise<Engagem
     slack_channel_archived_at: channelColumns ? data.slack_channel_archived_at ?? null : null,
     slack_channel_problems: channelColumns ? readProblems(data.slack_channel_problems) : null,
     channelColumns,
+  }
+}
+
+// The client's name, from the lead the engagement belongs to — the same
+// place the hub page gets it (leads.name by engagements.client_id). Only the
+// channel name and its opening message need it, so it is read when a channel
+// is made, not on every open of a job.
+//   { ok: true, name }  → the name (null when the lead has none)
+//   { ok: false }       → the read FAILED; the caller makes nothing rather
+//                         than a channel named after the project type alone.
+export async function readClientName(db: Db, clientId: string | null): Promise<{ ok: true; name: string | null } | { ok: false }> {
+  if (!clientId) return { ok: true, name: null }
+  try {
+    const { data, error } = await db.from('leads').select('name').eq('id', clientId).maybeSingle()
+    if (error) { console.warn('[engagement-bees] client name not read for lead', clientId, '—', error.message); return { ok: false } }
+    const name = typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : null
+    return { ok: true, name }
+  } catch (e: any) {
+    console.warn('[engagement-bees] client name not read for lead', clientId, '—', e?.name || 'error')
+    return { ok: false }
   }
 }
 
@@ -328,7 +351,7 @@ export function openingMessage(args: { clientName: string | null; projectType: s
 
 export type CreateResult =
   | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[] }
-  | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' }
+  | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' | 'client_unreadable' }
 
 const NAME_ATTEMPTS = 6
 
@@ -350,10 +373,16 @@ export async function createJobChannel(
   const bees = await readEngagementBees(db, eng)
   if (!bees.setUp) return { ok: false, reason: 'not_set_up_yet' }
 
+  // The channel is named for the client, and the client's name is on the
+  // lead. Read BEFORE anything is made; a failed read makes nothing.
+  const client = await readClientName(db, eng.client_id)
+  if (!client.ok) return { ok: false, reason: 'client_unreadable' }
+  const clientName = client.name
+
   // conversations.create, retrying name_taken with -2, -3, …
   let created: { id: string; name: string } | null = null
   for (let i = 0; i < NAME_ATTEMPTS && !created; i++) {
-    const name = slackJobChannelName(eng.client_name, eng.project_type, i === 0 ? '' : `-${i + 1}`)
+    const name = slackJobChannelName(clientName, eng.project_type, i === 0 ? '' : `-${i + 1}`)
     const j = await slackApi(token, 'conversations.create', { name, is_private: false })
     if (j.ok && j.channel?.id) { created = { id: String(j.channel.id), name: String(j.channel.name || name) }; break }
     const code = slackErr(j)
@@ -394,7 +423,7 @@ export async function createJobChannel(
   const url = baseUrl && eng.client_id ? `${baseUrl.replace(/\/$/, '')}/clients/${eng.client_id}?e=${eng.id}` : null
   const posted = await slackApi(token, 'chat.postMessage', {
     channel: created.id,
-    text: openingMessage({ clientName: eng.client_name, projectType: eng.project_type, url }),
+    text: openingMessage({ clientName, projectType: eng.project_type, url }),
     unfurl_links: false,
   })
   if (!posted.ok) console.warn(`[engagement-bees] opening message engagement=${eng.id} → ${slackErr(posted)}`)
@@ -453,7 +482,7 @@ const SWEEP_LIMIT = 200
 
 export async function sweepJobChannels(db: Db): Promise<SweepResult> {
   const r: SweepResult = { ok: true, archived: 0, unarchived: 0, gone: 0, no_slack: 0, failed: 0, reconcile_problems: 0 }
-  const cols = 'id, location_uuid, client_name, closed_at, slack_channel_id, slack_channel_name, slack_channel_archived_at'
+  const cols = 'id, location_uuid, closed_at, slack_channel_id, slack_channel_name, slack_channel_archived_at'
   const [toArchive, toUnarchive] = await Promise.all([
     db.from('engagements').select(cols)
       .not('slack_channel_id', 'is', null).not('closed_at', 'is', null).is('slack_channel_archived_at', null)

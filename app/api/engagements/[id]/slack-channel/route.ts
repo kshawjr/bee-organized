@@ -32,6 +32,7 @@ const REFUSALS: Record<string, [number, string]> = {
   name_unavailable: [409, 'Slack already has channels with this job’s name. Rename one in Slack, then try again.'],
   slack_unavailable: [502, 'Slack didn’t answer — nothing was made. Try again shortly.'],
   store_failed: [500, 'Couldn’t save the channel — try again.'],
+  client_unreadable: [500, 'Couldn’t read this job’s client just now — nothing was made. Try again.'],
 }
 
 export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {

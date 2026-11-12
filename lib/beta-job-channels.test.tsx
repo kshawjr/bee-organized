@@ -28,7 +28,16 @@ const SCOPES_NEW = 'chat:write,channels:read,channels:manage,users:read,users:re
 const SCOPES_OLD = 'chat:write,channels:read,users:read,users:read.email'
 
 const h = vi.hoisted(() => {
-  const db: any = { tables: {} as Record<string, any[]>, seq: 0, noChannelCols: false, noBeesTable: false, touched: new Set<string>() }
+  // THIS STAND-IN HOLDS THE CODE TO THE REAL SCHEMA (lib/db-columns-check).
+  // It used to hand back whatever rows a test seeded and ignore the column
+  // list it was asked for — so when the code selected engagements.client_name
+  // (no such column) and the seed happened to give engagements a client_name,
+  // 117 tests passed and production failed every read. Now, like Postgres:
+  //   · a select, filter, insert or update naming a column the real table
+  //     does not have → the real "column x.y does not exist" error;
+  //   · a SEEDED row carrying a made-up key is recorded in db.seedFaults,
+  //     and afterEach fails the test — a test may not invent the schema.
+  const db: any = { tables: {} as Record<string, any[]>, seq: 0, noChannelCols: false, noBeesTable: false, failLeads: false, touched: new Set<string>(), seedFaults: [] as string[] }
   const state: any = { hubUser: null as any }
   const match = (r: any, f: any[]) => {
     const [m, col, val] = f
@@ -59,6 +68,18 @@ const h = vi.hoisted(() => {
         if (/slack_channel/.test(keys)) return { data: null, error: { code: '42703', message: 'column engagements.slack_channel_id does not exist' } }
       }
       const rows = (db.tables[table] ||= [])
+      // ── the real schema ──
+      for (const r of rows) for (const k of unknownKeys(table, r)) {
+        const fault = `${table}.${k}`
+        if (!db.seedFaults.includes(fault)) db.seedFaults.push(fault)
+      }
+      const wrong = [
+        ...(ctx.op === 'select' || ctx.cols ? unknownColumns(table, ctx.cols || '*').map((p: any) => [p.table, p.column]) : []),
+        ...ctx.filters.map((x: any) => [table, x[1]]).filter(([t, c]: any) => unknownKeys(t, { [c]: 1 }).length),
+        ...(ctx.payload ? unknownKeys(table, ctx.payload).map((k: string) => [table, k]) : []),
+      ][0]
+      if (wrong) return { data: null, error: missingColumnError(wrong[0], wrong[1]) }
+      if (db.failLeads && table === 'leads') return { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }
       if (ctx.op === 'insert') {
         const now = new Date().toISOString()
         const row = { id: `iiiiiiii-iiii-4iii-8iii-${String(++db.seq).padStart(12, '0')}`, assigned_at: now, removed_at: null, created_at: now, updated_at: now, ...ctx.payload }
@@ -99,6 +120,7 @@ import { sweepJobChannels, reconcileChannelBees } from '@/lib/engagement-bees'
 import { supabaseService } from '@/lib/supabase-service'
 import BeesOnJob, { MAX_BEE_FACES } from '@/components/hive/BeesOnJob'
 import { beeSlackNote } from '@/components/hive/shared/BeeSlackStatus'
+import { unknownColumns, unknownKeys, missingColumnError } from '@/lib/db-columns-check'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -173,6 +195,8 @@ let logs: string[] = []
 beforeEach(() => {
   h.db.noChannelCols = false
   h.db.noBeesTable = false
+  h.db.failLeads = false
+  h.db.seedFaults = []
   h.db.touched = new Set()
   h.db.seq = 0
   h.db.tables = {
@@ -181,9 +205,18 @@ beforeEach(() => {
       { id: LOC2, slack_connected: true, slack_bot_token: TOKEN, slack_scopes: SCOPES_OLD },
     ],
     engagements: [
-      { id: ENG, location_uuid: LOC, client_id: 'lead-1', client_name: 'Sarah McAllister', project_type: 'Pantry', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
-      { id: ENG2, location_uuid: LOC2, client_id: 'lead-2', client_name: 'Joe Two', project_type: 'Garage', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
-      { id: ENG_NOCHAN, location_uuid: LOC, client_id: 'lead-3', client_name: 'Closed No Channel', project_type: 'Office', closed_at: '2026-11-02T00:00:00Z', slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
+      { id: ENG, location_uuid: LOC, client_id: 'lead-1', project_type: 'Pantry', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
+      { id: ENG2, location_uuid: LOC2, client_id: 'lead-2', project_type: 'Garage', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
+      { id: ENG_NOCHAN, location_uuid: LOC, client_id: 'lead-3', project_type: 'Office', closed_at: '2026-11-02T00:00:00Z', slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null },
+    ],
+    // An engagement has NO name of its own: client_id points at a lead, and
+    // the lead carries the name. (The seed used to put client_name straight
+    // on the engagement — a column the real table never had.)
+    leads: [
+      { id: 'lead-1', name: 'Sarah McAllister' },
+      { id: 'lead-2', name: 'Joe Two' },
+      { id: 'lead-3', name: 'Closed No Channel' },
+      { id: 'lead-9', name: 'Second Job' },
     ],
     location_bees: [
       bee(B_SAM, LOC, 'Sam Bee', 'sam@bee.com', 'U_SAM'),
@@ -209,7 +242,11 @@ beforeEach(() => {
     vi.spyOn(console, m).mockImplementation((...a: any[]) => { logs.push(a.map(String).join(' ')) })
   }
 })
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+afterEach(() => {
+  vi.unstubAllGlobals(); vi.restoreAllMocks()
+  // A test may not invent the schema: every seeded row is held to the real one.
+  expect(h.db.seedFaults, 'rows seeded with columns the real table does not have').toEqual([])
+})
 
 // ── helpers ─────────────────────────────────────────────────
 const responses: string[] = []
@@ -324,6 +361,74 @@ describe('the channel name', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 2026-11-12, production: "column engagements.client_name does not exist".
+// The code asked the engagement for a name it does not have. The Bees cell
+// never rendered and the sweep failed every 15 minutes.
+describe('against the real schema — the engagement has no name; the lead does', () => {
+  it('this stand-in refuses a column the real table does not have, with Postgres’s own words', async () => {
+    const r: any = await (supabaseService as any).from('engagements').select('id, client_name').eq('id', ENG).maybeSingle()
+    expect(r.data).toBeNull()
+    expect(r.error).toEqual({ code: '42703', message: 'column engagements.client_name does not exist' })
+    // …for a filter and for a write, too.
+    expect((await (supabaseService as any).from('engagements').select('id').eq('client_name', 'x')).error.message).toBe('column engagements.client_name does not exist')
+    expect((await (supabaseService as any).from('engagements').update({ client_name: 'x' }).eq('id', ENG)).error.message).toBe('column engagements.client_name does not exist')
+    // A real column still reads.
+    expect((await (supabaseService as any).from('engagements').select('id, client_id').eq('id', ENG).maybeSingle()).data).toEqual(expect.objectContaining({ id: ENG, client_id: 'lead-1' }))
+  })
+
+  it('the Bees cell’s read works: GET answers for a real-shaped engagement (it 404’d on every job in production)', async () => {
+    const g = await read(ENG)
+    expect(g.status).toBe(200)
+    expect(g.j.setUp).toBe(true)
+    expect(g.j.roster.map((b: any) => b.name)).toEqual(['Ana Bee', 'Nora Nobody', 'Sam Bee'])
+    expect(logs.join('\n')).not.toMatch(/does not exist/)
+  })
+
+  it('the sweep reads without error and logs its ordinary line (it failed every 15 minutes in production)', async () => {
+    const r = await sweepJobChannels(supabaseService as any)
+    expect(r).toMatchObject({ ok: true, archived: 0, unarchived: 0, failed: 0 })
+    expect(r.not_set_up_yet).toBeUndefined()
+    expect(logs.join('\n')).not.toMatch(/sweep read failed|does not exist/)
+    const res = await cronGET({ headers: { get: () => 'Bearer cron-secret' }, nextUrl: { searchParams: { get: () => null } } } as any)
+    expect(res.status).toBe(200)
+    expect(logs.some(l => l.startsWith('[cron job-channels] archived 0, unarchived 0'))).toBe(true)
+  })
+
+  it('the channel is named for the client, and the client’s name is read from the LEAD', async () => {
+    h.db.tables.leads[0].name = 'Priya Raman'
+    const r = await create(ENG)
+    expect(r.status).toBe(200)
+    expect(r.j.channel.name).toBe('priya-raman-pantry')
+    expect(slack.calls.find(c => c.method === 'chat.postMessage')!.body.text).toContain('*Priya Raman* — Pantry')
+    expect(h.db.touched.has('leads')).toBe(true)
+  })
+
+  it('a lead with no name still gets a channel, named for the project type', async () => {
+    h.db.tables.leads[0].name = null
+    const r = await create(ENG)
+    expect(r.status).toBe(200)
+    expect(r.j.channel.name).toBe('pantry')
+    expect(slack.calls.find(c => c.method === 'chat.postMessage')!.body.text).toContain('*this client* — Pantry')
+  })
+
+  it('if the client cannot be read, NOTHING is made — no channel named for the project alone, no Slack call, a plain message', async () => {
+    h.db.failLeads = true
+    slack.calls = []
+    const r = await create(ENG)
+    expect(r.status).toBe(500)
+    expect(r.j).toEqual({ error: 'client_unreadable', message: 'Couldn’t read this job’s client just now — nothing was made. Try again.' })
+    expect(slack.calls).toEqual([])
+    expect(engRow(ENG).slack_channel_id).toBeNull()
+  })
+
+  it('opening a job (the GET) and ticking a bee never read the lead at all — only making a channel needs the name', async () => {
+    h.db.touched = new Set()
+    await read(ENG); await tick(ENG, B_SAM)
+    expect(h.db.touched.has('leads')).toBe(false)
+  })
+})
+
 describe('Part B — making the channel', () => {
   it('creates a public channel, stores its id and name, invites ticked bees + the owner, posts one opening message', async () => {
     await tick(ENG, B_SAM)
@@ -361,7 +466,7 @@ describe('Part B — making the channel', () => {
     expect((await create(ENG)).j.problems).toEqual([{ status: 'owner_not_in_slack', bee: 'owner@bee.com', email: 'owner@bee.com' }])
     // A second job, owner now in Slack → nothing to say.
     slack.users['owner@bee.com'] = 'U_OWNER'
-    h.db.tables.engagements.push({ id: 'eeeeeeee-eeee-4eee-8eee-0000000000aa', location_uuid: LOC, client_id: 'lead-9', client_name: 'Second Job', project_type: 'Attic', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null })
+    h.db.tables.engagements.push({ id: 'eeeeeeee-eeee-4eee-8eee-0000000000aa', location_uuid: LOC, client_id: 'lead-9', project_type: 'Attic', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null })
     expect((await create('eeeeeeee-eeee-4eee-8eee-0000000000aa')).j.problems).toEqual([])
   })
 
