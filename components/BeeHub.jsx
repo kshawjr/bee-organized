@@ -18268,6 +18268,7 @@ import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS } from '@/lib/merge-tags'
 import { safeHttpUrl } from '@/lib/email-signature'
 import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
 import { slackCanManageChannels } from '@/lib/slack-scopes'
+import SlackAutoChannels from './hive/SlackAutoChannels'
 
 // The greeting line is almost always "{{first_name}}," which tells an owner
 // nothing, so the preview is the first line WITH something in it after that.
@@ -21832,6 +21833,12 @@ export function SlackCard({ settings, updateLocation, readOnly = false }) {
             </button>
           </div>
         )}
+
+        {/* Automatic job channels (slice 3): the switch lives here, where the
+            reconnect box lives. Off by default; greyed with a reason until
+            the location has reconnected. It renders nothing where Slack is
+            not connected or the migration has not run. */}
+        {connected && !readOnly && <SlackAutoChannels locationId={locationId} />}
 
         {!connected && (
           <button onClick={goConnect} disabled={busy}

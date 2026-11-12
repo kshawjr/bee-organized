@@ -165,6 +165,11 @@ import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/
 import { JOB_DELETED, isDeletedJob } from '@/components/hive/shared/jobDeleted'
 import type { LocationRow } from './jobber-webhook'
 import { CREW_RETRY_MARK, crewNote, handleVisitNotice, isRetryable, mirrorCrewSafely } from './jobber-crew-mirror'
+import { autoCreateJobChannelSafely, autoNote } from './job-channel-auto'
+
+// The link in a new channel's opening message — the same base the Slack mark's
+// route uses (app/api/engagements/[id]/slack-channel).
+const APP_BASE_URL = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://beehive.beeorganized.com').replace(/\/$/, '')
 
 export type HandlerCtx = {
   topic: string
@@ -634,6 +639,7 @@ async function handleJobCore(
   }
 
   const jRes = await upsertJob(jobRec, sr?.id || null, leadId, ctx.location.location_id)
+  let autoChannelNote: string | null = null
 
   // Dual-write (step 3): resolve via SR, then Job.quote (jobs.quote_id,
   // resolved inside upsertJob), then rule-5 fallbacks. Additive.
@@ -654,6 +660,15 @@ async function handleJobCore(
       // a no-op on every other deal).
       await reopenIfClosedByJobDeletion(engId)
       await maybeAdvanceEngagementStage(engId)
+      // Automatic job channel (lib/job-channel-auto.ts) — ONLY on the live
+      // JOB_CREATE notice, only where the owner switched it on, only for a
+      // job Jobber made after that. Before the crew mirror, so the mirror
+      // finds the channel and puts the visit's people in it. Never throws.
+      if (ctx.topic === 'JOB_CREATE') {
+        autoChannelNote = autoNote(await autoCreateJobChannelSafely(supabaseService, {
+          engagementId: engId, locationUuid: ctx.location.id, jobCreatedAt: jobRec.createdAt ?? null, baseUrl: APP_BASE_URL,
+        }))
+      }
       // Who is on the job, from Jobber's visits (lib/jobber-crew-mirror.ts).
       // Here as well as on the visit notices because a visit notice can land
       // BEFORE this job exists in Bee Hub, when it has nothing to attach to.
@@ -683,10 +698,11 @@ async function handleJobCore(
       lead_id: leadId,
       lead_stage: promo.lead_stage,
       prev_stage: promo.prev_stage,
+      ...(autoChannelNote ? { note: autoChannelNote } : {}),
     }
   }
   const stage = await readLeadStage(leadId)
-  return { processed: true, lead_id: leadId, lead_stage: stage, prev_stage: stage }
+  return { processed: true, lead_id: leadId, lead_stage: stage, prev_stage: stage, ...(autoChannelNote ? { note: autoChannelNote } : {}) }
 }
 
 // JOB_CREATE → 'Job in Progress' (forward-only) + stamp job_created_at + scheduled_at
