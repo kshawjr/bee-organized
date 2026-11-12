@@ -5,7 +5,7 @@
 // Jobber owns who is on a job (lib/jobber-crew-mirror.ts). The panel shows it:
 // faces directly under the assignee corner, in the corner's own treatment,
 // with no way to change them; the job's Slack lines under the identity row;
-// "Put this job in Slack" in the ··· menu.
+// "Put this job in Slack" as Slack's mark, third in that corner.
 //
 // These mount the REAL EngagementPanel (and so the real AssigneeCorner,
 // RecordMenu and BeesOnJob pieces) against a canned server. happy-dom lays
@@ -19,7 +19,8 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import EngagementPanel from '@/components/hive/EngagementPanel'
-import { BEES_FROM_JOBBER, NO_BEES_YET, PUT_IN_SLACK, RECONNECT_LINE, MAX_BEE_FACES } from '@/components/hive/BeesOnJob'
+import { BEES_FROM_JOBBER, NO_BEES_YET, PUT_IN_SLACK, RECONNECT_LINE, MAX_BEE_FACES, SLACK_BTN, SLACK_MARK, beesSlackDoesNotKnow } from '@/components/hive/BeesOnJob'
+import { SLACK_MARK_PATHS, SLACK_MARK_PILL_RATIO } from '@/components/hive/shared/SlackMark'
 import { FACE_OVERLAP } from '@/components/hive/shared/AssigneeCorner'
 import { assigneeSyncNote } from '@/components/hive/shared/AssigneeSyncStatus'
 import { beeSlackNote } from '@/components/hive/shared/BeeSlackStatus'
@@ -106,7 +107,6 @@ describe('the bees row sits directly under the assignee corner and uses its trea
     expect(col.style.display).toBe('flex')
     expect(col.style.flexDirection).toBe('column')
     expect(col.style.alignItems).toBe('flex-end')
-    expect(col.children).toHaveLength(2)
     expect(col.children[0].querySelector('button')!.getAttribute('aria-label')).toMatch(/^Assigned to Olive Owner, Mona Manager/)
     expect(col.children[1]).toBe(beeRow())
     // …and that column is in the identity row, beside the ··· menu.
@@ -194,7 +194,7 @@ describe('nothing in the Type band mentions bees', () => {
   it('in the source, the bees pieces are mounted before the band, and nothing after it', () => {
     const src = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
     const band = src.indexOf('<MicroLabel>Type</MicroLabel>')
-    for (const piece of ['<BeeCorner', '<BeeSlackLines', '<BeeChannelDialog']) {
+    for (const piece of ['<BeeCorner', '<BeeSlackLines', '<BeeSlackButton']) {
       expect(src.split(piece).length - 1, piece).toBe(1)
       expect(src.indexOf(piece), piece).toBeLessThan(band)
     }
@@ -253,15 +253,56 @@ describe('there is no way to change a job’s bees from the panel', () => {
   })
 })
 
-describe('"Put this job in Slack" lives in the ··· menu', () => {
-  it('reconnected, no channel yet: the item is in the menu, and the old button is nowhere', async () => {
+describe('"Put this job in Slack" is Slack’s mark in the corner, with a small confirm', () => {
+  const mark = () => host.querySelector('[data-bee-make-channel]') as HTMLButtonElement | null
+  const confirmBox = () => host.querySelector('[data-bee-slack-confirm]') as HTMLElement | null
+
+  it('reconnected, no channel yet: an icon button, third in the people column, directly under the bees', async () => {
     await mount()
-    expect(host.querySelector('[data-bee-make-channel]')).toBeNull()
-    expect(Array.from(host.querySelectorAll('button')).some(b => b.textContent!.trim() === PUT_IN_SLACK)).toBe(false)
+    const col = people()
+    expect(col.children).toHaveLength(3)
+    expect(col.children[1]).toBe(beeRow())
+    expect(col.children[2].contains(mark())).toBe(true)
+    expect(mark()!.tagName).toBe('BUTTON')
+    // An icon alone: no words on the button itself.
+    expect(mark()!.textContent).toBe('')
+    expect(mark()!.querySelector('svg[data-slack-mark]')).not.toBeNull()
+  })
+
+  it('the icon has a name a screen reader reads, and a tooltip on hover', async () => {
+    await mount()
+    expect(mark()!.getAttribute('aria-label')).toBe('Put this job in Slack: make a Slack channel for this job')
+    expect(mark()!.getAttribute('title')).toBe(PUT_IN_SLACK)
+    // The drawing is decoration; the button carries the name.
+    expect(mark()!.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
+    expect(mark()!.getAttribute('aria-expanded')).toBe('false')
+    await click(mark())
+    expect(mark()!.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('it is a third ROW, never beside the faces: the column that takes its width from the client’s name is no wider for it', async () => {
+    await mount()
+    const col = people()
+    expect(col.style.flexDirection).toBe('column')
+    expect(beeRow()!.contains(mark())).toBe(false)
+    expect(col.children[0].contains(mark())).toBe(false)
+    // Declared narrower than the narrowest thing above it: one 24px face in
+    // its 4px padding is 32; the button is 28 in 4px side padding, 36 — and
+    // an assignee row is never under 32 + its own padding. What a browser
+    // measured (name width before = after, at 390 and 320) is in the report.
+    expect(SLACK_BTN).toBe(28)
+    expect(mark()!.style.width).toBe('28px')
+    expect(mark()!.style.height).toBe('28px')
+    expect(mark()!.style.minHeight).toMatch(/^0(px)?$/)
+  })
+
+  it('there is no "Put this job in Slack" in the ··· menu, and no words for it anywhere else', async () => {
+    await mount()
     await openMenu()
-    expect(menuLabels()).toContain(PUT_IN_SLACK)
-    // Beside the other record actions, not instead of them.
-    expect(menuLabels()).toEqual(expect.arrayContaining(['Set a reminder', 'Report a problem with this engagement', 'Mark as Closed Lost']))
+    expect(menuLabels()).toEqual(['Set a reminder', 'Report a problem with this engagement', 'Mark as Closed Lost'])
+    expect(menuLabels().join(' ')).not.toMatch(/slack/i)
+    expect(code('components/hive/EngagementPanel.jsx')).not.toMatch(/beeChannelMenuItem|BeeChannelDialog/)
+    expect(code('components/hive/BeesOnJob.jsx')).not.toMatch(/beeChannelMenuItem|BeeChannelDialog|WizardShell/)
   })
 
   const HIDDEN: [string, () => void, any?][] = [
@@ -272,64 +313,113 @@ describe('"Put this job in Slack" lives in the ··· menu', () => {
     ['the job is closed', () => { beesBody.slack = { ...READY, closed: true } }],
     ['the channel columns are not set up', () => { beesBody.slack = { ...READY, channelsSetUp: false } }],
     ['the user is read-only', () => {}, { readOnly: true }],
+    ['the bees tables are not there yet', () => { beesBody = { setUp: false } }],
   ]
   for (const [why, arrange, props] of HIDDEN) {
-    it(`hidden — no item at all — when ${why}`, async () => {
+    it(`not shown — nothing rendered at all — when ${why}`, async () => {
       arrange()
       await mount(props || {})
+      expect(mark()).toBeNull()
+      expect(host.querySelector('[data-bee-slack], [data-slack-mark], [data-bee-slack-confirm]')).toBeNull()
+      expect(Array.from(people().children).every(c => !c.hasAttribute('data-bee-slack'))).toBe(true)
       await openMenu()
-      expect(menuLabels().length).toBeGreaterThan(0)          // the menu itself is there
-      expect(menuLabels()).not.toContain(PUT_IN_SLACK)
+      expect(menuLabels().length).toBeGreaterThan(0)
       expect(doc().textContent).not.toContain(PUT_IN_SLACK)
     })
   }
 
-  it('picking it opens the same confirm: the channel’s name, who is added, and that the channel follows Jobber — with nothing to tick', async () => {
+  it('the confirm is a small box under the mark, not a modal: what it makes, the channel’s name, who goes in, Make it / Cancel — and nothing else', async () => {
     await mount()
-    await openMenu()
-    await click(menuItem(PUT_IN_SLACK))
-    expect(doc().querySelector('[data-bee-record-menu]')).toBeNull()      // the menu closed
-    const text = doc().textContent!
-    expect(text).toContain('A public channel called #sarah-mcallister-pantry')
-    expect(text).toContain('The bees on this job are added, and the location owner too, as long as Slack knows the email they use for Bee Hub.')
-    expect(doc().querySelector('[data-bee-dialog-who]')!.textContent).toBe('On this job now: Ana Bee, Sam Carpenter.')
-    expect(text).toContain('When the people on this job’s visits change in Jobber, the channel follows.')
-    expect(doc().querySelector('[data-bee-picker], [data-bee-id], input[type="checkbox"]')).toBeNull()
+    await click(mark())
+    const box = confirmBox()!
+    expect(box.parentElement!.contains(mark())).toBe(true)              // anchored to the button
+    expect(doc().querySelector('[data-bee-wizard-shell], [aria-modal="true"]')).toBeNull()
+    expect(Array.from(box.querySelectorAll('p')).map(p => p.textContent)).toEqual([
+      'Make a public Slack channel for this job?',
+      '#sarah-mcallister-pantry',
+      'Going in: Ana Bee, Sam Carpenter and the owner.',
+    ])
+    expect(Array.from(box.querySelectorAll('button')).map(b => b.textContent)).toEqual(['Cancel', 'Make it'])
+    expect(box.querySelector('input, select, textarea, [role="checkbox"]')).toBeNull()
+    // What the old dialog carried and this does not.
+    expect(box.textContent).not.toMatch(/or close to it|as long as Slack knows|the channel follows|added when they are/)
     expect(calls.some(c => c.method === 'POST')).toBe(false)             // nothing made yet
   })
 
-  it('with nobody on the job, the confirm says the channel waits for them', async () => {
+  it('with nobody on the job it says only the owner goes in', async () => {
     beesBody.bees = []
     await mount()
-    await openMenu(); await click(menuItem(PUT_IN_SLACK))
-    expect(doc().querySelector('[data-bee-dialog-who]')!.textContent).toBe(`${NO_BEES_YET} The channel is made now and they are added when they are.`)
+    await click(mark())
+    expect(confirmBox()!.querySelector('[data-bee-confirm-who]')!.textContent).toBe('Going in: the owner. Nobody is on this job’s visits in Jobber yet.')
+    expect(confirmBox()!.querySelector('[data-bee-confirm-warning]')).toBeNull()
   })
 
-  it('Make the channel posts once, the channel line appears under the row, and the item leaves the menu', async () => {
+  it('it WARNS about anyone Slack is known not to have: checked before and not found — and says nothing about a bee never checked', async () => {
+    const NOT_FOUND = bee(3, 'Nora Nobody', { slack_user_id: null }), NEVER = bee(4, 'Una Unchecked', { slack_user_id: null, slack_checked_at: null })
+    beesBody.bees = [ANA, NOT_FOUND, NEVER]
     await mount()
-    await openMenu(); await click(menuItem(PUT_IN_SLACK))
+    await click(mark())
+    const warn = confirmBox()!.querySelector('[data-bee-confirm-warning]')!
+    expect(warn.textContent).toBe('Slack had nobody with the email for Nora Nobody when Bee Hub last checked. If that is still so, they will not be added.')
+    expect(confirmBox()!.querySelector('[data-bee-confirm-who]')!.textContent).toBe('Going in: Ana Bee, Nora Nobody, Una Unchecked and the owner.')
+    expect(beesSlackDoesNotKnow([ANA, NOT_FOUND, NEVER]).map((b: any) => b.name)).toEqual(['Nora Nobody'])
+    expect(beesSlackDoesNotKnow([ANA, SAM])).toEqual([])
+  })
+
+  it('no warning when Slack knows everyone', async () => {
+    await mount()
+    await click(mark())
+    expect(confirmBox()!.querySelector('[data-bee-confirm-warning]')).toBeNull()
+  })
+
+  it('Cancel, Escape and a second tap on the mark all close it and make nothing', async () => {
+    await mount()
+    await click(mark()); await click(confirmBox()!.querySelector('[data-bee-confirm-cancel]'))
+    expect(confirmBox()).toBeNull()
+    await click(mark())
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(confirmBox()).toBeNull()
+    await click(mark()); await click(mark())
+    expect(confirmBox()).toBeNull()
+    expect(calls.some(c => c.method !== 'GET')).toBe(false)
+    expect(mark()).not.toBeNull()
+  })
+
+  // BY FINGERPRINT: everything sent to the server from opening the job to a
+  // made channel, in order, method and body. Recorded on d08fce0 (the menu
+  // item + dialog) with this same canned server; it must not move.
+  it('making a channel does exactly what it did before: one POST, no body, same address, same result on the panel', async () => {
+    await mount()
+    await click(mark())
     await click(doc().querySelector('[data-bee-make-channel-confirm]'))
-    expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/engagements/${ENG}/slack-channel`])
+    expect(calls.map(c => `${c.method} ${c.url} ${JSON.stringify(c.body)}`)).toEqual([
+      `GET /api/reminders?engagement_id=${ENG} null`,
+      `GET /api/engagements/${ENG}/bees null`,
+      `GET /api/engagements/${ENG} null`,
+      `POST /api/engagements/${ENG}/slack-channel null`,
+    ])
     expect(host.querySelector('[data-bee-channel]')!.textContent).toBe('Slack channel #sarah-mcallister-pantry')
-    expect(doc().querySelector('[data-bee-make-channel-confirm]')).toBeNull()
     expect(toasts.at(-1)).toEqual({ kind: 'success', msg: 'Made #sarah-mcallister-pantry in Slack' })
-    await openMenu()
-    expect(menuLabels()).not.toContain(PUT_IN_SLACK)
+    // The job has a channel now: the box and the mark are both gone.
+    expect(confirmBox()).toBeNull()
+    expect(mark()).toBeNull()
+    expect(people().children).toHaveLength(2)
   })
 
   it('when the server refuses, its own words are shown and nothing changes on the panel', async () => {
     channelAnswer = () => res({ error: 'not_ready', message: 'Reconnect Slack first — this location can’t make channels yet.' }, 409)
     await mount()
-    await openMenu(); await click(menuItem(PUT_IN_SLACK))
+    await click(mark())
     await click(doc().querySelector('[data-bee-make-channel-confirm]'))
     expect(toasts.at(-1)).toEqual({ kind: 'error', msg: 'Reconnect Slack first — this location can’t make channels yet.' })
     expect(host.querySelector('[data-bee-channel]')).toBeNull()
+    expect(mark()).not.toBeNull()
   })
 
-  it('an owner who could not be added to the new channel is named under the row', async () => {
+  it('anyone who could not be added to the new channel is still named under the row afterwards', async () => {
     channelAnswer = () => res({ ok: true, channel: CHANNEL, bees: [ANA, SAM], problems: [{ status: 'owner_not_in_slack', bee: 'Olive Owner', email: 'olive@home.com' }] })
     await mount()
-    await openMenu(); await click(menuItem(PUT_IN_SLACK))
+    await click(mark())
     await click(doc().querySelector('[data-bee-make-channel-confirm]'))
     expect(host.querySelector('[data-bee-slack-lines] [data-bee-bees-slack]')!.textContent)
       .toBe('Olive Owner, the owner, wasn’t added to the channel: nobody in your Slack uses olive@home.com, the email they sign in to Bee Hub with. Add them in Slack.')
@@ -338,10 +428,34 @@ describe('"Put this job in Slack" lives in the ··· menu', () => {
   // The server half is unchanged and still pinned where it was: the POST
   // refuses (closed job, not reconnected, no Slack) BEFORE any Slack call —
   // lib/beta-job-channels.test.tsx, "Part B — making the channel". This pins
-  // that the route file itself did not move in this slice.
+  // that the route file itself did not move.
   it('the server route that refuses before calling Slack is byte-for-byte what was pushed', () => {
     expect(createHash('sha256').update(readFileSync('app/api/engagements/[id]/slack-channel/route.ts')).digest('hex'))
       .toBe('da053ab5fd04abd1428da9dc9f6c81e9ec85a1c45418001e16fb80bba1627ca6')
+  })
+})
+
+describe('the mark is Slack’s own file, not a drawing', () => {
+  // sha256 of the eight path strings and four colours as they stand in
+  // Slack_Mark.svg from Slack's brand asset host (whitespace inside a path
+  // removed, nothing else). A redraw or a recolour changes it.
+  it('the paths and colours are Slack’s, character for character', () => {
+    expect(createHash('sha256').update(JSON.stringify(SLACK_MARK_PATHS)).digest('hex')).toBe('4ae64ffcd55c8b2c52566152879ce8fc6a85cf3e9541ba2c35fa2200afc7da92')
+    expect(SLACK_MARK_PATHS.map(p => p[0])).toEqual(['#E01E5A', '#E01E5A', '#36C5F0', '#36C5F0', '#2EB67D', '#2EB67D', '#ECB22E', '#ECB22E'])
+  })
+
+  it('drawn square and whole, in its own colours, with no effect on it, and the clear space Slack asks for', async () => {
+    await mount()
+    const svg = host.querySelector('svg[data-slack-mark]') as SVGElement
+    expect(svg.getAttribute('viewBox')).toBe('73.6 73.6 122.8 122.8')     // the mark's exact bounds: nothing cropped
+    expect(svg.getAttribute('width')).toBe(svg.getAttribute('height'))
+    expect(Array.from(svg.querySelectorAll('path')).map(p => [p.getAttribute('fill'), p.getAttribute('d')])).toEqual(SLACK_MARK_PATHS)
+    expect(svg.querySelectorAll('*')).toHaveLength(8)
+    const css = (svg.getAttribute('style') || '') + (svg.parentElement!.getAttribute('style') || '')
+    expect(css).not.toMatch(/opacity|filter|transform|shadow|animation/)
+    // At least one pill's length clear on every side.
+    expect((SLACK_BTN - SLACK_MARK) / 2).toBeGreaterThanOrEqual(SLACK_MARK * SLACK_MARK_PILL_RATIO)
+    expect(Number(svg.getAttribute('width'))).toBe(SLACK_MARK)
   })
 })
 

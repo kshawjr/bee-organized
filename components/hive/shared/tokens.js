@@ -182,6 +182,13 @@ export const T = {
     cornerFont: '10px',
   },
 
+  // ── Slack's mark — NOT OURS, never restyle ────────────────────
+  // The four colours of Slack's logo, as Slack's own Slack_Mark.svg has
+  // them. Slack's brand terms forbid any other colour on the mark, so these
+  // are used by shared/SlackMark.jsx and by nothing else: they are not
+  // palette, and nothing of ours may borrow them.
+  slackMark: { red: '#E01E5A', blue: '#36C5F0', green: '#2EB67D', yellow: '#ECB22E' },
+
   // ── THE action accent (brand teal — ui/tokens GREEN_FILL) ─────
   // The stops are now the SITE's teal, not a near-miss of it: the public
   // theme ships this exact value as color-scheme-inverse's secondary

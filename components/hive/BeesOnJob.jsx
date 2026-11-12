@@ -10,7 +10,7 @@
 // is the leg that was deleted. Typing a bee by hand lives in Settings › Team
 // and Seats.
 //
-// Four pieces, one shared state (useJobBees), placed by EngagementPanel:
+// Three pieces, one shared state (useJobBees), placed by EngagementPanel:
 //
 //   BeeCorner         the faces, DIRECTLY UNDER the assignee corner in the
 //                     masthead's top-right, wearing ITS treatment
@@ -27,10 +27,8 @@
 //                     reconnect line, what Slack refused, and the "when this
 //                     job reopened" box. Silent when there is nothing to say,
 //                     and never a word about Slack where there is no Slack.
-//   beeChannelMenuItem  "Put this job in Slack", for the masthead's ··· menu
-//                     (RecordMenu drops a falsy item, so "hidden" is exactly
-//                     what it was as a button: no item at all).
-//   BeeChannelDialog  the confirm it opens.
+//   BeeSlackButton    "Put this job in Slack": Slack's mark as an icon button,
+//                     under the bees faces, and the small confirm it opens.
 //
 // WHEN THE ROW SHOWS AT ALL: when the job has bees, or the location's Slack
 // is reconnected for job channels (the only locations the mirror runs for).
@@ -44,13 +42,12 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { IconSend } from '@/components/ui/icons'
 import { T } from './shared/tokens'
 import MiniAvatar from './shared/MiniAvatar'
 import { FACE_OVERLAP } from './shared/AssigneeCorner'
 import BeeSlackStatus from './shared/BeeSlackStatus'
 import { MicroLabel, quietBtn } from './shared/cardKit'
-import { WizardShell, wizAccentBtn, wizQuietBtn } from './shared/CloseWizardKit'
+import SlackMark from './shared/SlackMark'
 import { slackJobChannelName } from '@/lib/slack-channel-name'
 
 export const MAX_BEE_FACES = 3 // the assignee corner's own limit
@@ -116,7 +113,8 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
     } finally { setClearing(false) }
   }
 
-  // Exactly the conditions the button had (it was a button until 2026-11-12).
+  // Exactly the conditions it has always had, as a button, a menu item, and
+  // now Slack's mark in the corner.
   const showCreate = ready && !readOnly && !slack.channel && !!slack.connected && !!slack.canManageChannels && !!slack.channelsSetUp && !slack.closed
   // Only to someone who can act on it (the owner, or an admin): a manager or a
   // read-only user has no Slack settings to go to, and an instruction nobody
@@ -263,38 +261,93 @@ export function BeeSlackLines({ ctl }) {
   )
 }
 
-// ── "Put this job in Slack", for the ··· menu ────────────────
-// null when it must not be offered; RecordMenu drops a falsy item.
-export function beeChannelMenuItem(ctl) {
-  if (!ctl?.showCreate) return null
-  return { key: 'bee-slack-channel', label: PUT_IN_SLACK, icon: <IconSend size={15} />, onClick: ctl.openDialog }
-}
+// ── "Put this job in Slack": the Slack mark, third in the corner ──
+// Slack's own mark as an icon button, DIRECTLY UNDER the bees faces, on the
+// same right edge (2026-11-12, Kevin: "a slack emblem outside that does the
+// same thing in the same area, and a quick confirmation box"). It was an item
+// in the ··· menu for one day.
+//
+// A THIRD ROW, not a neighbour of the faces: beside them it would widen the
+// corner's column, and that column takes its width straight out of the
+// client's name, which on a phone has none to give. Under them it is never
+// the widest row, so the name keeps every pixel it had.
+//
+// Shown in exactly the states the menu item was (ctl.showCreate), nothing
+// rendered otherwise. Tapping it opens a small box under it, not a modal:
+// what it makes, the channel's name, who goes in, Make it / Cancel.
+export const SLACK_BTN = 28   // the button; the mark inside is half of it
+export const SLACK_MARK = 14  // 7px clear on every side; one pill is 6.6px
 
-export function BeeChannelDialog({ ctl, clientName = null, projectType = null, isMobile = false }) {
-  if (!ctl?.dialog) return null
+// Who Bee Hub already knows Slack will not take: it asked Slack for this
+// bee's email before and nobody had it. Never checked = not known = not said.
+export const beesSlackDoesNotKnow = (bees) => (bees || []).filter(b => b && b.slack_checked_at && !b.slack_user_id)
+const listNames = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
+
+export function BeeSlackButton({ ctl, clientName = null, projectType = null }) {
+  const open = !!ctl?.dialog
+  const close = ctl?.closeDialog
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!ctl?.showCreate) return null
   const { bees, creating } = ctl
   const previewName = slackJobChannelName(clientName, projectType)
+  const unknown = beesSlackDoesNotKnow(bees)
+  const small = { minHeight: 0, padding: '5px 12px', borderRadius: T.radius.pill, fontSize: '12px', fontWeight: 600, fontFamily: 'inherit' }
   return (
-    <WizardShell isMobile={isMobile} onClose={ctl.closeDialog} title={PUT_IN_SLACK} maxWidth={440}
-      footer={(
-        <>
-          <button type="button" onClick={ctl.closeDialog} disabled={creating} style={wizQuietBtn()}>Cancel</button>
-          <button type="button" data-bee-make-channel-confirm onClick={ctl.createChannel} disabled={creating} style={wizAccentBtn(creating)}>
-            {creating ? 'Making…' : 'Make the channel'}
-          </button>
-        </>
-      )}>
-      <p style={{ fontSize: '13px', color: T.ink.secondary, lineHeight: 1.5 }}>
-        A public channel called <strong style={{ color: T.ink.primary }}>#{previewName}</strong> (or close to it, if Slack already has one). The bees on this job are added, and the location owner too, as long as Slack knows the email they use for Bee Hub.
-      </p>
-      <p data-bee-dialog-who style={{ marginTop: '10px', fontSize: '13px', color: T.ink.secondary, lineHeight: 1.5 }}>
-        {bees.length
-          ? <>On this job now: <strong style={{ color: T.ink.primary, fontWeight: 600 }}>{bees.map(b => b.name).join(', ')}</strong>.</>
-          : <>{NO_BEES_YET} The channel is made now and they are added when they are.</>}
-      </p>
-      <p style={{ marginTop: '10px', fontSize: '12px', color: T.ink.muted, lineHeight: 1.5 }}>
-        When the people on this job’s visits change in Jobber, the channel follows.
-      </p>
-    </WizardShell>
+    <span data-bee-slack style={{ position: 'relative', display: 'inline-flex', flexShrink: 0, padding: '2px 4px' }}>
+      <button type="button" data-bee-make-channel onClick={() => (open ? close() : ctl.openDialog())}
+        aria-label={`${PUT_IN_SLACK}: make a Slack channel for this job`}
+        aria-haspopup="dialog" aria-expanded={open}
+        title={PUT_IN_SLACK}
+        style={{
+          width: `${SLACK_BTN}px`, height: `${SLACK_BTN}px`, minHeight: 0, padding: 0, boxSizing: 'border-box',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          border: `1px solid ${T.hairline.control}`, borderRadius: T.radius.round,
+          background: T.surface.raised, cursor: 'pointer',
+        }}>
+        <SlackMark size={SLACK_MARK} />
+      </button>
+      {open && (
+        <div data-bee-slack-confirm role="dialog" aria-label={PUT_IN_SLACK} onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 10010,
+            width: '260px', maxWidth: 'calc(100vw - 32px)', boxSizing: 'border-box', textAlign: 'left',
+            background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset,
+            boxShadow: T.shadow.pop, padding: '12px',
+          }}>
+          <p data-bee-confirm-what style={{ margin: 0, fontSize: '12px', lineHeight: 1.45, color: T.ink.secondary }}>
+            Make a public Slack channel for this job?
+          </p>
+          <p data-bee-confirm-name style={{ margin: '4px 0 0', fontSize: '13px', fontWeight: 600, lineHeight: 1.35, color: T.ink.primary, overflowWrap: 'anywhere' }}>
+            #{previewName}
+          </p>
+          <p data-bee-confirm-who style={{ margin: '6px 0 0', fontSize: '12px', lineHeight: 1.45, color: T.ink.secondary, overflowWrap: 'anywhere' }}>
+            {bees.length
+              ? `Going in: ${listNames([...bees.map(b => b.name), 'the owner'])}.`
+              : 'Going in: the owner. Nobody is on this job’s visits in Jobber yet.'}
+          </p>
+          {unknown.length > 0 && (
+            <p data-bee-confirm-warning role="note" style={{ margin: '8px 0 0', padding: '6px 8px', borderRadius: T.radius.inset, background: T.surface.sunken, fontSize: '12px', fontWeight: 500, lineHeight: 1.45, color: T.ink.primary, overflowWrap: 'anywhere' }}>
+              {`Slack had nobody with the email for ${listNames(unknown.map(b => b.name))} when Bee Hub last checked. If that is still so, they will not be added.`}
+            </p>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '10px' }}>
+            <button type="button" className="bee-small-action" data-bee-confirm-cancel onClick={close} disabled={creating}
+              style={{ ...small, border: 'none', background: 'transparent', color: T.ink.muted, cursor: creating ? 'default' : 'pointer' }}>
+              Cancel
+            </button>
+            <button type="button" className="bee-small-action" data-bee-make-channel-confirm onClick={ctl.createChannel} disabled={creating}
+              style={{ ...small, border: 'none', background: T.accent.fg, color: T.accent.onFill, cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.6 : 1 }}>
+              {creating ? 'Making…' : 'Make it'}
+            </button>
+          </div>
+        </div>
+      )}
+    </span>
   )
 }

@@ -79,7 +79,7 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
-import { useJobBees, BeeCorner, BeeSlackLines, BeeChannelDialog, beeChannelMenuItem } from './BeesOnJob'
+import { useJobBees, BeeCorner, BeeSlackLines, BeeSlackButton } from './BeesOnJob'
 import BookAssessment from './BookAssessment'
 import { canBookAssessment } from './shared/bookAssessmentGate'
 import { describeJoinedRequests } from './shared/joinedRequests'
@@ -646,11 +646,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     // Reminders (2026-09-30) — in the menu AND the action bar (Kevin wants
     // both). Not behind readOnly: a reminder is personal.
     reminderMenuItem(reminder),
-    // "Put this job in Slack" (2026-11-12 — it was a button in the Type band).
-    // A record action, so it lives here and the bottom bar stays at five.
-    // null — no item at all — when it must not be offered: not reconnected,
-    // no Slack, a channel already exists, the job is closed, or read-only.
-    beeChannelMenuItem(jobBees),
     // Always present once the record has loaded — non-mutating, so it rides
     // read-only surfaces too (everyone can report a problem). It also means the
     // menu is never empty, read-only surfaces included. Hands an ID-ONLY context up to BeeHub's feedback modal
@@ -1189,7 +1184,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 drives the Jobber crew sync, so unmapped-to-Jobber users are
                 marked in the picker. Empty → a dashed ghost. Gated on the
                 fetch so it doesn't flash a ghost before assignees load. */}
-            {/* WHO IS ON THIS, top-right, two rows:
+            {/* WHO IS ON THIS, top-right, two rows (and Slack's mark, below):
                   1. the assignee corner (above) — hub users, click to assign;
                   2. the BEES, directly under it and wearing its treatment
                      (2026-11-12, Kevin: "same row as the assignee … same
@@ -1212,6 +1207,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                   readOnly={readOnly}
                 />
                 <BeeCorner ctl={jobBees} isMobile={isMobile} />
+                {/* 3. Slack's mark — "Put this job in Slack". A third row, under
+                    the bees, on the same right edge: never the widest row, so
+                    it takes nothing from the client's name. One route only:
+                    it is no longer in the ··· menu. */}
+                <BeeSlackButton ctl={jobBees} clientName={eng.client_name || client?.name || null} projectType={eng.project_type || null} />
               </div>
             )}
             {/* Masthead ··· overflow menu (Part 1) — portal-rendered so
@@ -1235,7 +1235,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               thing that was clicked. Nothing renders when there is nothing to
               say, and never a word about Slack where there is no Slack. */}
           <BeeSlackLines ctl={jobBees} />
-          <BeeChannelDialog ctl={jobBees} clientName={eng.client_name || client?.name || null} projectType={eng.project_type || null} isMobile={isMobile} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span title={displayTitle(eng)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}
