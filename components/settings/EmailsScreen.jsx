@@ -17,6 +17,7 @@ import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/d
 import { SIGNATURE_MARKER, SIGNATURE_ICON_PATHS, safeHttpUrl, linkedinFor, signatureInitials } from '@/lib/email-signature'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
+import { buildMarketingFooter, COMMERCIAL_EMAIL_AUDIENCE } from '@/lib/marketing-consent'
 
 // ── Tokens (export src/styles.css :root) ──────────────────────────────────
 // Exact: the export's oklch values converted to hex (Kevin, 2026-10-30
@@ -537,11 +538,38 @@ export function sampleEmailHtml(style) {
 
 // A real email in an iframe, scaled to the box (export ScaledFrame). The
 // iframe has no allow-scripts, so nothing in it can run.
+//
+// HOW TALL IT IS (2026-11-12). It used to start 1,100px tall and then ask the
+// document for documentElement.scrollHeight — which never answers LESS than
+// the frame it is in. So every email shorter than 1,100px was shown 1,100px
+// tall, the rest filled with the page's pale mint ("a lot of green space in
+// the footer"): 321px on the sample email, 551 on a two-line one. And it only
+// ever grew: a short email after a long one kept the long height.
+//
+// It now reads the BODY's height, which is the email's own height whatever
+// size the frame is. It is re-read:
+//   • on every load — a changed email is a new srcDoc, which reloads the frame,
+//     so a shorter email after a longer one shrinks BY DESIGN: the reading no
+//     longer depends on the height the frame happened to have;
+//   • whenever the body's size changes afterwards (a ResizeObserver on it) and
+//     when an image inside finishes loading or the web fonts arrive — the
+//     things that land after "load".
+//
+// WHEN IT CANNOT BE READ (no document, a throw, a zero): there is no honest
+// number, so none is invented — the old 1,100 was a guess that looked like a
+// measurement. The frame is EMAIL_FRAME_UNMEASURED_PX tall and SCROLLS, so the
+// whole email is still reachable and nothing is padded or cut off. That is
+// also what it is for the instant before its first reading.
+//
+// THE FIVE SMALL LOOK CARDS (`fit`) ARE LEFT EXACTLY AS THEY WERE — same
+// starting height, same reading, capped at 700 and cropped, never scrolling.
+export const EMAIL_FRAME_UNMEASURED_PX = 700
 export function EmailFrame({ html, fit = false }) {
   const box = React.useRef(null)
   const frame = React.useRef(null)
+  const watch = React.useRef(null)
   const [scale, setScale] = React.useState(fit ? 0.3 : 1)
-  const [height, setHeight] = React.useState(1100)
+  const [height, setHeight] = React.useState(fit ? 1100 : null)    // null: not measured (never for a look card)
   React.useEffect(() => {
     const el = box.current
     if (!el || typeof ResizeObserver === 'undefined') return undefined
@@ -549,18 +577,42 @@ export function EmailFrame({ html, fit = false }) {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  const onLoad = () => {
+  React.useEffect(() => () => { if (watch.current) watch.current.disconnect() }, [])
+  const measure = () => {
     try {
       const doc = frame.current && frame.current.contentDocument
-      if (doc) setHeight(doc.documentElement.scrollHeight)
-    } catch { /* sandboxed — keep the default height */ }
+      const h = doc && doc.body ? doc.body.scrollHeight : 0
+      setHeight(h > 0 ? h : null)
+    } catch { setHeight(null) }
   }
-  const shown = fit ? Math.min(height, 700) : height
+  const onLoad = () => {
+    if (fit) {
+      try {
+        const doc = frame.current && frame.current.contentDocument
+        if (doc) setHeight(doc.documentElement.scrollHeight)
+      } catch { /* sandboxed — keep the default height */ }
+      return
+    }
+    measure()
+    // What arrives after "load". Each of these only re-reads; none can throw
+    // the first reading away.
+    try {
+      const doc = frame.current && frame.current.contentDocument
+      if (watch.current) { watch.current.disconnect(); watch.current = null }
+      if (!doc || !doc.body) return
+      if (typeof ResizeObserver !== 'undefined') { watch.current = new ResizeObserver(measure); watch.current.observe(doc.body) }
+      doc.addEventListener('load', measure, true)                  // an image inside finishing
+      if (doc.fonts && doc.fonts.ready && doc.fonts.ready.then) doc.fonts.ready.then(measure, () => {})
+    } catch { /* the first reading stands */ }
+  }
+  const measured = height != null
+  const frameHeight = measured ? height : EMAIL_FRAME_UNMEASURED_PX
+  const shown = fit ? Math.min(height, 700) : frameHeight
   return (
     <div ref={box} style={{ width:'100%' }}>
-      <div style={{ height: shown * scale, overflow:'hidden', borderRadius:'6px', border:`1px solid ${ET.border}` }}>
-        <iframe ref={frame} onLoad={onLoad} title="Email preview" srcDoc={html} scrolling="no" tabIndex={-1} sandbox="allow-same-origin"
-          style={{ width:600, height, transform:`scale(${scale})`, transformOrigin:'top left', border:0, pointerEvents: fit ? 'none' : 'auto' }} />
+      <div data-email-frame={fit ? undefined : measured ? 'measured' : 'unmeasured'} style={{ height: shown * scale, overflow:'hidden', borderRadius:'6px', border:`1px solid ${ET.border}` }}>
+        <iframe ref={frame} onLoad={onLoad} title="Email preview" srcDoc={html} scrolling={fit || measured ? 'no' : 'auto'} tabIndex={-1} sandbox="allow-same-origin"
+          style={{ width:600, height: frameHeight, transform:`scale(${scale})`, transformOrigin:'top left', border:0, pointerEvents: fit ? 'none' : 'auto' }} />
       </div>
     </div>
   )
@@ -601,7 +653,34 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false 
 // Fill the tags the way a send does, with this location's real values and a
 // sample client; wrap in the location's style with the subject as heading
 // and the email's button.
-export function previewEmailHtml({ row, style, values, signature = null }) {
+//
+// THE UNSUBSCRIBE AND ADDRESS BLOCK (2026-11-12). The welcome and the two job
+// follow-ups are commercial: every one sent ends, inside the white card, with
+// why the client is getting it, an unsubscribe link and Bee Organized's postal
+// address. The preview used to stop short of it — about 143px of the email an
+// owner never saw. Not on purpose: the test send already adds it "so the owner
+// sees the email as sent" (app/api/emails/test-send). It is now here too,
+// built by the SAME function the sends use (buildMarketingFooter), for the
+// same three emails (COMMERCIAL_EMAIL_AUDIENCE). Two parts cannot be the
+// client's own, and say so truthfully:
+//   • the unsubscribe link is per client; a preview has no client, so it
+//     points where the test send's does (a page that does nothing);
+//   • the postal address is the real one (GET …/email-settings); where it
+//     isn't configured the line reads "(your postal address)", as the test
+//     send's does — never an invented address.
+// Drip emails carry no such block, so their previews were already complete.
+export const PREVIEW_UNSUBSCRIBE_PATH = '/unsubscribe/test-email'
+export function previewCardFooter(row, postalAddress = null) {
+  const audience = COMMERCIAL_EMAIL_AUDIENCE[row?.templateKey]
+  if (!audience) return null
+  const origin = typeof window !== 'undefined' && window.location && /^https?:/.test(window.location.origin || '') ? window.location.origin : ''
+  return buildMarketingFooter({
+    unsubscribeUrl: `${origin}${PREVIEW_UNSUBSCRIBE_PATH}`,
+    postalAddress: (postalAddress || '').trim() || '(your postal address)',
+    audience,
+  })
+}
+export function previewEmailHtml({ row, style, values, signature = null, postalAddress = null }) {
   const sw = { subject: row?.subject ?? '', body: row?.body ?? '', buttonLink: row?.buttonLink || '' }
   const fill = (text, marker) => String(text || '').replace(/\{\{(\w+)\}\}/g, (m, k) => {
     if (k === 'signature') return marker ? SIGNATURE_MARKER : ''
@@ -619,7 +698,7 @@ export function previewEmailHtml({ row, style, values, signature = null }) {
     style,
     heading: subject,
     button: row?.buttonText && buttonLink ? { label: fill(row.buttonText, false), href: buttonLink, align: row.buttonAlign } : null,
-  })
+  }, previewCardFooter(row, postalAddress))
 }
 
 // "Send me a test" (export, in the read dialog). POSTs to the real send path.
@@ -1237,7 +1316,7 @@ export function EditorPreview({ draft, preview }) {
   return (
     <div data-editor-preview>
       {!preview && <p style={{ ...eHintStyle, margin:'0 0 8px' }}>Shown with sample details.</p>}
-      <EmailFrame html={previewEmailHtml({ row: draft, style: ctx.style, values: ctx.values, signature: ctx.signature })} />
+      <EmailFrame html={previewEmailHtml({ row: draft, style: ctx.style, values: ctx.values, signature: ctx.signature, postalAddress: ctx.postalAddress })} />
     </div>
   )
 }

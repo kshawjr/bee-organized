@@ -108,7 +108,13 @@ const MAIN: Record<string, string> = {
 
 const SIG = { name: 'Lynette Ewy', title: 'Owner', email: 'l@x.com', mobile: '(816) 555-0100', photoPath: null, websiteUrl: 'https://beeorganized.com/kc', facebookUrl: null, instagramUrl: null, linkedinUrl: null }
 const BODY = `Hi Jordan,\n\nThanks for reaching out.\n\nThank you,\n${SIGNATURE_MARKER}`
-const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+// 2026-11-12 — the two honeycomb bands and the logo gained a height attribute
+// (so a blocked image keeps its shape; lib/drip-email-layout.ts). These stored
+// fingerprints are from before that, and still hold for EVERYTHING ELSE: the
+// three attributes are taken back out before comparing. They are pinned on
+// their own in lib/beta-email-preview-frame.test.tsx.
+const noImgHeights = (html: string) => html.replace(/(<img src="[^"]*" width="600") height="150"( alt="")/g, '$1$2').replace(/(<img src="[^"]*" width="72") height="51"( alt="Bee Organized")/g, '$1$2')
+const sha = (s: string) => createHash('sha256').update(noImgHeights(s)).digest('hex')
 const base = (st: string | null) => ({ location_name: 'Kansas City', location_phone: '(816) 555-0100', reviews_link: 'https://g.page/r/kc', signature: null, style: st, heading: 'Welcome' })
 const CENTRE = { label: 'Book Your Assessment', href: 'https://cal.example.com/kc' }
 

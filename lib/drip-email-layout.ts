@@ -137,6 +137,22 @@ function appAsset(path: string, env: NodeJS.ProcessEnv = process.env): string {
   const base = (env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')
   return base ? `${base}${path}` : path
 }
+// IMAGE HEIGHTS, AS ATTRIBUTES (2026-11-12). The two bands and the logo had a
+// width and no height. That is invisible while images load — and when they do
+// not (a recipient with images off, a blocked request), Safari's engine, which
+// Apple Mail uses, draws each band as an empty box as TALL as it is wide: the
+// email opened with a 600×600 hole, 1,646px tall where it should be 1,175
+// (Rounded, with two bands: 2,249 for 1,328). Measured, not assumed.
+//
+// The attribute gives the box its shape before — or without — the picture:
+// 600×150 for a band. Every <img> keeps `height:auto` in its style, so the
+// attribute is only a ratio hint: with images on the email is pixel-for-pixel
+// what it was, at 600px and at phone width (the band still scales to the card).
+// The numbers are the artwork's own proportions (1200×300 → 600×150; the logo
+// 300×211 → 72×51) — nothing about the pictures or the layout changes.
+export const EMAIL_HONEYCOMB_HEIGHT = 150
+export const DRIP_LOGO_HEIGHT = 51
+
 export const resolveHoneycombUrl = (env: NodeJS.ProcessEnv = process.env) => appAsset(EMAIL_HONEYCOMB_PATH, env)
 export const resolveHoneycombFlippedUrl = (env: NodeJS.ProcessEnv = process.env) => appAsset(EMAIL_HONEYCOMB_FLIPPED_PATH, env)
 
@@ -300,7 +316,7 @@ export function buildBrandedShellHtml(
     : ''
   const bottomBandRow = style === 'rounded'
     ? `
-          <tr><td style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombFlippedUrl()}" width="600" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>`
+          <tr><td style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombFlippedUrl()}" width="600" height="${EMAIL_HONEYCOMB_HEIGHT}" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>`
     : ''
   const darkCss = `.dm-bg{background-color:#1F201E !important;}.dm-card{background-color:#2A2B29 !important;}.dm-text,.dm-text a,.dm-text strong{color:#E4E5E1 !important;}.dm-line{border-color:#454643 !important;}`
 
@@ -326,9 +342,9 @@ ${heading ? `<title>${escHtml(heading)}</title>\n` : ''}<link href="${FONTS_LINK
     <tr>
       <td align="center" style="padding:24px 10px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="bo-card dm-card" bgcolor="#FFFFFF" style="width:100%;max-width:600px;background-color:#FFFFFF;">
-          <tr><td align="right" style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombUrl()}" width="600" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>
+          <tr><td align="right" style="padding:0;font-size:0;line-height:0;"><img src="${resolveHoneycombUrl()}" width="600" height="${EMAIL_HONEYCOMB_HEIGHT}" alt="" style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>
           <tr><td align="center" style="padding:0 24px 4px 24px;">
-            <img src="${logoUrl}" width="72" alt="Bee Organized" style="display:block;margin:0 auto;width:72px;height:auto;border:0;font-family:${EMAIL_SANS};font-size:20px;letter-spacing:3px;color:${EMAIL_TEXT};">
+            <img src="${logoUrl}" width="72" height="${DRIP_LOGO_HEIGHT}" alt="Bee Organized" style="display:block;margin:0 auto;width:72px;height:auto;border:0;font-family:${EMAIL_SANS};font-size:20px;letter-spacing:3px;color:${EMAIL_TEXT};">
             <p class="dm-text" style="margin:10px 0 0 0;font-family:${EMAIL_SANS};font-size:13px;letter-spacing:4px;text-transform:uppercase;color:${EMAIL_TEXT};">Bee Organized</p>
           </td></tr>${headingRow}
           <tr>

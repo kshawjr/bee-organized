@@ -285,6 +285,13 @@ describe('COMPLIANCE — what actually ships for a Closed-Job follow-up', () => 
 })
 
 // ── Drips are unchanged ─────────────────────────────────────────────────────
+// 2026-11-12 — the two honeycomb bands and the logo gained a height attribute
+// (so a blocked image keeps its shape; lib/drip-email-layout.ts). These stored
+// fingerprints are from before that, and still hold for EVERYTHING ELSE: the
+// three attributes are taken back out before comparing. They are pinned on
+// their own in lib/beta-email-preview-frame.test.tsx.
+const noImgHeights = (html: string) => html.replace(/(<img src="[^"]*" width="600") height="150"( alt="")/g, '$1$2').replace(/(<img src="[^"]*" width="72") height="51"( alt="Bee Organized")/g, '$1$2')
+
 describe('drips are byte-identical to before the footer slot existed', () => {
   // SHA-256 of buildBrandedDripHtml / buildBrandedDripText for this exact input.
   // First recorded on d4e99c5 BEFORE the card-footer slot was added.
@@ -294,7 +301,7 @@ describe('drips are byte-identical to before the footer slot existed', () => {
   it('same output, byte for byte', () => {
     const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
     const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
-    const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+    const sha = (s: string) => createHash('sha256').update(noImgHeights(s)).digest('hex')
     expect(sha(buildBrandedDripHtml(body, ctx))).toBe(
       '79c288b84e44173d315a43ea0f609c152953aa22ffa9ddb325059e0c8375da4c',
     )
@@ -319,7 +326,7 @@ describe('the Closed-Job follow-ups are byte-identical to 5656a86', () => {
     const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
     const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
     const r = renderStageEmailContent('opp_closed_job_3mo', body, ctx, { html: '<div>FOOTER</div>', text: 'FOOTER' })
-    const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+    const sha = (s: string) => createHash('sha256').update(noImgHeights(s)).digest('hex')
     expect(sha(r.html)).toBe('d076bb3748c5decbfe114a7a1b63bf087511d405c077588e5434b338c9952eaa')
     expect(sha(r.text)).toBe('ec823e07f0065881ba3e4b6f2ffe3ff3acfd9354dc1fb6fb4e3f2a2f3b766e20')
   })

@@ -94,7 +94,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (denied) return denied
   const row = await readRow(params.id)
   if (!row) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
-  return NextResponse.json({ settings: locationEmailOptionsFromRow(row), ready: { ...readiness(row), align: await alignReady() } })
+  return NextResponse.json({
+    settings: locationEmailOptionsFromRow(row),
+    ready: { ...readiness(row), align: await alignReady() },
+    // The postal address printed at the foot of every commercial email
+    // (CAN-SPAM; MARKETING_POSTAL_ADDRESS, read by lib/marketing-unsubscribe.ts
+    // at send time). Read-only here, so the Emails screen's preview can show
+    // the block the client really gets. Null when it isn't configured.
+    postalAddress: (process.env.MARKETING_POSTAL_ADDRESS || '').trim() || null,
+  })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

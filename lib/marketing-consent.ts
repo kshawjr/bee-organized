@@ -92,6 +92,18 @@ function escapeHtml(s: string): string {
 // TOLERATED by the builder so previews work before configuration, but the
 // future sender must treat a missing address like a missing unsubscribe
 // token: refuse to send.
+// WHICH EMAILS CARRY IT, and the "why you're getting this" line each uses.
+// The same three keys the sends treat as commercial (lib/welcome-email.ts,
+// lib/stage-emails.ts COMMERCIAL_STAGE_EMAIL_KEYS, app/api/emails/test-send) —
+// stated here, in the pure module, so the on-screen PREVIEW can show the block
+// too. Drip emails are not in it: they never carry one.
+// This list decides nothing about a send; a test holds it equal to theirs.
+export const COMMERCIAL_EMAIL_AUDIENCE: Record<string, MarketingAudience> = {
+  welcome: 'inquiry',
+  opp_closed_job_3mo: 'client',
+  opp_closed_job_12mo: 'client',
+}
+
 export function buildMarketingFooter(args: {
   unsubscribeUrl: string
   postalAddress?: string | null

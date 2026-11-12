@@ -18510,7 +18510,7 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
           We can't show this one. It points at a template whose wording we couldn't load, so anything shown here might not be what actually sends.
         </ENote>
       ) : preview ? (
-        <EmailFrame html={previewEmailHtml({ row, style: preview.style, values: preview.values, cfg, signature: preview.signature })} />
+        <EmailFrame html={previewEmailHtml({ row, style: preview.style, values: preview.values, cfg, signature: preview.signature, postalAddress: preview.postalAddress })} />
       ) : (
         <>
           <div style={{ background:ET.background, border:`1px solid ${ET.border}`, borderRadius:ER.lg, padding:'16px 20px', fontFamily:EF.body, fontSize:'14px', lineHeight:1.65, color:ET.ink, whiteSpace:'pre-line' }}>{row.body}</div>
@@ -18564,7 +18564,7 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
         <EBtn variant="primary" onClick={save} disabled={busy || !changed}>{busy ? 'Saving…' : 'Save'}</EBtn>
       </>}>
       {previewing ? (
-        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
+        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign), templateKey: row.templateKey }} />
       ) : <>
       <label style={eLabelStyle}>Subject</label>
       <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...eInputStyle, marginBottom:'12px' }} />
@@ -23004,7 +23004,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     let cancelled = false
     fetch(`/api/locations/${realLocId}/email-settings`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => { if (!cancelled && j?.settings) setEmailSettings({ settings: j.settings, ready: j.ready || { style:false, links:false } }) })
+      .then(j => { if (!cancelled && j?.settings) setEmailSettings({ settings: j.settings, ready: j.ready || { style:false, links:false }, postalAddress: j.postalAddress || null }) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [realLocId, activeSection])
@@ -23056,7 +23056,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   function emailsEditorProps() {
     const es = emailSettings.settings
     return {
-      preview: { style: es.style, values: emailsPreviewValues(), signature: signatureFromData(emailSig.data) },
+      // postalAddress: the foot of a commercial email (previewCardFooter).
+      preview: { style: es.style, values: emailsPreviewValues(), signature: signatureFromData(emailSig.data), postalAddress: emailSettings.postalAddress || null },
       links: { discovery: es.discoveryBookingLink, inHome: settings.location.bookingLink, video: es.virtualBookingLink },
       alignReady: emailSettings.ready.align === true,
     }
