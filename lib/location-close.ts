@@ -128,6 +128,7 @@ export const LOCATION_REFERENCES: readonly LocationRef[] = [
   { table: 'lead_notification_externals', column: 'location_id', form: 'uuid_text', fk: 'none', action: 'keep', why: 'non-login recipients; silenced by notifications_live=false' },
   { table: 'lead_notification_prefs', column: 'location_id', form: 'uuid_text', fk: 'none', action: 'keep', why: 'per-user notification settings' },
   { table: 'location_project_type_senders', column: 'location_id', form: 'uuid_text', fk: 'none', action: 'keep', why: 'per-project-type sender setup' },
+  { table: 'location_bees', column: 'location_uuid', form: 'uuid', fk: 'cascade', action: 'keep', why: 'its bee roster (names + emails, no logins); back as it was on reopen' },
   { table: 'location_jobber_users', column: 'location_id', form: 'slug', fk: 'none', action: 'keep', why: 'Jobber roster cache (0 rows today)' },
 
   // ── logs, never rewritten ──

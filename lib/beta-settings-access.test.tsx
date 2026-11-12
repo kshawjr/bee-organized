@@ -98,7 +98,7 @@ const currentKey = (): string | null =>
 // group, top to bottom.
 const ALL_SECTIONS = [
   'profile',                          // You
-  'location', 'team', 'tags',         // Your business (tags: 2026-10-16)
+  'location', 'team', 'bees', 'tags', // Your business (tags: 2026-10-16, bees: 2026-11-04)
   'emails', 'texts',                  // Client messages
   'newleads',                         // Notifications
   'slack', 'jobber', 'mailchimp',     // Connections
@@ -114,9 +114,10 @@ describe('SettingsScreen sections by franchiseRole', () => {
   })
 
   // A manager may create and manage the location's OWN tags (2026-10-16,
-  // Kevin) — that one section joins Profile; everything else stays owner-only.
-  it('manager sees Profile and Tags — nothing else', async () => {
-    expect(await sectionKeys('manager')).toEqual(['profile', 'tags'])
+  // Kevin) and its bee roster (2026-11-04) — those join Profile; everything
+  // else stays owner-only (Team and seats included: seats cost money).
+  it('manager sees Profile, Bees and Tags — nothing else', async () => {
+    expect(await sectionKeys('manager')).toEqual(['profile', 'bees', 'tags'])
   })
 
   it("lite_user (franchiseRole 'viewer' — what mapRole actually emits) sees Profile only, no config sections", async () => {
@@ -202,7 +203,7 @@ describe('groups never render empty (issue 246 step 1)', () => {
   it('a manager sees ONLY the groups that have a visible item', async () => {
     await mountRole('manager')
     const rail = container.querySelector('[data-settings-nav="rail"]')!
-    expect(groupTitles(rail)).toEqual(['You', 'Your business'])   // Your business: Tags only
+    expect(groupTitles(rail)).toEqual(['You', 'Your business'])   // Your business: Bees + Tags only
     expect(rail.textContent).not.toContain('Team and seats')
     expect(rail.textContent).not.toContain('Location')
     // Belt and braces: not a single header of the owner-only groups survives.

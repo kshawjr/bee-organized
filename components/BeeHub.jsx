@@ -73,6 +73,7 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
 import OwnTagsSettings from "@/components/hive/OwnTagsSettings"
+import BeeRosterSettings from "@/components/hive/BeeRosterSettings"
 import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
 import RetiredTagsPanel from "@/components/hive/RetiredTagsPanel"
 // Reminders (2026-09-30) — the page and the Home block. Props-only leaves
@@ -23776,6 +23777,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // depending on the width of your screen.
       ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
       ...(canManageTeam ? [{ key:'team',     label:'Team and seats', icon:'👥' }] : []),
+      // Bees (2026-11-04): the people who work the jobs — a roster, not
+      // logins. Owner AND manager, like Tags (same server check); Team and
+      // seats stays owner-only because seats cost money and bees don't.
+      ...(canManageOwnTags ? [{ key:'bees', label:'Bees', icon:'🐝' }] : []),
       // A location's own tags (2026-10-16): owner AND manager — the same
       // people who may create them. Allowlist, like ownerConfig.
       ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
@@ -23980,6 +23985,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         {/* ── My Location ── */}
         {activeSection==='tags'&&(
           <OwnTagsSettings locationId={realLocId} locationName={settings.location.name || ''} />
+        )}
+        {activeSection==='bees'&&(
+          <BeeRosterSettings locationId={realLocId} locationName={settings.location.name || ''} />
         )}
         {activeSection==='location'&&(
           <>
