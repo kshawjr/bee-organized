@@ -146,6 +146,9 @@ const LOC_OLD = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'   // Slack connected, not
 const ENG = '00000000-0000-4000-8000-000000000001'
 const ENG_QUIET = '00000000-0000-4000-8000-000000000002'
 const ENG_OLD = '00000000-0000-4000-8000-000000000003'
+const LOC_B = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'     // a second reconnected location
+const ENG_PLAIN = '00000000-0000-4000-8000-000000000004' // reconnected location, job has NO channel yet
+const ENG_B = '00000000-0000-4000-8000-000000000005'
 const TOKEN = 'xoxb-test'
 const NEW_SCOPES = 'chat:write,channels:read,channels:manage,users:read,users:read.email'
 const OLD_SCOPES = 'chat:write,channels:read,users:read,users:read.email'
@@ -186,16 +189,21 @@ beforeEach(() => {
       { id: LOC, location_id: 'loc_test', jobber_connected: true, slack_connected: true, slack_bot_token: TOKEN, slack_scopes: NEW_SCOPES },
       { id: LOC_QUIET, location_id: 'loc_quiet', jobber_connected: true, slack_connected: false, slack_bot_token: null, slack_scopes: null },
       { id: LOC_OLD, location_id: 'loc_old', jobber_connected: true, slack_connected: true, slack_bot_token: TOKEN, slack_scopes: OLD_SCOPES },
+      { id: LOC_B, location_id: 'loc_b', jobber_connected: true, slack_connected: true, slack_bot_token: TOKEN, slack_scopes: NEW_SCOPES },
     ],
     engagements: [
       eng(ENG, LOC, { slack_channel_id: 'C1', slack_channel_name: 'sarah-pantry' }),
       eng(ENG_QUIET, LOC_QUIET),
       eng(ENG_OLD, LOC_OLD, { slack_channel_id: 'C9', slack_channel_name: 'old-one' }),
+      eng(ENG_PLAIN, LOC),
+      eng(ENG_B, LOC_B, { slack_channel_id: 'CB', slack_channel_name: 'b-one' }),
     ],
     jobs: [
       jobRow('10000000-0000-4000-8000-000000000001', 'loc_test', '501', ENG),
       jobRow('10000000-0000-4000-8000-000000000002', 'loc_quiet', '601', ENG_QUIET),
       jobRow('10000000-0000-4000-8000-000000000003', 'loc_old', '701', ENG_OLD),
+      jobRow('10000000-0000-4000-8000-000000000004', 'loc_test', '801', ENG_PLAIN),
+      jobRow('10000000-0000-4000-8000-000000000005', 'loc_b', '901', ENG_B),
     ],
     location_bees: [], engagement_bees: [], job_visits: [], sync_log: [],
     hub_users: [{ id: 'u-owner', role: 'owner', location_id: LOC, email: 'owner@bee.test', full_name: 'Olive Owner' }],
@@ -210,10 +218,12 @@ beforeEach(() => {
     '501': { visits: [{ id: '9001', crew: [ANA, SAM] }] },
     '601': { visits: [{ id: '9101', crew: [ANA] }] },
     '701': { visits: [{ id: '9201', crew: [ANA] }] },
+    '801': { visits: [{ id: '9301', crew: [ANA] }] },
+    '901': { visits: [{ id: '9401', crew: [ANA] }] },
   }
   slack = {
     users: { 'ana@bee.test': 'U_ANA', 'sam@bee.test': 'U_SAM', 'zoe@bee.test': 'U_ZOE', 'owner@bee.test': 'U_OWNER' },
-    channels: new Map([['C1', { members: new Set(['UBOT', 'U_OWNER', 'U_HAND']), archived: false }], ['C9', { members: new Set(['UBOT']), archived: false }]]),
+    channels: new Map([['C1', { members: new Set(['UBOT', 'U_OWNER', 'U_HAND']), archived: false }], ['C9', { members: new Set(['UBOT']), archived: false }], ['CB', { members: new Set(['UBOT']), archived: false }]]),
     calls: [], down: false,
   }
   vi.stubGlobal('fetch', vi.fn(slackFetch))
@@ -389,25 +399,79 @@ describe('a visit notice for a job Bee Hub does not have', () => {
   })
 })
 
-describe('a location with no Slack', () => {
-  it('records who is on the job and makes no Slack call at all', async () => {
-    const r = await notice('VISIT_UPDATE', '9101', 'loc_quiet', LOC_QUIET)
-    expect(r.processed).toBe(true)
-    expect(onJob(ENG_QUIET)).toEqual(['Ana Bee'])
-    expect(beeByEmail('ana@bee.test')).toMatchObject({ location_uuid: LOC_QUIET, jobber_user_id: ANA, slack_user_id: null, slack_checked_at: null })
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(r.note).toContain('slack no_slack')
+// Kevin, 2026-11-12: bees exist to drive job channels, and a location that has
+// not reconnected Slack cannot have one. So for those locations NOTHING runs —
+// not a Jobber read, not a bee, not a Slack call — from any of the three ways in.
+describe('only locations that have reconnected Slack take part', () => {
+  const untouched = async (run: () => Promise<any>) => {
+    const before = snapshot()
+    const out = await run()
+    expect(snapshot()).toBe(before)
+    expect(h.db.writes).toEqual([])
+    expect(h.jobber.said).toEqual([])                 // Jobber was not even asked
+    expect(globalThis.fetch).not.toHaveBeenCalled()   // nor Slack
+    return out
+  }
+
+  it('a visit notice at a location with no Slack records nothing and reads nothing', async () => {
+    const r = await untouched(() => notice('VISIT_UPDATE', '9101', 'loc_quiet', LOC_QUIET))
+    expect(r).toEqual({ processed: true, note: 'crew not recorded — this location has not reconnected Slack for job channels' })
   })
 
-  it('connected but not reconnected: bees recorded, the channel is not touched', async () => {
-    const r = await notice('VISIT_UPDATE', '9201', 'loc_old', LOC_OLD)
-    expect(onJob(ENG_OLD)).toEqual(['Ana Bee'])
-    expect(r.note).toContain('slack not_reconnected')
-    expect(slack.calls.filter(c => c.method.startsWith('conversations.'))).toEqual([])
+  it('a visit notice at a location with Slack connected but NOT reconnected: the same', async () => {
+    const r = await untouched(() => notice('VISIT_UPDATE', '9201', 'loc_old', LOC_OLD))
+    expect(r.note).toContain('has not reconnected Slack')
     expect(inChannel('C9')).toEqual(['UBOT'])
   })
 
-  it('a job with no channel yet: bees recorded, nobody invited anywhere', async () => {
+  it('a job event at such a location (the call JOB_CREATE and JOB_UPDATE make) records nothing either', async () => {
+    expect(await untouched(() => mirrorCrewSafely(db, ENG_OLD))).toEqual({ ok: false, engagementId: ENG_OLD, reason: 'slack_not_reconnected' })
+    expect(await untouched(() => mirrorCrewSafely(db, ENG_QUIET))).toEqual({ ok: false, engagementId: ENG_QUIET, reason: 'slack_not_reconnected' })
+  })
+
+  it('the sweep never reads Jobber for them, on any of its twelve turns — even with a retry mark pointing at one', async () => {
+    h.db.tables.sync_log.push({ id: 's9', direction: 'inbound', created_at: new Date().toISOString(), message: `x — ${CREW_RETRY_MARK}${ENG_QUIET}` })
+    for (let slot = 0; slot < CREW_SWEEP_BUCKETS; slot++) await sweepJobCrews(db, { now: Date.now() + slot * 15 * 60 * 1000 })
+    const asked = h.jobber.said.map((s: any) => s.vars.jobId)
+    expect(asked).not.toContain(h.gid('Job', '601'))
+    expect(asked).not.toContain(h.gid('Job', '701'))
+    expect(onJob(ENG_QUIET)).toEqual([])
+    expect(onJob(ENG_OLD)).toEqual([])
+    expect(h.db.tables.location_bees.filter((b: any) => b.location_uuid === LOC_QUIET || b.location_uuid === LOC_OLD)).toEqual([])
+    // The reconnected locations did run.
+    expect(asked).toContain(h.gid('Job', '501'))
+    expect(asked).toContain(h.gid('Job', '901'))
+  })
+
+  it('the sweep does not even pick their jobs up: a run counts only reconnected locations’ jobs', async () => {
+    // A turn that is not the turn of any no-channel job here, so the run is
+    // exactly the jobs WITH a channel. Three have one (ENG, ENG_B, ENG_OLD);
+    // ENG_OLD's location has not reconnected, so it is not counted.
+    const taken = new Set([ENG_PLAIN, ENG_QUIET, ENG, ENG_B, ENG_OLD].map(crewBucket))
+    const slot = Array.from({ length: CREW_SWEEP_BUCKETS }, (_, i) => i).find(i => !taken.has(i))!
+    const r = await sweepJobCrews(db, { now: slot * 15 * 60 * 1000 })
+    expect(r.checked).toBe(2)
+  })
+
+  it('with NO reconnected location at all, the sweep reads nothing', async () => {
+    for (const l of h.db.tables.locations) l.slack_scopes = OLD_SCOPES
+    const r = await sweepJobCrews(db, { now: 0 })
+    expect(r).toMatchObject({ ok: true, checked: 0 })
+    expect(h.jobber.said).toEqual([])
+  })
+
+  it('the rollout: when an owner reconnects, that location is filled in — instantly by a notice, and within one cycle by the sweep', async () => {
+    h.db.tables.locations.find((l: any) => l.id === LOC_OLD).slack_scopes = NEW_SCOPES   // the owner reconnected
+    await notice('VISIT_UPDATE', '9201', 'loc_old', LOC_OLD)
+    expect(onJob(ENG_OLD)).toEqual(['Ana Bee'])
+    expect(inChannel('C9')).toEqual(['UBOT', 'U_ANA'])
+    // And with no notice at all:
+    h.db.tables.engagement_bees = []; h.db.tables.location_bees = []; slack.channels.get('C9')!.members = new Set(['UBOT'])
+    await sweepJobCrews(db, { now: 0 })
+    expect(onJob(ENG_OLD)).toEqual(['Ana Bee'])
+  })
+
+  it('at a reconnected location, a job with no channel yet still has its bees recorded, and nobody is invited anywhere', async () => {
     h.db.tables.engagements[0].slack_channel_id = null
     const r = await notice('VISIT_UPDATE', '9001')
     expect(onJob()).toEqual(['Ana Bee', 'Sam Carpenter'])
@@ -488,7 +552,7 @@ describe('a failed read never looks like an empty crew', () => {
       if (query.includes('JobCrewForMirror') && n++ === 0) throw new Error('Jobber GraphQL HTTP 503: busy')
       return realRead(slug, query, vars)
     })
-    const out = await handleVisitNotice(db, { locationSlug: 'loc_test', visitId: h.gid('Visit', '9001'), read: flaky as any })
+    const out = await handleVisitNotice(db, { locationSlug: 'loc_test', locationUuid: LOC, visitId: h.gid('Visit', '9001'), read: flaky as any })
     expect(out).toEqual({ status: 'mirrored', result: { ok: false, engagementId: ENG, reason: 'jobber_unread' } })
     // Through the handler, the same failure is an error row with the mark.
     h.jobber.throws = false; h.jobber.jobs['501'] = 'fail'
@@ -645,23 +709,23 @@ describe('the 15-minute sweep is the backstop', () => {
     for (let slot = 0; slot < CREW_SWEEP_BUCKETS; slot++) {
       h.jobber.said = []
       await sweepJobCrews(db, { now: at(slot) })
-      if (h.jobber.said.some((s: any) => s.vars.jobId === h.gid('Job', '601'))) seen.push(slot)
+      if (h.jobber.said.some((s: any) => s.vars.jobId === h.gid('Job', '801'))) seen.push(slot)
     }
-    expect(seen).toEqual([slotFor(ENG_QUIET)])
-    expect(onJob(ENG_QUIET)).toEqual(['Ana Bee'])
+    expect(seen).toEqual([slotFor(ENG_PLAIN)])
+    expect(onJob(ENG_PLAIN)).toEqual(['Ana Bee'])
   })
 
   it('an engagement a notice could not finish is picked up from its retry mark on the next run, whatever its turn', async () => {
-    const wrongSlot = (slotFor(ENG_QUIET) + 1) % CREW_SWEEP_BUCKETS
+    const wrongSlot = (slotFor(ENG_PLAIN) + 1) % CREW_SWEEP_BUCKETS
     const now = at(wrongSlot + CREW_SWEEP_BUCKETS * 1000)
-    h.db.tables.sync_log.push({ id: 's1', direction: 'inbound', created_at: new Date(now - 5 * 60 * 1000).toISOString(), message: `topic=VISIT_UPDATE item=x error=crew_read_failed — crew not changed (jobber_unread) engagement=${ENG_QUIET} — ${CREW_RETRY_MARK}${ENG_QUIET}` })
+    h.db.tables.sync_log.push({ id: 's1', direction: 'inbound', created_at: new Date(now - 5 * 60 * 1000).toISOString(), message: `topic=VISIT_UPDATE item=x error=crew_read_failed — crew not changed (jobber_unread) engagement=${ENG_PLAIN} — ${CREW_RETRY_MARK}${ENG_PLAIN}` })
     const r = await sweepJobCrews(db, { now })
-    expect(onJob(ENG_QUIET)).toEqual(['Ana Bee'])
+    expect(onJob(ENG_PLAIN)).toEqual(['Ana Bee'])
     expect(r.changed).toBeGreaterThanOrEqual(1)
     // An old mark is not chased forever.
     h.db.tables.engagement_bees = []; h.db.tables.sync_log[0].created_at = new Date(now - 3 * 60 * 60 * 1000).toISOString()
     await sweepJobCrews(db, { now })
-    expect(onJob(ENG_QUIET)).toEqual([])
+    expect(onJob(ENG_PLAIN)).toEqual([])
   })
 
   it('a stored Slack problem is tried again by the sweep even when the crew has not changed', async () => {
@@ -684,11 +748,11 @@ describe('the 15-minute sweep is the backstop', () => {
     h.db.tables.jobs.push(jobRow('10000000-0000-4000-8000-000000000060', 'loc_test', '560', E2))
     h.jobber.jobs['501'] = 'fail'; h.jobber.jobs['560'] = { visits: [{ id: '1', crew: [ANA] }] }
     const r = await sweepJobCrews(db, { now: 0 })
-    expect(r.unread).toBe(2)
+    expect(r.unread).toBeGreaterThanOrEqual(2)   // the failed read, and every other job of that location
     expect(h.jobber.said.some((s: any) => s.vars.jobId === h.gid('Job', '560'))).toBe(false)
     expect(h.db.tables.engagement_bees.filter((x: any) => x.engagement_id === E2)).toEqual([])
-    // The other location still ran.
-    expect(h.jobber.said.some((s: any) => s.vars.jobId === h.gid('Job', '701'))).toBe(true)
+    // The other reconnected location still ran.
+    expect(h.jobber.said.some((s: any) => s.vars.jobId === h.gid('Job', '901'))).toBe(true)
   })
 
   it('the run stops at its limit and says how many were left', async () => {

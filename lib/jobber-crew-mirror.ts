@@ -43,14 +43,21 @@
 // by hand for someone who is not in Jobber has none, and is never taken off a
 // job here — that is what typing a bee by hand is still for.
 //
-// No Slack → steps 1–3 still run. The location's bees are recorded; the Slack
-// half is skipped and no Slack call is made.
+// ONLY FOR LOCATIONS THAT HAVE RECONNECTED SLACK (Kevin, 2026-11-12). Bees
+// exist to drive job channels, and a location whose Slack install has not
+// been reconnected (no channels:manage) cannot have one. For every other
+// location NOTHING here runs: no Jobber read, no bee added, no Slack call —
+// from a notice, from a job event, or from the sweep. Otherwise several
+// hundred names would appear on a screen 43 owners have never been told
+// about, for a feature they cannot use. It spreads as owners reconnect: the
+// first notice or sweep after a reconnect fills that location in.
 //
 // Log lines carry ids and counts only: no names, no emails, no tokens.
 // ─────────────────────────────────────────────────────────────
 import { isDeletedJob } from '@/components/hive/shared/jobDeleted'
 import { jobberGraphQL } from './jobber'
 import { encodeJobberId, extractJobberId } from './jobber-import'
+import { slackCanManageChannels } from './slack-scopes'
 import { BEE_COLUMNS, type BeeRow, checkBeeAgainstSlack, cleanEmail, cleanName, emailKey } from './location-bees'
 import {
   type Db, assignBee, unassignBee, beesTableMissing, loadEngagementForBees,
@@ -218,7 +225,7 @@ export async function beesForCrew(
 
 // ── One engagement ───────────────────────────────────────────
 export type CrewMirrorSkip =
-  | 'engagement_not_found' | 'closed' | 'no_jobs' | 'jobber_not_connected'
+  | 'engagement_not_found' | 'closed' | 'slack_not_reconnected' | 'no_jobs' | 'jobber_not_connected'
   | 'jobber_unread' | 'too_many_visits' | 'bees_not_set_up' | 'db_error'
 
 export type CrewMirrorResult =
@@ -230,7 +237,7 @@ export type CrewMirrorResult =
       removed: number      // taken off the job here
       newBees: number      // seen for the first time
       unresolved: number   // on a visit, but could not be made a bee
-      slack: 'no_slack' | 'no_channel' | 'not_reconnected' | 'unchanged' | 'matched' | 'problems'
+      slack: 'no_channel' | 'unchanged' | 'matched' | 'problems'
       slackProblems: number
     }
   | { ok: false; engagementId: string; reason: CrewMirrorSkip }
@@ -249,6 +256,10 @@ export async function mirrorCrewFromJobber(
   const eng = await loadEngagementForBees(db, engagementId)
   if (!eng) return skip('engagement_not_found')
   if (eng.closed_at) return skip('closed')
+  // The gate. Checked BEFORE Jobber is read, so a location that has not
+  // reconnected costs one database read and nothing else.
+  const slack = await readLocationSlackFull(db, eng.location_uuid)
+  if (!slack.connected || !slack.token || !slack.canManageChannels) return skip('slack_not_reconnected')
 
   const [locRes, jobsRes] = await Promise.all([
     db.from('locations').select('location_id, jobber_connected').eq('id', eng.location_uuid).maybeSingle(),
@@ -301,27 +312,23 @@ export async function mirrorCrewFromJobber(
     if (r.changed) removed++
   }
 
-  // 4. Slack. A location with no Slack stops here, having made no Slack call.
+  // 4. Slack.
   const out: CrewMirrorResult = {
     ok: true, engagementId, onJob: crew.size, added, removed,
-    newBees: bees.added.length, unresolved: bees.unresolved, slack: 'no_slack', slackProblems: 0,
+    newBees: bees.added.length, unresolved: bees.unresolved, slack: 'no_channel', slackProblems: 0,
   }
-  const slack = await readLocationSlackFull(db, eng.location_uuid)
-  if (slack.connected && slack.token) {
-    // A new bee is checked against Slack once, when added — the roster's own
-    // rule. Best effort: a failed check never undoes the bee.
-    for (const b of bees.added) await checkBeeAgainstSlack(db, b, slack)
-    if (!eng.slack_channel_id || eng.slack_channel_archived_at) out.slack = 'no_channel'
-    else if (!slack.canManageChannels) out.slack = 'not_reconnected'
-    else if (added + removed === 0 && !(opts.retrySlackProblems && eng.slack_channel_problems)) out.slack = 'unchanged'
-    else {
-      const rec = await reconcileChannelBees(db, {
-        token: slack.token, engagementId, locationUuid: eng.location_uuid,
-        channelId: eng.slack_channel_id, channelName: eng.slack_channel_name,
-      })
-      out.slackProblems = rec.problems.length
-      out.slack = rec.problems.length ? 'problems' : 'matched'
-    }
+  // A new bee is checked against Slack once, when added — the roster's own
+  // rule. Best effort: a failed check never undoes the bee.
+  for (const b of bees.added) await checkBeeAgainstSlack(db, b, slack)
+  if (!eng.slack_channel_id || eng.slack_channel_archived_at) out.slack = 'no_channel'
+  else if (added + removed === 0 && !(opts.retrySlackProblems && eng.slack_channel_problems)) out.slack = 'unchanged'
+  else {
+    const rec = await reconcileChannelBees(db, {
+      token: slack.token, engagementId, locationUuid: eng.location_uuid,
+      channelId: eng.slack_channel_id, channelName: eng.slack_channel_name,
+    })
+    out.slackProblems = rec.problems.length
+    out.slack = rec.problems.length ? 'problems' : 'matched'
   }
   console.log(`[crew-mirror] engagement=${engagementId} on_job=${out.onJob} added=${added} removed=${removed} new_bees=${out.newBees} unresolved=${out.unresolved} slack=${out.slack}${out.slackProblems ? `(${out.slackProblems})` : ''}`)
   return out
@@ -365,11 +372,16 @@ export type VisitNoticeResult =
   | { status: 'unknown_job'; jobberJobId: string | null }
   | { status: 'visit_unreadable' }
   | { status: 'visit_gone' } // deleted, and never seen before — the sweep catches it
+  | { status: 'not_reconnected' } // this location's Slack has no job channels: nothing is read or recorded
 
 export async function handleVisitNotice(
   db: Db,
-  args: { locationSlug: string; visitId: string; read?: JobberReader },
+  args: { locationSlug: string; locationUuid: string; visitId: string; read?: JobberReader },
 ): Promise<VisitNoticeResult> {
+  // The gate, before anything is asked of Jobber: ~190 visit notices a day
+  // arrive across the fleet, nearly all from locations with no job channels.
+  const gate = await readLocationSlackFull(db, args.locationUuid)
+  if (!gate.connected || !gate.token || !gate.canManageChannels) return { status: 'not_reconnected' }
   const read = args.read || (jobberGraphQL as JobberReader)
   const visitNumeric = extractJobberId(args.visitId) || String(args.visitId)
 
@@ -429,6 +441,7 @@ export async function handleVisitNotice(
 //      last 45 minutes)
 //   2. every open job that HAS a Slack channel — this is where a missed
 //      change is felt, so they are checked on every run
+//   (only at locations that have reconnected Slack — see the top of the file)
 //   3. one twelfth of the open jobs at 'Job in Progress' with no channel —
 //      each is reached once every three hours. Their bees are a record, not a
 //      conversation; three hours is the price of not reading a thousand jobs
@@ -462,6 +475,14 @@ export async function sweepJobCrews(
   const budget = opts.budgetMs ?? CREW_SWEEP_BUDGET_MS
   const slot = Math.floor(now / SLOT_MS)
 
+  // Which locations take part at all: Slack connected AND reconnected.
+  const { data: locRows, error: locErr } = await db.from('locations')
+    .select('id, slack_connected, slack_bot_token, slack_scopes').eq('slack_connected', true).limit(1000)
+  if (locErr) { console.error('[crew-mirror] sweep could not read locations —', locErr.message); return { ...r, ok: false } }
+  const reconnected = new Set<string>(((locRows || []) as any[])
+    .filter(l => typeof l.slack_bot_token === 'string' && l.slack_bot_token && slackCanManageChannels(l)).map(l => l.id))
+  if (!reconnected.size) return r
+
   const [retries, withChannel, inProgress] = await Promise.all([
     db.from('sync_log').select('message').eq('direction', 'inbound')
       .gte('created_at', new Date(now - 45 * 60 * 1000).toISOString()).ilike('message', `%${CREW_RETRY_MARK}%`).limit(200),
@@ -475,8 +496,10 @@ export async function sweepJobCrews(
     return { ...r, ok: false }
   }
 
+  const here = (rows: any[] | null) => ((rows || []) as any[]).filter(e => reconnected.has(e.location_uuid))
+  withChannel.data = here(withChannel.data); inProgress.data = here(inProgress.data)
   const locOf = new Map<string, string>()
-  for (const e of [...(withChannel.data || []), ...(inProgress.data || [])] as any[]) locOf.set(e.id, e.location_uuid)
+  for (const e of [...withChannel.data, ...inProgress.data] as any[]) locOf.set(e.id, e.location_uuid)
   const retryIds = ((retries.data || []) as any[])
     .map(x => (String(x.message || '').split(CREW_RETRY_MARK)[1] || '').match(/^[0-9a-f-]{36}/i)?.[0] || '')
     .filter(Boolean)

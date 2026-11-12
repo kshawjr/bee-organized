@@ -1769,12 +1769,17 @@ export async function handleAppDisconnect(ctx: HandlerCtx): Promise<HandlerResul
 // READ ONLY towards Jobber. Until 2026-11-12 these four topics were discarded
 // as unknown: about 5,700 notices a month.
 //
+//   · location has not reconnected Slack → nothing is read or recorded
+//     (Kevin, 2026-11-12: bees exist to drive job channels).
 //   · job not in Bee Hub (a visit can arrive before its job) → nothing is
 //     created or changed; the note says so. JOB_CREATE mirrors the crew.
 //   · Jobber could not be read → NOT a silent drop: the row is an error and
 //     carries a crew_retry mark the 15-minute sweep picks up.
 export async function handleVisitEvent(ctx: HandlerCtx): Promise<HandlerResult> {
-  const out = await handleVisitNotice(supabaseService, { locationSlug: ctx.location.location_id, visitId: ctx.itemId })
+  const out = await handleVisitNotice(supabaseService, { locationSlug: ctx.location.location_id, locationUuid: ctx.location.id, visitId: ctx.itemId })
+  if (out.status === 'not_reconnected') {
+    return { processed: true, note: 'crew not recorded — this location has not reconnected Slack for job channels' }
+  }
   if (out.status === 'unknown_job') {
     return { processed: true, note: `visit of job ${out.jobberJobId ?? 'unknown'} — that job is not in Bee Hub (yet); nothing changed` }
   }
