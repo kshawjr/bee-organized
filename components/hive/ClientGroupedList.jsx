@@ -51,6 +51,15 @@
 //     through the SAME deriveClientStatus call as a loaded row, so it lands in
 //     its real band. Nothing here assigns a band by hand.
 // An empty box asks nothing and renders exactly as before.
+//
+// EVERY BAND BUT NURTURING IS WHOLE (slice 2 — 2026-11-12). On a cut-off load
+// the page also loads every older client who is being worked
+// (lib/hub-working-clients.ts), so New, Attempting, Active, Client, Past and
+// No contact are complete. What is still not listed is all Nurturing, and
+// `clientsCutoff.notListed` is exactly how many: the Nurturing header counts
+// them and a line under it says they are found by search. When the page could
+// not establish that (notListed null) no band claims a number it cannot back —
+// the list says it is partial instead.
 // The tag FILTER is still a filter over rows in hand: loaded clients plus
 // whatever the search brought in. When the load was cut short the screen says
 // so rather than letting a short tag list pass for the whole location.
@@ -104,7 +113,7 @@ const NO_REMOTE = { term: null, people: [], total: 0, capped: false, loading: fa
 // actually search for, so a reply can be matched to the box that asked.
 const serverTerm = (raw) => (raw || '').replace(/\*/g, ' ').trim().slice(0, 80)
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null }) {
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null, clientsCutoff = null }) {
   const [search, setSearch] = useState('')
   const [remote, setRemote] = useState(NO_REMOTE)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -166,10 +175,14 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   const term = serverTerm(search)
   const olderThan = useMemo(() => {
     if (!leadsTruncated) return null
+    // The page says how far back its ordinary load reaches. NOT the oldest
+    // row in hand: the older working clients it also loads would drag that
+    // date back and the search would skip everyone in between.
+    if (clientsCutoff?.loadedBackTo) return clientsCutoff.loadedBackTo
     let min = null
     for (const p of scoped) if (p.created && (min === null || p.created < min)) min = p.created
     return min
-  }, [leadsTruncated, scoped])
+  }, [leadsTruncated, scoped, clientsCutoff])
   const reqSeq = useRef(0)
   useEffect(() => {
     if (!term) { setRemote(NO_REMOTE); return }
@@ -226,6 +239,13 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   const isExpanded = (gid) => (q || tagFilter.length ? true : expandedMap[gid] === true)
   const totalShown = visible.length
 
+  // Clients at this location that are not in the list. All Nurturing, and
+  // only counted on the plain list: a search or tag filter shows its own
+  // matches, with its own notices.
+  const plainList = !q && tagFilter.length === 0
+  const notListed = leadsTruncated && plainList && typeof clientsCutoff?.notListed === 'number' ? clientsCutoff.notListed : 0
+  const listPartial = leadsTruncated && plainList && typeof clientsCutoff?.notListed !== 'number'
+
   return (
     <div>
       <style>{`.bee-grp-row:hover { border-color:${T.hairline.strong} }`}</style>
@@ -275,11 +295,17 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
       )}
       {leadsTruncated && tagFilter.length > 0 && !term && (
         <p role="status" data-testid="clients-tagfilter-partial" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
-          Tag filters only look through your newest {scoped.length.toLocaleString()} clients. To find anyone older, type in the search box.
+          Tag filters only look through the {scoped.length.toLocaleString()} clients listed here. To find anyone older, type in the search box.
         </p>
       )}
 
-      {totalShown === 0 && (
+      {listPartial && (
+        <p role="status" data-testid="clients-list-partial" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
+          This list shows {scoped.length.toLocaleString()} of your clients — older ones aren't listed here. Type in the search box to find anyone.
+        </p>
+      )}
+
+      {totalShown === 0 && notListed === 0 && (
         searching
           ? (
             <div data-testid="clients-search-loading" style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
@@ -301,8 +327,11 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
       )}
 
       {CLIENT_STATUS_ORDER.map(statusKey => {
-        const rows = groups.get(statusKey)
-        if (!rows || rows.length === 0) return null
+        const listed = groups.get(statusKey) || []
+        // Only Nurturing can have clients that are not listed (see header).
+        const unlisted = statusKey === 'Nurturing' ? notListed : 0
+        if (listed.length === 0 && unlisted === 0) return null
+        const rows = listed
         const meta = CLIENT_STATUS_META[statusKey]
         const fam = CHIP_STYLES[meta.styleKey] || CHIP_STYLES.gray
         const expanded = isExpanded(statusKey)
@@ -319,7 +348,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
             >
               <StatusDot color={fam.text} />
               <span style={{ fontSize: '13px', fontWeight: 600, color: fam.text, whiteSpace: 'nowrap' }}>{meta.label}</span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: fam.text, opacity: 0.7, fontVariantNumeric: T.type.tabular }}>· {rows.length}</span>
+              <span style={{ fontSize: '12px', fontWeight: 500, color: fam.text, opacity: 0.7, fontVariantNumeric: T.type.tabular }}>· {(rows.length + unlisted).toLocaleString()}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color: fam.text }}>
                 <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
               </span>
@@ -336,6 +365,11 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
             {STATUS_DEFS[statusKey] && (
               <p style={{ margin: '3px 4px 8px 21px', fontSize: '11.5px', lineHeight: 1.4, color: fam.text, opacity: 0.72 }}>
                 {STATUS_DEFS[statusKey]}
+              </p>
+            )}
+            {unlisted > 0 && (
+              <p data-testid="clients-nurturing-unlisted" style={{ margin: '0 4px 8px 21px', fontSize: '11.5px', lineHeight: 1.4, color: fam.text, opacity: 0.85 }}>
+                {rows.length.toLocaleString()} are listed here. The other {unlisted.toLocaleString()} are older contacts — type a name, email or phone in the search box to find any of them.
               </p>
             )}
             {expanded && (

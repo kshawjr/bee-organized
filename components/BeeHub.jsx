@@ -9802,7 +9802,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTruncated=false, locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onLensChange=()=>{}, onReportProblem=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTruncated=false, clientsCutoff=null, locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onLensChange=()=>{}, onReportProblem=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -10099,6 +10099,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTru
           // The clients load hit its ceiling — the Client List's search then
           // asks the server for the older clients this page does not hold.
           leadsTruncated={leadsTruncated}
+          clientsCutoff={clientsCutoff}
           locationRequired={locationRequired}
           onOpenLocationPicker={onOpenLocationPicker}
           // Deep-link intent (Home "Needs attention" cards): land on the
@@ -24942,7 +24943,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, scopedOverview=null, scopedOverviewLocId=null, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, clientsCutoff=null, scopedOverview=null, scopedOverviewLocId=null, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -25405,7 +25406,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={leadsTruncated} locationRequired={!!allOverview} onOpenLocationPicker={onClickLocation} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} onReportProblem={onReportProblem} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={leadsTruncated} locationRequired={!!allOverview} clientsCutoff={clientsCutoff} onOpenLocationPicker={onClickLocation} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} onReportProblem={onReportProblem} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -37153,6 +37154,7 @@ export default function App({
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
   initialAllOverview,        // Fix 2 Phase 4: server-reduced corporate overview for 'All Locations' (null on a scoped load) — replaces the people graph on that scope
   initialLeadsTruncated,     // true when the leads load hit MAX_LEADS; rendered as a banner so a short count is never presented as complete
+  initialClientsCutoff,      // cut-off load only: { loadedBackTo, notListed } for the Client List (null otherwise)
   initialScopedOverview,     // server counts for Home when the leads load hit MAX_LEADS (null otherwise) — the leads-derived numbers come from here instead of the short people graph
   initialNetworkTruncated,   // true when the partners/companies load hit MAX_NETWORK_ROWS; the Network screen states the shortfall
   initialTransferPeople,     // loc_other unrouted leads — fetched OUTSIDE the selected scope so the routing queue survives a location switch (Fix 2 Phase 2). Elevated only; [] for franchise.
@@ -38499,7 +38501,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* Sample-now/bulk-later gap state: the Clients surface must explain a
             partial book ("rest arrives tonight"), or it reads as data loss. */}
         <ImportGapBanner locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} />
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={!!initialLeadsTruncated} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onLensChange={setHiveLens} onReportProblem={openRecordReport} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={!!initialLeadsTruncated} locationRequired={!!initialAllOverview} clientsCutoff={initialClientsCutoff||null} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onLensChange={setHiveLens} onReportProblem={openRecordReport} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -38567,6 +38569,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           transferPeople={transferPeople}
           allOverview={initialAllOverview}
           leadsTruncated={!!initialLeadsTruncated}
+          clientsCutoff={initialClientsCutoff||null}
           scopedOverview={initialScopedOverview || null}
           scopedOverviewLocId={initialScopeLocationId || null}
           networkTruncated={!!initialNetworkTruncated}

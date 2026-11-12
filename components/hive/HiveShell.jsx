@@ -176,6 +176,8 @@ export default function HiveShell({
   currentLocationUuid = null,
   // True when the page's clients load hit its 5,000 ceiling (_hub-page).
   leadsTruncated = false,
+  // Cut-off load only: { loadedBackTo, notListed } (lib/hub-working-clients).
+  clientsCutoff = null,
   currentUserId = null,
   // Role travels with the id so the client card can decide who may edit or
   // delete a note without reaching into context (§8.5). The ROUTE is still
@@ -980,6 +982,7 @@ export default function HiveShell({
           // older clients need fetching); the location is a hint the server
           // re-checks — a franchise user is fenced to their own regardless.
           leadsTruncated={leadsTruncated}
+          clientsCutoff={clientsCutoff}
           searchLocationId={locFilter !== 'all' ? locFilter : (currentLocationUuid || null)}
         />
       ) : engView === 'list' ? (

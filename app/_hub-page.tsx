@@ -29,6 +29,7 @@ import {
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
+import { fetchWorkingClients, keepWorkingClients, clientsCutoffFor } from '@/lib/hub-working-clients'
 import { fetchTransferQueueRows } from '@/lib/transfer-queue'
 // issue 226 step 2 — per-location seat composition. The derivation moved to
 // lib/billing-state.ts so it could be tested; this is its only caller.
@@ -1147,6 +1148,10 @@ export default async function HubPage({
   // Locations' server reduction, fenced to that one location. Null whenever
   // the load was complete (every location but Philadelphia Suburbs today).
   let initialScopedOverview: any = null
+  // What the Client List is told about a cut-off load: how far back the
+  // ordinary load reaches, and how many (Nurturing) clients are not listed.
+  // Null on a complete load.
+  let initialClientsCutoff: any = null
 
   if (!overviewOnly) {
     // Paginated load — a single .limit(1000) silently truncated locations
@@ -1206,6 +1211,18 @@ export default async function HubPage({
         )
       }
     }
+
+    // ── A cut-off location also loads everyone being WORKED ───────────────
+    // The newest 5,000 leave out older clients with an open job, won work,
+    // paid history or a live enquiry — the rows an owner notices are missing.
+    // lib/hub-working-clients.ts finds them by their markers and they join
+    // leadsRaw here, so every step below (child rows, roll-ups, mapping, the
+    // board's client names) treats them like any other lead. On a complete
+    // load this makes NO query and adds nothing.
+    const working = await fetchWorkingClients(supabaseService, {
+      truncated: leadsTruncated, locationUuid: scopeLocationUuid, loadedRows: leadsRaw,
+    })
+    if (leadsRaw && working.extraRows.length > 0) leadsRaw.push(...working.extraRows)
 
     if (leadsError) {
       console.error('[hub-page] leads fetch error:', leadsError.message)
@@ -1386,6 +1403,18 @@ export default async function HubPage({
           network_moved:    networkMoved.has(row.id),
         })
       )
+      // The extra clients were CANDIDATES. The list's own derivation now
+      // decides: anyone it calls Nurturing is dropped again, so a marker
+      // alone never drags a client in. No extras → the same array.
+      initialPeople = keepWorkingClients(initialPeople, working)
+      initialClientsCutoff = clientsCutoffFor(leadsTruncated, working, initialPeople.length)
+      if (leadsTruncated) {
+        console.log(
+          `[hub-page] working-clients for ${scopeLocationUuid}: ${working.extraRows.length} older candidates read, ` +
+          `${initialPeople.length - (leadsRaw.length - working.extraRows.length)} kept` +
+          (working.complete ? '' : ' — INCOMPLETE, bands may be short')
+        )
+      }
       console.log(`[hub-page] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)
 
       // ── HIVE Phase 1 step 4: open engagements (dual-read; additive) ──
@@ -1966,6 +1995,8 @@ export default async function HubPage({
       // True when the leads load hit MAX_LEADS and the counts on this page are
       // therefore short. Rendered as a banner, never left implicit.
       initialLeadsTruncated={leadsTruncated}
+      // Cut-off load only: how far back the list reaches + how many are not listed.
+      initialClientsCutoff={initialClientsCutoff}
       // Server counts for Home when the leads load was cut off (null otherwise).
       initialScopedOverview={initialScopedOverview}
       initialTransferPeople={initialTransferPeople}

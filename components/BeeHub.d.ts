@@ -191,6 +191,9 @@ interface BeeHubProps {
   } | null
   // True when the leads load hit MAX_LEADS, so the page's counts are short.
   initialLeadsTruncated?: boolean
+  // Cut-off load only (lib/hub-working-clients ClientsCutoff): how far back the
+  // ordinary load reaches, and how many clients are not in the Client List.
+  initialClientsCutoff?: { loadedBackTo: string | null; notListed: number | null } | null
   // Home's numbers for a location whose leads load hit MAX_LEADS — the same
   // server reduction as initialAllOverview, fenced to that one location. Null
   // when the load was complete.

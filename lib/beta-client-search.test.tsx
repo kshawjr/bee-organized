@@ -29,6 +29,7 @@ import { rollUpEngagements } from '@/lib/engagement-rollup'
 import { deriveClientStatus } from '@/components/hive/shared/clientStatus'
 import { matchesTagSearch } from '@/components/hive/shared/tagFilter'
 import ClientGroupedList, { CLIENT_SEARCH_DEBOUNCE_MS } from '@/components/hive/ClientGroupedList'
+import { fakeDb, type Call } from '@/lib/fake-postgrest.test.harness'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -37,71 +38,6 @@ const LOC_B = '22222222-2222-4222-8222-222222222222'
 const TAG_REALTOR = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const NOW = Date.now()
 const daysAgo = (n: number) => new Date(NOW - n * 86400000).toISOString()
-
-// ── a small in-memory PostgREST ──────────────────────────────────────────────
-// Real filter semantics for the handful of operators the search uses, and a
-// log of every filter applied per table — so a test can ask both "what came
-// back" and "was the fence on that read".
-type Call = { table: string; filters: string[] }
-function fakeDb(tables: Record<string, any[]>) {
-  const calls: Call[] = []
-  const from = (table: string) => {
-    const call: Call = { table, filters: [] }
-    calls.push(call)
-    let rows = [...(tables[table] || [])]
-    let wantCount = false
-    let limitN: number | null = null
-    let rangeFT: [number, number] | null = null
-    const orders: Array<{ col: string; asc: boolean }> = []
-    const b: any = {
-      select(_cols: string, opts?: any) { if (opts?.count) wantCount = true; return b },
-      eq(col: string, v: any) { call.filters.push(`eq:${col}:${v}`); rows = rows.filter(r => String(r[col]) === String(v)); return b },
-      in(col: string, vs: any[]) { call.filters.push(`in:${col}`); const s = new Set(vs.map(String)); rows = rows.filter(r => s.has(String(r[col]))); return b },
-      is(col: string, v: any) { call.filters.push(`is:${col}:${v}`); rows = rows.filter(r => (r[col] ?? null) === v); return b },
-      not(col: string, op: string, v: any) { call.filters.push(`not:${col}:${op}:${v}`); rows = rows.filter(r => !(r[col] === v)); return b },
-      lte(col: string, v: any) { call.filters.push(`lte:${col}:${v}`); rows = rows.filter(r => new Date(r[col]).getTime() <= new Date(v).getTime()); return b },
-      ilike(col: string, pattern: string) {
-        call.filters.push(`ilike:${col}:${pattern}`)
-        const needle = pattern.replace(/^%|%$/g, '').replace(/\\(.)/g, '$1').toLowerCase()
-        rows = rows.filter(r => String(r[col] || '').toLowerCase().includes(needle)); return b
-      },
-      or(clause: string) {
-        call.filters.push(`or:${clause}`)
-        if (table === 'leads') {
-          // name.ilike."*term*",email.ilike."*term*",phone.ilike."*term*"
-          const m = clause.match(/^name\.ilike\."\*(.*)\*",email\.ilike\."\*(.*)\*",phone\.ilike\."\*(.*)\*"$/)
-          if (!m) throw new Error(`unparsed or clause: ${clause}`)
-          // undo the PostgREST quoting, then the LIKE escaping
-          const needle = m[1].replace(/\\(.)/g, '$1').replace(/\\(.)/g, '$1').toLowerCase()
-          rows = rows.filter(r => ['name', 'email', 'phone'].some(f => String(r[f] || '').toLowerCase().includes(needle)))
-        } else if (table === 'lookups') {
-          const loc = clause.split('location_id.eq.')[1]
-          rows = rows.filter(r => r.location_id == null || r.location_id === loc)
-        }
-        return b
-      },
-      order(col: string, o?: any) { orders.push({ col, asc: o?.ascending !== false }); return b },
-      limit(n: number) { limitN = n; return b },
-      range(f: number, t: number) { rangeFT = [f, t]; return b },
-      then(res: any, rej: any) {
-        const sorted = [...rows].sort((x, y) => {
-          for (const o of orders) {
-            const a = x[o.col] ?? '', c = y[o.col] ?? ''
-            if (a !== c) return (a < c ? -1 : 1) * (o.asc ? 1 : -1)
-          }
-          return 0
-        })
-        const count = sorted.length
-        let out = sorted
-        if (rangeFT) out = out.slice(rangeFT[0], rangeFT[1] + 1)
-        if (limitN != null) out = out.slice(0, limitN)
-        return Promise.resolve({ data: out, error: null, count: wantCount ? count : null }).then(res, rej)
-      },
-    }
-    return b
-  }
-  return { db: { from }, calls }
-}
 
 const lead = (over: any) => ({
   id: over.id, name: 'Nobody', first_name: null, last_name: null, email: null, phone: null,
@@ -527,7 +463,7 @@ describe('the Client List search box', () => {
 
   it('a tag filter alone, on a cut-off load, says it only covers the loaded clients', async () => {
     await mount({ leadsTruncated: true, initialTagId: TAG_REALTOR })
-    expect(host.querySelector('[data-testid="clients-tagfilter-partial"]')!.textContent).toContain('Tag filters only look through your newest 2 clients')
+    expect(host.querySelector('[data-testid="clients-tagfilter-partial"]')!.textContent).toContain('Tag filters only look through the 2 clients listed here')
     expect(fetchMock).not.toHaveBeenCalled()
     await act(async () => root.unmount()); root = createRoot(host)
     await mount({ leadsTruncated: false, initialTagId: TAG_REALTOR })

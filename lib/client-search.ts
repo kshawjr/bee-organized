@@ -259,7 +259,16 @@ export async function searchClients(
     leadRows.push(...(data || []))
   }
   const leadById = new Map(leadRows.map((r) => [r.id, r]))
-  const liveIds = ids.filter((id) => leadById.has(id))
+  const people = await hydrateClients(db, ids.filter((id) => leadById.has(id)).map((id) => leadById.get(id)))
+  return { people, total, capped: capped || people.length < total, cap }
+}
+
+// Lead rows → the page load's Person shape. The caller has ALREADY fenced the
+// rows (location, not junk, not archived); this only joins and maps.
+export async function hydrateClients(db: any, leadRowsIn: any[]): Promise<any[]> {
+  const leadById = new Map(leadRowsIn.map((r) => [r.id, r]))
+  const liveIds = leadRowsIn.map((r) => r.id)
+  if (liveIds.length === 0) return []
 
   // 4 ── everything the page load joins to a lead, for these leads only, in
   // the page load's own order (app/_hub-page.tsx fetchChildRows calls). The
@@ -309,7 +318,7 @@ export async function searchClients(
   const networkMoved = new Set<string>()
   for (const p of partners) if (p.is_customer !== true && p.customer_lead_id) networkMoved.add(String(p.customer_lead_id))
 
-  const people = liveIds.map((id) => {
+  return liveIds.map((id) => {
     const row = leadById.get(id)
     return mapLeadToPerson(row, {
       lead_notes:       notesBy[id]     || [],
@@ -329,6 +338,4 @@ export async function searchClients(
       network_moved: networkMoved.has(id),
     } as any)
   })
-
-  return { people, total, capped: capped || people.length < total, cap }
 }
