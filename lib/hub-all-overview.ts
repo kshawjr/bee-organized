@@ -50,6 +50,7 @@ import {
   ASSESSMENT_HORIZON_DAYS,
 } from '@/components/hive/shared/attentionThresholds'
 import { childLocationFilter } from '@/lib/hub-scope'
+import { applyLeadActiveFilter } from '@/lib/lead-suppression'
 
 const DAY_MS = 86400000
 const daysSince = (iso: string | null | undefined, now: number): number => {
@@ -76,6 +77,9 @@ export type AllOverview = {
   newThisWeekCount: number
   outstandingTotal: number
   leadCount: number
+  // Every client on the active surface (not junk, not archived) in this scope —
+  // Home's "Everyone" on All Locations. Null when the count could not be read.
+  clientCount: number | null
   // True when a candidate ceiling was hit — the client renders a truncation
   // notice rather than presenting a short number as complete.
   truncated: boolean
@@ -319,6 +323,12 @@ export async function buildAllOverview(
   ])
   const newThisWeekCount = counts[0]?.count ?? 0
   const leadCount = counts[1]?.count ?? 0
+  // Everyone — through the shared active-surface predicate, the population the
+  // Client List lists. A failed read is NULL, never 0: Home then says it could
+  // not count rather than showing a number.
+  const everyone = await onLeads(applyLeadActiveFilter(db.from('leads').select('id', { count: 'exact', head: true })))
+  if (everyone?.error) console.error('[hub-all-overview] client count failed:', everyone.error.message)
+  const clientCount = !everyone?.error && typeof everyone?.count === 'number' ? everyone.count : null
 
   return {
     newUncontacted: { count: newCount, oldestDays: newOldest },
@@ -335,6 +345,7 @@ export async function buildAllOverview(
     newThisWeekCount,
     outstandingTotal,
     leadCount,
+    clientCount,
     truncated: leadsTrunc || agingTrunc || unpaidTrunc || !derivationInputsComplete,
   }
 }

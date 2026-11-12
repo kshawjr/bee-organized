@@ -263,6 +263,60 @@ export async function searchClients(
   return { people, total, capped: capped || people.length < total, cap }
 }
 
+// ── browsing: the older clients, A to Z, a page at a time ────────────────────
+// Clients at scale, slice 3. On a cut-off location the Client List can walk
+// through the clients the page did not load (everything created on or before
+// `olderThan`, the oldest client the ordinary load holds), CLIENT_BROWSE_PAGE
+// at a time, by name. Same fence and same rule as the search above — one
+// location, not junk, not archived — and the same Person shape, so the screen
+// bands each row with the code it already uses.
+//
+// Paged by a cursor (the last row's name + id), not by a row offset: a client
+// added, renamed or archived between two presses cannot make the next page
+// repeat a row or skip one. The order is the database's own for both the
+// ORDER BY and the cursor comparison, so the two cannot disagree.
+export const CLIENT_BROWSE_PAGE = 500
+
+export type ClientBrowseCursor = { name: string | null; id: string }
+export type ClientBrowseResult = { people: any[]; next: ClientBrowseCursor | null }
+
+// A value inside or=(…) for an exact comparison (no LIKE involved).
+const orExact = (v: string) => `"${v.replace(/[\\"]/g, (m) => `\\${m}`)}"`
+
+export async function browseClients(
+  db: any,
+  opts: { locationUuid: string; olderThan: string; after?: ClientBrowseCursor | null; limit?: number },
+): Promise<ClientBrowseResult> {
+  const limit = opts.limit ?? CLIENT_BROWSE_PAGE
+  if (!opts.locationUuid || !opts.olderThan || isNaN(Date.parse(opts.olderThan))) return { people: [], next: null }
+  const olderThan = new Date(opts.olderThan).toISOString()
+
+  let q = applyLeadActiveFilter(db.from('leads').select('*'))
+    .eq('location_uuid', opts.locationUuid)
+    .lte('created_at', olderThan)
+  const after = opts.after
+  if (after && after.id) {
+    if (after.name === null || after.name === undefined) {
+      // Already among the nameless rows, which sort last: only later ids remain.
+      q = q.is('name', null).gt('id', after.id)
+    } else {
+      const n = orExact(after.name)
+      q = q.or(`name.gt.${n},and(name.eq.${n},id.gt.${after.id}),name.is.null`)
+    }
+  }
+  // One row past the page tells us whether there is another page.
+  const { data, error } = await q
+    .order('name', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true })
+    .limit(limit + 1)
+  if (error) throw new Error(`client browse: leads read failed: ${error.message}`)
+  const rows = (data || []).slice(0, limit)
+  const more = (data || []).length > limit
+  const last = rows[rows.length - 1]
+  const people = await hydrateClients(db, rows)
+  return { people, next: more && last ? { name: last.name ?? null, id: last.id } : null }
+}
+
 // Lead rows → the page load's Person shape. The caller has ALREADY fenced the
 // rows (location, not junk, not archived); this only joins and maps.
 export async function hydrateClients(db: any, leadRowsIn: any[]): Promise<any[]> {

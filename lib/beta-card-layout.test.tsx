@@ -308,7 +308,7 @@ describe('prev/next chevrons (opener ordering)', () => {
   })
 
   it('the grouped client list passes its displayed row ordering; HiveShell threads it (source pins)', () => {
-    expect(readFileSync('components/hive/ClientGroupedList.jsx', 'utf8')).toContain('onOpenClient(p.id, rows.map(r => r.id))')
+    expect(readFileSync('components/hive/ClientGroupedList.jsx', 'utf8')).toContain('onOpenRef.current(id, (shownByGroup.current[group] || []).map(r => r.id))')
     const shell = readFileSync('components/hive/HiveShell.jsx', 'utf8')
     expect(shell).toContain('siblings={overlay.siblings ?? null}')
     expect(shell).toContain('onNavigate=')

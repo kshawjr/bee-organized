@@ -41,7 +41,7 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     // reads the SERVER-computed overview instead of the people graph, so a new
     // overview must recompute the block. Still no clock/time value — that
     // omission is the point of the memo and is asserted below.
-    expect(dash).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])')
+    expect(dash).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId, clientsCutoff])')  // clientsCutoff: the server's cut-off facts, read by the Everyone tile
     // The whole point: no time value in the deps (that would bust the memo on
     // every render/tick and defeat the fix). nowHome is captured INSIDE.
     expect(dash).not.toMatch(/\}, \[[^\]]*\bnow\b[^\]]*\]\)/)

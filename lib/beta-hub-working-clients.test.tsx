@@ -311,11 +311,12 @@ describe('the Client List on a cut-off load', () => {
   it('the Nurturing header counts everyone, and says where the rest are', async () => {
     await mount({ leadsTruncated: true, clientsCutoff: { loadedBackTo: CUT, notListed: 13924 } })
     expect(header('Nurturing')).toContain('13,926')
-    expect(host.querySelector('[data-testid="clients-nurturing-unlisted"]')!.textContent)
-      .toBe('2 are listed here. The other 13,924 are older contacts — type a name, email or phone in the search box to find any of them.')
+    // slice 3: the rest are now reached with Show more, and the line says so
+    expect(host.querySelector('[data-testid="clients-nurturing-browse-hint"]')!.textContent)
+      .toBe('Open this group to go through them A to Z, a page at a time — or type a name, email or phone in the search box.')
     // the complete bands show their plain count and carry no such line
     expect(header('Client')).toContain('· 1')
-    expect(host.querySelectorAll('[data-testid="clients-nurturing-unlisted"]').length).toBe(1)
+    expect(host.querySelectorAll('[data-testid="clients-nurturing-browse-hint"]').length).toBe(1)
     expect(host.querySelector('[data-testid="clients-list-partial"]')).toBeNull()
   })
 

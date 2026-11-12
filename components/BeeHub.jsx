@@ -10,6 +10,7 @@ import { senderAddressProblem, isLocationSendSettingProblem } from "@/lib/sender
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
+import { clientTotal } from "@/components/hive/shared/clientTotal"
 import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath, buildAmbientContext, legacyFeedbackRedirect } from "@/components/hive/shared/hubUrl"
 // Home redesign — read the SAME derivation/tokens the Clients surface uses so
 // Home can't drift from the views. Pure leaves (§8.5), imported statically.
@@ -10889,9 +10890,9 @@ function HomeAllClearCard() {
 }
 
 // A quiet metric tile (surface-1, no heavy border) — context, not hero.
-function HomeMetricTile({ label, value, sub }) {
+function HomeMetricTile({ label, value, sub, testId }) {
   return (
-    <div style={{ flex:'1 1 130px', minWidth:0, background:HT.surface.sunken, borderRadius:HT.radius.inset, padding:'12px 13px' }}>
+    <div data-testid={testId} style={{ flex:'1 1 130px', minWidth:0, background:HT.surface.sunken, borderRadius:HT.radius.inset, padding:'12px 13px' }}>
       <p style={{ fontSize:'20px', fontWeight:600, color:HT.ink.primary, fontVariantNumeric:HT.type.tabular, letterSpacing:HT.type.trackNum, marginBottom:'3px' }}>{value}</p>
       <p style={{ fontSize:'11px', fontWeight:500, color:HT.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label}</p>
       {sub && <p style={{ fontSize:'10px', color:HT.ink.quiet, marginTop:'1px' }}>{sub}</p>}
@@ -25088,6 +25089,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       activeClientsCount: ov.activeClientsCount,
       newThisWeekCount: ov.newThisWeekCount,
       outstandingTotal: ov.outstandingTotal,
+      // Every client in the tenant — a server count; null when it failed.
+      everyoneCount: typeof ov.clientCount === 'number' ? ov.clientCount : null,
       countsShort: !!ov.truncated,
     }
   }
@@ -25224,6 +25227,11 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     agingOldest: serverH ? serverH.agingInvoices.oldestDays : agingOldest,
     transferLeads,
     openEngagementsCount, activeClientsCount, newThisWeekCount,
+    // Everyone — every client at the location, the SAME sum the Client List's
+    // band headers add up to (shared/clientTotal.js): the clients this page
+    // holds plus the server's count of those it does not. Null when a cut-off
+    // load could not be counted — the tile then says so, never a short number.
+    everyoneCount: clientTotal({ listedCount: scopedPeopleH.length, leadsTruncated, clientsCutoff }),
     outstandingTotal: serverH ? serverH.outstandingTotal : outstandingTotal,
     // Are any numbers on screen short? Decided by where each number came from:
     // a complete load → no; a cut-off load → only if the server replacement is
@@ -25234,7 +25242,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // NOT a dep: keeping it out is the whole point — the block must not recompute
   // on the clock tick. `engagements` is the stable server prop; `people` is App
   // state (new ref only on a real change); the rest are primitives/booleans.
-  }, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])
+  }, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId, clientsCutoff])
   const {
     newCount, newUncontactedOldest,
     estimateCount, estimateOldest,
@@ -25242,6 +25250,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     agingCount, agingTotal, agingOldest,
     transferLeads,
     openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
+    everyoneCount,
     countsShort,
   } = homeDerived
 
@@ -25632,6 +25641,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
           <HomeMetricTile label="Open engagements" value={openEngagementsCount} />
           <HomeMetricTile label="Active clients" value={activeClientsCount} />
+          {/* Everyone — right after Active clients, so the two read as a pair:
+              who is being worked, out of how many. Same word as the sidebar's
+              Clients › Everyone. */}
+          <HomeMetricTile label="Everyone" testId="home-everyone"
+            value={everyoneCount == null ? '—' : everyoneCount.toLocaleString()}
+            sub={everyoneCount == null ? "Couldn't be counted just now" : 'all your clients and contacts'} />
           <HomeMetricTile label="New this week" value={newThisWeekCount} />
           {canSeeFinancials && <HomeMetricTile label="Outstanding" value={fmt(outstandingTotal)} />}
         </div>

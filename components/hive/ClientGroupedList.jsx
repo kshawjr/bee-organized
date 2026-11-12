@@ -57,16 +57,34 @@
 // (lib/hub-working-clients.ts), so New, Attempting, Active, Client, Past and
 // No contact are complete. What is still not listed is all Nurturing, and
 // `clientsCutoff.notListed` is exactly how many: the Nurturing header counts
-// them and a line under it says they are found by search. When the page could
-// not establish that (notListed null) no band claims a number it cannot back —
-// the list says it is partial instead.
+// them. When the page could not establish that (notListed null) no band claims
+// a number it cannot back — the list says it is partial instead.
+//
+// SHOW MORE (slice 3 — 2026-11-12). On that same cut-off load, and ONLY then,
+// opening Nurturing shows a page of names A to Z with a Show more under it.
+// Each press fetches the next CLIENT_BROWSE_PAGE older clients
+// (GET /api/clients/browse, by name) and reveals the loaded Nurturing rows up
+// to the same point in the alphabet, so the list only ever grows at the
+// bottom. Three rules:
+//   · the band never renders rows it has not been asked for — 18,830 rows at
+//     once would lock the page up. Rows carry content-visibility:auto so the
+//     browser skips the ones off screen once the list is long.
+//   · every fetched client is classified by the SAME deriveClientStatus call.
+//     One that is not Nurturing (it changed since the page loaded) appears in
+//     its own band, never in this one.
+//   · a search or tag filter is a different question: no Show more, no paging,
+//     slice 1's behaviour exactly. The clients browsed in so far stay in hand,
+//     so clearing the box returns to the same place in the list.
+// A location that loaded in full has no Show more, asks the server nothing,
+// and renders byte-for-byte what it rendered before
+// (lib/__fixtures__/client-list-complete.before.json).
 // The tag FILTER is still a filter over rows in hand: loaded clients plus
 // whatever the search brought in. When the load was cut short the screen says
 // so rather than letting a short tag list pass for the whole location.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
@@ -105,6 +123,27 @@ const STATUS_DEFS = {
   no_contact: "No email or phone on file, so there's no way to reach out.",
 }
 
+// One client row. Memoised: a Show more press re-renders the list, and the
+// thousands of rows already on the page must not be rebuilt for it.
+const ClientRow = React.memo(function ClientRow({ p, sub, fam, lazy, group, onOpen }) {
+  return (
+    <div className={lazy ? 'bee-grp-row bee-grp-row-lazy' : 'bee-grp-row'} onClick={() => onOpen(p.id, group)}
+      style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
+      <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p title={p.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+        {sub && <p title={sub} style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{sub}</p>}
+      </div>
+    </div>
+  )
+})
+
+// Show more. `next`: undefined = nothing fetched yet · a cursor = more to
+// fetch · null = the end has been reached. `loc` ties it to one location.
+export const NO_CLIENT_BROWSE = { loc: null, people: [], next: undefined, loading: false, failed: false }
+// The only band that can hold clients the page did not load (see header).
+const BROWSE_BAND = 'Nurturing'
+
 // How long the box waits after the last keystroke before asking the server.
 export const CLIENT_SEARCH_DEBOUNCE_MS = 250
 const NO_REMOTE = { term: null, people: [], total: 0, capped: false, loading: false, failed: false }
@@ -113,7 +152,7 @@ const NO_REMOTE = { term: null, people: [], total: 0, capped: false, loading: fa
 // actually search for, so a reply can be matched to the box that asked.
 const serverTerm = (raw) => (raw || '').replace(/\*/g, ' ').trim().slice(0, 80)
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null, clientsCutoff = null }) {
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null, clientsCutoff = null, browse = null, onBrowseChange = null }) {
   const [search, setSearch] = useState('')
   const [remote, setRemote] = useState(NO_REMOTE)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -138,6 +177,28 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
   ), [people, locFilter])
 
+  // ── Show more: the older clients browsed in so far ─────────────────────
+  // Held by the shell when it passes `browse` (so switching tabs does not
+  // lose the place), otherwise here. Everything below treats these exactly
+  // like loaded clients: `inHand` is what the list classifies, searches and
+  // tag-filters. With nothing browsed, `inHand` IS `scoped`.
+  const [ownBrowse, setOwnBrowse] = useState(NO_CLIENT_BROWSE)
+  const browseKey = searchLocationId || locFilter
+  const heldBrowse = (onBrowseChange ? browse : ownBrowse) || NO_CLIENT_BROWSE
+  const browseState = heldBrowse.loc === browseKey ? heldBrowse : NO_CLIENT_BROWSE
+  const setBrowse = (fn) => (onBrowseChange || setOwnBrowse)(prev =>
+    fn(prev && prev.loc === browseKey ? prev : { ...NO_CLIENT_BROWSE, loc: browseKey }))
+  const canBrowse = !!leadsTruncated && typeof clientsCutoff?.notListed === 'number'
+    && clientsCutoff.notListed > 0 && !!clientsCutoff.loadedBackTo
+  const browseDone = browseState.next === null
+  const browsed = useMemo(() => {
+    if (browseState.people.length === 0) return browseState.people
+    const have = new Set(scoped.map(p => p.id))
+    return browseState.people.filter(p => p && p.id && !have.has(p.id))
+  }, [browseState.people, scoped])
+  const browsedIds = useMemo(() => new Set(browsed.map(p => p.id)), [browsed])
+  const inHand = useMemo(() => (browsed.length ? [...scoped, ...browsed] : scoped), [scoped, browsed])
+
   // Open / won client-id sets — same derivation inputs the directory uses,
   // so a just-closed engagement leaves the open set and a just-won one flips
   // its person to Client without a reload.
@@ -155,9 +216,9 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   // Classify once, then filter. Grouping is by STATUS (present on the shape
   // via the shared derivation) — search is name/email/phone/tag name, the
   // tag filter is any-of over the picked tags.
-  const classified = useMemo(() => scoped.map(p => ({
+  const classified = useMemo(() => inHand.map(p => ({
     p, status: deriveClientStatus(p, openClientIds, nowMs, wonClientIds),
-  })), [scoped, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
+  })), [inHand, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.trim().toLowerCase()
   // THE BROWSER FILTER — unchanged, and never replaced by the server's answer.
@@ -210,7 +271,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   // are dropped (the loaded row is the live one); the rest are classified by
   // the SAME derivation as every loaded row, then pass the same tag filter.
   const remoteCurrent = remote.term === term && !!term
-  const loadedIds = useMemo(() => new Set(scoped.map(p => p.id)), [scoped])
+  const loadedIds = useMemo(() => new Set(inHand.map(p => p.id)), [inHand])
   const remoteExtra = useMemo(() => {
     if (!remoteCurrent) return []
     return remote.people
@@ -243,12 +304,59 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   // only counted on the plain list: a search or tag filter shows its own
   // matches, with its own notices.
   const plainList = !q && tagFilter.length === 0
-  const notListed = leadsTruncated && plainList && typeof clientsCutoff?.notListed === 'number' ? clientsCutoff.notListed : 0
+  // Each client browsed in is one fewer not listed; at the end there are none,
+  // whatever the page counted when it loaded.
+  const notListed = leadsTruncated && plainList && typeof clientsCutoff?.notListed === 'number'
+    ? (browseDone ? 0 : Math.max(0, clientsCutoff.notListed - browsed.length)) : 0
+
+  // Fetch the next page of older clients. First call = the first page.
+  const browseBusy = useRef(false)
+  const loadMore = async () => {
+    if (!canBrowse || browseDone || browseBusy.current) return
+    browseBusy.current = true
+    const cursor = browseState.next
+    setBrowse(b => ({ ...b, loading: true, failed: false }))
+    try {
+      const params = new URLSearchParams({ olderThan: clientsCutoff.loadedBackTo })
+      if (searchLocationId) params.set('location', searchLocationId)
+      if (cursor) { params.set('afterId', cursor.id); if (cursor.name != null) params.set('afterName', cursor.name) }
+      const res = await fetch(`/api/clients/browse?${params.toString()}`, { credentials: 'include' })
+      if (!res.ok) throw new Error(String(res.status))
+      const json = await res.json()
+      const got = Array.isArray(json.people) ? json.people : []
+      setBrowse(b => {
+        const have = new Set(b.people.map(p => p.id))
+        return {
+          ...b, loading: false, failed: false,
+          people: [...b.people, ...got.filter(p => p && p.id && !have.has(p.id) && (have.add(p.id) || true))],
+          next: json.next && json.next.id ? { id: json.next.id, name: json.next.name ?? null } : null,
+        }
+      })
+    } catch (e) {
+      setBrowse(b => ({ ...b, loading: false, failed: true }))
+    } finally {
+      browseBusy.current = false
+    }
+  }
+  // Opening the band asks for its first page — nothing is fetched before that.
+  const browseOpen = canBrowse && plainList && expandedMap[BROWSE_BAND] === true
+  useEffect(() => {
+    if (browseOpen && browseState.next === undefined && !browseState.loading && !browseState.failed) loadMore()
+  }, [browseOpen, browseState.next, browseState.loading, browseState.failed]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Row clicks: one stable handler, so memoised rows are not rebuilt. The
+  // profile's ‹ › siblings are the rows DISPLAYED in that row's band.
+  const shownByGroup = useRef({})
+  const onOpenRef = useRef(onOpenClient)
+  onOpenRef.current = onOpenClient
+  const openRow = useCallback((id, group) => {
+    onOpenRef.current(id, (shownByGroup.current[group] || []).map(r => r.id))
+  }, [])
   const listPartial = leadsTruncated && plainList && typeof clientsCutoff?.notListed !== 'number'
 
   return (
     <div>
-      <style>{`.bee-grp-row:hover { border-color:${T.hairline.strong} }`}</style>
+      <style>{`.bee-grp-row:hover { border-color:${T.hairline.strong} }${canBrowse ? ' .bee-grp-row-lazy { content-visibility:auto; contain-intrinsic-size:auto 56px }' : ''}`}</style>
 
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: tagFilter.length ? '8px' : '12px' }}>
         <input
@@ -266,7 +374,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={tagFilter.length} open={filtersOpen} onToggle={() => setFiltersOpen(o => !o)} />
           <FilterPopover open={filtersOpen} count={tagFilter.length} onClear={() => setTagFilter([])}>
-            <TagFilterSection tags={tags} rows={scoped} picked={tagFilter} onToggle={toggleTag}
+            <TagFilterSection tags={tags} rows={inHand} picked={tagFilter} onToggle={toggleTag}
               emptyNote="No one here is tagged yet — add tags from a client's record." testId="clients-tag-options" />
           </FilterPopover>
         </div>
@@ -295,13 +403,13 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
       )}
       {leadsTruncated && tagFilter.length > 0 && !term && (
         <p role="status" data-testid="clients-tagfilter-partial" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
-          Tag filters only look through the {scoped.length.toLocaleString()} clients listed here. To find anyone older, type in the search box.
+          Tag filters only look through the {inHand.length.toLocaleString()} clients listed here. To find anyone older, type in the search box.
         </p>
       )}
 
       {listPartial && (
         <p role="status" data-testid="clients-list-partial" style={{ margin: '0 2px 10px', fontSize: '12px', lineHeight: 1.4, color: T.ink.muted }}>
-          This list shows {scoped.length.toLocaleString()} of your clients — older ones aren't listed here. Type in the search box to find anyone.
+          This list shows {inHand.length.toLocaleString()} of your clients — older ones aren't listed here. Type in the search box to find anyone.
         </p>
       )}
 
@@ -329,9 +437,21 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
       {CLIENT_STATUS_ORDER.map(statusKey => {
         const listed = groups.get(statusKey) || []
         // Only Nurturing can have clients that are not listed (see header).
-        const unlisted = statusKey === 'Nurturing' ? notListed : 0
+        const unlisted = statusKey === BROWSE_BAND ? notListed : 0
         if (listed.length === 0 && unlisted === 0) return null
         const rows = listed
+        // Show more: this band, on a cut-off load, with no search or filter.
+        // Until the end is reached it shows the clients browsed in, plus the
+        // loaded ones up to the same point in the alphabet — never the rest.
+        const chunked = statusKey === BROWSE_BAND && plainList && canBrowse
+        let shown = rows
+        if (chunked && !browseDone) {
+          const upTo = browseState.next ? browseState.next.name : undefined
+          if (browseState.next === undefined) shown = []
+          else if (upTo != null) shown = rows.filter(r => browsedIds.has(r.id) || (r.name || '').localeCompare(upTo) <= 0)
+        }
+        const left = chunked ? (rows.length - shown.length) + unlisted : 0
+        shownByGroup.current[statusKey] = shown
         const meta = CLIENT_STATUS_META[statusKey]
         const fam = CHIP_STYLES[meta.styleKey] || CHIP_STYLES.gray
         const expanded = isExpanded(statusKey)
@@ -367,28 +487,50 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
                 {STATUS_DEFS[statusKey]}
               </p>
             )}
-            {unlisted > 0 && (
+            {chunked && !expanded && (
+              <p data-testid="clients-nurturing-browse-hint" style={{ margin: '0 4px 8px 21px', fontSize: '11.5px', lineHeight: 1.4, color: fam.text, opacity: 0.85 }}>
+                Open this group to go through them A to Z, a page at a time — or type a name, email or phone in the search box.
+              </p>
+            )}
+            {unlisted > 0 && !chunked && (
               <p data-testid="clients-nurturing-unlisted" style={{ margin: '0 4px 8px 21px', fontSize: '11.5px', lineHeight: 1.4, color: fam.text, opacity: 0.85 }}>
                 {rows.length.toLocaleString()} are listed here. The other {unlisted.toLocaleString()} are older contacts — type a name, email or phone in the search box to find any of them.
               </p>
             )}
             {expanded && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {rows.map(p => {
+                {shown.map(p => {
                   const loc = locName(p.locationId)
                   // Location, then the client's tags — so a tag match shows why.
                   const sub = [loc, (p.tagIds || []).map(id => tagById.get(id)).filter(Boolean).map(tagText).join(', ')].filter(Boolean).join(' · ')
-                  return (
-                    <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, rows.map(r => r.id))}
-                      style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
-                      <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p title={p.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                        {sub && <p title={sub} style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{sub}</p>}
-                      </div>
-                    </div>
-                  )
+                  return <ClientRow key={p.id} p={p} sub={sub} fam={fam} lazy={chunked} group={statusKey} onOpen={openRow} />
                 })}
+              </div>
+            )}
+            {expanded && chunked && (
+              <div data-testid="clients-browse" style={{ margin: '10px 4px 0', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {browseState.failed && (
+                  <p role="alert" data-testid="clients-browse-failed" style={{ flexBasis: '100%', fontSize: '12px', color: T.ink.primary }}>
+                    Couldn't load more just now. Nothing is lost — try again in a moment.
+                  </p>
+                )}
+                {left > 0 ? (
+                  <>
+                    <button type="button" data-testid="clients-show-more" onClick={loadMore} disabled={browseState.loading}
+                      style={{ height: '36px', padding: '0 16px', borderRadius: T.radius.pill, border: T.border.thin, background: T.surface.raised, color: T.ink.primary, fontSize: '13px', fontWeight: 500, fontFamily: 'inherit', cursor: browseState.loading ? 'default' : 'pointer' }}>
+                      {browseState.loading ? 'Loading…' : browseState.failed ? 'Try again' : 'Show more'}
+                    </button>
+                    <span role="status" data-testid="clients-browse-count" style={{ fontSize: '12px', color: fam.text, fontVariantNumeric: T.type.tabular }}>
+                      {shown.length === 0
+                        ? `${left.toLocaleString()} to show`
+                        : `Showing ${shown.length.toLocaleString()} of ${(rows.length + unlisted).toLocaleString()} · ${left.toLocaleString()} more`}
+                    </span>
+                  </>
+                ) : (
+                  <span role="status" data-testid="clients-browse-end" style={{ fontSize: '12px', color: fam.text, fontVariantNumeric: T.type.tabular }}>
+                    That's everyone — all {shown.length.toLocaleString()} are showing.
+                  </span>
+                )}
               </div>
             )}
           </div>

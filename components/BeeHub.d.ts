@@ -187,6 +187,7 @@ interface BeeHubProps {
     newThisWeekCount: number
     outstandingTotal: number
     leadCount: number
+    clientCount?: number | null
     truncated: boolean
   } | null
   // True when the leads load hit MAX_LEADS, so the page's counts are short.

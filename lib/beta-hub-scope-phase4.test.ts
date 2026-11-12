@@ -309,7 +309,7 @@ describe('BeeHub wiring — Phase 4', () => {
 
   it('Home reads the server overview on "all" instead of the people graph', () => {
     expect(src).toContain('if (allOverview) {')
-    expect(src).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId])')
+    expect(src).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials, leadsTruncated, scopedOverview, scopedOverviewLocId, clientsCutoff])')  // clientsCutoff: the server's cut-off facts, read by the Everyone tile
   })
 
   it('the hero cards read explicit COUNTS, so both paths share one shape', () => {

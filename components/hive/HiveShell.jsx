@@ -20,7 +20,7 @@ import EngagementBoard from './EngagementBoard'
 // restore from git history if a flat lens ever comes back.
 import EngagementGroupedList from './EngagementGroupedList'
 import EngagementPanel from './EngagementPanel'
-import ClientGroupedList from './ClientGroupedList'
+import ClientGroupedList, { NO_CLIENT_BROWSE } from './ClientGroupedList'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import NewClientSheet from './NewClientSheet'
@@ -261,6 +261,8 @@ export default function HiveShell({
   // 'board'/'list' value migrates to 'engagements' (they're now the
   // sub-toggle, not tabs).
   const [lens, setLens] = useState('inbox')
+  // The older clients the Client List has browsed in (its Show more).
+  const [clientBrowse, setClientBrowse] = useState(NO_CLIENT_BROWSE)
   const isMobile = useIsMobile()
   useEffect(() => {
     try {
@@ -983,6 +985,10 @@ export default function HiveShell({
           // re-checks — a franchise user is fenced to their own regardless.
           leadsTruncated={leadsTruncated}
           clientsCutoff={clientsCutoff}
+          // Show more's place in the list, held HERE so a trip to the Inbox
+          // or the board and back does not start it again.
+          browse={clientBrowse}
+          onBrowseChange={setClientBrowse}
           searchLocationId={locFilter !== 'all' ? locFilter : (currentLocationUuid || null)}
         />
       ) : engView === 'list' ? (
