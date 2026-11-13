@@ -83,15 +83,13 @@ const mount = async (loc: any, section = 'location') => {
   await act(async () => {})   // flush mount-time fetches
 }
 
-// Row container = the flex wrapper that holds this label's input AND its
-// Edit/Save buttons. The label <p> is `{label}{required && <span>*</span>}`,
-// so strip a trailing asterisk before matching.
+// The row for a label (Settings slice 3, 2026-11-13: Location is rebuilt to
+// the new look, so a row is [data-settings-row] with a pencil; Enter or
+// picking from the list saves — there is no Edit/Save pair any more).
 const rowFor = (label: string) => {
-  const p = Array.from(container.querySelectorAll('p')).find(
-    el => (el.textContent || '').trim().replace(/\*$/, '').trim() === label,
-  )
-  expect(p, `the "${label}" row`).toBeTruthy()
-  return p!.parentElement!.parentElement as HTMLElement
+  const r = container.querySelector(`[data-settings-row="${label}"]`)
+  expect(r, `the "${label}" row`).toBeTruthy()
+  return r as HTMLElement
 }
 
 // Works for the text rows (<input>) AND the dropdown rows (<select> — the
@@ -105,19 +103,20 @@ const setNativeValue = (el: HTMLInputElement | HTMLSelectElement, value: string)
   el.dispatchEvent(new Event(isSelect ? 'change' : 'input', { bubbles: true }))
 }
 
-// Open the row, type/pick `value`, click Save, and flush the awaited PATCH + paint.
+// Open the row with its pencil, type/pick `value`, and save: Enter in a text
+// box; a list saves on the pick itself. Then flush the awaited PATCH + paint.
 const editAndSave = async (label: string, value: string) => {
-  const row = rowFor(label)
   await act(async () => {
-    (Array.from(row.querySelectorAll('button')).find(b => b.textContent === 'Edit') as HTMLElement).click()
+    (rowFor(label).querySelector(`button[aria-label="Edit ${label}"]`) as HTMLElement).click()
   })
   const input = rowFor(label).querySelector('input, select') as HTMLInputElement | HTMLSelectElement
   expect(input, `input for "${label}"`).toBeTruthy()
   await act(async () => { setNativeValue(input, value) })
-  await act(async () => {
-    (Array.from(rowFor(label).querySelectorAll('button')).find(b => b.textContent === 'Save') as HTMLElement).click()
-  })
+  if (input.tagName !== 'SELECT') {
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  }
   await act(async () => {})   // paint-on-success happens AFTER the fetch resolves
+  await act(async () => {})
 }
 
 const patchTo = (uuidOrSlug: string) =>
@@ -133,11 +132,11 @@ const anyLocationPatch = () =>
 // Every migrated Location + Online-Presence row: display label → DB column, and
 // a distinctive value to type. Reviews must be a valid URL (row validates it).
 const FIELDS: Array<{ label: string; column: string; value: string }> = [
-  { label: 'Location Name', column: 'name',          value: 'Emerald City Organizers' },
-  { label: 'Street Address', column: 'address',      value: '42 Rainier Ave' },
-  { label: 'City',           column: 'city',         value: 'Bellevue' },
-  { label: 'State',          column: 'state',        value: 'OR' },
-  { label: 'ZIP',            column: 'zip',          value: '98004' },
+  { label: 'Location name',  column: 'name',          value: 'Emerald City Organizers' },
+  // Street, City, State and ZIP were four rows here. They are ONE Address
+  // row now (2026-11-13) that still writes the four columns, in one request:
+  // the same three guarantees, plus "all four together", are pinned in
+  // lib/settings-location.test.tsx.
   { label: 'Phone',          column: 'phone',        value: '(425) 555-0199' },
   // Timezone is a dropdown (lib/us-timezones.ts) — the value must be a listed
   // label. The row displays the option's label, which contains the value.

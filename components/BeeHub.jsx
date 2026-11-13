@@ -54,6 +54,7 @@ import {
 // still decides who sees what and does every save.
 import * as SUI from "@/components/settings/SettingsShell"
 import * as TUI from "@/components/settings/TeamAndLeads"
+import * as LUI from "@/components/settings/LocationRows"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -77,7 +78,6 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
-import OwnTagsSettings from "@/components/hive/OwnTagsSettings"
 import BeeRosterSettings from "@/components/hive/BeeRosterSettings"
 import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
 import RetiredTagsPanel from "@/components/hive/RetiredTagsPanel"
@@ -22305,6 +22305,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // under each person on Team. So BOTH old keys land on 'team',
   // which is where the thing they were for now is. Neither may point at
   // 'newleads': that key draws nothing any more.
+  // Sections that exist in the nav but cannot be opened. Arriving on one —
+  // a deep link, ?section=, the back button, initialSection — shows a short
+  // "being rebuilt" line (below, where the section would render), never the
+  // old screen and never a blank one.
+  const CLOSED_SETTINGS_SECTIONS = ['tags']
   const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'team', newleads:'team' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
@@ -22340,6 +22345,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   //   desktop rail   → replaceState · back leaves Settings, exactly as today
   const sectionHref = key => `${window.location.pathname}?section=${encodeURIComponent(key)}`
   function openSection(key, { push }) {
+    // A closed section is not a destination. Its nav item is not a button,
+    // so this is only for a caller that asks anyway.
+    if (CLOSED_SETTINGS_SECTIONS.includes(key)) return
     setActiveSection(key)
     setMobileDrilled(true)
     if (typeof window !== 'undefined') {
@@ -23361,10 +23369,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // locId) can't show a value it never saved. And — unlike an optimistic paint —
   // we paint ONLY after the write lands: on a server error the field keeps its
   // old value and the user is told plainly, never a silent success.
+  // Answers true when the write landed and false when it did not, so a row
+  // only says "Saved" when it was.
   async function persistLocationField(stateKey, column, v, noun) {
     if (!realLocId) {
       alert(`You're viewing this location, not signed in to it — open the real location to change the ${noun}.`)
-      return
+      return false
     }
     try {
       const res = await fetch(`/api/locations/${realLocId}`, {
@@ -23378,9 +23388,48 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         throw new Error(j?.error || `HTTP ${res.status}`)
       }
       updateLocation(stateKey, v)
+      return true
     } catch (e) {
       console.error(`[settings] ${column} save failed`, e)
       alert(`Could not save your ${noun}: ` + (e?.message || e))
+      return false
+    }
+  }
+
+  // THE ADDRESS IS ONE FIELD ON SCREEN AND FOUR COLUMNS IN THE DATABASE
+  // (Settings slice 3, 2026-11-13). The four rows it replaces each wrote one
+  // column; this writes all four in ONE request to the same route, so an
+  // address can never be half-saved (new street, old ZIP). The columns stay
+  // separate because {{business_city}} and the client-email location line
+  // read city and state on their own (#93) — nothing is joined into one
+  // string and nothing is parsed back out of one. An empty part is sent as an
+  // empty string, which the route stores as blank: picking an address with no
+  // ZIP clears the old ZIP rather than leaving it under the new street.
+  // Same guard and same rule as persistLocationField: nothing is painted
+  // until the write lands.
+  async function persistLocationAddress(parts) {
+    if (!realLocId) {
+      alert("You're viewing this location, not signed in to it — open the real location to change the address.")
+      return false
+    }
+    const body = { address: parts.address || '', city: parts.city || '', state: parts.state || '', zip: parts.zip || '' }
+    try {
+      const res = await fetch(`/api/locations/${realLocId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        throw new Error(j?.error || `HTTP ${res.status}`)
+      }
+      setSettings(st => ({ ...st, location: { ...st.location, ...body } }))
+      return true
+    } catch (e) {
+      console.error('[settings] address save failed', e)
+      alert('Could not save your address: ' + (e?.message || e))
+      return false
     }
   }
 
@@ -23841,7 +23890,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       ...(canSeeTeamScreen ? [{ key:'team', label:'Team', icon:'👥' }] : []),
       // A location's own tags (2026-10-16): owner AND manager — the same
       // people who may create them. Allowlist, like ownerConfig.
-      ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
+      // CLOSED (Settings slice 3, 2026-11-13): tags are being rebuilt as their
+      // own project. The item stays where it was, for the same people, but
+      // greyed with a "Soon" chip (`soon`) and it cannot be opened — see
+      // CLOSED_SETTINGS_SECTIONS. Tagging a client or a Network contact is
+      // untouched.
+      ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️', soon:true }] : []),
     ]},
     { title:'Client messages', items: ownerConfig ? [
       { key:'emails', label:'Emails',            icon:'📧' },
@@ -23855,6 +23909,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       { key:'mailchimp', label:'Mailchimp', icon:'📬' },
     ] : []},
   ].filter(g => g.items.length > 0)
+   // …and a group with nothing in it that can be OPENED goes too, so nobody
+   // is shown a heading standing over a lone greyed item.
+   .filter(g => g.items.some(i => !i.soon))
   const sections = SECTION_GROUPS.flatMap(g => g.items)
   // Deep-link / stale-state safety: if activeSection isn't one this role can
   // see (e.g. manager hits ?section=billing), show a polite no-access notice
@@ -23990,107 +24047,94 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           </SUI.SettingsPage>
         )}
 
-        {/* ── My Location ── */}
+        {/* ── Tags: CLOSED (Settings slice 3, 2026-11-13) ──
+            The old screen (components/hive/OwnTagsSettings.jsx) is no longer
+            mounted by anything. Whoever arrives here — and only someone who
+            could have opened it before; anyone else still gets the no-access
+            notice above — is told tags are being rebuilt. */}
         {activeSection==='tags'&&(
-          <OwnTagsSettings locationId={realLocId} locationName={settings.location.name || ''} />
+          <SUI.SettingsPage>
+            <SUI.PageHeader title="Tags" />
+            <SUI.Notice tone="quiet" data-section-closed="tags"
+              actions={<SUI.Btn data-closed-back onClick={()=>openSection('profile', { push:false })}>Go to Profile</SUI.Btn>}>
+              <span style={{ display:'block', fontSize:'14px', lineHeight:'20px', fontWeight:700, color:SUI.FG }}>Tags are being rebuilt.</span>
+              This page is closed for now. You can still add and remove tags on a client or a Network contact, exactly as before.
+            </SUI.Notice>
+          </SUI.SettingsPage>
         )}
+
+        {/* ── Location ── rebuilt to the new look (slice 3, 2026-11-13).
+            The rows are components/settings/LocationRows.jsx. Every save is
+            the route it was: PATCH /api/locations/[id]. */}
         {activeSection==='location'&&(
-          <>
-            <div style={{ padding:'16px 16px 8px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <div>
-                <p style={{ fontSize:'12px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'2px' }}>Location Details</p>
-                <p style={{ fontSize:'12px', color:'#b0c0bc' }}>Your franchise location info</p>
-              </div>
-              {(()=>{
-                const sc = CRM_STATUS_CONF[settings.location.crmStatus||'active']
-                return (
-                  <div style={{ display:'flex', alignItems:'center', gap:'5px', padding:'4px 10px', borderRadius:'20px', background:sc.bg, border:`1px solid ${sc.border}` }}>
-                    <span style={{ fontSize:'12px' }}>{sc.icon}</span>
-                    <span style={{ fontSize:'11px', color:sc.color, fontWeight:600 }}>{sc.label}</span>
-                    
-                  </div>
-                )
-              })()}
-            </div>
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Location Name"   value={settings.location.name}          onSave={v=>persistLocationField('name','name',v,'location name')} />
-              {/* Address is FOUR rows, each persisting to its own column
-                  (address/city/state/zip) — a straight full-width stack, no
-                  side-by-side State/Zip, so nothing feels cramped. The DB stores
-                  these separately and {{business_city}} / the client-email
-                  location line read city+state, so they are never merged into a
-                  single line here (#93). */}
-              <SettingsEditRow label="Street Address"  value={settings.location.address}       onSave={v=>persistLocationField('address','address',v,'street address')} />
-              <SettingsEditRow label="City"            value={settings.location.city}          onSave={v=>persistLocationField('city','city',v,'city')} />
-              <SettingsEditRow label="State"           value={settings.location.state}         onSave={v=>persistLocationField('state','state',v,'state')} />
-              <SettingsEditRow label="ZIP"             value={settings.location.zip}           onSave={v=>persistLocationField('zip','zip',v,'ZIP code')} type="tel" />
-              <SettingsEditRow label="Phone"           value={settings.location.phone}         onSave={v=>persistLocationField('phone','phone',v,'phone number')} type="tel" />
+          <SUI.SettingsPage>
+            <SUI.PageHeader title="Location" intro="Your franchise location, territory and scheduling defaults." />
+            <SUI.Section eyebrow="Location details" title={settings.location.name || 'Your location'}
+              right={(()=>{
+                const status = settings.location.crmStatus||'active'
+                return <SUI.Pill data-location-status={status} tone={status==='active' ? 'ok' : status==='inactive' ? 'quiet' : 'warn'}>{status==='active' && <SUI.IconCircleCheck size={12} />}{CRM_STATUS_CONF[status].label}</SUI.Pill>
+              })()}>
+              <SUI.EditRow label="Location name" value={settings.location.name} onSave={v=>persistLocationField('name','name',v,'location name')} />
+              {/* ONE field with a typeahead where there were four rows. Still
+                  four columns: see persistLocationAddress. */}
+              <LUI.AddressRow
+                value={{ address:settings.location.address, city:settings.location.city, state:settings.location.state, zip:settings.location.zip }}
+                onSave={persistLocationAddress} />
+              <SUI.EditRow label="Phone" value={settings.location.phone} type="tel" onSave={v=>persistLocationField('phone','phone',v,'phone number')} />
               {/* Dropdown, not free text — the same list onboarding offers.
                   This row WAS a text box, which is how "Phoenix AZ" got into
                   Scottsdale and broke every assessment send there. A stored
                   IANA alias ('America/New_York', the DB default) displays as
                   its label; anything else is shown as-is and flagged, never
                   silently blanked. */}
-              <SettingsEditRow label="Timezone"
+              <LUI.SelectRow label="Timezone"
                 value={normalizeTimezoneLabel(settings.location.timezone) || settings.location.timezone || ''}
                 options={US_TIMEZONES}
                 invalidHint="Not a valid timezone — pick one from the list. Until it is fixed, assessment scheduling and Send to Jobber will fail for this location."
-                hint="Used to schedule your lead emails and Jobber assessments at the right local time."
+                hint="Schedules lead emails and Jobber assessments at the right local time."
                 onSave={v=>persistLocationField('timezone','timezone',v,'timezone')} />
-              <SettingsEditRow label="Location ID"     value={settings.location.locId||'—'}   readOnly hint="Your unique franchise location identifier" />
-            </div>
+              {/* The export has no Location ID. It is how a person tells
+                  support which location they are, so it stays — as a quiet
+                  line under the rows rather than a row of its own. */}
+              <LUI.LocationIdLine id={settings.location.locId} />
+            </SUI.Section>
 
-            {/* Territory — the zips whose website leads come here. Next to the
-                address because it is the same kind of fact: where this
-                franchise is. Owners VIEW (Kevin: territories are a franchise-
-                agreement matter); corporate viewing this location edits. The
-                server's can_edit decides which. */}
-            <div style={{ margin:'12px 12px 0' }}>
+            {/* Territory — the zips whose website leads come here. Owners VIEW
+                (Kevin: territories are a franchise-agreement matter);
+                corporate viewing this location edits. The server's can_edit
+                decides which. NOT REBUILT: LocationZipsPanel is the same
+                panel Admin uses, so it keeps its own card and the font it
+                had; it draws nothing for a location that is not real. */}
+            <div data-location-territory style={{ fontFamily:'DM Sans,system-ui,sans-serif' }}>
               <LocationZipsPanel locationId={realLocId} />
             </div>
 
-            {/* MOVED 2026-10-30 — the booking links, Google Reviews link,
-                hourly rate and the signature's website and social links only
-                exist to fill emails, so they live on Settings → Emails
-                ("Your details" and "Signature"). One editable copy each. */}
-            <SectionHeader title="Online Presence &amp; Pricing" />
-            <p style={{ margin:'0 12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-              Your booking links, Google Reviews link, hourly rate and website and social links is now on{' '}
-              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>, with everything else your emails use.
-            </p>
-
-            <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+            <SUI.Section eyebrow="Assessment default" title="How first visits happen" intro="Used when scheduling — can be overridden per client.">
               {/* Saves to locations.default_assessment_type through the same
                   PATCH every Location row uses (persistLocationField: paints only
                   after the write lands, view-as refused). Send to Jobber starts on
                   it unless the client has a type of their own. */}
-              <div style={{ padding:'12px 16px', background:'white' }}>
-                <div role="radiogroup" aria-label="Assessment default" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-                  {[['in-person','🏠','In-Person'],['virtual','💻','Virtual']].map(([v,icon,label])=>{
-                    const on = (settings.location.assessmentType||'in-person')===v
-                    return (
-                    <button key={v} type="button" role="radio" aria-checked={on} data-assessment-default={v}
-                      onClick={()=>{ if (!on) persistLocationField('assessmentType','default_assessment_type',v,'assessment default') }}
-                      style={{ padding:'12px', borderRadius:'10px', cursor:'pointer', border:'2px solid', borderColor:on?'#a8c9c4':'rgba(0,0,0,0.08)', background:on?'rgba(168,201,196,0.12)':'#f7f5f0', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', justifyContent:'center' }}>
-                      <span style={{ fontSize:'20px' }}>{icon}</span>
-                      <span style={{ fontSize:'13px', fontWeight:on?600:400, color:'#1a2e2b' }}>{label}</span>
-                      {on&&<span style={{ color:'#a8c9c4' }}>✓</span>}
-                    </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
+              <LUI.ChoiceCards label="Assessment default" attr="data-assessment-default"
+                value={settings.location.assessmentType||'in-person'}
+                choices={[
+                  { value:'in-person', label:'In-person', icon:<SUI.IconHome size={16} /> },
+                  { value:'virtual',   label:'Virtual',   icon:<SUI.IconMonitor size={16} /> },
+                ]}
+                onChoose={v=>persistLocationField('assessmentType','default_assessment_type',v,'assessment default')} />
+            </SUI.Section>
 
-            {/* Not here, and each moved for a different reason:
+            {/* MOVED 2026-10-30 — the booking links, Google Reviews link,
+                hourly rate and the signature's website and social links only
+                exist to fill emails, so they live on Settings → Emails
+                ("Your details" and "Signature"). One editable copy each.
+                Not here, and each moved for a different reason:
                   the sending identity → Emails (issue 246 step 1)
                   who hears about a new lead → Team
-                  Jobber → Connections › Jobber; it was the sole occupant of
-                    an "Integrations" header on this section, which is the
-                    definition of a thing filed under the wrong heading. */}
-
-          </>
+                  Jobber → Connections › Jobber */}
+            {sections.some(sec => sec.key === 'emails') && (
+              <SUI.EmailsLink plural what="Booking links, Google Reviews link, hourly rate, website and social links" onOpen={() => openSection('emails', { push:false })} />
+            )}
+          </SUI.SettingsPage>
         )}
 
         {/* ── Team & Billing (merged) ── */}

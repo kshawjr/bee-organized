@@ -157,7 +157,8 @@ describe('each role is offered exactly the sections it was, in both navs', () =>
   it('the names: slice 1\'s list, with Team and no New leads', async () => {
     await mount({ franchiseRole: 'owner' })
     const labels = Array.from(rail().querySelectorAll('[data-section]')).map(b => b.textContent)
-    expect(labels).toEqual(['Profile', 'Location', 'Team', 'Tags', 'Emails', 'Texts and scripts', 'Slack', 'Jobber', 'Mailchimp'])
+    // Slice 3 (2026-11-13): Tags is closed, so its item carries a "Soon" chip.
+    expect(labels).toEqual(['Profile', 'Location', 'Team', 'TagsSoon', 'Emails', 'Texts and scripts', 'Slack', 'Jobber', 'Mailchimp'])
   })
 
   it('the nav has no section list and no role in it — it draws what BeeHub hands it', () => {
@@ -169,7 +170,7 @@ describe('each role is offered exactly the sections it was, in both navs', () =>
     // The predicates, word for word as they were on main.
     expect(HUB).toContain("...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),")
     expect(HUB).toContain("...(canSeeTeamScreen ? [{ key:'team', label:'Team', icon:'👥' }] : []),")
-    expect(HUB).toContain("...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),")
+    expect(HUB).toContain("...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️', soon:true }] : []),")
     expect(HUB).toContain("{ title:'Client messages', items: ownerConfig ? [")
     expect(HUB).not.toContain("title:'Notifications'")
     expect(HUB).toContain("{ title:'Connections', items: ownerConfig ? [")
@@ -177,9 +178,12 @@ describe('each role is offered exactly the sections it was, in both navs', () =>
   })
 
   it('the current section is marked on the rail, and only one is', async () => {
-    await mount({ franchiseRole: 'owner', initialSection: 'tags' })
+    await mount({ franchiseRole: 'owner', initialSection: 'team' })
     const current = Array.from(rail().querySelectorAll('[aria-current="page"]')).map(b => b.getAttribute('data-section'))
-    expect(current).toEqual(['tags'])
+    expect(current).toEqual(['team'])
+    // A closed section is never the current page, even for someone who lands on it.
+    await mount({ franchiseRole: 'owner', initialSection: 'tags' })
+    expect(Array.from(rail().querySelectorAll('[aria-current="page"]'))).toEqual([])
   })
 })
 
@@ -568,10 +572,12 @@ describe('Lato and Arvo cannot leak', () => {
     expect(rootEl.style.fontFamily).not.toMatch(newFace)
   })
 
-  it('an unrebuilt section (Location) carries no new font and sits outside every data-settings-ui', async () => {
-    await mount({ franchiseRole: 'owner', initialSection: 'location' })
+  // Location was the example here until it was rebuilt (slice 3); Texts and
+  // scripts is still to come (slice 4).
+  it('an unrebuilt section (Texts and scripts) carries no new font and sits outside every data-settings-ui', async () => {
+    await mount({ franchiseRole: 'owner', initialSection: 'texts' })
     const body = pane().lastElementChild as HTMLElement
-    expect(body.textContent).toContain('Location Details')
+    expect(body.textContent).toContain('Texts are on their way')
     expect(body.querySelector('[data-settings-ui]'), 'no rebuilt piece inside it').toBeNull()
     expect(body.closest('[data-settings-ui]'), 'not inside a rebuilt piece').toBeNull()
     for (const el of Array.from(body.querySelectorAll('*')) as HTMLElement[]) {
@@ -650,8 +656,8 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     const importers = (needle: string) =>
       [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => readFileSync(p, 'utf8').includes(needle)).sort()
     // Slice 2 added the Team pieces and restyled the Bees card.
-    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/TeamAndLeads.jsx'])
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/hive/BeeRosterSettings.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/hive/BeeRosterSettings.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })
@@ -663,16 +669,19 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     const is = (v: string, h: string) => [h.toLowerCase(), asRgb(h)].includes(hex(v))
     await mount({ franchiseRole: 'owner', initialSection: 'profile' })
     expect(is(bg(), T.background), `profile: ${bg()}`).toBe(true)
-    await mount({ franchiseRole: 'owner', initialSection: 'team' })
-    expect(is(bg(), T.background), `team: ${bg()}`).toBe(true)
-    for (const section of ['location', 'tags', 'emails', 'texts', 'slack', 'jobber', 'mailchimp']) {
+    // team: slice 2. location, and the closed Tags notice: slice 3.
+    for (const section of ['team', 'location', 'tags']) {
+      await mount({ franchiseRole: 'owner', initialSection: section })
+      expect(is(bg(), T.background), `${section}: ${bg()}`).toBe(true)
+    }
+    for (const section of ['emails', 'texts', 'slack', 'jobber', 'mailchimp']) {
       await mount({ franchiseRole: 'owner', initialSection: section })
       expect(is(bg(), '#f7f5f0'), `${section}: ${bg()}`).toBe(true)
     }
     // The no-access notice is old-look too.
     await mount({ franchiseRole: 'manager', initialSection: 'emails' })
     expect(is(bg(), '#f7f5f0'), `notice: ${bg()}`).toBe(true)
-    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team'])
+    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team', 'location', 'tags'])
   })
 
   it('no new dependency: the shell imports React, the tokens and Bee Hub\'s own icons — nothing else', () => {

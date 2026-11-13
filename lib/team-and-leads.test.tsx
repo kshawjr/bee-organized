@@ -491,7 +491,8 @@ describe('nothing points at New leads any more', () => {
     for (const key of ['profile', 'location', 'team', 'tags', 'emails', 'texts', 'slack', 'jobber', 'mailchimp']) {
       // Without a location context: some old sections need the app's router once they have a real location.
       await render(<CurrentUserContext.Provider value={owner}><SettingsScreen initialSection={key} franchiseRole="owner" /></CurrentUserContext.Provider>)
-      expect(railCurrent(), key).toBe(key)
+      // Tags is closed (slice 3): it is never the current page.
+      expect(railCurrent(), key).toBe(key === 'tags' ? undefined : key)
       const text = pane().textContent || ''
       for (const stale of ['on New leads', 'Notifications ›', 'Settings → New leads', 'New leads section', 'Team and Seats']) {
         expect(text, `${key}: "${stale}"`).not.toContain(stale)

@@ -166,7 +166,10 @@ describe('one editable copy — Location keeps a pointer, not the fields', () =>
     for (const gone of ['Hourly Rate', 'Booking Link', 'Google Reviews', 'Website', 'Facebook']) {
       expect(ps, `"${gone}" row on Location`).not.toContain(gone)
     }
-    expect(container.textContent).toContain('is now on')
-    expect(container.textContent).toContain('Settings → Emails')
+    // 2026-11-13 (Settings slice 3): the pointer is the new look's Emails
+    // link — same message, and still a pointer rather than the fields.
+    const link = container.querySelector('[data-semails-link]')!
+    expect(link.textContent).toContain('Booking links, Google Reviews link, hourly rate, website and social links now live on Emails')
+    expect(link.querySelector('button')!.textContent).toBe('Open Emails')
   })
 })

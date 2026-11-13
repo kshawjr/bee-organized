@@ -67,7 +67,10 @@ export const IconChevronLeft = draw(<path d="M15 6l-6 6l6 6" />)
 export const IconTrash = draw(<><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7V4a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></>)
 export const IconCard = draw(<><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M3 10h18" /><path d="M7 15h.01" /><path d="M11 15h2" /></>)
 export const IconRefresh = draw(<><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></>)
-export { IconPlus, IconAlertTriangle, IconMail, IconPencil, IconChevronRight, IconCheck }
+export { IconPlus, IconAlertTriangle, IconMail, IconPencil, IconChevronRight, IconCheck, IconMapPin }
+// Slice 3 (Location).
+export const IconHome = draw(<><path d="M5 12H3l9 -9l9 9h-2" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></>)
+export const IconMonitor = draw(<><rect x="3" y="4" width="18" height="12" rx="1" /><path d="M7 20h10" /><path d="M9 16v4" /><path d="M15 16v4" /></>)
 
 // One outline per section KEY. The key is all the nav is told about a
 // section besides its label, so a section added to SECTION_GROUPS later still
@@ -121,7 +124,11 @@ export const SETTINGS_CSS = `
 [data-slead]{display:flex;align-items:center;gap:16px;min-width:0}
 [data-snotice]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
 [data-sfields]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+[data-striple]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+[data-schoices]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 @media (min-width:640px){
+[data-striple]{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}
+[data-schoices]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 [data-slead]{margin-left:52px}
 [data-snotice]{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 [data-sfields]{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
@@ -171,6 +178,18 @@ export function SettingsRail({ groups, active, onOpen }) {
               {group.items.map(sec => {
                 const isActive = active === sec.key
                 const Icon = iconFor(sec.key)
+                // A CLOSED section (`soon`): the export's "Text messaging"
+                // treatment — the label at half strength and a small chip.
+                // It is a plain <div>, not a button: nothing to click,
+                // nothing to tab to, and it can never be the current page.
+                if (sec.soon) return (
+                  <div key={sec.key} data-section={sec.key} data-soon="" aria-disabled="true"
+                    style={{ display:'flex', alignItems:'center', gap:'10px', width:'100%', boxSizing:'border-box', padding:'6px 8px', borderRadius:R.md, cursor:'default' }}>
+                    <span aria-hidden="true" style={{ display:'flex', flexShrink:0, opacity:0.35, color:T.foreground }}><Icon size={16} /></span>
+                    <span style={{ fontSize:'14px', lineHeight:'20px', fontWeight:400, color:alpha(T.foreground, 0.8), opacity:0.5 }}>{sec.label}</span>
+                    <span data-soon-chip style={{ marginLeft:'auto', borderRadius:R.full, background:T.muted, padding:'2px 6px', fontSize:'9px', lineHeight:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', color:T.mutedFg }}>Soon</span>
+                  </div>
+                )
                 return (
                   <button key={sec.key} type="button" data-section={sec.key}
                     aria-current={isActive ? 'page' : undefined}
@@ -209,6 +228,18 @@ export function SettingsDrill({ groups, hidden, onOpen }) {
           <div style={{ borderRadius:R.xxl, overflow:'hidden', border:`1px solid ${T.border}`, background:T.card }}>
             {group.items.map((sec, i) => {
               const Icon = iconFor(sec.key)
+              // Closed: same row, half strength, "Coming soon" under the
+              // name, no chevron — and not a button.
+              if (sec.soon) return (
+                <div key={sec.key} data-section={sec.key} data-soon="" aria-disabled="true"
+                  style={{ display:'flex', alignItems:'center', gap:'12px', width:'100%', boxSizing:'border-box', minHeight:'52px', padding:'10px 16px', background:T.card, borderBottom: i < group.items.length - 1 ? `1px solid ${T.border}` : 'none', cursor:'default' }}>
+                  <span aria-hidden="true" style={{ display:'flex', flexShrink:0, color:T.mutedFg, opacity:0.5 }}><Icon size={18} /></span>
+                  <span style={{ minWidth:0 }}>
+                    <span style={{ display:'block', fontSize:'16px', lineHeight:'22px', fontWeight:400, color:T.foreground, opacity:0.5 }}>{sec.label}</span>
+                    <span data-soon-chip style={{ display:'block', fontSize:'11px', lineHeight:'14px', color:T.mutedFg }}>Coming soon</span>
+                  </span>
+                </div>
+              )
               return (
                 <button key={sec.key} type="button" data-section={sec.key} data-shover="muted"
                   onClick={() => onOpen(sec.key, { push:true })}
@@ -468,11 +499,12 @@ export function ActionRow({ icon, label, danger, onClick }) {
 }
 
 // "X now lives on Emails" — the dashed sage note with the Open Emails button.
-export function EmailsLink({ what, onOpen }) {
+// `plural` when `what` names several things: "…links now live on Emails".
+export function EmailsLink({ what, onOpen, plural = false }) {
   return (
     <div data-semails-link style={{ borderRadius:R.xxl, border:`1px dashed ${T.border}`, background:alpha(T.sageSoft, 0.5), padding:'16px 20px' }}>
       <p style={{ fontFamily:FONT.body, fontSize:'13px', lineHeight:'20px', color:T.mutedFg }}>
-        {what} now lives on <span style={{ fontWeight:700, color:T.foreground }}>Emails</span>, with everything else your emails use.
+        {what} now {plural ? 'live' : 'lives'} on <span style={{ fontWeight:700, color:T.foreground }}>Emails</span>, with everything else your emails use.
       </p>
       <button type="button" data-shover="brand" onClick={onOpen}
         style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px', minHeight:'44px', padding:'8px 16px', borderRadius:R.lg, border:'none', background:T.sage, color:T.ink, cursor:'pointer', fontFamily:FONT.ui, transition:'background-color .15s' }}>
@@ -506,6 +538,7 @@ export const IconSignOut = IconLogout
 // here. BeeHub.jsx paints the screen PAGE_BG behind one of these and leaves
 // the old cream behind every other section, so a short rebuilt page has no
 // band of the old colour under it.
-export const REBUILT_SECTIONS = ['profile', 'team']
+export const REBUILT_SECTIONS = ['profile', 'team', 'location', 'tags']
 export const PAGE_BG = T.background
 export const MUTED_FG = T.mutedFg
+export const FG = T.foreground

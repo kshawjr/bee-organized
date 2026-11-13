@@ -312,7 +312,11 @@ describe('mobile drill-down: list → section → back → list', () => {
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) {
       expect(parseInt(row.style.minHeight, 10), `${row.dataset.section} tap target`).toBeGreaterThanOrEqual(44)
-      const label = row.querySelector('span:not([aria-hidden])') as HTMLElement
+      // A closed section (Tags, 2026-11-13) keeps the row's height and its
+      // 16px name; "Coming soon" sits under the name, so the name is one level in.
+      const label = (row.hasAttribute('data-soon')
+        ? row.querySelector('span:not([aria-hidden]) > span')
+        : row.querySelector('span:not([aria-hidden])')) as HTMLElement
       expect(parseInt(label.style.fontSize, 10), `${row.dataset.section} label size`).toBeGreaterThanOrEqual(16)
     }
   })

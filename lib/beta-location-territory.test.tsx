@@ -437,14 +437,20 @@ describe('D. mounted on both location pages; built from the shared parts', () =>
     expect(panel).toBeLessThan(owners)
   })
 
-  it('Settings → Location: right after Location Details (address, ZIP), before Online Presence', () => {
-    const details = BEEHUB.indexOf('label="Location ID"')
+  it('Settings → Location: right after Location details (address, Location ID), before the assessment default and the Emails pointer', () => {
+    // 2026-11-13 (Settings slice 3): Location is rebuilt to the new look. The
+    // panel itself is untouched and sits where it sat: after the details
+    // card, before everything else.
+    const details = BEEHUB.indexOf('<LUI.LocationIdLine id={settings.location.locId} />')
     const panel = BEEHUB.indexOf('<LocationZipsPanel locationId={realLocId} />')
-    // 2026-10-30: the Online Presence rows moved to Settings → Emails; their
-    // header (now a pointer) still follows the territory panel.
-    const online = BEEHUB.indexOf('<SectionHeader title="Online Presence &amp; Pricing" />')
+    const assessment = BEEHUB.indexOf('<SUI.Section eyebrow="Assessment default"')
+    // 2026-10-30: the Online Presence rows moved to Settings → Emails; the
+    // pointer to them still follows the territory panel.
+    const online = BEEHUB.indexOf('<SUI.EmailsLink plural what="Booking links')
+    expect(details).toBeGreaterThan(0)
     expect(panel).toBeGreaterThan(details)
-    expect(panel).toBeLessThan(online)
+    expect(panel).toBeLessThan(assessment)
+    expect(assessment).toBeLessThan(online)
   })
 
   it('both screens use the same parts — no second implementation', () => {

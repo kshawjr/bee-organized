@@ -48,7 +48,7 @@ import { tagKey, nearTagVerdict, tagSection, sectionTags } from '@/lib/tags'
 import PickerModal from '@/components/hive/shared/PickerModal'
 import OwnTagsSettings from '@/components/hive/OwnTagsSettings'
 import TagFilterSection from '@/components/hive/shared/TagFilterSection'
-import { GET as ownGET } from '@/app/api/tags/own/route'
+import { GET as ownGET } from '@/app/api/tags/own/route'   // closed: takes no request, the tests pass one anyway (as any)
 import { GET as locationsGET } from '@/app/api/tags/locations/route'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -343,10 +343,15 @@ describe('E) Settings › Tags', () => {
     expect(JSON.parse(fetchCalls.find(c => c.url === '/api/lookups/o-sb')!.init.body)).toEqual({ is_active: true })
   })
 
-  it('Settings shows it to owners and managers', () => {
+  // CLOSED 2026-11-13 (Settings slice 3): tags are being rebuilt as their own
+  // project. The screen above still exists as a component (these tests mount
+  // it directly) but Settings no longer mounts it for anyone.
+  it('Settings no longer mounts it: the nav item is greyed for owners and managers and the screen is not imported', () => {
     const src = readFileSync('components/BeeHub.jsx', 'utf8')
     expect(src).toContain("const canManageOwnTags = franchiseRole === 'owner' || franchiseRole === 'manager'")
-    expect(src).toContain("<OwnTagsSettings locationId={realLocId}")
+    expect(src).toContain("...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️', soon:true }] : []),")
+    expect(src).not.toContain('<OwnTagsSettings')
+    expect(src).not.toMatch(/import OwnTagsSettings/)
   })
 })
 
@@ -355,37 +360,30 @@ describe('F) /api/tags/own and /api/tags/locations', () => {
   const req = (u: string) => new Request(`http://t.local${u}`) as any
   beforeEach(() => { h.state.calls = [] })
 
-  it('own: an owner reads their own location, with people counts', async () => {
-    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC }
-    h.state.respond = (ctx: any) => {
-      if (ctx.table === 'lookups') return { data: [{ id: 'o-org', label: 'Organizer', is_active: true }], error: null }
-      if (ctx.table === 'lead_tags') return { data: [{ tag_lookup_id: 'o-org' }, { tag_lookup_id: 'o-org' }], error: null }
-      if (ctx.table === 'partner_tags') return { data: [{ tag_lookup_id: 'o-org' }], error: null }
-      return { data: null, error: null }
+  // CLOSED 2026-11-13 (Settings slice 3). This route listed a location's own
+  // tags for Settings › Tags and had no other caller. It now refuses everyone
+  // — owner, manager, another location's owner, read-only staff, corporate —
+  // with the same answer, and reads nothing first.
+  it('own: closed — 410 for every caller, saying why, and no table is read', async () => {
+    for (const hubUser of [
+      { id: 'u1', role: 'owner', location_id: LOC },
+      { id: 'u2', role: 'manager', location_id: LOC },
+      { id: 'u1', role: 'owner', location_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+      { id: 'u3', role: 'lite_user', location_id: LOC },
+      { id: 'a1', role: 'super_admin', location_id: null },
+      null,
+    ]) {
+      h.state.hubUser = hubUser
+      h.state.calls = []
+      h.state.respond = () => ({ data: [{ id: 'o-org', label: 'Organizer', is_active: true }], error: null })
+      const res = await (ownGET as any)(req(`/api/tags/own?location_id=${LOC}`))
+      expect(res.status, JSON.stringify(hubUser)).toBe(410)
+      const json = await res.json()
+      expect(json.error).toBe('tags_settings_closed')
+      expect(json.message).toContain('Settings › Tags is closed while tags are being rebuilt')
+      expect(json.tags).toBeUndefined()
+      expect(h.state.calls, 'nothing read').toEqual([])
     }
-    const json = await (await ownGET(req(`/api/tags/own?location_id=${LOC}`))).json()
-    expect(json.tags).toEqual([{ id: 'o-org', label: 'Organizer', is_active: true, people: 3, deleteBlockers: [], deleteReason: null }])
-    expect(h.state.calls.find((c: any) => c.table === 'lookups').filters).toContainEqual(['eq', 'location_id', LOC])
-  })
-
-  it('own: a copy collapsed into a corporate tag is marked promoted', async () => {
-    h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC }
-    h.state.respond = (ctx: any) => {
-      if (ctx.table === 'lookups') return { data: [{ id: 'o-dnb', label: 'DO NOT BOOK', is_active: false }], error: null }
-      if (ctx.table === 'tag_promotion_copies') return { data: [{ tag_id: 'o-dnb' }], error: null }
-      return { data: [], error: null }
-    }
-    const json = await (await ownGET(req(`/api/tags/own?location_id=${LOC}`))).json()
-    expect(json.tags[0]).toMatchObject({ id: 'o-dnb', promoted: true })
-    const promoRead = h.state.calls.find((c: any) => c.table === 'tag_promotion_copies')
-    expect(promoRead.filters).toContainEqual(['is', 'tag_promotions.undone_at', null])
-  })
-
-  it("own: another location's, or read-only staff → 403", async () => {
-    h.state.hubUser = { id: 'u1', role: 'owner', location_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
-    expect((await ownGET(req(`/api/tags/own?location_id=${LOC}`))).status).toBe(403)
-    h.state.hubUser = { id: 'u3', role: 'lite_user', location_id: LOC }
-    expect((await ownGET(req(`/api/tags/own?location_id=${LOC}`))).status).toBe(403)
   })
 
   it('locations: corporate only; the same name at several locations is ONE row, most widespread first', async () => {

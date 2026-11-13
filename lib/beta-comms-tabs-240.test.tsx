@@ -191,8 +191,9 @@ describe('nothing that worked before is unreachable', () => {
     expect(await mount('jobber')).toContain('Jobber')
     // Location kept everything else and lost only this.
     const loc = await mount('location')
-    expect(loc).toContain('Location Name')
-    expect(loc).toContain('Assessment Default')   // still here, still honest
+    // 2026-11-13: Location is rebuilt to the new look (Settings slice 3).
+    expect(loc).toContain('Location name')
+    expect(loc).toContain('Assessment default')   // still here, still honest
     expect(loc).not.toContain('Integrations')
   })
 

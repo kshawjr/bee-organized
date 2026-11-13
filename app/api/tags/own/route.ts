@@ -1,82 +1,38 @@
 // app/api/tags/own/route.ts
 //
-// GET /api/tags/own?location_id=<uuid> — a location's OWN tags (switched on
-// and off), each with how many people carry it (clients + Network), for
-// Settings › Tags (2026-10-16). Renames and switch-off/restore go through
-// PATCH /api/lookups/[id], which carries the permission + near-match rules.
+// GET /api/tags/own?location_id=<uuid> — CLOSED 2026-11-13 (Settings slice 3).
 //
-// Who: an owner or manager of that location (the param must be their own),
-// or corporate for any location.
+// It listed a location's OWN tags (switched on and off), each with how many
+// people carry it, for Settings › Tags (2026-10-16). That screen is closed
+// while tags are rebuilt as their own project (a master list where each tag
+// knows what kind of record it belongs to). This route served that screen and
+// nothing else — its one caller was components/hive/OwnTagsSettings.jsx,
+// which nothing mounts any more — so it refuses, for everyone, rather than
+// sit open behind a page that is gone.
+//
+// 410 Gone, not 403: nobody is being told they lack permission. The answer is
+// the same whoever asks and is given before anything is read, so it says
+// nothing about any location.
+//
+// NOT closed, because other screens use them:
+//   · /api/lead-tags, /api/partner-tags — putting a tag on a client or a
+//     Network contact and taking it off (the Tags row on a record)
+//   · /api/lookups — making a tag from that row's "+ Tag", and corporate's
+//     Configure tab
+//   · /api/tags/delete — corporate's Retired tags panel also calls it
+//
+// TO REOPEN: the read this route did (lookups by location, counted against
+// lead_tags and partner_tags, with promoted copies marked) is in git at
+// affc44b, the commit before this one.
 
-import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
-import { supabaseService } from '@/lib/supabase-service'
-import { TAG_CATEGORIES, describeTagBlockers } from '@/lib/tags'
-import { LOCATION_TAG_ROLES } from '@/lib/tag-guard'
+import { NextResponse } from 'next/server'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-export async function GET(req: NextRequest) {
-  try {
-    await requireAuth()
-    const hubUser = await getHubUser()
-    if (!hubUser) return NextResponse.json({ error: 'No hub user profile' }, { status: 403 })
-
-    const locationId = new URL(req.url).searchParams.get('location_id') || ''
-    if (!UUID_RE.test(locationId)) return NextResponse.json({ error: 'invalid_location_id' }, { status: 400 })
-    if (!isAdmin(hubUser.role)) {
-      if (!LOCATION_TAG_ROLES.has(String(hubUser.role))) return NextResponse.json({ error: 'forbidden_role' }, { status: 403 })
-      if (hubUser.location_id !== locationId) return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
-    }
-
-    const { data: tags, error } = await supabaseService
-      .from('lookups')
-      .select('id, label, icon, is_active, created_at, updated_at')
-      .in('category', TAG_CATEGORIES)
-      .eq('location_id', locationId)
-      .order('label', { ascending: true })
-    if (error) return NextResponse.json({ error: 'read_failed', detail: error.message }, { status: 500 })
-
-    const ids = (tags || []).map((t: any) => t.id)
-    const count = new Map<string, number>()
-    if (ids.length) {
-      const [leadLinks, partnerLinks] = await Promise.all([
-        supabaseService.from('lead_tags').select('tag_lookup_id').in('tag_lookup_id', ids),
-        supabaseService.from('partner_tags').select('tag_lookup_id').in('tag_lookup_id', ids),
-      ])
-      for (const r of [...(leadLinks.data || []), ...(partnerLinks.data || [])]) {
-        count.set((r as any).tag_lookup_id, (count.get((r as any).tag_lookup_id) || 0) + 1)
-      }
-    }
-
-    // Copies collapsed into a corporate tag ("Make corporate", not undone)
-    // are switched off but are NOT the location's to restore — restoring one
-    // would put a duplicate next to the corporate tag. Best effort: before
-    // migrations/tag_make_corporate.sql runs the table doesn't exist.
-    const promoted = new Set<string>()
-    if (ids.length) {
-      const { data: copies } = await supabaseService
-        .from('tag_promotion_copies').select('tag_id, tag_promotions!inner(undone_at)')
-        .in('tag_id', ids).is('tag_promotions.undone_at', null)
-      for (const c of (copies || []) as any[]) promoted.add(c.tag_id)
-    }
-
-    // Why each can't be deleted (none = it can) — the same check the delete
-    // itself runs (tag_delete_blockers, migrations/tag_delete.sql).
-    const blockersOf = new Map<string, string[]>()
-    await Promise.all(ids.map(async (id: string) => {
-      const { data: b } = await supabaseService.rpc('tag_delete_blockers', { p_id: id })
-      blockersOf.set(id, Array.isArray(b) ? b : ['unknown'])
-    }))
-
-    return NextResponse.json({
-      tags: (tags || []).map((t: any) => {
-        const blockers = blockersOf.get(t.id) || ['unknown']
-        return { ...t, people: count.get(t.id) || 0, ...(promoted.has(t.id) ? { promoted: true } : {}), deleteBlockers: blockers, deleteReason: describeTagBlockers(blockers) }
-      }),
-    })
-  } catch (err: any) {
-    console.error('[/api/tags/own GET] error:', err?.message || err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
-  }
+export async function GET() {
+  return NextResponse.json(
+    {
+      error: 'tags_settings_closed',
+      message: 'Settings › Tags is closed while tags are being rebuilt. You can still add and remove tags on a client or a Network contact.',
+    },
+    { status: 410 },
+  )
 }

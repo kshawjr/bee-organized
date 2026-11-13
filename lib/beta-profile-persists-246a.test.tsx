@@ -332,7 +332,11 @@ describe('Change Password', () => {
 
   it('nothing on this tab says "coming soon" any more', async () => {
     await mount()
-    expect(container.textContent ?? '').not.toMatch(/coming soon/i)
+    // The TAB, not the nav beside it: since 2026-11-13 the closed Tags item
+    // in the nav reads "Coming soon" on a phone, and that is true.
+    const tab = container.querySelector('[data-settings-page]')!
+    expect(tab.textContent).toContain('Personal details')
+    expect(tab.textContent ?? '').not.toMatch(/coming soon/i)
   })
 })
 
@@ -349,10 +353,10 @@ describe('the read-only rows are unchanged', () => {
     expect(rowFor('Role').textContent).toContain('Zee Bee')
   })
 
-  it('Location ID is untouched on the Location tab', () => {
-    expect(HUB).toContain(
-      '<SettingsEditRow label="Location ID"     value={settings.location.locId||\'—\'}   readOnly hint="Your unique franchise location identifier" />',
-    )
+  it('Location ID is still on the Location tab, read-only', () => {
+    // 2026-11-13 (Settings slice 3): a quiet line under the rows rather than
+    // a row; lib/settings-location.test.tsx mounts it.
+    expect(HUB).toContain('<LUI.LocationIdLine id={settings.location.locId} />')
   })
 
   it('the Location rows still persist through their own route, not this one', () => {

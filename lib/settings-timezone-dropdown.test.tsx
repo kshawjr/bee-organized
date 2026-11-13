@@ -77,12 +77,16 @@ const mount = async (loc: any) => {
   await act(async () => {})
 }
 
+// Settings slice 3 (2026-11-13): Location is rebuilt to the new look. The
+// row is [data-settings-row], opened with its pencil; picking from the list
+// IS the save (there is no Save button to leave off).
 const rowFor = (label: string) => {
-  const p = Array.from(container.querySelectorAll('p')).find(
-    el => (el.textContent || '').trim().replace(/\*$/, '').trim() === label,
-  )
-  expect(p, `the "${label}" row`).toBeTruthy()
-  return p!.parentElement!.parentElement as HTMLElement
+  const r = container.querySelector(`[data-settings-row="${label}"]`)
+  expect(r, `the "${label}" row`).toBeTruthy()
+  return r as HTMLElement
+}
+const openRow = async (label: string) => {
+  await act(async () => { (rowFor(label).querySelector(`button[aria-label="Edit ${label}"]`) as HTMLElement).click() })
 }
 
 const clickButton = async (row: HTMLElement, text: string) => {
@@ -105,7 +109,7 @@ const saveButton = (row: HTMLElement) =>
 describe('Settings › Timezone is a dropdown fed by the one shared list', () => {
   it('editing opens a <select> with exactly the shared options, and no text input', async () => {
     await mount(selectedLoc())
-    await clickButton(rowFor('Timezone'), 'Edit')
+    await openRow('Timezone')
     const row = rowFor('Timezone')
     expect(row.querySelector('input'), 'no free-text input').toBeNull()
     const select = row.querySelector('select') as HTMLSelectElement
@@ -138,27 +142,27 @@ describe('Settings › Timezone with an invalid stored value ("Phoenix AZ")', ()
     expect(row.textContent).not.toContain('Not set')
   })
 
-  it('on Edit the select shows the invalid value as the current (disabled) entry and Save is off', async () => {
+  it('on Edit the select shows the invalid value as the current (disabled) entry, which cannot be picked', async () => {
     await mount(selectedLoc({ timezone: 'Phoenix AZ' }))
-    await clickButton(rowFor('Timezone'), 'Edit')
+    await openRow('Timezone')
     const row = rowFor('Timezone')
     const select = row.querySelector('select') as HTMLSelectElement
     expect(select.value).toBe('Phoenix AZ')
     const current = Array.from(select.options).find(o => o.value === 'Phoenix AZ')!
     expect(current.disabled).toBe(true)
     expect(current.textContent).toContain('not valid')
-    expect(saveButton(row).disabled).toBe(true)
+    // It is the only entry that is not a real timezone, and it is not pickable.
+    expect(Array.from(select.options).filter(o => o.disabled).length).toBe(1)
     expect(row.textContent).toContain('Not a valid timezone')
   })
 
-  it('picking a listed value enables Save and PATCHes the label', async () => {
+  it('picking a listed value PATCHes the label, and clears the warning', async () => {
     await mount(selectedLoc({ timezone: 'Phoenix AZ' }))
-    await clickButton(rowFor('Timezone'), 'Edit')
+    await openRow('Timezone')
     okFetch.mockClear()
     const select = rowFor('Timezone').querySelector('select') as HTMLSelectElement
     await pick(select, 'Mountain Time (MT)')
-    expect(saveButton(rowFor('Timezone')).disabled).toBe(false)
-    await clickButton(rowFor('Timezone'), 'Save')
+    await act(async () => {})
     await act(async () => {})
     const call = okFetch.mock.calls.find(
       ([url, opts]: any[]) => String(url) === `/api/locations/${LOC_UUID}` && opts?.method === 'PATCH',
@@ -235,7 +239,8 @@ describe('source guards — no second copy of the timezone list anywhere', () =>
   })
 
   it('the Settings row is the dropdown variant, not the free-text one', () => {
-    expect(beehub).toMatch(/<SettingsEditRow label="Timezone"[\s\S]*?options=\{US_TIMEZONES\}/)
+    expect(beehub).toMatch(/<LUI\.SelectRow label="Timezone"[\s\S]*?options=\{US_TIMEZONES\}/)
+    expect(beehub).not.toMatch(/<SUI\.EditRow label="Timezone"/)
   })
 
   it('PATCH /api/locations/[id] validates timezone against the shared list', () => {
