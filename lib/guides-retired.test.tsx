@@ -15,7 +15,8 @@
 //   4 · The screen map lists none of the retired screens, so the feedback
 //       sorter cannot file a report onto a screen that is not there.
 //   5 · NOTHING IS DELETED FROM THE DATABASE. The slide tables keep their
-//       rows: no migration was added, and the two slide routes — whose save
+//       rows: no migration names either table that did not before, no code
+//       writes to either, and the two slide routes — whose save
 //       wiped its table and wrote a new set — are CLOSED too: they answer
 //       "closed" and read nothing.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
@@ -316,15 +317,55 @@ describe('the screen map lists none of the retired screens', () => {
 // 5 · NOTHING IS DELETED FROM THE DATABASE
 // ═══════════════════════════════════════════════════════════════════════════
 describe('the slides stay as rows', () => {
-  it('no migration was added, changed or removed', () => {
-    const tracked = (ref: string) => execSync(`git ls-tree -r --name-only ${ref} -- migrations`, { cwd: root0 }).toString().trim().split('\n').sort()
-    const changed = execSync('git diff --name-only 722aaa0 -- migrations', { cwd: root0 }).toString().trim()
-    expect(changed).toBe('')
-    expect(tracked('722aaa0').length).toBeGreaterThan(10)
-    // and no file anywhere in the change drops, truncates or deletes from either table
-    const diff = execSync('git diff 722aaa0 -- . ":!lib/*.test.*"', { cwd: root0, maxBuffer: 64 * 1024 * 1024 }).toString()
-    const added = diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n')
-    expect(added).not.toMatch(/drop table|truncate|delete from|\.delete\(\)/i)
+  // WHAT THIS GUARDS: the rows in guide_slides and manual_slides can only be
+  // lost two ways — a migration that names one of the tables, or app code
+  // that writes to one. Both are checked against the tree AS IT IS NOW.
+  //
+  // It used to assert "no migration was added, changed or removed since
+  // 722aaa0", and that no line added anywhere since then contained "delete
+  // from", "truncate" or ".delete()". That described one commit, not the
+  // tables: it went red the moment the next, unrelated migration landed (the
+  // call-script seed, 8f8e100), and would have gone red again on any later
+  // delete in any feature. A guard that fails on honest work gets switched
+  // off; this one names the two tables and nothing else.
+  const SLIDE_TABLES = /guide_slides|manual_slides/
+
+  it('no migration that names a slide table was added, changed or removed', () => {
+    // Read from disk, not from git, so a migration written but not yet
+    // committed is caught too.
+    const naming = readdirSync(join(root0, 'migrations')).filter(f => SLIDE_TABLES.test(read(`migrations/${f}`))).sort()
+    // The three that existed when the guides were retired: the two that made
+    // the tables, and help_entries, which only mentions them.
+    expect(naming).toEqual(['help_entries.sql', 'manual_slides.sql', 'tier_prices.sql'])
+    for (const f of naming) expect(read(`migrations/${f}`), f).toBe(atHead(`migrations/${f}`))
+    // The scan is really reading the folder (a migration added since then,
+    // which does not name the tables, is seen and passed over).
+    expect(readdirSync(join(root0, 'migrations'))).toContain('seed_call_script_masters.sql')
+  })
+
+  it('no code writes to a slide table: the only two uses are the page load’s reads', () => {
+    const walk = (dir: string): string[] => readdirSync(join(root0, dir), { withFileTypes: true }).flatMap(d => {
+      const p = `${dir}/${d.name}`
+      if (d.isDirectory()) return d.name === 'node_modules' ? [] : walk(p)
+      return /\.(ts|tsx|js|jsx|mjs)$/.test(d.name) && !/\.test\./.test(d.name) ? [p] : []
+    })
+    const uses: string[] = []
+    for (const f of ['app', 'lib', 'components', 'scripts'].flatMap(walk)) {
+      const src = read(f)
+      const re = /\.from\(\s*['"`](guide_slides|manual_slides)['"`]\s*\)([\s\S]{0,400})/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(src))) {
+        // What is done with the table: the first call chained onto .from().
+        const verb = (m[2].match(/^\s*\.(\w+)\(/) || [])[1] || 'unknown'
+        uses.push(`${f}: ${m[1]} ${verb}`)
+        // …and nothing in the rest of that chain changes rows.
+        const chain = m[2].split(/\n\s*\n|;/)[0]
+        expect(chain, `${f} ${m[1]}`).not.toMatch(/\.(delete|update|insert|upsert)\(/)
+      }
+      // No raw SQL against them either.
+      expect(src, f).not.toMatch(/(drop table|truncate|delete from|update|insert into)\s+(if exists\s+)?(public\.)?(guide_slides|manual_slides)/i)
+    }
+    expect(uses.sort()).toEqual(['app/_hub-page.tsx: guide_slides select', 'app/_hub-page.tsx: manual_slides select'])
   })
 
   it('the page load that reads the rows, and the record of both tables’ columns, are byte-for-byte what they were', () => {
