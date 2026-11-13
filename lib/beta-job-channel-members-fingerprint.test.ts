@@ -268,13 +268,25 @@ async function run() {
   }))
 }
 const sha = (x: any) => createHash('sha256').update(JSON.stringify(x)).digest('hex')
+// 2026-11-13 — WHO COULD NOT BE ADDED IS NOW KEPT ON THE JOB. Against the
+// recording, exactly two things differ and both are named here, nothing else:
+//   · the caller is also handed the list as it was stored (`stored`)
+//   · storing it is ONE extra `update engagements`, straight after the bees
+//     are put in (the Slack mark's channel has Nora, whom Slack does not know)
+// Every Slack call, every member of every channel, every other write and
+// everything else a caller is told: identical.
+const EXTRA_WRITE_AT = 2
+const withoutTheKeptList = (writes: string[]) => { const w = [...writes]; expect(w[EXTRA_WRITE_AT]).toBe('update engagements'); w.splice(EXTRA_WRITE_AT, 1); return w }
 const RECORDED_SHA = '792d45fc9163ec34f971e8bb18853bc63f8558c16689c494e5fd1ec8810b1fb8'
 
 describe('nothing about who is in a job’s channel changed', () => {
   it('lookups, invites and removals in order, the people in each channel, what the caller is told, and every database write: identical to f5a7c86', async () => {
     const fp = await run()
     if (process.env.FP_RECORD) { writeFileSync(process.env.FP_RECORD, JSON.stringify({ sha: sha(fp), fp }, null, 1)); return }
-    expect(sha(fp)).toBe(RECORDED_SHA)
+    const { stored, ...hand } = fp.hand
+    expect(sha({ ...fp, hand, writes: withoutTheKeptList(fp.writes) })).toBe(RECORDED_SHA)
+    expect(fp.writes).toHaveLength(25)
+    expect(stored.items.map((p: any) => [p.status, p.bee, p.from])).toEqual([['not_in_slack', 'Nora Nobody', 'created']])
     // Sanity that the scenario did real work, so an empty fingerprint cannot pass.
     expect(fp.people.filter((c: any) => c.method === 'conversations.invite').length).toBeGreaterThanOrEqual(6)
     expect(fp.people.some((c: any) => c.method === 'conversations.kick')).toBe(true)

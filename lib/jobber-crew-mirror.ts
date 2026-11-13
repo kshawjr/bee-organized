@@ -248,7 +248,7 @@ export const isRetryable = (r: CrewMirrorResult) => !r.ok && (r.reason === 'jobb
 export async function mirrorCrewFromJobber(
   db: Db,
   engagementId: string,
-  opts: { read?: JobberReader; retrySlackProblems?: boolean } = {},
+  opts: { read?: JobberReader } = {},
 ): Promise<CrewMirrorResult> {
   const read = opts.read || (jobberGraphQL as JobberReader)
   const skip = (reason: CrewMirrorSkip): CrewMirrorResult => ({ ok: false, engagementId, reason })
@@ -321,11 +321,15 @@ export async function mirrorCrewFromJobber(
   // rule. Best effort: a failed check never undoes the bee.
   for (const b of bees.added) await checkBeeAgainstSlack(db, b, slack)
   if (!eng.slack_channel_id || eng.slack_channel_archived_at) out.slack = 'no_channel'
-  else if (added + removed === 0 && !(opts.retrySlackProblems && eng.slack_channel_problems)) out.slack = 'unchanged'
+  // Nothing changed in the crew → Slack is not asked. A line Slack refused
+  // before is NOT put to it again from here every 15 minutes (it was, until
+  // 2026-11-13): the stored lines have their own paced retry,
+  // lib/engagement-bees sweepChannelProblems.
+  else if (added + removed === 0) out.slack = 'unchanged'
   else {
     const rec = await reconcileChannelBees(db, {
       token: slack.token, engagementId, locationUuid: eng.location_uuid,
-      channelId: eng.slack_channel_id, channelName: eng.slack_channel_name,
+      channelId: eng.slack_channel_id, channelName: eng.slack_channel_name, from: 'crew',
     })
     out.slackProblems = rec.problems.length
     out.slack = rec.problems.length ? 'problems' : 'matched'
@@ -518,7 +522,7 @@ export async function sweepJobCrews(
     const id = queue[i]
     const loc = locOf.get(id)
     if (loc && deadLocations.has(loc)) { r.unread++; continue }
-    const res = await mirrorCrewFromJobber(db, id, { read: opts.read, retrySlackProblems: true })
+    const res = await mirrorCrewFromJobber(db, id, { read: opts.read })
       .catch((e: any): CrewMirrorResult => { console.error('[crew-mirror] sweep failed for', id, '—', e?.message || e); return { ok: false, engagementId: id, reason: 'db_error' } })
     r.checked++
     if (!res.ok) {

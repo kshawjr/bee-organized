@@ -1,7 +1,8 @@
 // app/api/engagements/[id]/slack-channel/route.ts
 //
-// PATCH { clear_problems: true } → the owner tapped Got it on the lines the
-// sweep stored when this job reopened (slack_channel_problems → null).
+// PATCH { clear_problems: true } → someone tapped Got it on the stored
+// "could not be added" lines. They are HIDDEN from the page, not deleted: a
+// line only goes when it stops being true (lib/engagement-bees, PART C).
 //
 // POST → "Put this job in Slack". Makes ONE public channel named
 // <client>-<project type> (lib/engagement-bees slackJobChannelName), stores
@@ -17,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { createJobChannel, readEngagementBees, readLocationSlackFull, storeProblems } from '@/lib/engagement-bees'
+import { createJobChannel, markProblemsSeen, readEngagementBees, readLocationSlackFull, visibleProblems } from '@/lib/engagement-bees'
 import { gateEngagement } from '@/lib/engagement-bees-gate'
 
 export const runtime = 'nodejs'
@@ -62,6 +63,9 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       // Bees who could not be added, then owners who could not — the panel
       // shows one line for each. Never silent.
       problems: [...r.problems, ...(r.ownerProblems || [])],
+      // The same lines as they are now STORED on the job — what a reload, or
+      // the next person to open it, is shown. The panel draws these.
+      reconcile: r.already ? visibleProblems(eng.slack_channel_problems) : visibleProblems(r.stored),
       owners: r.owners,
     })
   } catch (err: any) {
@@ -80,7 +84,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const body = await req.json().catch(() => ({}))
     if (body?.clear_problems !== true) return NextResponse.json({ error: 'nothing_to_do' }, { status: 400 })
     if (!eng.channelColumns) return NextResponse.json({ ok: true })
-    await storeProblems(supabaseService, eng.id, null)
+    await markProblemsSeen(supabaseService, eng.id, eng.slack_channel_problems)
     return NextResponse.json({ ok: true })
   } catch (err: any) {
     console.error('[engagements/[id]/slack-channel PATCH] error:', err?.message || err)

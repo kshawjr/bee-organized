@@ -730,7 +730,7 @@ describe('reconcile on unarchive', () => {
     expect(chanOf(ENG).members.has('U_SAM')).toBe(true)       // Slack refused
     expect(ebRow(ENG, B_SAM).removed_at).toBeTruthy()          // Bee Hub is the truth
     expect(engRow(ENG).slack_channel_problems.items).toEqual([
-      { status: 'still_in_channel', bee: 'Sam Bee', channel: 'sarah-mcallister-pantry', bee_id: B_SAM },
+      expect.objectContaining({ status: 'still_in_channel', bee: 'Sam Bee', channel: 'sarah-mcallister-pantry', bee_id: B_SAM, from: 'reopened' }),
     ])
     const g = await read(ENG)
     expect(g.j.slack.reconcile.items[0]).toMatchObject({ status: 'still_in_channel', bee: 'Sam Bee' })
@@ -741,7 +741,10 @@ describe('reconcile on unarchive', () => {
     expect(jobChannelsLine(r)).toContain('bee problems stored for owners 1')
   })
 
-  it('a stored line clears on Got it, and a line about one bee clears when the owner re-ticks that bee', async () => {
+  // Changed on purpose 2026-11-13: Got it HIDES the lines from the page; it no
+  // longer deletes them, so a fix made later is still picked up by the paced
+  // retry. A line is deleted only when it stops being true.
+  it('Got it hides a stored line from the page without deleting it, and a line about one bee clears when the owner re-ticks that bee', async () => {
     await closeAndArchive([B_SAM, B_ANA])
     await untick(ENG, B_SAM); await untick(ENG, B_ANA)
     slack.restrictKick = true
@@ -752,7 +755,7 @@ describe('reconcile on unarchive', () => {
     expect(engRow(ENG).slack_channel_problems.items.map((p: any) => p.bee_id)).toEqual([B_ANA])
     const p = await call(channelPATCH(reqJson({ clear_problems: true }), { params: { id: ENG } }))
     expect(p.status).toBe(200)
-    expect(engRow(ENG).slack_channel_problems).toBeNull()
+    expect(engRow(ENG).slack_channel_problems.items.map((x: any) => [x.bee_id, !!x.seen_at])).toEqual([[B_ANA, true]])
     expect((await read(ENG)).j.slack.reconcile).toBeNull()
   })
 

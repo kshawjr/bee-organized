@@ -309,6 +309,15 @@ async function run() {
   }
 }
 const sha = (x: any) => createHash('sha256').update(JSON.stringify(x)).digest('hex')
+// 2026-11-13 — WHO COULD NOT BE ADDED IS NOW KEPT ON THE JOB. Against the
+// recording, exactly two things differ and both are named here, nothing else:
+//   · the caller is also handed the list as it was stored (`stored`)
+//   · storing it is ONE extra `update engagements`, straight after the bees
+//     are put in (the Slack mark's channel has Nora, whom Slack does not know)
+// Every Slack call, every member of every channel, every other write and
+// everything else a caller is told: identical.
+const EXTRA_WRITE_AT = 2
+const withoutTheKeptList = (writes: string[]) => { const w = [...writes]; expect(w[EXTRA_WRITE_AT]).toBe('update engagements'); w.splice(EXTRA_WRITE_AT, 1); return w }
 const RECORDED_SHA = 'd48a437d44aae7260ebaa06d673baf3b027a9d87809b552d40a805a573feed5d'
 const RECORDED_CARDS = 6   // how many cards 689daee posted in this scenario
 
@@ -316,7 +325,9 @@ describe('only the email and the description left the card', () => {
   it('every Slack call and its body, every card’s remaining text, who is in each channel, what callers are told, every database write: identical to 689daee', async () => {
     const { fp, cards } = await run()
     if (process.env.FP_RECORD) { writeFileSync(process.env.FP_RECORD, JSON.stringify({ sha: sha(fp), cards, fp }, null, 1)); return }
-    expect(sha(fp)).toBe(RECORDED_SHA)
+    const told = fp.told.map((t: any) => { if (!t || typeof t !== 'object' || !('stored' in t)) return t; const { stored, ...rest } = t; return rest })
+    expect(sha({ ...fp, told, writes: withoutTheKeptList(fp.writes) })).toBe(RECORDED_SHA)
+    expect(fp.writes).toHaveLength(19)
     expect(cards).toHaveLength(RECORDED_CARDS)
     expect(cards.length).toBeGreaterThanOrEqual(6)
   })

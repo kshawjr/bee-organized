@@ -431,9 +431,12 @@ describe('"Put this job in Slack" is Slack’s mark in the corner, with a small 
   // that the route file itself did not move.
   // (Edited on purpose 2026-11-12: two refusals added to its list of words —
   // no_job and job_unreadable. Nothing else in the route moved.)
+  // (Edited on purpose 2026-11-13: the answer also carries the lines as they
+  // were STORED on the job, and Got it hides lines instead of deleting them —
+  // lib/beta-job-channel-kept-lines.test.ts. The refusals did not move.)
   it('the server route that refuses before calling Slack is byte-for-byte what was pushed', () => {
     expect(createHash('sha256').update(readFileSync('app/api/engagements/[id]/slack-channel/route.ts')).digest('hex'))
-      .toBe('9172f8c6e975dcfc9b636aaf6614d905eb53f5c7b2a4cd70e5105d2a7bbbaa5c')
+      .toBe('d1699194220642c423652581c02759dc10a37bafa0feca73fbcb9cada1850a82')
   })
 })
 
@@ -635,6 +638,90 @@ describe('the lines under the identity row, and their order', () => {
   })
 })
 
+describe('WHO SLACK WOULD NOT ADD IS ON THE JOB WHEN IT IS FRESHLY LOADED, not only just after the dialog', () => {
+  const OWNER = { status: 'owner_not_in_slack', bee: 'Test Admin2', email: 'testuser@beeorganized.com', user_id: 'u-owner', from: 'created', since: '2026-11-13T01:00:00Z', tried_at: '2026-11-13T01:00:00Z' }
+  const NORA_LINE = { status: 'not_in_slack', bee: 'Nora Nobody', email: 'nora@elsewhere.test', bee_id: 'bee-3', from: 'crew', since: '2026-11-13T01:00:00Z', tried_at: '2026-11-13T01:00:00Z' }
+  const REOPEN = { status: 'still_in_channel', bee: 'Sam Carpenter', channel: CHANNEL.name, bee_id: 'bee-2', from: 'reopened' }
+  const OWNER_WORDS = 'Test Admin2, the owner, wasn’t added to the channel: nobody in your Slack uses testuser@beeorganized.com, the email they sign in to Bee Hub with. Add them in Slack.'
+
+  it('a fresh load of a job whose owner could not be added names the owner — no press, no dialog, nothing carried over', async () => {
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [OWNER] } }
+    await mount()
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])        // this is only a load
+    const lines = host.querySelector('[data-bee-slack-lines]')!
+    expect(lines.querySelector('[data-bee-channel]')!.textContent).toBe('Slack channel #sarah-mcallister-pantry')
+    expect(lines.querySelector('[data-bee-standing]')!.textContent).toContain(OWNER_WORDS)
+    // It is the owner's line, said plainly — NOT under "when this job reopened".
+    expect(lines.querySelector('[data-bee-reconcile]')).toBeNull()
+    expect(lines.textContent).not.toMatch(/When this job reopened/)
+  })
+
+  it('the same on an automatic channel nobody ever pressed anything for, and for a bee missed when the crew changed', async () => {
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [OWNER, NORA_LINE] } }
+    await mount()
+    const t = host.querySelector('[data-bee-standing]')!.textContent!
+    expect(t).toContain(OWNER_WORDS)
+    expect(t).toContain('Nora Nobody is on this job, but nobody in your Slack uses nora@elsewhere.test')
+  })
+
+  it('lines from a reopen keep their heading; the owner’s line is outside it; ONE Got it covers both', async () => {
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [OWNER, REOPEN] } }
+    await mount()
+    const standing = host.querySelector('[data-bee-standing]')!, box = host.querySelector('[data-bee-reconcile]')!
+    expect(standing.textContent).toContain(OWNER_WORDS)
+    expect(standing.textContent).not.toMatch(/Sam Carpenter/)
+    expect(box.textContent).toMatch(/When this job reopened/)
+    expect(box.textContent).toMatch(/Sam Carpenter is off this job/)
+    expect(box.textContent).not.toMatch(/Test Admin2/)
+    expect(host.querySelectorAll('[data-bee-reconcile-ok]')).toHaveLength(1)
+    await click(host.querySelector('[data-bee-reconcile-ok]'))
+    expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([{ clear_problems: true }])
+    expect(host.querySelector('[data-bee-standing]')).toBeNull()
+    expect(host.querySelector('[data-bee-reconcile]')).toBeNull()
+  })
+
+  it('the owner’s line alone has its own Got it; someone who cannot change anything sees the line and no button', async () => {
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [OWNER] } }
+    await mount()
+    expect(host.querySelector('[data-bee-standing] [data-bee-reconcile-ok]')!.textContent).toBe('Got it')
+    act(() => root.unmount()); host.remove()
+    await mount({ readOnly: true })
+    expect(host.querySelector('[data-bee-standing]')!.textContent).toContain(OWNER_WORDS)
+    expect(host.querySelector('[data-bee-reconcile-ok]')).toBeNull()
+  })
+
+  it('a line stored before lines said where they came from is still shown as it always was (under the reopen heading)', async () => {
+    const { from, ...old } = REOPEN
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [old] } }
+    await mount()
+    expect(host.querySelector('[data-bee-reconcile]')!.textContent).toMatch(/When this job reopened/)
+    expect(host.querySelector('[data-bee-standing]')).toBeNull()
+  })
+
+  it('pressing Make it draws the STORED lines the server hands back, once — the same thing a reload then draws', async () => {
+    channelAnswer = () => res({ ok: true, already: false, channel: CHANNEL, bees: [ANA, SAM], problems: [{ status: 'owner_not_in_slack', bee: 'Test Admin2', email: 'testuser@beeorganized.com' }], reconcile: { at: 'x', items: [OWNER] } })
+    await mount()
+    await click(host.querySelector('[data-bee-make-channel]'))
+    await click(doc().querySelector('[data-bee-make-channel-confirm]'))
+    const after = host.querySelector('[data-bee-slack-lines]')!.textContent!
+    expect(after.split(OWNER_WORDS)).toHaveLength(2)                 // said once, not twice
+    expect(host.querySelector('[data-bee-standing]')).toBeTruthy()
+    // "Reload": the server now answers the load with what it stored.
+    act(() => root.unmount()); host.remove()
+    beesBody.slack = { ...READY, channel: CHANNEL, reconcile: { at: 'x', items: [OWNER] } }
+    await mount()
+    expect(host.querySelector('[data-bee-slack-lines]')!.textContent).toBe(after)
+  })
+
+  it('a server that hands back no stored list still gets its lines drawn (never silent)', async () => {
+    channelAnswer = () => res({ ok: true, already: false, channel: CHANNEL, bees: [ANA, SAM], problems: [{ status: 'owner_not_in_slack', bee: 'Test Admin2', email: 'testuser@beeorganized.com' }] })
+    await mount()
+    await click(host.querySelector('[data-bee-make-channel]'))
+    await click(doc().querySelector('[data-bee-make-channel-confirm]'))
+    expect(host.querySelector('[data-bee-slack-lines]')!.textContent).toContain(OWNER_WORDS)
+  })
+})
+
 describe('a location with no Slack shows faces and not a word about Slack', () => {
   it('faces, the card, the menu — and "Slack" nowhere on the panel, visible or in a title', async () => {
     beesBody.slack = { connected: false, canManageChannels: false, canReconnect: true, channelsSetUp: true, channel: null, closed: false, reconcile: null }
@@ -728,11 +815,17 @@ describe('slice 1’s mirror is untouched, by fingerprint', () => {
   // lib/beta-job-channel-card.test.ts pins that. Edited again on purpose for
   // "a channel is for a job, not a request": createJobChannel refuses a deal
   // with no job — lib/beta-job-channel-needs-job.test.ts.)
+  // (2026-11-13, all three edited on purpose: who Slack would not add is kept
+  // on the job, and a refused invite is no longer put back to Slack every 15
+  // minutes. lib/engagement-bees.ts stores the lines and paces the retry,
+  // lib/jobber-crew-mirror.ts stopped retrying them from the crew sweep, and
+  // the cron route runs the paced retry. Who ends up in a channel is pinned
+  // unchanged by lib/beta-job-channel-members-fingerprint.test.ts.)
   const PUSHED: Record<string, string> = {
-    'lib/jobber-crew-mirror.ts': 'f3df7822fb40c77cfbb8fe5e2abfc6192fdf28855eaa9a64314f082d417ad0ef',
-    'lib/engagement-bees.ts': '6b558d16104034144133cd6ce8fb6686938ec9943a5218da138eaa834b887331',
+    'lib/jobber-crew-mirror.ts': 'fc524b1969d6a21f0e6bd7745a9a51991b533049c244b16cc23b28e3d4639001',
+    'lib/engagement-bees.ts': '5c63fb00bd63592f1b2845c5e2b1f4c22308abd5bf70b018216a14b62ca422ef',
     'lib/jobber-webhook-handlers.ts': '4252fc55e6b33424cfb62f03a8a7fbfa9db022d0dc6701114c68eca69e528208',
-    'app/api/cron/job-channels/route.ts': 'bec11c38d6fbab16104a897ad4444031534d92bf85db4238f207636e00705b60',
+    'app/api/cron/job-channels/route.ts': 'ba2649969b1c9abbbbe6a3a5dedcb2e3e58b1240f003873dd470e3f6e9728254',
     'lib/location-bees.ts': 'a8870029550a48572bc08ae6a01ada11d60f468f86afffef1aef2d88b26450b7',
   }
   for (const [file, sha] of Object.entries(PUSHED)) {

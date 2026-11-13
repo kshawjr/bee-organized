@@ -20,7 +20,7 @@ import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { canManageBees } from '@/lib/location-bees'
 import {
   assignBee, mirrorBee, readBeeRow, readEngagementBees, readLocationSlackFull, unassignBee, storeProblems,
-  beesTableMissing, type BeeSlackOutcome, type EngagementForBees,
+  beesTableMissing, visibleProblems, type BeeSlackOutcome, type EngagementForBees,
 } from '@/lib/engagement-bees'
 import { engagementHasJob } from '@/lib/engagement-has-job'
 import { canReconnectSlack, gateEngagement, isUuid, publicChannel } from '@/lib/engagement-bees-gate'
@@ -64,8 +64,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         // deal has one (lib/engagement-bees engagementHasJob). A failed read
         // counts as none. The create route checks again, on its own.
         hasJob: (await engagementHasJob(supabaseService, eng.id)) === true,
-        // What the unattended sweep couldn't do when this job reopened.
-        reconcile: eng.slack_channel_problems,
+        // Who Slack would not add to (or take out of) this job's channel,
+        // stored on the job — by the Slack mark, an automatic channel, a crew
+        // change or a reopen. Everything nobody has tapped Got it on.
+        reconcile: visibleProblems(eng.slack_channel_problems),
       },
       canAddBees: canManageBees(hubUser, eng.location_uuid),
     })

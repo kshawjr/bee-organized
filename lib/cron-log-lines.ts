@@ -38,6 +38,13 @@ export function jobChannelsLine(r: { not_set_up_yet?: boolean; archived: number;
   return `[cron job-channels] archived ${r.archived}, unarchived ${r.unarchived}, gone ${r.gone}, no slack ${r.no_slack}` + (r.reconcile_problems ? `, bee problems stored for owners ${r.reconcile_problems}` : '') + (r.failed ? `, failed ${r.failed}` : '')
 }
 
+// The stored "could not be added" lines, same route, its own line
+// (lib/engagement-bees sweepChannelProblems). `waiting` is the point of it:
+// lines Slack was NOT asked about again because nothing has changed.
+export function jobChannelRetriesLine(r: { jobs: number; tried: number; fixed: number; waiting: number; ok: boolean }): string {
+  return `[cron job-channels] not-added lines on ${r.jobs} job${r.jobs === 1 ? '' : 's'}: tried again ${r.tried}, now fixed ${r.fixed}, not due yet ${r.waiting}` + (r.ok ? '' : ', failed')
+}
+
 // The crew sweep, same route, its own line (lib/jobber-crew-mirror.ts).
 export function jobCrewsLine(r: { checked: number; changed: number; added: number; removed: number; unread: number; deferred: number; slack_problems: number; ok: boolean }): string {
   return `[cron job-channels] crews checked ${r.checked}, changed ${r.changed} (+${r.added} -${r.removed})` +

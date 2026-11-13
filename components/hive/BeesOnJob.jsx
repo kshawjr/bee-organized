@@ -24,9 +24,13 @@
 //                     everyone (a hover title does not exist on a phone) and
 //                     says, in one line, that the crew comes from Jobber.
 //   BeeSlackLines     under the identity row: the job's #channel, the
-//                     reconnect line, what Slack refused, and the "when this
-//                     job reopened" box. Silent when there is nothing to say,
-//                     and never a word about Slack where there is no Slack.
+//                     reconnect line, and WHO SLACK WOULD NOT ADD — kept on
+//                     the job by the server (2026-11-13), so the same lines
+//                     are there after a reload, for the next person, and for
+//                     a channel that was made automatically with nobody on
+//                     screen. The ones from a reopen keep their "when this
+//                     job reopened" heading. Silent when there is nothing to
+//                     say, and never a word about Slack where there is none.
 //   BeeSlackButton    "Put this job in Slack": Slack's mark as an icon button,
 //                     under the bees faces, and the small confirm it opens.
 //
@@ -95,8 +99,14 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
       const res = await fetch(`/api/engagements/${engagementId}/slack-channel`, { method: 'POST' })
       const j = await res.json().catch(() => ({}))
       if (!res.ok || !j.channel) throw new Error(j?.message || `HTTP ${res.status}`)
-      setState(s => ({ ...s, bees: Array.isArray(j.bees) ? j.bees : s.bees, slack: { ...s.slack, channel: j.channel } }))
-      setSync(Array.isArray(j.problems) && j.problems.length ? j.problems : null)
+      // Who was not added comes back as the lines now STORED on the job
+      // (j.reconcile) — drawn from the same place a reload draws them, so
+      // what is on screen now is what is on screen next time. (j.problems is
+      // the same people, unstored: only used if the server sent no stored
+      // list at all.)
+      const kept = j.reconcile !== undefined
+      setState(s => ({ ...s, bees: Array.isArray(j.bees) ? j.bees : s.bees, slack: { ...s.slack, channel: j.channel, ...(kept ? { reconcile: j.reconcile } : {}) } }))
+      setSync(!kept && Array.isArray(j.problems) && j.problems.length ? j.problems : null)
       setDialog(false)
       setToast({ kind: 'success', msg: j.already ? `This job already has #${j.channel.name}` : `Made #${j.channel.name} in Slack` })
     } catch (e) {
@@ -134,9 +144,19 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
   // Bees to show, or a location the mirror actually fills.
   const showRow = ready && (bees.length > 0 || (!!slack.connected && !!slack.canManageChannels))
 
+  // The stored lines, in two groups. A line written when the job REOPENED
+  // (or stored before lines said where they came from) goes under the "when
+  // this job reopened" heading; every other line — the owner, a bee missed
+  // when the channel was made or when the crew changed — is said plainly.
+  const kept = slack.reconcile?.items?.length ? slack.reconcile.items : []
+  const isReopen = p => p.from === 'reopened' || (!p.from && !String(p.status).startsWith('owner_'))
+  const reopened = kept.filter(isReopen)
+  const standing = kept.filter(p => !isReopen(p))
+
   return {
     ready, readOnly, bees, slack, sync,
-    reconcile: slack.reconcile?.items?.length ? slack.reconcile.items : null,
+    reconcile: reopened.length ? reopened : null,
+    standing: standing.length ? standing : null,
     showRow, showCreate, showReconnect, hasJob,
     dialog, openDialog: () => setDialog(true), closeDialog: () => { if (!creating) setDialog(false) },
     creating, createChannel, clearing, clearReconcile,
@@ -238,8 +258,16 @@ export function BeeCorner({ ctl, isMobile = false, size = T.avatar.corner, font 
 // ── The Slack lines, under the identity row ──────────────────
 export function BeeSlackLines({ ctl }) {
   if (!ctl?.ready) return null
-  const { slack, sync, reconcile, showReconnect, readOnly, clearing, clearReconcile } = ctl
-  if (!slack.channel && !showReconnect && !sync && !reconcile) return null
+  const { slack, sync, reconcile, standing, showReconnect, readOnly, clearing, clearReconcile } = ctl
+  if (!slack.channel && !showReconnect && !sync && !reconcile && !standing) return null
+  // One "Got it" for every stored line. It hides them; it does not delete
+  // them — a line goes for good only when it stops being true.
+  const gotIt = !readOnly && (
+    <button type="button" className="bee-small-action" data-bee-reconcile-ok onClick={clearReconcile} disabled={clearing}
+      style={{ ...quietBtn(T.ink.muted), minHeight: 0, padding: '4px 10px', marginTop: '6px' }}>
+      {clearing ? 'Clearing…' : 'Got it'}
+    </button>
+  )
   return (
     <div data-bee-slack-lines style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       {slack.channel && (
@@ -254,18 +282,19 @@ export function BeeSlackLines({ ctl }) {
         </p>
       )}
       <BeeSlackStatus sync={sync} />
+      {standing && (
+        <div data-bee-standing>
+          <BeeSlackStatus sync={standing} />
+          {!reconcile && gotIt}
+        </div>
+      )}
       {reconcile && (
         <div data-bee-reconcile style={{ marginTop: '8px' }}>
           <p style={{ margin: 0, maxWidth: '52ch', fontSize: '12px', fontWeight: 600, lineHeight: 1.4, color: T.ink.secondary }}>
             When this job reopened, Bee Hub brought its Slack channel back in line with the bees here, except:
           </p>
           <BeeSlackStatus sync={reconcile} />
-          {!readOnly && (
-            <button type="button" className="bee-small-action" data-bee-reconcile-ok onClick={clearReconcile} disabled={clearing}
-              style={{ ...quietBtn(T.ink.muted), minHeight: 0, padding: '4px 10px', marginTop: '6px' }}>
-              {clearing ? 'Clearing…' : 'Got it'}
-            </button>
-          )}
+          {gotIt}
         </div>
       )}
     </div>

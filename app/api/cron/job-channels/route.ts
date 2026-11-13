@@ -13,6 +13,10 @@
 // to run twice — a stamped row no longer matches. A job with no channel is
 // never read.
 //
+// Then the NOT-ADDED RETRY (lib/engagement-bees sweepChannelProblems): the
+// people Slack would not add to a job's channel are stored on the job; the
+// ones that are due are tried again, and a line that is no longer true goes.
+//
 // Then the CREW sweep (lib/jobber-crew-mirror sweepJobCrews): re-reads who is
 // on each open job's unfinished visits in Jobber and makes the job's bees and
 // Slack channel match. The visit notices do this within seconds when they
@@ -31,9 +35,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
-import { sweepJobChannels } from '@/lib/engagement-bees'
+import { sweepJobChannels, sweepChannelProblems } from '@/lib/engagement-bees'
 import { sweepJobCrews } from '@/lib/jobber-crew-mirror'
-import { jobChannelsLine, jobCrewsLine } from '@/lib/cron-log-lines'
+import { jobChannelsLine, jobChannelRetriesLine, jobCrewsLine } from '@/lib/cron-log-lines'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,6 +60,15 @@ export async function GET(req: NextRequest) {
     const result = await sweepJobChannels(supabaseService)
     // EVERY run logs one line, even all zeros (Kevin, 20 Oct 2026).
     console.log(jobChannelsLine(result))
+    // People Slack would not add (or take out), stored on their jobs: try
+    // again the ones that are due. Its own step and line; never fails the rest.
+    let retries = null
+    try {
+      retries = await sweepChannelProblems(supabaseService)
+      console.log(jobChannelRetriesLine(retries))
+    } catch (err: any) {
+      console.error('[cron job-channels] not-added retry failed —', err?.name || 'error')
+    }
     // The crew sweep is its own step with its own line: a Jobber outage must
     // not stop channels being archived, and must be visible when it happens.
     let crews = null
@@ -65,7 +78,7 @@ export async function GET(req: NextRequest) {
     } catch (err: any) {
       console.error('[cron job-channels] crew sweep failed —', err?.message || err)
     }
-    return NextResponse.json({ ...result, crews }, { status: result.ok ? 200 : 500 })
+    return NextResponse.json({ ...result, retries, crews }, { status: result.ok ? 200 : 500 })
   } catch (err: any) {
     console.error('[cron job-channels] sweep failed —', err?.message || err)
     return NextResponse.json({ ok: false, error: 'sweep_failed' }, { status: 500 })

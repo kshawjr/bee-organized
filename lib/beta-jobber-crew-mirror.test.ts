@@ -138,6 +138,7 @@ import {
   JOB_CREW_QUERY, VISIT_JOB_QUERY, CREW_RETRY_MARK, CREW_SWEEP_BUCKETS,
 } from '@/lib/jobber-crew-mirror'
 import { GET as cronGET } from '@/app/api/cron/job-channels/route'
+import { sweepChannelProblems } from '@/lib/engagement-bees'
 
 const db = supabaseService as any
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'       // Slack connected and reconnected
@@ -643,7 +644,7 @@ describe('people → bees', () => {
     expect(beeByEmail('nora@elsewhere.test')).toMatchObject({ slack_user_id: null })
     expect(beeByEmail('nora@elsewhere.test').slack_checked_at).toBeTruthy()
     const stored = h.db.tables.engagements[0].slack_channel_problems
-    expect(stored.items).toEqual([{ status: 'not_in_slack', bee: 'Nora Nobody', email: 'nora@elsewhere.test', bee_id: beeByEmail('nora@elsewhere.test').id }])
+    expect(stored.items).toEqual([expect.objectContaining({ status: 'not_in_slack', bee: 'Nora Nobody', email: 'nora@elsewhere.test', bee_id: beeByEmail('nora@elsewhere.test').id, from: 'crew' })])
     expect(r.note).toContain('slack problems (1)')
   })
 
@@ -728,7 +729,13 @@ describe('the 15-minute sweep is the backstop', () => {
     expect(onJob(ENG_PLAIN)).toEqual([])
   })
 
-  it('a stored Slack problem is tried again by the sweep even when the crew has not changed', async () => {
+  // Changed on purpose 2026-11-13. The crew sweep used to put every stored
+  // line back to Slack on every run, which retried a settled refusal every 15
+  // minutes for ever. It no longer asks Slack anything when the crew has not
+  // changed; the paced retry (sweepChannelProblems, the step before it in the
+  // same cron) owns the stored lines. A miss from Slack being DOWN is still
+  // picked up on the very next run — that is the first-hour rule.
+  it('the crew sweep does not put a stored line back to Slack when the crew has not changed; the paced retry does, and a Slack outage is picked up on the next run', async () => {
     slack.down = true
     await notice('VISIT_UPDATE', '9001')
     expect(inChannel()).toEqual(['UBOT', 'U_HAND', 'U_OWNER'])
@@ -736,8 +743,14 @@ describe('the 15-minute sweep is the backstop', () => {
     slack.down = false
     const mine = () => JSON.stringify(h.db.tables.engagement_bees.filter((x: any) => x.engagement_id === ENG))
     const before = mine()
+    slack.calls = []
     await sweepJobCrews(db, { now: 0 })
     expect(mine()).toBe(before)                                  // the crew did not change
+    expect(slack.calls.filter(c => c.body.channel === 'C1')).toEqual([])   // …so Slack was not asked about this job
+    expect(slack.calls.filter(c => c.method === 'users.lookupByEmail' && c.body.email !== 'ana@bee.test')).toEqual([])
+    expect(inChannel()).toEqual(['UBOT', 'U_HAND', 'U_OWNER'])
+    const r = await sweepChannelProblems(db)
+    expect(r).toMatchObject({ ok: true, jobs: 1, fixed: 2, waiting: 0 })
     expect(inChannel()).toEqual(['UBOT', 'U_ANA', 'U_HAND', 'U_OWNER', 'U_SAM'])
     expect(h.db.tables.engagements[0].slack_channel_problems).toBeNull()
   })

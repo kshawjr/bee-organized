@@ -11,6 +11,13 @@
 //   them, on the request. A sweep (sweepJobChannels, /api/cron/job-channels)
 //   archives the channel of a closed job and unarchives a reopened one.
 //
+//   PART C — what Slack would not do, KEPT ON THE JOB (2026-11-13). Anyone
+//   who could not be put in (or taken out of) the channel — a bee, or the
+//   location's owner — is stored on the engagement and shown under the Bees
+//   cell every time the job is opened, by whoever opens it. See "What Slack
+//   would not do" below for where it is written, how it is retried and how
+//   it goes away.
+//
 // BEES ARE NOT ASSIGNEES. Nothing here reads or writes engagement_assignees
 // or calls Jobber. Bees sync to Slack; assignees sync to Jobber.
 //
@@ -109,7 +116,7 @@ export type EngagementForBees = {
   slack_channel_id: string | null
   slack_channel_name: string | null
   slack_channel_archived_at: string | null
-  slack_channel_problems: ChannelProblems | null // what the last unattended reconcile couldn't do
+  slack_channel_problems: ChannelProblems | null // who could not be put in / taken out of the channel (PART C)
   channelColumns: boolean // false until migrations/engagement_slack_channel.sql runs
 }
 
@@ -342,7 +349,7 @@ export async function readBeeRow(db: Db, beeId: string): Promise<BeeRow | null> 
 
 // ── Part B: making the channel ───────────────────────────────
 export type CreateResult =
-  | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[]; card?: CardResult }
+  | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[]; card?: CardResult; stored?: ChannelProblems | null }
   | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'no_job' | 'job_unreadable' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' | 'client_unreadable' }
 
 const NAME_ATTEMPTS = 6
@@ -408,16 +415,31 @@ export async function createJobChannel(
   // Who goes in: the bot (already in — it made the channel), the ticked
   // bees, and the location's owner(s) by email.
   const problems: BeeSlackOutcome[] = []
+  const keep: ChannelProblem[] = []
+  let gone = false
   if ('assigned' in bees) {
     for (const b of bees.assigned) {
       const row = await readBeeRow(db, b.id)
       if (!row) continue
       const o = await mirrorBee(db, { token, locationUuid: eng.location_uuid, engagementId: eng.id, channelId: created.id, channelName: created.name, bee: row, action: 'add' })
-      if (o.status !== 'ok') problems.push(o)
+      if (o.status !== 'ok') { problems.push(o); keep.push({ ...o, bee_id: row.id }) }
+      if (o.status === 'channel_gone') gone = true
       if (o.status === 'scope_lost' || o.status === 'channel_gone') break
     }
   }
   const owners = await inviteOwners(db, token, eng, created.id)
+  keep.push(...owners.kept)
+
+  // KEEP IT ON THE JOB. Until 2026-11-13 these went back to the page that
+  // pressed the button and nowhere else: closing the job's card lost them,
+  // and a channel made automatically (no page at all) never told anyone.
+  // Stored, they show under the Bees cell for whoever opens the job next.
+  let kept: ChannelProblems | null = null
+  if (keep.length && !gone) {
+    const at = new Date().toISOString()
+    kept = { at, items: keep.map(p => ({ ...p, from: 'created' as const, since: at, tried_at: at })) }
+    await storeProblems(db, eng.id, kept)
+  }
 
   const url = baseUrl && eng.client_id ? `${baseUrl.replace(/\/$/, '')}/clients/${eng.client_id}?e=${eng.id}` : null
   // The job card (lib/job-channel-card.ts): the channel's first message,
@@ -432,7 +454,7 @@ export async function createJobChannel(
     clientId: eng.client_id, clientName, projectType: eng.project_type, url,
   })
 
-  return { ok: true, already: false, channel: created, problems, owners: { invited: owners.invited, notInSlack: owners.notInSlack }, ownerProblems: owners.missed, card }
+  return { ok: true, already: false, channel: created, problems, owners: { invited: owners.invited, notInSlack: owners.notInSlack }, ownerProblems: owners.missed, card, stored: kept }
 }
 
 // The location's owners (hub_users role 'owner'), looked up by email in this
@@ -442,25 +464,33 @@ export async function createJobChannel(
 // not added comes back in `missed` and is named on the screen. The common
 // one is an owner whose Bee Hub email is not the email they use in Slack;
 // we can name the email we looked for, not the one Slack knows them by.
+type OwnerRow = { id: string; email: string | null; full_name?: string | null }
+
+// One owner into one channel. `miss` is null when they are in (added now, or
+// already there). `code` is Slack's own word for a refused invite.
+async function inviteOneOwner(token: string, channelId: string, u: OwnerRow): Promise<{ miss: BeeSlackOutcome | null; code?: string }> {
+  const email = String(u.email || '')
+  const who = (typeof u.full_name === 'string' && u.full_name.trim()) || email
+  const r = await lookupSlackUserByEmail(token, email)
+  if (r.status === 'not_found') return { miss: { status: 'owner_not_in_slack', bee: who, email } }
+  if (r.status !== 'found') return { miss: { status: 'owner_not_added', bee: who } }
+  const j = await slackApi(token, 'conversations.invite', { channel: channelId, users: r.slackUserId })
+  if (j.ok || j.error === 'already_in_channel' || j.error === 'cant_invite_self') return { miss: null }
+  return { miss: { status: 'owner_not_added', bee: who }, code: slackErr(j) }
+}
+
 async function inviteOwners(db: Db, token: string, eng: EngagementForBees, channelId: string) {
-  const out = { invited: 0, notInSlack: 0, missed: [] as BeeSlackOutcome[] }
+  const out = { invited: 0, notInSlack: 0, missed: [] as BeeSlackOutcome[], kept: [] as ChannelProblem[] }
   try {
     const { data } = await db.from('hub_users').select('id, email, role, full_name').eq('location_id', eng.location_uuid).eq('role', 'owner')
     for (const u of (data || []) as any[]) {
       if (!u.email) continue
-      const who = (typeof u.full_name === 'string' && u.full_name.trim()) || u.email
-      const r = await lookupSlackUserByEmail(token, u.email)
-      if (r.status !== 'found') {
-        if (r.status === 'not_found') { out.notInSlack++; out.missed.push({ status: 'owner_not_in_slack', bee: who, email: u.email }) }
-        else out.missed.push({ status: 'owner_not_added', bee: who })
-        continue
-      }
-      const j = await slackApi(token, 'conversations.invite', { channel: channelId, users: r.slackUserId })
-      if (j.ok || j.error === 'already_in_channel' || j.error === 'cant_invite_self') out.invited++
-      else {
-        out.missed.push({ status: 'owner_not_added', bee: who })
-        console.warn(`[engagement-bees] owner invite engagement=${eng.id} user=${u.id} → ${slackErr(j)}`)
-      }
+      const r = await inviteOneOwner(token, channelId, u)
+      if (!r.miss) { out.invited++; continue }
+      if (r.miss.status === 'owner_not_in_slack') out.notInSlack++
+      out.missed.push(r.miss)
+      out.kept.push({ ...r.miss, user_id: String(u.id) })
+      if (r.code) console.warn(`[engagement-bees] owner invite engagement=${eng.id} user=${u.id} → ${r.code}`)
     }
   } catch (e: any) {
     console.warn('[engagement-bees] owner invite skipped for', eng.id, '—', e?.name || 'error')
@@ -520,7 +550,7 @@ export async function sweepJobChannels(db: Db): Promise<SweepResult> {
       if (archive) r.archived++
       else {
         r.unarchived++
-        const rec = await reconcileChannelBees(db, { token: slack.token, engagementId: row.id, locationUuid: row.location_uuid, channelId: row.slack_channel_id, channelName: row.slack_channel_name ?? null })
+        const rec = await reconcileChannelBees(db, { token: slack.token, engagementId: row.id, locationUuid: row.location_uuid, channelId: row.slack_channel_id, channelName: row.slack_channel_name ?? null, from: 'reopened' })
         r.reconcile_problems += rec.problems.length
       }
       return
@@ -553,18 +583,80 @@ export async function sweepJobChannels(db: Db): Promise<SweepResult> {
 // No conversations.members read: that needs channels:read, which we don't
 // require, and the per-bee answers already say "not in channel" for free.
 //
-// Nobody watches the cron, so every miss is STORED on the engagement
-// (slack_channel_problems) and shown under the Bees cell the next time
-// anyone opens the job, until the owner taps Got it or re-ticks that bee.
-// A clean reconcile clears the old list. Bee Hub's assignment is never
-// changed here.
-export type ChannelProblem = BeeSlackOutcome & { bee_id?: string }
+// Bee Hub's assignment is never changed here.
+//
+// ── What Slack would not do (PART C) ─────────────────────────
+// ONE STORE: engagements.slack_channel_problems, a small list. A bee's miss
+// and the owner's miss sit in the same list and are told apart by what they
+// are (`bee_id` or `user_id`, and the status). One list because every reader
+// wants all of it at once, and a channel deleted in Slack forgets all of it
+// at once (forgetChannel).
+//
+// WRITTEN FROM THREE PLACES, each saying which (`from`):
+//   'created'   createJobChannel — the Slack mark AND automatic channels
+//   'crew'      the crew changed in Jobber and the channel was brought in line
+//   'reopened'  the job reopened and its channel was unarchived
+//
+// HOW A LINE GOES AWAY:
+//   · it stops being true. Every run of the 15-minute cron looks at the
+//     stored lines (sweepChannelProblems) and tries again the ones that are
+//     DUE; one that now works is removed. That is the only way a line is
+//     deleted, apart from the channel itself going.
+//   · "Got it" only HIDES the lines from the page (seen_at). They are still
+//     tried again, so a fix is still picked up after someone tapped it.
+//
+// WHEN A LINE IS DUE (problemDue) — never "every 15 minutes, for ever":
+//   · something changed on OUR side since it was last tried: the email we
+//     looked for is no longer the person's email in Bee Hub, or Bee Hub has
+//     since found the bee in Slack. Tried on the next run.
+//   · otherwise once a day (PROBLEM_RETRY_MS). That is what picks up a fix
+//     made only in Slack — the person joined, or took that email there —
+//     which Bee Hub cannot see happen.
+//   · a miss that may only have been Slack having a bad minute ('unavailable',
+//     'owner_not_added') is tried every run for its first hour, then daily.
+// A change of crew, or a reopen, brings the whole channel in line at once and
+// does not wait for any of this.
+export type ChannelProblem = BeeSlackOutcome & {
+  bee_id?: string    // a bee's line
+  user_id?: string   // the owner's line (hub_users.id)
+  from?: 'created' | 'crew' | 'reopened'
+  since?: string     // when this line first became true
+  tried_at?: string  // when Slack was last asked
+  seen_at?: string   // someone tapped Got it — hidden, still tried
+}
 export type ChannelProblems = { at: string; items: ChannelProblem[] }
+
+export const PROBLEM_RETRY_MS = 24 * 60 * 60 * 1000
+export const PROBLEM_QUICK_MS = 60 * 60 * 1000
+const SETTLED = new Set(['not_in_slack', 'add_refused', 'still_in_channel', 'owner_not_in_slack'])
+const emailKeyOf = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '')
+export const isOwnerProblem = (p: { status: string }) => p.status === 'owner_not_in_slack' || p.status === 'owner_not_added'
+
+export function problemDue(
+  p: ChannelProblem, nowMs: number,
+  current: { email?: string | null; slackUserId?: string | null; slackCheckedAt?: string | null } = {},
+): boolean {
+  const tried = Date.parse(p.tried_at || '')
+  if (!Number.isFinite(tried)) return true // stored before retries were paced: once, then it is stamped
+  if (p.status === 'not_in_slack' || p.status === 'owner_not_in_slack') {
+    if (current.email != null && emailKeyOf(current.email) !== emailKeyOf((p as any).email)) return true
+  }
+  if (p.status === 'not_in_slack' && current.slackUserId && Date.parse(current.slackCheckedAt || '') > tried) return true
+  const since = Date.parse(p.since || '')
+  if (!SETTLED.has(p.status) && Number.isFinite(since) && nowMs - since < PROBLEM_QUICK_MS) return true
+  return nowMs - tried >= PROBLEM_RETRY_MS
+}
 
 export function readProblems(raw: unknown): ChannelProblems | null {
   if (!raw || typeof raw !== 'object') return null
   const items = Array.isArray((raw as any).items) ? (raw as any).items.filter((x: any) => x && typeof x.status === 'string') : []
   return items.length ? { at: String((raw as any).at || ''), items } : null
+}
+
+// What the page is shown: everything nobody has tapped Got it on.
+export function visibleProblems(p: ChannelProblems | null | undefined): ChannelProblems | null {
+  const items = (p?.items || []).filter(x => !x.seen_at)
+  return items.length ? { at: p!.at, items } : null
 }
 
 export async function storeProblems(db: Db, engagementId: string, problems: ChannelProblems | null) {
@@ -574,11 +666,47 @@ export async function storeProblems(db: Db, engagementId: string, problems: Chan
   } catch { /* logged above when it answers */ }
 }
 
+// "Got it": hide every line from the page. Nothing is deleted — a line only
+// goes when it stops being true.
+export async function markProblemsSeen(db: Db, engagementId: string, problems: ChannelProblems | null) {
+  if (!problems) return
+  const now = new Date().toISOString()
+  await storeProblems(db, engagementId, { ...problems, items: problems.items.map(p => (p.seen_at ? p : { ...p, seen_at: now })) })
+}
+
+// The list as it is in the database NOW (not as it was when the caller
+// loaded the job) — so a write here never drops a line someone else stored.
+async function readStoredProblems(db: Db, engagementId: string): Promise<{ ok: true; value: ChannelProblems | null } | { ok: false }> {
+  try {
+    const { data, error } = await db.from('engagements').select('slack_channel_problems').eq('id', engagementId).maybeSingle()
+    if (error) return { ok: false }
+    return { ok: true, value: readProblems(data?.slack_channel_problems) }
+  } catch { return { ok: false } }
+}
+
+// A line that is still true keeps when it started and whether it was hidden;
+// a line that CHANGED (another status, another email) is a new line.
+const carry = (now: string, fresh: ChannelProblem, prev: ChannelProblem | undefined, from: ChannelProblem['from']): ChannelProblem => {
+  const same = !!prev && prev.status === fresh.status && emailKeyOf((prev as any).email) === emailKeyOf((fresh as any).email)
+  return {
+    ...fresh,
+    from: same ? prev!.from ?? from : from,
+    since: same ? prev!.since ?? now : now,
+    tried_at: now,
+    ...(same && prev!.seen_at ? { seen_at: prev!.seen_at } : {}),
+  }
+}
+
 export async function reconcileChannelBees(
   db: Db,
-  args: { token: string; engagementId: string; locationUuid: string; channelId: string; channelName: string | null },
+  args: {
+    token: string; engagementId: string; locationUuid: string; channelId: string; channelName: string | null
+    from?: 'crew' | 'reopened'
+    only?: Set<string> // the timed retry: ONLY these bees are put to Slack; every other line is left as it is
+  },
 ): Promise<{ problems: ChannelProblem[]; invites: number; removes: number }> {
-  const { token, engagementId, locationUuid, channelId, channelName } = args
+  const { token, engagementId, locationUuid, channelId, channelName, only } = args
+  const from = args.from ?? 'crew'
   const out = { problems: [] as ChannelProblem[], invites: 0, removes: 0 }
   const { data: rows, error } = await db.from('engagement_bees').select('bee_id, removed_at').eq('engagement_id', engagementId)
   if (error) { console.warn('[engagement-bees] reconcile read failed for', engagementId, '—', error.message); return out }
@@ -596,21 +724,143 @@ export async function reconcileChannelBees(
   const plan: { id: string; action: 'add' | 'remove' }[] = [
     ...Array.from(onJob).map(id => ({ id, action: 'add' as const })),
     ...Array.from(offJob).map(id => ({ id, action: 'remove' as const })),
-  ]
+  ].filter(step => !only || only.has(step.id))
+  const asked = new Set<string>()
+  let gone = false
   for (const step of plan) {
     const bee = await readBeeRow(db, step.id)
     if (!bee || bee.location_uuid !== locationUuid) continue
     if (step.action === 'remove' && ownerEmails.has(String(bee.email || '').trim().toLowerCase())) continue
     if (step.action === 'add') out.invites++; else out.removes++
     const o = await mirrorBee(db, { token, locationUuid, engagementId, channelId, channelName, bee, action: step.action })
+    // Slack answered about this bee, yes or no — unless the whole thing just
+    // stopped (permission lost): then nothing is known and the old line stays.
+    if (o.status !== 'scope_lost' && o.status !== 'channel_gone') asked.add(bee.id)
     if (o.status !== 'ok') out.problems.push({ ...o, bee_id: bee.id })
+    if (o.status === 'channel_gone') gone = true
     if (o.status === 'scope_lost' || o.status === 'channel_gone') break
   }
 
-  // channel_gone already forgot the channel (and its problems) — nothing to
+  // channel_gone already forgot the channel (and its lines) — nothing to
   // store against a channel that no longer exists.
-  if (!out.problems.some(p => p.status === 'channel_gone')) {
-    await storeProblems(db, engagementId, out.problems.length ? { at: new Date().toISOString(), items: out.problems } : null)
+  if (gone) return out
+  const prior = await readStoredProblems(db, engagementId)
+  if (!prior.ok) { console.warn('[engagement-bees] stored lines not read for', engagementId, '— left as they are'); return out }
+  const before = prior.value?.items || []
+  const prevFor = (beeId?: string) => before.find(p => !!beeId && p.bee_id === beeId)
+  const now = new Date().toISOString()
+  const items: ChannelProblem[] = [
+    // The owner's lines are not this function's to judge: kept as they are.
+    ...before.filter(p => !p.bee_id),
+    // On the timed retry, a bee that was not asked about keeps its line.
+    ...(only ? before.filter(p => p.bee_id && !asked.has(p.bee_id)) : []),
+    ...out.problems.filter(p => p.status !== 'scope_lost' || !only).map(p => carry(now, p, prevFor(p.bee_id), from)),
+  ]
+  out.problems = out.problems.map(p => items.find(i => i.bee_id === p.bee_id && i.status === p.status) || p)
+  await storeProblems(db, engagementId, items.length ? { at: now, items } : null)
+  return out
+}
+
+// ── The owner's line, tried again ────────────────────────────
+// Looks the owner up by the email they have in Bee Hub NOW and invites them.
+// In (or already in) → the line is removed. Never removes anyone. An owner
+// who is no longer this location's owner has no line: it is not true any more.
+async function retryOwnerLines(
+  db: Db,
+  args: { token: string; engagementId: string; locationUuid: string; channelId: string; items: ChannelProblem[]; nowMs: number },
+): Promise<{ items: ChannelProblem[]; tried: number; fixed: number; waiting: number; changed: boolean; gone: boolean }> {
+  const out = { items: [] as ChannelProblem[], tried: 0, fixed: 0, waiting: 0, changed: false, gone: false }
+  let owners: OwnerRow[]
+  try {
+    const { data, error } = await db.from('hub_users').select('id, email, role, full_name').eq('location_id', args.locationUuid).eq('role', 'owner')
+    if (error) return { ...out, items: args.items }
+    owners = (data || []) as OwnerRow[]
+  } catch { return { ...out, items: args.items } }
+  const now = new Date(args.nowMs).toISOString()
+  for (const item of args.items) {
+    if (out.gone) break
+    const u = owners.find(o => String(o.id) === item.user_id)
+    if (!u || !u.email) { out.changed = true; out.fixed++; continue }
+    if (!problemDue(item, args.nowMs, { email: u.email })) { out.items.push(item); out.waiting++; continue }
+    out.tried++; out.changed = true
+    const r = await inviteOneOwner(args.token, args.channelId, u)
+    if (r.code === 'channel_not_found') { await forgetChannel(db, args.engagementId); out.gone = true; break }
+    if (!r.miss) { out.fixed++; continue }
+    if (r.code) console.warn(`[engagement-bees] owner invite engagement=${args.engagementId} user=${u.id} → ${r.code}`)
+    out.items.push(carry(now, { ...r.miss, user_id: item.user_id }, item, item.from ?? 'created'))
   }
   return out
+}
+
+// ── The timed retry: every stored line that is due ───────────
+// Runs in the 15-minute cron, after the archive sweep. Reads only jobs that
+// HAVE stored lines, and asks Slack only about the lines that are due
+// (problemDue) — a line Slack refused an hour ago for a reason that has not
+// changed is not asked again until tomorrow.
+export type ProblemSweepResult = {
+  ok: boolean
+  jobs: number      // open jobs with a channel and at least one stored line
+  tried: number     // lines put to Slack again this run
+  fixed: number     // lines that are no longer true, removed
+  waiting: number   // lines not due yet — Slack was not asked
+}
+
+export async function sweepChannelProblems(db: Db, opts: { now?: number } = {}): Promise<ProblemSweepResult> {
+  const r: ProblemSweepResult = { ok: true, jobs: 0, tried: 0, fixed: 0, waiting: 0 }
+  const nowMs = opts.now ?? Date.now()
+  const { data, error } = await db.from('engagements')
+    .select('id, location_uuid, slack_channel_id, slack_channel_name, slack_channel_problems')
+    .is('closed_at', null).not('slack_channel_id', 'is', null).is('slack_channel_archived_at', null)
+    .not('slack_channel_problems', 'is', null).limit(SWEEP_LIMIT)
+  if (error) {
+    if (channelColumnsMissing(error.message)) return r
+    console.error('[engagement-bees] problem sweep read failed —', error.message)
+    return { ...r, ok: false }
+  }
+  const slackByLoc = new Map<string, LocationSlack>()
+  for (const row of (data || []) as any[]) {
+    const stored = readProblems(row.slack_channel_problems)
+    if (!stored) continue
+    r.jobs++
+    try {
+      if (!slackByLoc.has(row.location_uuid)) slackByLoc.set(row.location_uuid, await readLocationSlackFull(db, row.location_uuid))
+      const slack = slackByLoc.get(row.location_uuid)!
+      if (!slack.connected || !slack.token || !slack.canManageChannels) { r.waiting += stored.items.length; continue }
+
+      // 1. The owner's lines.
+      const ownerLines = stored.items.filter(p => !p.bee_id)
+      let gone = false
+      if (ownerLines.length) {
+        const o = await retryOwnerLines(db, { token: slack.token, engagementId: row.id, locationUuid: row.location_uuid, channelId: row.slack_channel_id, items: ownerLines, nowMs })
+        r.tried += o.tried; r.fixed += o.fixed; r.waiting += o.waiting
+        gone = o.gone
+        if (o.changed && !gone) {
+          const fresh = await readStoredProblems(db, row.id)
+          if (fresh.ok) {
+            const items = [...(fresh.value?.items || []).filter(p => p.bee_id), ...o.items]
+            await storeProblems(db, row.id, items.length ? { at: new Date(nowMs).toISOString(), items } : null)
+          }
+        }
+      }
+      if (gone) continue
+
+      // 2. The bees' lines that are due.
+      const beeLines = stored.items.filter(p => p.bee_id)
+      const due = new Set<string>()
+      for (const p of beeLines) {
+        const bee = await readBeeRow(db, p.bee_id!)
+        if (!bee || problemDue(p, nowMs, { email: bee.email, slackUserId: bee.slack_user_id, slackCheckedAt: bee.slack_checked_at })) due.add(p.bee_id!)
+      }
+      r.waiting += beeLines.length - due.size
+      if (due.size) {
+        const rec = await reconcileChannelBees(db, { token: slack.token, engagementId: row.id, locationUuid: row.location_uuid, channelId: row.slack_channel_id, channelName: row.slack_channel_name ?? null, only: due })
+        r.tried += due.size
+        r.fixed += Math.max(0, due.size - rec.problems.length)
+      }
+    } catch (e: any) {
+      r.ok = false
+      console.error('[engagement-bees] problem sweep failed for', row.id, '—', e?.name || 'error')
+    }
+  }
+  return r
 }

@@ -283,7 +283,10 @@ describe('with the switch off, a new job behaves exactly as it did before the sw
     expect(fp.steps).toHaveLength(7)
   })
 
-  it('the ONLY difference is one extra read of the location per JOB_CREATE, at the same point each time — none on JOB_UPDATE or a visit notice', async () => {
+  // 2026-11-13: when a crew change brings a channel in line, the lines kept on
+  // the job are read first (so the owner's line is never overwritten). That is
+  // one read of `engagements`, only in the step whose deal HAS a channel.
+  it('the ONLY difference is one extra read of the location per JOB_CREATE, at the same point each time — none on JOB_UPDATE or a visit notice (and one read of the kept lines where a channel is brought in line)', async () => {
     const fp = await run()
     if (process.env.FP_RECORD) return
     const now = fp.steps.map((s: any) => s.reads as string[])
@@ -291,10 +294,11 @@ describe('with the switch off, a new job behaves exactly as it did before the sw
       const before = RECORDED_READS[i]
       const isCreate = fp.steps[i].label.includes('JOB_CREATE') || i < 4
       if (!isCreate) { expect(reads, fp.steps[i].label).toEqual(before); return }
-      expect(reads.length, fp.steps[i].label).toBe(before.length + 1)
-      const at = reads.findIndex((t, k) => t !== before[k])
-      expect(reads[at], fp.steps[i].label).toBe('locations')
-      expect([...reads.slice(0, at), ...reads.slice(at + 1)], fp.steps[i].label).toEqual(before)
+      const extra: string[] = []; const rest: string[] = []
+      let k = 0
+      for (const t of reads) { if (t === before[k]) { rest.push(t); k++ } else extra.push(t) }
+      expect(rest, fp.steps[i].label).toEqual(before)
+      expect(extra, fp.steps[i].label).toEqual(/has a channel/.test(fp.steps[i].label) ? ['locations', 'engagements'] : ['locations'])
     })
   })
 })
