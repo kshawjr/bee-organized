@@ -371,12 +371,119 @@ describe('C1. an owner sees the list and no controls', () => {
   })
 })
 
+// ── ONE CARD (2026-11-13, layout approved by Kevin) ───────────────────────
+// The zips and corporate's controls used to be two cards. They are one: the
+// zips, then — for corporate only — a hairline, a gold "Change this
+// territory" label, the Zip box and Add on one row, and "Move a zip to
+// another location" above its box. Only the layout moved: every request the
+// controls make is pinned, unchanged, in C2 below.
+describe('C1b. the territory is ONE card', () => {
+  const cardsIn = (host: HTMLElement) => {
+    const root = host.querySelector('[data-testid="location-territory"]') as HTMLElement
+    return Array.from(root.children) as HTMLElement[]
+  }
+  const hasBorder = (el: HTMLElement) => !!el.style.border && el.style.border !== 'none'
+
+  it('corporate: one card holding the zips and the controls, in the approved order', async () => {
+    CORPORATE()
+    const { host } = await mountPanel(DENVER.id)
+    const cards = cardsIn(host)
+    expect(cards.length, 'one card, not two').toBe(1)
+    const card = cards[0]
+    expect(hasBorder(card)).toBe(true)
+    const controls = card.querySelector('[data-testid="territory-controls"]') as HTMLElement
+    const chips = card.querySelector('[data-testid="zip-chips"]') as HTMLElement
+    expect(chips && controls).toBeTruthy()
+    // Chips first, then the controls — inside the same card.
+    expect(chips.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The controls are not a card of their own: no box, just a hairline above.
+    expect(controls.style.borderTop).not.toBe('')
+    expect(controls.style.borderRadius).toBe('')
+    expect(controls.style.background).toBe('')
+    expect(controls.style.borderBottom).toBe(''); expect(controls.style.borderLeft).toBe('')
+    // Label, then Zip + Add on one row, then "Move a zip to another location" above its box.
+    const label = controls.querySelector('[data-testid="territory-change-label"]') as HTMLElement
+    const zip = controls.querySelector('input[aria-label="Zip code"]') as HTMLElement
+    const add = btnText(controls, 'Add')! as HTMLElement
+    const move = Array.from(controls.querySelectorAll('div')).find(d => d.textContent === 'Move a zip to another location') as HTMLElement
+    const find = controls.querySelector('input[aria-label="Find one of these zips"]') as HTMLElement
+    const order = [label, zip, add, move, find]
+    for (const el of order) expect(el).toBeTruthy()
+    for (let i = 0; i < order.length - 1; i++) expect(order[i].compareDocumentPosition(order[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING, `step ${i}`).toBeTruthy()
+    expect(zip.parentElement).toBe(add.parentElement)   // one row
+    expect(zip.parentElement!.style.display).toBe('flex')
+    expect(controls.textContent).not.toContain('Move a zipType')   // the old bare "Move a zip" heading is gone
+  })
+
+  it('the label is the small gold uppercase one a rebuilt Settings card opens with, and names no font of its own', async () => {
+    const { T: DESIGN } = await import('@/components/design/tokens')
+    CORPORATE()
+    const { host } = await mountPanel(DENVER.id)
+    const label = host.querySelector('[data-testid="territory-change-label"]') as HTMLElement
+    expect(label.textContent).toBe('Change this territory')
+    const hex = (c: string) => c.startsWith('rgb') ? '#' + c.match(/\d+/g)!.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('') : c
+    expect(hex(label.style.color).toLowerCase()).toBe(DESIGN.gold.toLowerCase())
+    expect([label.style.fontSize, label.style.fontWeight, label.style.textTransform, label.style.letterSpacing]).toEqual(['11px', '700', 'uppercase', '0.14em'])
+    // Settings gives it its heading font through the shell's stylesheet; the
+    // panel itself (shared with Admin, which is not rebuilt) names none.
+    expect(label.style.fontFamily).toBe('inherit')
+    expect(label.hasAttribute('data-seyebrow')).toBe(true)
+    expect(readFileSync('components/admin/LocationZipsPanel.jsx', 'utf8')).not.toMatch(/Lato|Arvo/)
+    expect(readFileSync('components/settings/SettingsShell.jsx', 'utf8')).toContain('[data-settings-ui] [data-seyebrow]{font-family:${FONT.ui}!important}')
+  })
+
+  it('corporate with no zips: still one card, with the controls under "No zips"', async () => {
+    CORPORATE()
+    h.state.rows = []
+    const { host } = await mountPanel(DENVER.id)
+    expect(host.querySelector('[data-testid="territory-count"]')!.textContent).toBe('0 zips')
+    expect(cardsIn(host).length).toBe(1)
+    const card = cardsIn(host)[0]
+    expect(card.textContent).toContain('No zips.')
+    const controls = card.querySelector('[data-testid="territory-controls"]') as HTMLElement
+    expect(controls).not.toBeNull()
+    expect(controls.querySelector('input[aria-label="Zip code"]')).not.toBeNull()
+    expect(card.querySelector('[data-testid="zip-chips"]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('an owner with no zips: one card, ending at the line that says so', async () => {
+    DENVER_OWNER()
+    h.state.rows = []
+    const { host } = await mountPanel(DENVER.id)
+    expect(cardsIn(host).length).toBe(1)
+    expect(host.textContent).toContain('No website leads route to Denver by zip yet.')
+    expect(host.querySelector('[data-testid="territory-controls"]')).toBeNull()
+    expect(host.querySelectorAll('input, button').length).toBe(0)
+  })
+
+  it('an owner: one card that ENDS after the zips — no crosses, no hairline, no label, no boxes — and says changes go through corporate', async () => {
+    DENVER_OWNER()
+    const { host } = await mountPanel(DENVER.id)
+    const cards = cardsIn(host)
+    expect(cards.length).toBe(1)
+    const card = cards[0]
+    expect(card.querySelector('[data-testid="territory-controls"]')).toBeNull()
+    expect(card.querySelector('[data-testid="territory-change-label"]')).toBeNull()
+    expect(card.querySelectorAll('input, select, textarea').length).toBe(0)
+    expect(Array.from(card.querySelectorAll('button')).filter(b => /Remove|×|Add/.test((b.getAttribute('aria-label') || '') + b.textContent)).length).toBe(0)
+    expect(card.textContent).toContain('Territory changes go through corporate.')
+    expect(card.textContent).not.toMatch(/Change this territory|Move a zip/)
+    // Nothing after the zips but (when there are none) the line that says so.
+    const chips = card.querySelector('[data-testid="zip-chips"]') as HTMLElement
+    const after = Array.from(card.children).slice(Array.from(card.children).indexOf(chips) + 1) as HTMLElement[]
+    for (const el of after) expect(el.style.borderTop, 'no hairline for an owner').toBe('')
+  })
+})
+
 describe('C2. corporate sees the controls and edits from this page', () => {
   it('has the controls: add, remove per zip, move, resolve', async () => {
     CORPORATE()
     const { host } = await mountPanel(DENVER.id)
     expect(host.querySelector('[data-testid="territory-controls"]')).not.toBeNull()
-    expect(host.textContent).toContain('Add a zip to Denver')
+    // 2026-11-13: one card. The controls open with "Change this territory"
+    // (it was "Add a zip to Denver" at the top of a second card).
+    expect(host.textContent).toContain('Change this territory')
+    expect(host.textContent).not.toContain('Add a zip to Denver')
     expect(host.querySelector('button[aria-label="Remove 80111 from Denver"]')).not.toBeNull()
     expect(btnText(host, 'Give to Central Denver')).toBeTruthy()
     expect(btnText(host, 'Give to West Denver')).toBeTruthy()

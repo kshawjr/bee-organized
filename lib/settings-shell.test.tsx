@@ -662,7 +662,10 @@ describe('the new pieces are used by Settings and by nothing else', () => {
       [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => readFileSync(p, 'utf8').includes(needle)).sort()
     // Slice 2 added the Team pieces and restyled the Bees card.
     expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
+    // ONE colour from the tokens, the gold of its "Change this territory"
+    // label. It names no font: see the Lato test above.
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })

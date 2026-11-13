@@ -18,6 +18,15 @@
 //     act on (by asking corporate), and the reason to show them the list.
 //   • NOT LIVE: an onboarding location's zips route to Leslie until it is.
 //
+// ONE CARD (2026-11-13, layout approved by Kevin). It used to be two: the
+// zips in one, and corporate's controls in a second card underneath. Now the
+// zips are at the top and, FOR CORPORATE ONLY, a hairline and a "Change this
+// territory" label follow, then the Zip box and Add on one row, then "Move a
+// zip to another location" above its box. For an owner the card ends after
+// the zips: no crosses, no hairline, no controls. Only the layout moved —
+// who may do what is still the server's `can_edit`, and every action is the
+// one it was.
+//
 // Built from ./zips/zipParts.jsx — the same rows and actions as Admin → Zip
 // codes, scoped to one location.
 // ─────────────────────────────────────────────────────────────
@@ -26,6 +35,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { T } from '@/components/hive/shared/tokens'
 import { SECTION_LABEL } from '@/components/ui/tokens'
+import { T as DESIGN } from '@/components/design/tokens'
 import {
   zipStyles, zipSend, useZipActions,
   ZipMessage, ZipConflictRow, ZipAddForm, ZipEditRow, ZipChips,
@@ -37,6 +47,16 @@ const warnBox = {
   background: T.state.warning.soft,
   border: `1px solid ${T.state.warning.fg}`,
   color: T.state.warning.fg,
+}
+// "Change this territory" — the small gold uppercase label a rebuilt Settings
+// card opens with (ASSESSMENT DEFAULT, on the same page): the shared design
+// gold, 11px, bold, widely spaced. It names NO font: it takes the one it
+// sits in. On Settings the shell's own stylesheet gives [data-seyebrow] the
+// Settings heading font, so there it matches ASSESSMENT DEFAULT exactly; on
+// Admin's sheet, which has not been rebuilt, it stays in Admin's font.
+const CHANGE_LABEL = {
+  fontSize: '11px', lineHeight: '16px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em',
+  color: DESIGN.gold, fontFamily: 'inherit',
 }
 const plural = (n, one, many) => (n === 1 ? one : many)
 // Real locations only. Demo / view-as paths carry mock ids like 'loc_kc'.
@@ -139,39 +159,40 @@ export default function LocationZipsPanel({ locationId }) {
         {count === 0 && (
           <div style={{ ...muted, marginTop: '6px' }}>No website leads route to {location.name} by zip yet.</div>
         )}
-      </div>
 
-      {canEdit && (
-        <div style={card} data-testid="territory-controls">
-          <ZipMessage msg={actions.msg} />
-          <div style={SECTION_LABEL}>Add a zip to {location.name}</div>
-          <ZipAddForm fixedLocationId={location.id} busy={actions.busy} onAdd={actions.add} />
-          <div style={{ ...SECTION_LABEL, marginTop: '12px' }}>Move a zip</div>
-          <input
-            aria-label="Find one of these zips"
-            placeholder="Type one of these zips"
-            inputMode="numeric"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ ...input, width: '100%', boxSizing: 'border-box', marginTop: '8px' }}
-          />
-          {hits.length > 0 && (
-            <div style={{ marginTop: '8px' }} data-testid="zip-hits">
-              {hits.map((row) => (
-                <ZipEditRow
-                  key={row.id}
-                  row={row}
-                  locations={data.locations || []}
-                  inConflict={conflicted.has(row.zip)}
-                  busy={actions.busy}
-                  onMove={actions.move}
-                  onRemove={actions.remove}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        {/* Corporate only, by the server's can_edit. An owner's card ends above. */}
+        {canEdit && (
+          <div data-testid="territory-controls" style={{ marginTop: '14px', paddingTop: '14px', borderTop: T.border.divider }}>
+            <ZipMessage msg={actions.msg} />
+            <div data-testid="territory-change-label" data-seyebrow style={CHANGE_LABEL}>Change this territory</div>
+            <ZipAddForm fixedLocationId={location.id} busy={actions.busy} onAdd={actions.add} />
+            <div style={{ ...SECTION_LABEL, marginTop: '14px' }}>Move a zip to another location</div>
+            <input
+              aria-label="Find one of these zips"
+              placeholder="Type one of these zips"
+              inputMode="numeric"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ ...input, width: '100%', boxSizing: 'border-box', marginTop: '8px' }}
+            />
+            {hits.length > 0 && (
+              <div style={{ marginTop: '8px' }} data-testid="zip-hits">
+                {hits.map((row) => (
+                  <ZipEditRow
+                    key={row.id}
+                    row={row}
+                    locations={data.locations || []}
+                    inConflict={conflicted.has(row.zip)}
+                    busy={actions.busy}
+                    onMove={actions.move}
+                    onRemove={actions.remove}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

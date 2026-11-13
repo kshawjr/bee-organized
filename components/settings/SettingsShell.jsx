@@ -121,6 +121,7 @@ export const SETTINGS_CSS = `
 [data-settings-ui] [data-sbtn="danger-icon"]:not(:disabled):hover{background-color:${T.destructiveSoft}!important}
 [data-settings-ui] [data-sbtn="text"]:not(:disabled):hover>span{text-decoration:underline}
 [data-slist]>*+*{border-top:1px solid ${T.border}}
+[data-settings-ui] [data-seyebrow]{font-family:${FONT.ui}!important}
 [data-sactions]{display:flex;flex-wrap:wrap;gap:8px}
 [data-slead]{display:flex;align-items:center;gap:16px;min-width:0}
 [data-snotice]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
