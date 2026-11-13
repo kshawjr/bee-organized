@@ -73,8 +73,8 @@
       ],
       "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
       "lines": [
-        37373,
-        38548
+        36809,
+        37950
       ]
     },
     {
@@ -96,8 +96,8 @@
       ],
       "note": "Role gating for which nav items appear is inline here. Help appears for every role (an owner's own reports live under Help › My requests — \"What you've told us\" is retired); Admin only for elevated users.",
       "lines": [
-        38307,
-        38548
+        37710,
+        37950
       ]
     },
     {
@@ -124,8 +124,8 @@
         "search doesn't find anyone"
       ],
       "lines": [
-        30360,
-        30548
+        30352,
+        30540
       ]
     },
     {
@@ -166,77 +166,8 @@
         "seeing someone else's account"
       ],
       "lines": [
-        30549,
-        30656
-      ]
-    },
-    {
-      "id": "shell.ask-bee-hub",
-      "surface": "The Ask Bee Hub help panel (and the footer links to the Guide and the Manual)",
-      "nav": "Home",
-      "file": "components/hive/AskBeeHubPanel.jsx",
-      "symbol": "AskBeeHubPanel",
-      "exported": "default",
-      "routes": [
-        "POST /api/help-chat"
-      ],
-      "tables": [],
-      "says": [
-        "the help thing",
-        "ask bee hub",
-        "the chat bubble",
-        "the question mark button"
-      ],
-      "lines": [
-        90,
-        595
-      ]
-    },
-    {
-      "id": "shell.guide",
-      "surface": "The How-To Guide slideshow",
-      "nav": "Home",
-      "file": "components/guide/HowToGuideModal.jsx",
-      "symbol": "HowToGuideModal",
-      "exported": "default",
-      "routes": [
-        "GET /api/guide-slides"
-      ],
-      "tables": [
-        "guide_slides"
-      ],
-      "says": [
-        "the guide",
-        "the how-to",
-        "the walkthrough",
-        "the tutorial slides"
-      ],
-      "lines": [
-        34,
-        149
-      ]
-    },
-    {
-      "id": "shell.manual",
-      "surface": "The Manual modal",
-      "nav": "Home",
-      "file": "components/BeeHub.jsx",
-      "symbol": "ManualModal",
-      "exported": "internal",
-      "routes": [
-        "GET /api/manual-slides"
-      ],
-      "tables": [
-        "manual_slides"
-      ],
-      "says": [
-        "the manual",
-        "the handbook",
-        "the documentation"
-      ],
-      "lines": [
-        32600,
-        32677
+        30541,
+        30648
       ]
     },
     {
@@ -255,8 +186,8 @@
         "the banner won't go away"
       ],
       "lines": [
-        14669,
-        14698
+        14661,
+        14690
       ]
     },
     {
@@ -279,8 +210,8 @@
         "the payment button does nothing"
       ],
       "lines": [
-        14722,
-        14829
+        14714,
+        14821
       ]
     },
     {
@@ -298,8 +229,8 @@
         "it won't let me do anything"
       ],
       "lines": [
-        14699,
-        14721
+        14691,
+        14713
       ]
     },
     {
@@ -323,8 +254,8 @@
         "the front page"
       ],
       "lines": [
-        25155,
-        26003
+        25147,
+        25995
       ]
     },
     {
@@ -344,8 +275,8 @@
       ],
       "note": "The counts are computed in DashboardScreen (or server-side in lib/hub-all-overview.ts on 'All locations'); this component only paints them. Wrong NUMBER is upstream of here.",
       "lines": [
-        10862,
-        10886
+        10854,
+        10878
       ]
     },
     {
@@ -364,8 +295,8 @@
         "the count is off"
       ],
       "lines": [
-        10906,
-        10932
+        10898,
+        10924
       ]
     },
     {
@@ -411,8 +342,8 @@
         "follow ups (classic)"
       ],
       "lines": [
-        24950,
-        25012
+        24942,
+        25004
       ],
       "note": "DEAD: defined but never rendered, and its list lived only in the browser. Owners saying 'my reminders' mean Reminders — see reminders.page / home.reminders / reminders.record."
     },
@@ -1278,8 +1209,8 @@
         "the yellow bar on clients"
       ],
       "lines": [
-        13082,
-        13158
+        13074,
+        13150
       ]
     },
     {
@@ -1303,8 +1234,8 @@
       ],
       "note": "Which of HiveScreen / HiveShell a user sees is decided by canSeeBetaBoard in components/hive/shared/betaGate.js. Confirm the reporter's role before reading either.",
       "lines": [
-        9814,
-        10822
+        9806,
+        10814
       ]
     },
     {
@@ -1325,8 +1256,8 @@
       ],
       "note": "4,400 lines — the single largest region in the file. Only reached via HiveScreen (legacy board). If the reporter is on the beta board, clients.record is the right entry instead.",
       "lines": [
-        4729,
-        9159
+        4721,
+        9151
       ]
     },
     {
@@ -1355,8 +1286,8 @@
         "it says the drip is running but nothing sent"
       ],
       "lines": [
-        4321,
-        4466
+        4313,
+        4458
       ]
     },
     {
@@ -1382,8 +1313,8 @@
         "the outreach tab"
       ],
       "lines": [
-        4467,
-        4728
+        4459,
+        4720
       ]
     },
     {
@@ -1546,8 +1477,8 @@
         "the old contacts page"
       ],
       "lines": [
-        16409,
-        16539
+        16401,
+        16531
       ]
     },
     {
@@ -1569,8 +1500,8 @@
         "next steps on a partner"
       ],
       "lines": [
-        15743,
-        16408
+        15735,
+        16400
       ]
     },
     {
@@ -1597,8 +1528,8 @@
       ],
       "note": "2,300+ lines. The sub-entries below anchor on each section's render branch — start from those, not from the top of the component. Retired section keys (billing, bees, paths, templates, yourteam, newleads) still resolve via SETTINGS_RETIRED_SECTIONS.",
       "lines": [
-        22069,
-        24881
+        22061,
+        24873
       ]
     },
     {
@@ -1623,8 +1554,8 @@
         "my calendar link"
       ],
       "lines": [
-        24019,
-        24114
+        24011,
+        24106
       ]
     },
     {
@@ -1650,8 +1581,8 @@
         "the review link"
       ],
       "lines": [
-        24115,
-        24192
+        24107,
+        24184
       ]
     },
     {
@@ -1698,8 +1629,8 @@
       ],
       "note": "Team and Billing merged in 2026-07; New leads folded in on 2026-11-13 (Settings slice 2). 'billing', 'bees', 'yourteam' and 'newleads' all survive as deep-link aliases into this section. The Seats card is TeamSection (BeeHub.jsx); the new-lead switches and outside emails are components/settings/TeamAndLeads.jsx; the Bees card is components/hive/BeeRosterSettings.jsx.",
       "lines": [
-        24193,
-        24457
+        24185,
+        24449
       ]
     },
     {
@@ -1742,8 +1673,8 @@
         "which name is on these emails"
       ],
       "lines": [
-        24518,
-        24710
+        24510,
+        24702
       ]
     },
     {
@@ -1763,8 +1694,8 @@
         "what to say on the call"
       ],
       "lines": [
-        24711,
-        24881
+        24703,
+        24873
       ],
       "note": "Split out of 'Texts and scripts' on 2026-11-13 (Settings slice 4). Old 'texts' links land here. Text messaging is a greyed nav item (key 'texting') that cannot be opened."
     },
@@ -1793,8 +1724,8 @@
         "disconnect slack"
       ],
       "lines": [
-        24458,
-        24481
+        24450,
+        24473
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1824,8 +1755,8 @@
         "sync with jobber"
       ],
       "lines": [
-        24482,
-        24500
+        24474,
+        24492
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1858,8 +1789,8 @@
         "sync now"
       ],
       "lines": [
-        24501,
-        24517
+        24493,
+        24509
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1883,8 +1814,8 @@
         "it says connected but nothing syncs"
       ],
       "lines": [
-        17386,
-        17629
+        17378,
+        17621
       ]
     },
     {
@@ -1916,8 +1847,8 @@
         "the progress bar"
       ],
       "lines": [
-        17630,
-        18299
+        17622,
+        18291
       ]
     },
     {
@@ -1939,8 +1870,8 @@
         "the days between emails"
       ],
       "lines": [
-        19329,
-        19542
+        19321,
+        19534
       ]
     },
     {
@@ -1981,8 +1912,8 @@
         "where replies to a job type go"
       ],
       "lines": [
-        19967,
-        20472
+        19959,
+        20464
       ]
     },
     {
@@ -2007,8 +1938,8 @@
         "the person is still showing"
       ],
       "lines": [
-        20873,
-        21270
+        20865,
+        21262
       ]
     },
     {
@@ -2031,8 +1962,8 @@
         "the slack button"
       ],
       "lines": [
-        21648,
-        21958
+        21640,
+        21950
       ]
     },
     {
@@ -2056,8 +1987,8 @@
         "billing history"
       ],
       "lines": [
-        20495,
-        20603
+        20487,
+        20595
       ]
     },
     {
@@ -2086,8 +2017,8 @@
         "the charge for adding a person"
       ],
       "lines": [
-        36907,
-        37372
+        36343,
+        36808
       ]
     },
     {
@@ -2111,8 +2042,8 @@
         "the price it quoted was wrong"
       ],
       "lines": [
-        36654,
-        36906
+        36090,
+        36342
       ]
     },
     {
@@ -2132,8 +2063,8 @@
       ],
       "note": "Currently a coming-soon surface. A report of \"reports don't work\" is expected behaviour, not a bug.",
       "lines": [
-        35912,
-        35939
+        35348,
+        35375
       ]
     },
     {
@@ -2150,8 +2081,8 @@
         "the back office tab"
       ],
       "lines": [
-        35964,
-        36039
+        35400,
+        35475
       ]
     },
     {
@@ -2168,8 +2099,8 @@
         "back office says coming soon"
       ],
       "lines": [
-        35940,
-        35963
+        35376,
+        35399
       ]
     },
     {
@@ -2179,13 +2110,8 @@
       "file": "components/BeeHub.jsx",
       "symbol": "SuperAdminLayout",
       "exported": "internal",
-      "routes": [
-        "GET /api/guide-slides",
-        "GET /api/manual-slides"
-      ],
+      "routes": [],
       "tables": [
-        "guide_slides",
-        "manual_slides",
         "hub_users"
       ],
       "says": [
@@ -2195,8 +2121,8 @@
         "an admin section is missing"
       ],
       "lines": [
-        34975,
-        35521
+        34454,
+        34985
       ]
     },
     {
@@ -2221,8 +2147,8 @@
         "the overview at the top of admin"
       ],
       "lines": [
-        34608,
-        34815
+        34087,
+        34294
       ]
     },
     {
@@ -2245,8 +2171,8 @@
       ],
       "note": "GET /api/admin/locations does not exist — the list arrives server-rendered via app/_hub-page.tsx. The route only exports POST (create), which AddLocationModal uses.",
       "lines": [
-        27331,
-        27586
+        27323,
+        27578
       ]
     },
     {
@@ -2275,8 +2201,8 @@
         "their subscription"
       ],
       "lines": [
-        28155,
-        29050
+        28147,
+        29042
       ]
     },
     {
@@ -2296,8 +2222,8 @@
         "everyone's accounts"
       ],
       "lines": [
-        29572,
-        29673
+        29564,
+        29665
       ]
     },
     {
@@ -2323,8 +2249,8 @@
         "the seat list"
       ],
       "lines": [
-        27593,
-        27856
+        27585,
+        27848
       ]
     },
     {
@@ -2438,8 +2364,8 @@
         "changing pricing"
       ],
       "lines": [
-        31763,
-        32123
+        31755,
+        32115
       ]
     },
     {
@@ -2464,8 +2390,8 @@
         "the close reasons"
       ],
       "lines": [
-        31460,
-        31609
+        31452,
+        31601
       ]
     },
     {
@@ -2491,8 +2417,8 @@
         "I deleted an option and it's still there"
       ],
       "lines": [
-        31263,
-        31459
+        31255,
+        31451
       ]
     },
     {
@@ -2514,8 +2440,8 @@
         "the incoming events"
       ],
       "lines": [
-        34120,
-        34372
+        33599,
+        33851
       ]
     },
     {
@@ -2538,8 +2464,8 @@
         "expired tokens"
       ],
       "lines": [
-        34862,
-        34974
+        34341,
+        34453
       ]
     },
     {
@@ -2564,8 +2490,8 @@
         "restore a lead"
       ],
       "lines": [
-        32124,
-        32280
+        32116,
+        32272
       ]
     },
     {
@@ -2594,8 +2520,8 @@
         "the template library"
       ],
       "lines": [
-        33130,
-        33555
+        32609,
+        33034
       ]
     },
     {
@@ -2620,36 +2546,28 @@
         "the timing for everyone"
       ],
       "lines": [
-        33556,
-        33682
+        33035,
+        33161
       ]
     },
     {
       "id": "admin.content",
-      "surface": "Admin → Content — the Guide and Manual slide editors",
+      "surface": "Admin → Content — the Edit picker over the master drips, the master email templates and the variable reference",
       "nav": "Admin",
       "file": "components/BeeHub.jsx",
       "symbol": "ContentEditor",
       "exported": "internal",
-      "routes": [
-        "GET /api/guide-slides",
-        "POST /api/guide-slides",
-        "GET /api/manual-slides",
-        "POST /api/manual-slides"
-      ],
+      "routes": [],
       "tables": [
-        "guide_slides",
-        "manual_slides",
         "hub_users"
       ],
       "says": [
-        "editing the guide",
-        "the help content",
-        "the manual pages"
+        "the content tab",
+        "the content page in admin"
       ],
       "lines": [
-        33065,
-        33129
+        32547,
+        32608
       ]
     },
     {
@@ -2674,8 +2592,8 @@
         "the owner never got their invite"
       ],
       "lines": [
-        29925,
-        30160
+        29917,
+        30152
       ]
     },
     {
@@ -2699,8 +2617,8 @@
         "grant access"
       ],
       "lines": [
-        31610,
-        31762
+        31602,
+        31754
       ]
     },
     {
@@ -2725,8 +2643,8 @@
         "the removal didn't happen"
       ],
       "lines": [
-        33855,
-        34098
+        33334,
+        33577
       ]
     },
     {
@@ -2750,8 +2668,8 @@
         "mark them as paid"
       ],
       "lines": [
-        29391,
-        29571
+        29383,
+        29563
       ]
     },
     {
@@ -2775,8 +2693,8 @@
         "convert their billing"
       ],
       "lines": [
-        29222,
-        29390
+        29214,
+        29382
       ]
     },
     {
@@ -2802,8 +2720,8 @@
         "the pay link doesn't work"
       ],
       "lines": [
-        29051,
-        29221
+        29043,
+        29213
       ]
     },
     {
@@ -2826,8 +2744,8 @@
         "set up a new office"
       ],
       "lines": [
-        34393,
-        34607
+        33872,
+        34086
       ]
     },
     {
@@ -2859,8 +2777,8 @@
       ],
       "note": "Step ids: welcome, pay, profile, location, jobber, import, paths, slack, invite (owner flow) and welcome_employee, profile (employee flow).",
       "lines": [
-        11052,
-        12521
+        11044,
+        12513
       ]
     },
     {
@@ -2878,8 +2796,8 @@
         "the fields in onboarding"
       ],
       "lines": [
-        13159,
-        13411
+        13151,
+        13403
       ]
     },
     {
@@ -2906,8 +2824,8 @@
         "activate my subscription"
       ],
       "lines": [
-        36243,
-        36422
+        35679,
+        35858
       ]
     },
     {
@@ -2927,8 +2845,8 @@
         "it bounced me back without connecting"
       ],
       "lines": [
-        12547,
-        12635
+        12539,
+        12627
       ]
     },
     {
@@ -2958,8 +2876,8 @@
         "the import step is stuck"
       ],
       "lines": [
-        12692,
-        13081
+        12684,
+        13073
       ]
     },
     {
@@ -2986,8 +2904,8 @@
         "it picked the wrong emails"
       ],
       "lines": [
-        13648,
-        13959
+        13640,
+        13951
       ]
     },
     {
@@ -3007,8 +2925,8 @@
         "getting leads in slack"
       ],
       "lines": [
-        14001,
-        14374
+        13993,
+        14366
       ]
     },
     {
@@ -3033,8 +2951,8 @@
         "the invites didn't send"
       ],
       "lines": [
-        14375,
-        14653
+        14367,
+        14645
       ]
     },
     {
@@ -3058,8 +2976,8 @@
         "the co-owner's checklist"
       ],
       "lines": [
-        25013,
-        25130
+        25005,
+        25122
       ]
     },
     {

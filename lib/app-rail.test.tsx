@@ -13,13 +13,18 @@
 //       back button — for any role.
 //   3 · Admin is hidden from exactly the people it was hidden from.
 //   4 · "Everyone" is gone from the menu.
-//   5 · collapse (remembered), the menu filter, the phone drawer.
-//   6 · what the export dropped and Bee Hub keeps: Ask Bee Hub, Search, the
-//       identity control, the onboarding lock.
+//   5 · collapse (remembered), the phone drawer.
+//   6 · REMOVED 2026-11-13 (Kevin): the "Search menu" box that filtered the
+//       menu items, and Ask Bee Hub everywhere (menu, phone top bar, chat
+//       panel, first-visit hint). The client Search button is NOT that box
+//       and stays.
+//   7 · what the export dropped and Bee Hub keeps: Search, the identity
+//       control, the onboarding lock.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { execSync } from 'node:child_process'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
@@ -42,6 +47,8 @@ import { RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY, APP_RAIL_CSS } from '@/co
 
 const read = (f: string) => readFileSync(join(process.cwd(), f), 'utf8')
 const HUB = read('components/BeeHub.jsx')
+// The shell as committed in 722aaa0, for "nothing else changed" comparisons.
+const HEAD_HUB = execSync('git show 722aaa0:components/BeeHub.jsx', { cwd: process.cwd(), maxBuffer: 64 * 1024 * 1024 }).toString()
 const RAIL = read('components/design/AppRail.jsx')
 const RAIL_CODE = RAIL.split('\n').filter(l => !l.trimStart().startsWith('//')).join('\n')
 
@@ -343,10 +350,8 @@ describe('the collapse control', () => {
     expect(keys()).toEqual(['home', 'reminders', 'hive', 'partners', 'reports', 'backoffice', 'settings', 'help', 'admin'])
     await click(item('settings')); expect(current()).toBe('settings')
     expect(item('reports').tagName).toBe('DIV')
-    // No menu filter on the strip; search and Ask are still there.
-    expect(rail().querySelector('[data-rail-filter]')).toBeNull()
+    // The client search is still there on the strip.
     expect(rail().querySelector('[data-rail-search]')).toBeTruthy()
-    expect(rail().querySelector('button[aria-label="Ask Bee Hub"]')).toBeTruthy()
     await click(toggle())
     expect(rail().style.width).toBe('192px')
     expect(rail().querySelector('nav')!.textContent).toContain('Home')
@@ -378,38 +383,88 @@ describe('the collapse control', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5 · THE MENU FILTER
+// 5 · REMOVED: THE "SEARCH MENU" BOX, AND ASK BEE HUB
 // ═══════════════════════════════════════════════════════════════════════════
-describe('the search box filters the menu', () => {
-  it('typing narrows the items; clearing brings them back; nothing matching says so', async () => {
-    await mount(ROLES[4].props)
-    const box = rail().querySelector('input[aria-label="Search menu"]')!
-    await type(box, 'se')
-    expect(keys()).toEqual(['settings'])
-    await type(box, 'RE')                              // any case; closed items are still listed, still closed
-    expect(keys()).toEqual(['reminders', 'partners', 'reports'])
-    expect(item('reports').tagName).toBe('DIV')
-    await type(box, 'adm')
-    expect(keys()).toEqual(['admin'])
-    await type(box, 'zzz')
-    expect(keys()).toEqual([])
-    expect(rail().querySelector('[data-rail-empty]')!.textContent).toBe('Nothing in the menu matches “zzz”.')
-    await type(box, '')
-    expect(keys().length).toBe(9)
+const SLIDES = [{ chapter: 'Basics', icon: '🐝', title: 'Welcome', color: '#1a2e2b', body: 'Hello.', bullets: [] }]
+describe('the "Search menu" box is gone; the client Search button is not', () => {
+  for (const { label, props } of ROLES) {
+    it(`${label}: no box that filters the menu, in the menu or the drawer; every item always listed`, async () => {
+      await mount(props)
+      const before = keys()
+      expect(rail().querySelectorAll('input').length).toBe(0)
+      expect(host.querySelector('[aria-label="Search menu"], [placeholder="Search menu"], [data-rail-filter], [data-rail-empty]')).toBeNull()
+      expect(host.textContent).not.toContain('Search menu')
+      const d = await openDrawer()
+      expect(d.querySelectorAll('input').length).toBe(0)
+      expect(keys(d)).toEqual(before)
+    })
+  }
+
+  it('the menu file holds no filter: no typed text, nothing narrowing the lists', () => {
+    expect(RAIL_CODE).not.toMatch(/<input|setQuery|\.filter\(matches\)|data-rail-filter|Search menu/)
+    expect(APP_RAIL_CSS).not.toContain('input')
+    expect(RAIL_CODE).toContain('{items.map(it =>')
+    expect(RAIL_CODE).toContain('{lower.map(it =>')
   })
 
-  it('it cannot surface an item the viewer does not have', async () => {
-    await mount(ROLES[0].props)
-    await type(rail().querySelector('input[aria-label="Search menu"]'), 'adm')
-    expect(keys()).toEqual([])
-  })
+  for (const { label, props } of ROLES) {
+    it(`${label}: the client Search button is still in the menu and still opens the search`, async () => {
+      await mount(props)
+      const search = rail().querySelector('[data-rail-search]') as HTMLElement
+      expect(search.tagName).toBe('BUTTON')
+      expect(search.getAttribute('aria-label')).toBe('Search clients and contacts')
+      expect(search.textContent).toContain('Search…')
+      const inputs = document.querySelectorAll('input').length
+      await click(search)
+      expect(document.querySelectorAll('input').length).toBeGreaterThan(inputs)
+    })
+  }
 
-  it('it is the menu filter, not the client search: that is still its own button, and ⌘K still opens it', async () => {
+  it('⌘K and the phone top bar’s Search are wired as they were', async () => {
     await mount(ROLES[0].props)
-    const search = rail().querySelector('[data-rail-search]') as HTMLElement
-    expect(search.getAttribute('aria-label')).toBe('Search clients and contacts')
+    expect(host.querySelector('button[aria-label="Search"]')).toBeTruthy()
     expect(HUB).toContain('onSearch={()=>setShowGlobalSearch(true)}')
     expect(HUB).toContain("function onKey(e) { if ((e.metaKey||e.ctrlKey) && e.key==='k') { e.preventDefault(); setShowGlobalSearch(true) } }")
+    expect(HUB.split('setShowGlobalSearch(true)').length - 1).toBe(HEAD_HUB.split('setShowGlobalSearch(true)').length - 1)
+  })
+})
+
+describe('Ask Bee Hub is gone, everywhere', () => {
+  for (const { label, props } of ROLES) {
+    it(`${label}: no Ask button in the menu, the drawer or the phone top bar, and no first-visit hint`, async () => {
+      // A first visit with a Guide to point at: exactly when the hint used to show.
+      await mount({ ...props, initialGuideSlides: SLIDES })
+      expect(window.localStorage.getItem('bee_guide_dismissed')).toBeNull()
+      const none = () => {
+        expect(host.querySelector('[aria-label="Ask Bee Hub"], [data-rail-ask], [aria-label="Ask Bee Hub help chat"]')).toBeNull()
+        expect(host.textContent).not.toContain('Ask Bee Hub')
+        expect(host.textContent).not.toContain('New here?')
+        expect(Array.from(host.querySelectorAll('button')).filter(b => (b.textContent || '').trim() === 'Ask').length).toBe(0)
+      }
+      none()
+      await openDrawer(); none()
+      for (const k of ['help', 'settings', 'hive', 'home']) { await click(item(k)); none() }
+      // …and the hint's "seen it" mark is no longer written by anything here
+      expect(window.localStorage.getItem('bee_guide_dismissed')).toBeNull()
+    })
+  }
+
+  it('the shell no longer holds the button, the panel, the hint, or their state', () => {
+    for (const gone of ['AskBeeHubButton', 'AskBeeHubPanel', 'showHelpChat', 'showGuideHint', 'dismissGuideHint', 'New here?', '/api/help-chat']) expect(HUB, gone).not.toContain(gone)
+    expect(RAIL_CODE).not.toMatch(/\bask\b|data-rail-ask/)
+  })
+
+  it('Help is still in the menu for everyone, which is where this now lives', async () => {
+    await mount(ROLES[2].props)
+    expect(item('help').tagName).toBe('BUTTON')
+    await click(item('help')); expect(current()).toBe('help')
+  })
+
+  // The Quick Start Guide and the Manual were retired the same day; what is
+  // left of them (the rows, the two slide routes) is pinned in
+  // lib/guides-retired.test.tsx.
+  it('nothing in the shell can open the Quick Start Guide or the Manual: the viewers are gone', () => {
+    for (const gone of ['HowToGuideModal', 'ManualModal', 'showGuide', 'showManual', 'openGuide', 'onOpenManual={']) expect(HUB, gone).not.toContain(gone)
   })
 })
 
@@ -476,14 +531,6 @@ describe('the phone drawer is the same menu, sliding in', () => {
 // 7 · WHAT THE EXPORT DROPPED AND BEE HUB KEEPS
 // ═══════════════════════════════════════════════════════════════════════════
 describe('kept, though the export has none of them', () => {
-  it('Ask Bee Hub is in the menu and in the drawer — on a desktop it is the only way to the Guide and the Manual', async () => {
-    await mount(ROLES[0].props)
-    expect(rail().querySelector('[data-rail-ask] button[aria-label="Ask Bee Hub"]')).toBeTruthy()
-    const d = await openDrawer()
-    expect(d.querySelector('[data-rail-ask] button[aria-label="Ask Bee Hub"]')).toBeTruthy()
-    expect(HUB.split('<AskBeeHubButton ').length - 1).toBe(2)   // the menu, and the phone top bar
-  })
-
   it('the identity control is the footer, handed in whole with the handlers it had', () => {
     expect(HUB.split('<IdentityScopeControl').length - 1).toBe(1)
     for (const h of ['onOpenViewAs={()=>{', 'onExitViewAs={()=>{', 'onOpenLocationPicker={()=>setShowLocPicker(true)}', 'signOutHref="/api/auth/signout"', 'canSwitchLocation={isElevated}']) expect(HUB).toContain(h)

@@ -32,18 +32,14 @@ vi.mock('@/lib/supabase-server', () => ({ createServerSupabaseClient: async () =
 vi.mock('@/lib/resend', () => ({ sendEmailDirect: vi.fn(), sendEmail: vi.fn() }))
 
 import HelpScreen from '@/components/help/HelpScreen'
-import AskBeeHubPanel from '@/components/hive/AskBeeHubPanel'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import { legacyFeedbackRedirect, HELP_REQUESTS_PATH, NAV_TO_URL, ROUTE_TO_NAV } from '@/components/hive/shared/hubUrl'
 import { feedbackReplyLink, FEEDBACK_REPLY_PATH } from '@/lib/feedback-reply-email'
 import { hubReturnTo, safeNextPath } from '@/lib/safe-next'
 import { loginRedirectTarget } from '@/lib/auth'
-import { buildSystem } from '@/lib/help-chat-prompt'
 
 const readSrc = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), 'utf8')
 const BEEHUB = readSrc('components/BeeHub.jsx')
-const PANEL = readSrc('components/hive/AskBeeHubPanel.jsx')
-const PROMPT = readSrc('lib/help-chat-prompt.ts')
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
 const item = (over: any) => ({
@@ -194,36 +190,15 @@ describe("an owner's existing items and threads render in Help › My requests u
 
 // ─── the chat's licence ───────────────────────────────────────────────
 
-describe('the chat still cannot name a control that does not exist', () => {
-  it('the three fixed affordances in the prompt are exactly the three links under the chat', () => {
-    const sys = buildSystem({ name: 'Clients', detail: 'Clients · Inbox' })
-    // what the prompt permits
-    expect(sys).toContain('"Quick Start Guide"')
-    expect(sys).toContain('"Manual"')
-    expect(sys).toContain('"Ask the team in\nHelp" link')
-    expect(sys).not.toContain('Report Bug or')
-    // what the footer renders
-    expect(PANEL).toContain('Quick Start Guide')
-    expect(PANEL).toContain('Manual')
-    expect(PANEL).toContain('Ask the team in Help')
-    expect(PANEL).not.toContain('Report Bug or Feature')
-    // the hard rule still travels
-    expect(sys).toContain('NEVER name or describe a button, menu')
-    expect(sys).not.toMatch(/suggest where/i)
-  })
-
-  it('the footer link is rendered with that exact label, and BeeHub routes it into Help', async () => {
-    const onOpenHelpAsk = vi.fn()
-    const { host, unmount } = await mount(<AskBeeHubPanel isMobile={false} onClose={() => {}} onOpenGuide={() => {}} onOpenManual={() => {}} onOpenHelpAsk={onOpenHelpAsk} />)
-    const link = host.querySelector('[data-ask-help]') as HTMLButtonElement
-    expect(link?.textContent?.trim()).toBe('Ask the team in Help')
-    expect(host.textContent).toContain('Still stuck?')
-    expect(host.textContent).toContain('Prefer a walkthrough?')
-    await act(async () => { link.click() })
-    expect(onOpenHelpAsk).toHaveBeenCalled()
-    expect(BEEHUB).toContain("onOpenHelpAsk={() => { setShowHelpChat(false); goToHelp('ask') }}")
+// The chat (Ask Bee Hub), its prompt and its panel were deleted on 2026-11-13,
+// so the tests that pinned what the chat was allowed to say went with them.
+// What is left of this block is the Help side of the old hand-off.
+describe('the Help ask strip the chat used to hand off to', () => {
+  it('the chat, its prompt and its panel are gone, and BeeHub routes nothing from them', () => {
+    expect(fs.existsSync(path.join(process.cwd(), 'components/hive/AskBeeHubPanel.jsx'))).toBe(false)
+    expect(fs.existsSync(path.join(process.cwd(), 'lib/help-chat-prompt.ts'))).toBe(false)
+    expect(BEEHUB).not.toContain('onOpenHelpAsk=')
     expect(BEEHUB).not.toContain('onOpenFeedback=')
-    await unmount()
   })
 
   it('the ask intent lands on the Help list with the ask strip, not on My requests', async () => {
@@ -245,8 +220,8 @@ describe('nothing that was silent before now sends', () => {
     expect(src).not.toContain('/?feedback=1`')
   })
 
-  it('the swap added no fetch, no email and no Slack call to the shell or the panel', () => {
-    for (const [name, src] of [['BeeHub', BEEHUB], ['panel', PANEL], ['prompt', PROMPT]] as const) {
+  it('the swap added no fetch, no email and no Slack call to the shell', () => {
+    for (const [name, src] of [['BeeHub', BEEHUB]] as const) {
       const region = name === 'BeeHub' ? BEEHUB.slice(BEEHUB.indexOf('function goToHelp'), BEEHUB.indexOf('function goToHelp') + 900) : src
       expect(region, name).not.toMatch(/\/api\/(slack|notify|email)|resend|sendSlack/)
     }

@@ -17,66 +17,15 @@ import path from 'node:path'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
-const h = vi.hoisted(() => {
-  const state: any = { rows: {} as Record<string, any[]>, reads: [] as string[] }
-  return { state }
-})
-vi.mock('@/lib/supabase-server', () => ({
-  createServerSupabaseClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: null } }) },
-    from: (t: string) => ({
-      select: () => ({
-        order: async () => { h.state.reads.push(t); return { data: h.state.rows[t] || [], error: null } },
-      }),
-    }),
-  }),
-}))
+// 2026-11-13: the Quick Start Guide and the Manual are retired and both slide
+// routes are CLOSED (they answer 410 and read nothing; a save used to wipe its
+// table). The tables and their rows are untouched. The routes' own tests are
+// in lib/guides-retired.test.tsx; what this file still pins is that Help was
+// built alongside the slide tables and never reaches into them.
 
-import { GET as guideGET } from '@/app/api/guide-slides/route'
-import { GET as manualGET } from '@/app/api/manual-slides/route'
-import HowToGuideModal from '@/components/guide/HowToGuideModal'
-
-const slideRow = (over: any) => ({
-  id: 'g1', slot: 0, icon: '🐝', chapter: 'Start', color: '#1a2e2b', title: 'Welcome',
-  body: 'Hello there.', bullets: ['one', 'two'], screenshot_url: null, screenshots: ['https://x/a.png'], ...over,
-})
-
-beforeEach(() => { h.state.rows = {}; h.state.reads = [] })
-
-describe('the slide routes are unchanged', () => {
-  it('GET /api/guide-slides reads guide_slides and returns the same shape', async () => {
-    h.state.rows.guide_slides = [slideRow({})]
-    const body = await (await guideGET()).json()
-    expect(h.state.reads).toEqual(['guide_slides'])
-    expect(body.slides).toEqual([{
-      icon: '🐝', chapter: 'Start', color: '#1a2e2b', title: 'Welcome', body: 'Hello there.',
-      bullets: ['one', 'two'], screenshot: 'https://x/a.png', screenshots: ['https://x/a.png'],
-    }])
-  })
-
-  it('GET /api/manual-slides reads manual_slides and returns the same shape, video_url included', async () => {
-    h.state.rows.manual_slides = [slideRow({ video_url: 'https://youtu.be/abcdefg' })]
-    const body = await (await manualGET()).json()
-    expect(h.state.reads).toEqual(['manual_slides'])
-    expect(body.slides[0]).toMatchObject({ title: 'Welcome', video_url: 'https://youtu.be/abcdefg', screenshot: 'https://x/a.png' })
-  })
-})
-
-describe('the guide modal still renders a slide', () => {
-  it('title, body and bullets', async () => {
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-    const root = createRoot(host)
-    await act(async () => {
-      root.render(<HowToGuideModal onClose={() => {}} onDismiss={() => {}} slides={[{ icon: '🐝', chapter: 'Start', color: '#1a2e2b', title: 'Welcome', body: 'Hello there.', bullets: ['one', 'two'], screenshot: null, screenshots: [] }]} />)
-    })
-    expect(host.textContent).toContain('Welcome')
-    expect(host.textContent).toContain('Hello there.')
-    expect(host.textContent).toContain('one')
-    await act(async () => root.unmount())
-    host.remove()
-  })
-})
+// The guide modal's own render test was here. The Quick Start Guide and the
+// Manual were retired on 2026-11-13 and the modal deleted; the two routes and
+// both tables are untouched, which is what the blocks around this pin.
 
 describe('the Help build leaves the slide tables alone', () => {
   const root = path.resolve(__dirname, '..')

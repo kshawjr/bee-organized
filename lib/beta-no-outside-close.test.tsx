@@ -36,7 +36,6 @@ import MetaSelect from '@/components/hive/MetaSelect'
 import IdentityScopeControl from '@/components/hive/IdentityScopeControl'
 import AssigneeCorner from '@/components/hive/shared/AssigneeCorner'
 import EngagementAssignees from '@/components/hive/shared/EngagementAssignees'
-import AskBeeHubPanel from '@/components/hive/AskBeeHubPanel'
 import FeedbackModal from '@/components/feedback/FeedbackModal'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -220,20 +219,8 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
   })
 })
 
-describe('Ask Bee Hub panel', () => {
-  it.each([['desktop float', false], ['phone sheet', true]])('%s: an outside click leaves it open; its ✕ closes it; Esc still does', async (_l, isMobile) => {
-    const onClose = vi.fn()
-    const { host, unmount } = await mount(<AskBeeHubPanel isMobile={isMobile} screenName="Home" onClose={onClose} />)
-    await clickOutside()
-    if (isMobile) await clickOutside(host.firstElementChild!) // the dimmed scrim itself
-    expect(onClose).not.toHaveBeenCalled()
-    await click(host.querySelector('button[aria-label="Close help chat"]')!)
-    expect(onClose).toHaveBeenCalledTimes(1)
-    await escape()
-    expect(onClose).toHaveBeenCalledTimes(2)
-    await unmount()
-  })
-})
+// The Ask Bee Hub panel had its own block here; the panel was deleted on
+// 2026-11-13 with the rest of Ask Bee Hub.
 
 describe('feedback form (FeedbackModal)', () => {
   it('a mousedown + click on its backdrop leaves it open; its ✕ closes it', async () => {
@@ -294,12 +281,11 @@ describe('codebase sweep: no outside-click closers left', () => {
 describe('nothing unclosable', () => {
   // Every full-screen fixed layer must contain its own way out. Layers that
   // ignore the pointer (confetti, click-through wrappers) are skipped.
-  // Four React.createElement layers in BeeHub + the Ask Bee Hub phone
-  // wrapper can't be walked by indentation — each is pinned explicitly
+  // The React.createElement layers in BeeHub can't be walked by indentation — each is pinned explicitly
   // below instead.
   const WALK_EXEMPT = new Set([
     'components/BeeHub.jsx#partner-popup', 'components/BeeHub.jsx#partner-delete',
-    'components/BeeHub.jsx#jobber-history', 'components/hive/AskBeeHubPanel.jsx#phone-wrapper',
+    'components/BeeHub.jsx#jobber-history',
   ])
   const CLOSE_CONTROL = /onClick(=\{|:)\s*(\(\)\s*=>\s*\{?\s*)?(on(Close|Cancel|Done|Dismiss)\b|close\b|set\w+\((false|null)\)|\(\)\s*=>\s*on(Close|Cancel)\(\))|>\s*(Cancel|Close|Done|Got it|OK|×|✕)\s*<|aria-label[=:]\s*['"]Close|['"](×|✕|Cancel|Close|Done)['"]/
 
@@ -323,14 +309,14 @@ describe('nothing unclosable', () => {
           e++
         }
         const sub = L.slice(c, e + 1).join('\n')
-        if (!CLOSE_CONTROL.test(sub) && !(f.endsWith('AskBeeHubPanel.jsx') && sub.includes('{panel}'))) {
+        if (!CLOSE_CONTROL.test(sub)) {
           unclosable.push(`${f}:${c + 1}`)
         }
         i = e
       }
     }
     expect(unclosable).toEqual([])
-    expect(WALK_EXEMPT.size).toBe(4)
+    expect(WALK_EXEMPT.size).toBe(3)   // was 4: the Ask Bee Hub phone wrapper went with the panel (2026-11-13)
   })
 
   const beehub = read('components/BeeHub.jsx')
@@ -369,7 +355,7 @@ describe('nothing unclosable', () => {
     for (const f of [
       'components/hive/shared/cardKit.jsx', 'components/hive/shared/RecordMenu.jsx', 'components/hive/InboxScreen.jsx',
       'components/hive/shared/PickerModal.jsx', 'components/hive/MetaSelect.jsx', 'components/hive/IdentityScopeControl.jsx',
-      'components/hive/shared/AssigneeCorner.jsx', 'components/hive/shared/EngagementAssignees.jsx', 'components/hive/AskBeeHubPanel.jsx',
+      'components/hive/shared/AssigneeCorner.jsx', 'components/hive/shared/EngagementAssignees.jsx',
     ]) expect(read(f), f).toMatch(/key === 'Escape'/)
   })
 })

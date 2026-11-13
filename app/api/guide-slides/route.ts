@@ -1,114 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+// app/api/guide-slides/route.ts
+//
+// GET and POST /api/guide-slides — CLOSED 2026-11-13.
+//
+// GET listed the Quick Start Guide's slides; POST saved them, and a save WIPED the
+// guide_slides table and wrote the new set in its place. The Quick Start Guide is retired
+// (its slides were out of date and are being replaced with help videos): the
+// viewer and the editor are deleted, so nothing in Bee Hub calls this any
+// more. Kevin is keeping the rows — 15 of them — to write the videos from.
+// With no screen left to serve, the only thing this route could still do was
+// destroy them, so it refuses, for everyone.
+//
+// 410 Gone, not 403: nobody is being told they lack permission. The answer is
+// the same whoever asks and is given before anything is read — not the
+// request, not the session, not the database — the same way /api/help-chat
+// and /api/tags/own were closed.
+//
+// THE ROWS ARE NOT TOUCHED. Nothing here, and no migration, deletes from
+// guide_slides. The page load (app/_hub-page.tsx) still reads the table
+// directly; it never came through this route.
+//
+// TO REOPEN: the route as it was is in git at 722aaa0.
 
-// GET — fetch all slides, ordered by slot
-export async function GET() {
-  const supabase = await createServerSupabaseClient()
-  const { data, error } = await supabase
-    .from('guide_slides')
-    .select('*')
-    .order('slot', { ascending: true })
+import { NextResponse } from 'next/server'
 
-  if (error) {
-    console.error('[guide_slides GET]', error)
-    return NextResponse.json({ slides: [], error: error.message }, { status: 500 })
-  }
-
-  const slides = (data || []).map((row) => {
-    let screenshots: string[] = []
-    if (Array.isArray(row.screenshots) && row.screenshots.length > 0) {
-      screenshots = row.screenshots
-    } else if (row.screenshot_url) {
-      screenshots = [row.screenshot_url]
-    }
-
-    return {
-      icon: row.icon,
-      chapter: row.chapter,
-      color: row.color,
-      title: row.title,
-      body: row.body || '',
-      bullets: row.bullets || [],
-      screenshot: screenshots[0] || null,
-      screenshots,
-    }
-  })
-
-  return NextResponse.json({ slides })
+const CLOSED = {
+  error: 'guide_slides_closed',
+  message: 'The Quick Start Guide is retired. Its slides are kept, but they can no longer be read or changed here.',
 }
 
-// POST — replace all slides. Super_admin or admin only.
-export async function POST(request: NextRequest) {
-  const supabase = await createServerSupabaseClient()
+export async function GET() {
+  return NextResponse.json(CLOSED, { status: 410 })
+}
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  }
-
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  // Allow both super_admin AND admin to edit the guide
-  const allowedRoles = ['super_admin', 'admin']
-  if (!hubUser || !allowedRoles.includes(hubUser.role)) {
-    return NextResponse.json(
-      { error: 'forbidden — super_admin or admin only' },
-      { status: 403 }
-    )
-  }
-
-  const body = await request.json().catch(() => ({}))
-  const slides = body.slides
-
-  if (!Array.isArray(slides)) {
-    return NextResponse.json({ error: 'invalid payload — slides must be an array' }, { status: 400 })
-  }
-
-  const { error: delErr } = await supabase
-    .from('guide_slides')
-    .delete()
-    .neq('id', '00000000-0000-0000-0000-000000000000')
-
-  if (delErr) {
-    console.error('[guide_slides DELETE]', delErr)
-    return NextResponse.json({ error: 'delete failed: ' + delErr.message }, { status: 500 })
-  }
-
-  if (slides.length > 0) {
-    const rows = slides.map((s: any, i: number) => {
-      let screenshots: string[] = []
-      if (Array.isArray(s.screenshots)) {
-        screenshots = s.screenshots
-      } else if (s.screenshot) {
-        screenshots = [s.screenshot]
-      }
-
-      return {
-        slot: i,
-        icon: s.icon || null,
-        chapter: s.chapter || null,
-        color: s.color || '#1a2e2b',
-        title: s.title || '',
-        body: s.body || null,
-        bullets: Array.isArray(s.bullets) ? s.bullets : [],
-        screenshot_url: screenshots[0] || null,
-        screenshots,
-        updated_by: user.id,
-      }
-    })
-
-    const { error: insErr } = await supabase.from('guide_slides').insert(rows)
-    if (insErr) {
-      console.error('[guide_slides INSERT]', insErr)
-      return NextResponse.json({ error: 'insert failed: ' + insErr.message }, { status: 500 })
-    }
-  }
-
-  return NextResponse.json({ ok: true, count: slides.length })
+export async function POST() {
+  return NextResponse.json(CLOSED, { status: 410 })
 }

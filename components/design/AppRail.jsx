@@ -19,8 +19,7 @@
 //     button, nothing to click, nothing to tab to.
 //
 // FROM THE EXPORT: 192px wide (was 220), which lines up with the Settings
-// column; a collapse control down to an 80px icon strip; a box that filters
-// the menu; the phone drawer (same menu, slides in, tap outside to close);
+// column; a collapse control down to an 80px icon strip; the phone drawer (same menu, slides in, tap outside to close);
 // the honeycomb behind the header; "Network & Nurture".
 //
 // NOT FROM THE EXPORT, each on purpose:
@@ -28,11 +27,12 @@
 //     prototype contains nothing but Settings ("not included in this
 //     Settings design"). Here Home, Reminders, Clients, Settings, Help and
 //     Admin are LIVE (Kevin's ruling); only the three `soon` items are not.
-//   · The export has no "Ask Bee Hub" and no global search. Both are KEPT:
-//     on a desktop this menu is the only way to open Ask Bee Hub — and the
-//     Quick Start Guide and the Manual open from it — and the Search button
-//     is the visible way into finding a client. Dropping either would
-//     strand a screen.
+//   · The export has no global search. The Search button is KEPT: it is the
+//     visible way into finding a client.
+//   · The export's "Search menu" box, which filtered the menu items as you
+//     typed, was built and then REMOVED (Kevin, 2026-11-13). So was the Ask
+//     Bee Hub button that sat in this header (Help covers it). Not to be
+//     confused with the Search button above, which stays.
 //   · The export's footer is a name and nothing else. Bee Hub's is the
 //     identity control (who you are, view-as, the location switcher, sign
 //     out), handed in as `footer` and kept whole.
@@ -84,15 +84,12 @@ const iconFor = key => ICONS[key] || ICONS.settings
 const RAIL_HONEYCOMB = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='42' height='72' viewBox='0 0 42 72'><path d='M21 1L41 12v24L21 48L1 36V12ZM1 36L21 48v24M41 36L21 48' fill='none' stroke='${T.gold}' stroke-opacity='0.35' stroke-width='.6'/></svg>`)}")`
 
 // What inline styles cannot say. Every selector starts with [data-app-rail],
-// so nothing outside the menu can match. (The font-size rule is there
-// because app/globals.css forces 16px onto every input.)
+// so nothing outside the menu can match.
 export const APP_RAIL_CSS = `
 [data-app-rail]{-webkit-tap-highlight-color:transparent}
-[data-app-rail] :is(button,input,a,[tabindex]):focus-visible{outline:none!important;box-shadow:0 0 0 2px ${T.gold}!important}
+[data-app-rail] :is(button,a,[tabindex]):focus-visible{outline:none!important;box-shadow:0 0 0 2px ${T.gold}!important}
 [data-app-rail] [data-rail-item]:not([data-active]):not(:disabled):hover{background-color:${alpha(T.railFg, 0.05)}!important;color:${T.railFg}!important}
 [data-app-rail] [data-rail-quiet]:hover{background-color:${alpha(T.railFg, 0.08)}!important;color:${T.railFg}!important}
-[data-app-rail] input[data-rail-filter]{font-size:14px!important}
-[data-app-rail] input[data-rail-filter]::placeholder{color:${T.railMuted}}
 @keyframes bee-rail-drawer-in{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @keyframes bee-rail-overlay-in{from{opacity:0}to{opacity:1}}
 [data-app-rail][data-rail-drawer]{animation:bee-rail-drawer-in .25s ease-out}
@@ -150,10 +147,7 @@ function RailItem({ item, active, compact, onPick, Badge }) {
 }
 
 // ── The inside of the menu, for the desktop column and the phone drawer ───
-function RailBody({ compact, mobile, items, lower, active, onPick, onClose, brandMark, ask, onSearch, footer, mobileFooter, account, Badge, onToggle }) {
-  const [query, setQuery] = React.useState('')
-  const matches = (it) => compact || it.label.toLowerCase().includes(query.trim().toLowerCase())
-  const shown = items.filter(matches), shownLower = lower.filter(matches)
+function RailBody({ compact, mobile, items, lower, active, onPick, onClose, brandMark, onSearch, footer, mobileFooter, account, Badge, onToggle }) {
   const pick = (key) => { onPick(key); if (mobile && onClose) onClose() }
   const line = `1px solid ${alpha(T.railFg, 0.1)}`
   const quiet = { display:'flex', alignItems:'center', width:'100%', minHeight:'44px', boxSizing:'border-box', borderRadius:R.md, border:'none', background:'transparent', color:T.railMuted, cursor:'pointer', fontFamily:'inherit', transition:'background-color .18s, color .18s' }
@@ -174,35 +168,23 @@ function RailBody({ compact, mobile, items, lower, active, onPick, onClose, bran
             style={{ ...quiet, justifyContent:'center', width:'44px', marginLeft:'auto', color:T.railFg }}><IconX size={20} /></button>
         )}
       </div>
-      {/* Ask Bee Hub — kept. See the note at the top of this file. */}
-      {ask && <div data-rail-ask style={{ position:'relative', display:'flex', justifyContent: compact ? 'center' : 'flex-start', marginTop:'12px' }}>{ask(compact)}</div>}
     </header>
-
-    {!compact && (
-      <label style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0, height:'44px', margin:'16px 12px 8px', padding:'0 10px', borderRadius:R.md, border:`1px solid ${alpha(T.railFg, 0.15)}`, background:alpha(T.railFg, 0.05), color:T.railMuted }}>
-        <IconSearch size={16} />
-        <input data-rail-filter aria-label="Search menu" placeholder="Search menu" value={query} onChange={e => setQuery(e.target.value)}
-          style={{ width:'100%', minWidth:0, border:'none', outline:'none', background:'transparent', color:T.railFg, fontFamily:'inherit' }} />
-      </label>
-    )}
 
     {/* THE scroll region; everything after it stays pinned. */}
     <nav aria-label="Main navigation" style={{ flex:1, minHeight:0, overflowY:'auto', padding:'16px 8px' }}>
       {!compact && <p style={{ margin:'0 10px 12px', fontSize:'10px', lineHeight:'14px', fontWeight:700, textTransform:'uppercase', color:T.railMuted }}>Workspace</p>}
       <div data-rail-list style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-        {shown.map(it => <RailItem key={it.key} item={it} active={active === it.key} compact={compact} onPick={pick} Badge={Badge} />)}
+        {items.map(it => <RailItem key={it.key} item={it} active={active === it.key} compact={compact} onPick={pick} Badge={Badge} />)}
       </div>
-      {shownLower.length > 0 && (
+      {lower.length > 0 && (
         <div data-rail-list="lower" style={{ display:'flex', flexDirection:'column', gap:'4px', marginTop:'20px', paddingTop:'16px', borderTop:line }}>
-          {shownLower.map(it => <RailItem key={it.key} item={it} active={active === it.key} compact={compact} onPick={pick} Badge={Badge} />)}
+          {lower.map(it => <RailItem key={it.key} item={it} active={active === it.key} compact={compact} onPick={pick} Badge={Badge} />)}
         </div>
-      )}
-      {!compact && query.trim() && shown.length + shownLower.length === 0 && (
-        <p data-rail-empty style={{ margin:'8px 10px', fontSize:'12px', lineHeight:'16px', color:T.railMuted }}>Nothing in the menu matches “{query.trim()}”.</p>
       )}
     </nav>
 
-    {/* Search (clients, Network people) — kept. Not the menu filter above.
+    {/* Search (clients, Network people) — kept. This is NOT the box that
+        filtered the menu items as you typed; that one was removed.
         Not in the phone drawer: on a phone the top bar already has it, and
         the room is better spent showing the whole menu without scrolling. */}
     {onSearch && !mobile && (
@@ -249,13 +231,12 @@ function RailBody({ compact, mobile, items, lower, active, onPick, onClose, bran
 //   collapsed / onToggle          the desktop icon strip
 //   mobileOpen / onCloseMobile    the phone drawer
 //   brandMark       what sits where the logo goes
-//   ask(compact)    the Ask Bee Hub button
 //   onSearch        open global search
 //   footer          the identity control; `account` {name, initials} stands in on the icon strip
 //   mobileFooter    what the phone drawer ends with (who you are, and Sign Out), as before
 //   Badge           the count badge component (Help's unread replies)
-export function AppRail({ items, lower = [], active, onPick, collapsed = false, onToggle, mobileOpen = false, onCloseMobile, brandMark, ask, onSearch, footer, mobileFooter, account, Badge }) {
-  const shared = { items, lower, active, onPick, brandMark, ask, onSearch, footer, mobileFooter, account, Badge, onToggle }
+export function AppRail({ items, lower = [], active, onPick, collapsed = false, onToggle, mobileOpen = false, onCloseMobile, brandMark, onSearch, footer, mobileFooter, account, Badge }) {
+  const shared = { items, lower, active, onPick, brandMark, onSearch, footer, mobileFooter, account, Badge, onToggle }
   const shell = { background:T.rail, color:T.railFg, fontFamily:FONT.ui, display:'flex', flexDirection:'column' }
   return <>
     <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
