@@ -28,9 +28,24 @@
 //
 // MARKS. Slack's is Slack's own published mark, already in Bee Hub
 // (components/hive/shared/SlackMark.jsx), given the clear space its terms
-// ask for. Jobber's, Mailchimp's, Gmail's and Dialpad's are NOT drawn or
-// approximated: each is a plain tile with the first letter of the name. To use real logo files
-// later, give that entry of MARKS an <img>.
+// ask for — a proper brand mark, kept as it is.
+//
+// Jobber's, Mailchimp's, Gmail's and Dialpad's are fetched LIVE, the way the
+// export does it (its pages.tsx): each company's own site icon, from Google's
+// favicon service —
+//   https://www.google.com/s2/favicons?domain=<their domain>&sz=128
+// THIS IS DELIBERATE, NOT AN ACCIDENT (Kevin, 2026-11-13): it means every
+// owner's browser makes four requests to google.com when they open
+// Connections, each naming one of those four public domains and nothing
+// about the owner or their location. Kevin has accepted that. Bee Hub ships
+// no logo files for these four and nothing here draws or approximates one.
+// TO REPLACE IT LATER with real logo files: give LogoMark a local `src` per
+// entry of LOGO_DOMAINS (or drop the files in /public and point at them) —
+// nothing else on the page depends on where the picture comes from.
+//
+// If a picture does not arrive (blocked, offline, Google down) the tile shows
+// the first letter of the name, which is what it shows until the picture has
+// loaded. A broken-image icon is never on screen.
 //
 // Nothing here decides who may see the page (that is `ownerConfig` in
 // BeeHub.jsx's SECTION_GROUPS) and nothing here connects or disconnects
@@ -122,13 +137,43 @@ export const MAILCHIMP_NOT_SYNCING = NOT_LIVE_COPY.replace(/^Connected\.\s*/, ''
 // side — more than the 0.473 × size its brand terms ask for.
 const tile = { display:'grid', placeItems:'center', width:'48px', height:'48px', flexShrink:0, borderRadius:R.xl, border:`1px solid ${T.border}`, background:T.card, boxShadow:SHADOW.field }
 const letterTile = { ...tile, background:T.sageSoft, border:'1px solid transparent', boxShadow:'none', color:T.primary, fontFamily:FONT.heading, fontSize:'20px', lineHeight:1, fontWeight:700 }
+// The four whose picture comes from Google's favicon service, and the public
+// domain each is looked up by.
+export const LOGO_DOMAINS = { jobber: 'getjobber.com', mailchimp: 'mailchimp.com', gmail: 'gmail.com', dialpad: 'dialpad.com' }
+export const logoUrl = (domain) => `https://www.google.com/s2/favicons?domain=${domain}&sz=128`
+
+// A tile that shows `letter` until the picture has LOADED, and goes on
+// showing it if the picture never does. The <img> is in the page from the
+// start (so the browser fetches it) but is not displayed until its load
+// event; on an error it is taken out altogether. `greyed` (a roadmap card)
+// drains the picture's colour so it matches the greyed card it sits on.
+function LogoMark({ id, letter, greyed = false }) {
+  const [state, setState] = React.useState('loading')   // 'loading' | 'loaded' | 'failed'
+  const img = React.useRef(null)
+  // A picture the browser already had can finish before React is listening.
+  React.useEffect(() => {
+    const el = img.current
+    if (el && el.complete) setState(el.naturalWidth > 0 ? 'loaded' : 'failed')
+  }, [])
+  const loaded = state === 'loaded'
+  return (
+    <span aria-hidden="true" data-mark={loaded ? 'logo' : 'letter'} data-logo-state={state} style={loaded ? tile : letterTile}>
+      {!loaded && letter}
+      {state !== 'failed' && (
+        <img ref={img} src={logoUrl(LOGO_DOMAINS[id])} alt="" width="32" height="32" loading="eager" decoding="async" referrerPolicy="no-referrer"
+          onLoad={() => setState('loaded')} onError={() => setState('failed')}
+          style={{ display: loaded ? 'block' : 'none', width:'32px', height:'32px', objectFit:'contain', filter: greyed ? 'grayscale(1)' : 'none' }} />
+      )}
+    </span>
+  )
+}
+
 const MARKS = {
   slack: () => <span aria-hidden="true" data-mark="slack" style={tile}><SlackMark size={24} /></span>,
-  // Not their logos. A letter on a plain tile, on purpose.
-  jobber: () => <span aria-hidden="true" data-mark="letter" style={letterTile}>J</span>,
-  mailchimp: () => <span aria-hidden="true" data-mark="letter" style={letterTile}>M</span>,
-  gmail: () => <span aria-hidden="true" data-mark="letter" style={letterTile}>G</span>,
-  dialpad: () => <span aria-hidden="true" data-mark="letter" style={letterTile}>D</span>,
+  jobber: (p) => <LogoMark id="jobber" letter="J" {...p} />,
+  mailchimp: (p) => <LogoMark id="mailchimp" letter="M" {...p} />,
+  gmail: (p) => <LogoMark id="gmail" letter="G" {...p} />,
+  dialpad: (p) => <LogoMark id="dialpad" letter="D" {...p} />,
 }
 
 const CHIP_TONE = { connected: 'ok', finish: 'warn', off: 'quiet' }
@@ -177,7 +222,7 @@ export function ConnectionsPage({ location, locationId, onOpen }) {
           <div key={c.id} data-connection={c.id} data-state="soon" data-soon="" aria-disabled="true"
             style={{ ...cardBox, cursor:'default' }}>
             <span style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'8px' }}>
-              <span style={{ opacity:0.5 }}><Mark /></span>
+              <span style={{ opacity:0.5 }}><Mark greyed /></span>
               <span data-connection-chip data-soon-chip style={{ borderRadius:R.full, background:T.muted, padding:'2px 8px', fontSize:'11px', lineHeight:'16px', fontWeight:700, whiteSpace:'nowrap', color:T.mutedFg }}>{c.chip}</span>
             </span>
             <span style={{ display:'block', opacity:0.5 }}>

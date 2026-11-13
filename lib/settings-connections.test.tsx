@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import * as BeeHubModule from '@/components/BeeHub'
-import { ConnectionsPage, connectionCards, connectionSummary, ROADMAP_CARDS, MAILCHIMP_NOT_SYNCING } from '@/components/settings/ConnectionsPage'
+import { ConnectionsPage, connectionCards, connectionSummary, ROADMAP_CARDS, MAILCHIMP_NOT_SYNCING, LOGO_DOMAINS, logoUrl } from '@/components/settings/ConnectionsPage'
 import { SLACK_MARK_PATHS } from '@/components/hive/shared/SlackMark'
 import { NOT_LIVE_COPY } from '@/lib/mailchimp-connection-state'
 
@@ -370,14 +370,162 @@ describe('the marks', () => {
     expect((48 - 24) / 2).toBeGreaterThanOrEqual(0.473 * 24)
   })
 
-  it('Jobber’s, Mailchimp’s, Gmail’s and Dialpad’s are a letter on a plain tile: nothing drawn, no image, no colour of theirs', async () => {
-    await mount()
-    for (const [id, letter] of [['jobber', 'J'], ['mailchimp', 'M'], ['gmail', 'G'], ['dialpad', 'D']]) {
-      const tile = card(id).querySelector('[data-mark="letter"]') as HTMLElement
-      expect(tile.textContent).toBe(letter)
-      expect(tile.querySelector('svg, img, path')).toBeNull()
+  // 2026-11-13: the export's own approach. Bee Hub ships no logo files for
+  // these four; each company's site icon is fetched live from Google's
+  // favicon service. Kevin has accepted that an owner's browser asks Google
+  // for them when Connections opens. What must hold: the right four
+  // addresses and nothing more, a letter tile whenever a picture has not
+  // (or never) arrived, and a greyed picture on a greyed card.
+  const LOGOS: Array<[string, string, string]> = [
+    ['jobber', 'J', 'https://www.google.com/s2/favicons?domain=getjobber.com&sz=128'],
+    ['mailchimp', 'M', 'https://www.google.com/s2/favicons?domain=mailchimp.com&sz=128'],
+    ['gmail', 'G', 'https://www.google.com/s2/favicons?domain=gmail.com&sz=128'],
+    ['dialpad', 'D', 'https://www.google.com/s2/favicons?domain=dialpad.com&sz=128'],
+  ]
+  const mark = (id: string) => card(id).querySelector('[data-mark]') as HTMLElement
+  const fire = async (el: Element, type: string) => { await act(async () => { el.dispatchEvent(new Event(type)) }) }
+  // The test browser never fetches a picture, and reports every <img> as
+  // "finished, and empty" at once. `pending(true)` makes a picture look the
+  // way it does in a real browser while it is still on its way, so the load
+  // and error events below are what decide — nothing passes by not running.
+  const proto = () => (window as any).HTMLImageElement.prototype
+  const pending = (isPending: boolean, naturalWidth = 0) => {
+    Object.defineProperty(proto(), 'complete', { configurable: true, get: () => !isPending })
+    Object.defineProperty(proto(), 'naturalWidth', { configurable: true, get: () => naturalWidth })
+  }
+  beforeEach(() => pending(true))
+  afterEach(() => { delete proto().complete; delete proto().naturalWidth })
+
+  it('Jobber, Mailchimp, Gmail and Dialpad each ask Google’s favicon service for that company’s own site icon', async () => {
+    await mount({}, loc(ALL))
+    expect(LOGOS.map(([id]) => card(id).querySelector('img')!.getAttribute('src'))).toEqual(LOGOS.map(l => l[2]))
+    expect(LOGO_DOMAINS).toEqual({ jobber: 'getjobber.com', mailchimp: 'mailchimp.com', gmail: 'gmail.com', dialpad: 'dialpad.com' })
+    expect(logoUrl('getjobber.com')).toBe('https://www.google.com/s2/favicons?domain=getjobber.com&sz=128')
+    // Exactly four pictures on the page, and Slack's is not one of them.
+    expect(all('[data-settings-page] img').length).toBe(4)
+    expect(card('slack').querySelector('img')).toBeNull()
+    for (const [id] of LOGOS) {
+      const img = card(id).querySelector('img')!
+      expect(img.getAttribute('alt'), id).toBe('')                         // decorative: the card names it
+      expect(img.getAttribute('referrerpolicy'), id).toBe('no-referrer')   // Google is not told which page asked
     }
-    expect(PAGE_CODE).not.toMatch(/<img|favicons|\.png|\.svg['"]|#[0-9a-fA-F]{3,8}\b/)
+  })
+
+  it('the address carries the company’s public domain and nothing about the owner or the location', async () => {
+    await mount({}, loc(ALL))
+    for (const img of all('[data-settings-page] img')) {
+      const u = new URL(img.getAttribute('src')!)
+      expect(u.origin + u.pathname).toBe('https://www.google.com/s2/favicons')
+      expect(Array.from(u.searchParams.keys())).toEqual(['domain', 'sz'])
+      expect(img.getAttribute('src')).not.toContain(LOC)
+      expect(img.getAttribute('src')).not.toMatch(/seattle|riley|bee/i)
+    }
+    // No other outside address anywhere in the page's code.
+    expect(Array.from(PAGE_CODE.matchAll(/https?:\/\/[^\s'"`)]+/g)).map(m => m[0])).toEqual(['https://www.google.com/s2/favicons?domain=${domain}&sz=128'])
+  })
+
+  it('until a picture has loaded the tile shows the letter, and the picture is not displayed', async () => {
+    await mount({}, loc(ALL))
+    for (const [id, letter] of LOGOS) {
+      const m = mark(id)
+      expect(m.getAttribute('data-logo-state'), id).toBe('loading')
+      expect(m.getAttribute('data-mark'), id).toBe('letter')
+      expect(m.textContent, id).toBe(letter)
+      expect((m.querySelector('img') as HTMLElement).style.display, id).toBe('none')
+    }
+  })
+
+  it('a picture that LOADS replaces the letter', async () => {
+    await mount({}, loc(ALL))
+    for (const [id] of LOGOS) {
+      const img = card(id).querySelector('img')!
+      expect(img, `${id}: a picture is on its way`).toBeTruthy()
+      await fire(img, 'load')
+      const m = mark(id)
+      expect(m.getAttribute('data-mark'), id).toBe('logo')
+      expect(m.getAttribute('data-logo-state'), id).toBe('loaded')
+      expect(m.textContent, id).toBe('')
+      expect((m.querySelector('img') as HTMLElement).style.display, id).toBe('block')
+    }
+  })
+
+  it('a picture that FAILS falls back to the letter tile — the picture is taken out, so no broken-image icon can show', async () => {
+    await mount({}, loc(ALL))
+    for (const [id, letter] of LOGOS) {
+      const img = card(id).querySelector('img')!
+      expect(img, `${id}: a picture is on its way`).toBeTruthy()
+      await fire(img, 'error')
+      const m = mark(id)
+      expect(m.getAttribute('data-logo-state'), id).toBe('failed')
+      expect(m.getAttribute('data-mark'), id).toBe('letter')
+      expect(m.textContent, id).toBe(letter)
+      expect(m.querySelector('img'), `${id}: no <img> left to draw a broken icon`).toBeNull()
+      // The letter tile as it was before logos: the soft sage tile, no outline.
+      expect(m.style.width).toBe('48px')
+      expect(m.querySelector('svg, path')).toBeNull()
+    }
+    expect(all('[data-settings-page] img').length).toBe(0)
+    // Every card still reads right with no pictures at all.
+    expect(['slack', 'jobber', 'mailchimp', 'gmail', 'dialpad'].map(chip)).toEqual(['Connected', 'Connected', 'Connected', 'Coming soon', 'Coming soon'])
+  })
+
+  it('one failing does not take the others with it, and a late load after a failure changes nothing', async () => {
+    await mount({}, loc(ALL))
+    const j = card('jobber').querySelector('img')!, m = card('mailchimp').querySelector('img')!
+    await fire(j, 'error')
+    await fire(m, 'load')
+    expect(mark('jobber').getAttribute('data-mark')).toBe('letter')
+    expect(mark('mailchimp').getAttribute('data-mark')).toBe('logo')
+    expect(card('jobber').querySelector('img')).toBeNull()
+    expect(mark('gmail').getAttribute('data-logo-state')).toBe('loading')
+  })
+
+  it('a picture the browser had already given up on before the page was listening still falls back', async () => {
+    pending(false, 0)   // finished, and empty: a failed picture whose error event has been and gone
+    await mount({}, loc(ALL))
+    for (const [id, letter] of LOGOS) {
+      expect(mark(id).getAttribute('data-logo-state'), id).toBe('failed')
+      expect(mark(id).textContent, id).toBe(letter)
+      expect(card(id).querySelector('img'), id).toBeNull()
+    }
+  })
+
+  it('…and one the browser already had, whole, is shown without waiting for an event', async () => {
+    pending(false, 128)   // finished, with a real picture: served from the browser's own store
+    await mount({}, loc(ALL))
+    for (const [id] of LOGOS) {
+      expect(mark(id).getAttribute('data-logo-state'), id).toBe('loaded')
+      expect((card(id).querySelector('img') as HTMLElement).style.display, id).toBe('block')
+    }
+  })
+
+  it('a roadmap card’s picture is greyed to match its card; a live card’s is in full colour', async () => {
+    await mount({}, loc(ALL))
+    for (const id of ['gmail', 'dialpad']) {
+      const img = card(id).querySelector('img') as HTMLElement
+      expect(img.style.filter, `${id}: greyed even before it shows`).toBe('grayscale(1)')
+      await fire(img, 'load')
+      const shown = card(id).querySelector('img') as HTMLElement
+      expect(shown.style.filter, id).toBe('grayscale(1)')
+      // …and it sits at the half strength the rest of the card's words have.
+      expect((mark(id).parentElement as HTMLElement).style.opacity, id).toBe('0.5')
+    }
+    for (const id of ['jobber', 'mailchimp']) {
+      const img = card(id).querySelector('img') as HTMLElement
+      await fire(img, 'load')
+      expect((card(id).querySelector('img') as HTMLElement).style.filter, id).toBe('none')
+      expect((mark(id).parentElement as HTMLElement).style.opacity, id).toBe('')
+    }
+    // Greyed in the letter-tile fallback too.
+    expect(PAGE_CODE).toContain("<span style={{ opacity:0.5 }}><Mark greyed /></span>")
+  })
+
+  it('it is written down that this is deliberate, and how to swap in real logo files later', () => {
+    expect(PAGE).toContain('THIS IS DELIBERATE, NOT AN ACCIDENT (Kevin, 2026-11-13)')
+    expect(PAGE).toMatch(/owner's browser makes four requests to google\.com/)
+    expect(PAGE).toContain('TO REPLACE IT LATER with real logo files')
+    // Nothing is drawn or shipped for these four.
+    expect(PAGE_CODE).not.toMatch(/\.png|\.svg['"]|#[0-9a-fA-F]{3,8}\b/)
   })
 })
 
