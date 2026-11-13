@@ -67,6 +67,13 @@ const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 //   bookmarks:write     put an "Open in Bee Hub" link in a channel's header
 //   files:write         post a file — a quote, photos
 //   reactions:write     mark a message, e.g. tick the card when a job is done
+//   commands            (added to this list 2026-11-13, after Kevin added it
+//                       in the Slack app's settings) a slash command and a
+//                       message shortcut, so a ZB can file a ticket from
+//                       Slack without Bee Hub ever reading their channels:
+//                       Slack hands over only what the person typed, or the
+//                       one message they chose. Nothing uses it yet — no
+//                       command or shortcut is built
 //
 // DELIBERATELY NOT REQUESTED: channels:history. It would let the app read
 // every message in every public channel of a franchise's workspace. Their
@@ -77,6 +84,7 @@ const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 const SLACK_SCOPES = [
   'chat:write', 'chat:write.public', 'channels:read', 'channels:manage', 'incoming-webhook', 'users:read', 'users:read.email',
   'pins:write', 'pins:read', 'channels:join', 'bookmarks:write', 'files:write', 'reactions:write', 'groups:write',
+  'commands',
 ].join(',')
 
 export async function GET(request: NextRequest) {

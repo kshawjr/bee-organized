@@ -28,6 +28,10 @@ vi.mock('@/lib/supabase-service', () => ({
 import { GET as connectGET } from '@/app/api/slack/connect/route'
 
 const ADDED = ['pins:write', 'pins:read', 'channels:join', 'bookmarks:write', 'files:write', 'reactions:write', 'groups:write']
+// 2026-11-13: one more, for a slash command and a message shortcut (file a
+// ticket from Slack). It reads nothing: Slack sends only what the person typed
+// or the one message they picked.
+const LATER = ['commands']
 const BEFORE = ['chat:write', 'chat:write.public', 'channels:read', 'channels:manage', 'incoming-webhook', 'users:read', 'users:read.email']
 
 async function asked(): Promise<string[]> {
@@ -47,11 +51,11 @@ beforeEach(() => {
 })
 
 describe('the permissions the "Add to Slack" link asks for', () => {
-  it('exactly the seven added on 2026-11-12, on top of the seven it already asked for — fourteen, each once, nothing else', async () => {
+  it('exactly the seven added on 2026-11-12 and commands on 2026-11-13, on top of the seven it already asked for — fifteen, each once, nothing else', async () => {
     const scopes = await asked()
-    expect(scopes).toEqual([...BEFORE, ...ADDED])
+    expect(scopes).toEqual([...BEFORE, ...ADDED, ...LATER])
     expect(ADDED).toHaveLength(7)
-    expect(new Set(scopes).size).toBe(14)
+    expect(new Set(scopes).size).toBe(15)
     expect(scopes.every(s => /^[a-z-]+(:[a-z.]+)*$/.test(s))).toBe(true)   // no stray space or empty entry
   })
 
@@ -82,7 +86,8 @@ describe('the permissions the "Add to Slack" link asks for', () => {
     const src = readFileSync('app/api/slack/connect/route.ts', 'utf8')
     const block = src.slice(src.indexOf('REQUESTED ON PURPOSE, NOT USED YET'), src.indexOf('const SLACK_SCOPES'))
     expect(block).toContain('DO NOT DELETE AS DEAD')
-    for (const s of ['groups:write', 'pins:read', 'channels:join', 'bookmarks:write', 'files:write', 'reactions:write']) expect(block, s).toContain(s)
+    for (const s of ['groups:write', 'pins:read', 'channels:join', 'bookmarks:write', 'files:write', 'reactions:write', 'commands']) expect(block, s).toContain(s)
+    expect(block).toMatch(/commands[\s\S]*slash command[\s\S]*message\s+shortcut[\s\S]*Nothing uses it yet/)
     expect(block).toMatch(/groups:write[\s\S]*PRIVATE channels[\s\S]*address/)
     expect(block).toMatch(/DELIBERATELY NOT REQUESTED: channels:history/)
   })
