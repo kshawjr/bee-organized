@@ -475,7 +475,7 @@ describe('nothing points at New leads any more', () => {
   it('no retired key points at another retired key, and every target is a real section', async () => {
     const m = HUB.match(/const SETTINGS_RETIRED_SECTIONS = (\{[^}]+\})/)![1]
     const map = Object.fromEntries(Array.from(m.matchAll(/(\w+):'(\w+)'/g)).map(x => [x[1], x[2]]))
-    expect(map).toEqual({ billing: 'team', bees: 'team', paths: 'emails', templates: 'emails', yourteam: 'team', newleads: 'team' })
+    expect(map).toEqual({ billing: 'team', bees: 'team', paths: 'emails', templates: 'emails', yourteam: 'team', newleads: 'team', texts: 'scripts' })   // texts: slice 4
     await mount()
     const live = all('[data-settings-nav="rail"] [data-section]').map(b => b.getAttribute('data-section'))
     for (const [from, to] of Object.entries(map)) {
@@ -488,11 +488,12 @@ describe('nothing points at New leads any more', () => {
   })
 
   it('no Settings section an owner can open still tells them to go to New leads', async () => {
-    for (const key of ['profile', 'location', 'team', 'tags', 'emails', 'texts', 'slack', 'jobber', 'mailchimp']) {
+    for (const key of ['profile', 'location', 'team', 'tags', 'emails', 'scripts', 'texting', 'connections', 'slack', 'jobber', 'mailchimp']) {
       // Without a location context: some old sections need the app's router once they have a real location.
       await render(<CurrentUserContext.Provider value={owner}><SettingsScreen initialSection={key} franchiseRole="owner" /></CurrentUserContext.Provider>)
       // Tags is closed (slice 3): it is never the current page.
-      expect(railCurrent(), key).toBe(key === 'tags' ? undefined : key)
+      // Slice 4: Text messaging is closed too, and on a connection's own screen Connections is the lit item.
+      expect(railCurrent(), key).toBe(['tags', 'texting'].includes(key) ? undefined : ['slack', 'jobber', 'mailchimp'].includes(key) ? 'connections' : key)
       const text = pane().textContent || ''
       for (const stale of ['on New leads', 'Notifications ›', 'Settings → New leads', 'New leads section', 'Team and Seats']) {
         expect(text, `${key}: "${stale}"`).not.toContain(stale)

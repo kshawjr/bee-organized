@@ -104,10 +104,12 @@ const ALL_SECTIONS = [
   'profile',                          // You
   'location', 'team', 'tags',         // Your business (tags: 2026-10-16). Bees is NOT a
                                       // section: it is the lower half of 'team' (2026-11-12).
-  'emails', 'texts',                  // Client messages
+  'emails', 'scripts', 'texting',     // Client messages. 2026-11-13 (slice 4): Texts and scripts
+                                      // split into Call scripts and a greyed Text messaging.
                                       // Notifications › New leads retired 2026-11-13
                                       // (Settings slice 2): its switches are on 'team'.
-  'slack', 'jobber', 'mailchimp',     // Connections
+  'connections',                      // Apps. Slice 4: ONE item; Slack, Jobber and Mailchimp
+                                      // are cards on it and are no longer nav items.
 ]
 
 describe('SettingsScreen sections by franchiseRole', () => {
@@ -381,10 +383,10 @@ describe('groups never render empty (issue 246 step 1)', () => {
     await act(async () => {})
   }
 
-  it('an owner sees all four groups (Notifications went when New leads folded into Team)', async () => {
+  it('an owner sees all four groups (Notifications went when New leads folded into Team; Connections became Apps)', async () => {
     await mountRole('owner')
     const rail = container.querySelector('[data-settings-nav="rail"]')!
-    expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Connections'])
+    expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Apps'])
   })
 
   it('a manager sees ONLY the groups that have a visible item', async () => {
@@ -394,7 +396,7 @@ describe('groups never render empty (issue 246 step 1)', () => {
     expect(Array.from(rail.querySelectorAll('[data-section]')).map(b => b.getAttribute('data-section'))).toEqual(['profile', 'team', 'tags'])
     expect(rail.textContent).not.toContain('Location')
     // Belt and braces: not a single header of the owner-only groups survives.
-    for (const gone of ['Client messages', 'Notifications', 'Connections']) {
+    for (const gone of ['Client messages', 'Notifications', 'Connections', 'Apps']) {
       expect(rail.textContent, `group '${gone}'`).not.toContain(gone)
     }
   })

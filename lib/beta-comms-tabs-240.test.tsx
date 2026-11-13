@@ -98,11 +98,14 @@ const sectionKeys = (): string[] => {
 const NO_ACCESS = "You don't have access to this section"
 
 describe('the sections exist and render', () => {
-  it('an owner is offered emails and texts; yourteam is no longer a section', async () => {
+  it('an owner is offered emails and call scripts; yourteam is no longer a section', async () => {
     await mount('profile')
     const keys = sectionKeys()
     expect(keys).toContain('emails')
-    expect(keys).toContain('texts')
+    // 2026-11-13 (Settings slice 4): "Texts and scripts" split. Call scripts
+    // is the section; Text messaging is a greyed item that cannot be opened.
+    expect(keys).toContain('scripts')
+    expect(keys).not.toContain('texts')
     // The two they replaced are gone from the nav (they survive only as
     // deep-link aliases, asserted below).
     expect(keys).not.toContain('paths')
@@ -118,7 +121,7 @@ describe('the sections exist and render', () => {
     // Lower-cased mid-sentence since issue 246 step 1: the subtitle now leads
     // with "Who your emails come from", because the sending identity moved in.
     expect(await mount('emails')).toContain('Everything about the emails your clients receive, in one place.')   // 2026-10-30 design
-    expect(await mount('texts')).toContain('Texts are on their way')
+    expect(await mount('texts')).toContain('Call scripts are notes for you')   // 'texts' lands on Call scripts (slice 4)
     // The three addresses Your team's contents moved to (issue 246 step 1).
     // New leads retired 2026-11-13 (Settings slice 2): the key lands on Team.
     expect(await mount('newleads')).toContain('who hears about new leads')
@@ -207,7 +210,7 @@ describe('nothing that worked before is unreachable', () => {
     expect(text).toContain('Moving')
   })
 
-  it('Emails owns no template section at all, and Texts & scripts owns its two', async () => {
+  it('Emails owns no template section at all, and Call scripts owns the call one', async () => {
     // Issue 240 step 11: the email template section is gone from this tab.
     // Creating and deleting a reusable email template is corporate's, in
     // Admin → Content. The list above is the only email surface left here.
@@ -220,7 +223,9 @@ describe('nothing that worked before is unreachable', () => {
     const texts = await mount('texts')
     // 'Text Templates' was an empty accordion locked behind a chip that could
     // never be earned; issue 240 step 6 replaced it with an inert preview.
-    expect(texts).toContain('Text messages')
+    // …and slice 4 (2026-11-13) stopped mounting that preview: Text messaging
+    // is a greyed nav item, and this page is Call scripts alone.
+    expect(texts).not.toContain('Text messages')
     expect(texts).not.toContain('Text Templates')
     expect(texts).toContain('Call Scripts')
     expect(texts).not.toContain('Email Templates')

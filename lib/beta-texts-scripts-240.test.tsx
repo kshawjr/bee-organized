@@ -109,11 +109,14 @@ describe('the texts block is inert', () => {
 })
 
 describe('the tab as a whole', () => {
-  it('shows texts before call scripts', async () => {
+  // 2026-11-13 (Settings slice 4): the tab is Call scripts alone. The texts
+  // preview above is still a component (mounted directly by the tests above)
+  // but Settings no longer mounts it; Text messaging is a greyed nav item.
+  it('is call scripts, without the texts preview', async () => {
     const text = (await mountTab()).textContent ?? ''
-    expect(text).toContain('Text messages')
     expect(text).toContain('Call Scripts')
-    expect(text.indexOf('Text messages')).toBeLessThan(text.indexOf('Call Scripts'))
+    expect(text).not.toContain('Text messages')
+    expect(text).not.toContain('Not sending yet')
   })
 
   it('no longer renders the locked Text Templates accordion', async () => {

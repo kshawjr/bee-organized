@@ -55,6 +55,7 @@ import {
 import * as SUI from "@/components/settings/SettingsShell"
 import * as TUI from "@/components/settings/TeamAndLeads"
 import * as LUI from "@/components/settings/LocationRows"
+import * as CUI from "@/components/settings/ConnectionsPage"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -22309,8 +22310,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // a deep link, ?section=, the back button, initialSection — shows a short
   // "being rebuilt" line (below, where the section would render), never the
   // old screen and never a blank one.
-  const CLOSED_SETTINGS_SECTIONS = ['tags']
-  const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'team', newleads:'team' }
+  // 'texting' (Settings slice 4): Text messaging, which has never sent
+  // anything. Same treatment as Tags — greyed in the nav, a line if you land.
+  const CLOSED_SETTINGS_SECTIONS = ['tags', 'texting']
+  // 'texts' (Settings slice 4, 2026-11-13): "Texts and scripts" split in two.
+  // The half that did something — call scripts — is the section 'scripts';
+  // the texts half was a picture of a message that is not sent, and is now
+  // only a greyed nav item. So an old 'texts' link lands on Call scripts.
+  // (slack, jobber and mailchimp are NOT retired: their screens are still
+  // there, one tap in from Connections — see CONNECTION_SECTIONS.)
+  const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'team', newleads:'team', texts:'scripts' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
   // ── Emails › which sequence is on screen (issue 303) ──────────────────────
@@ -23897,26 +23906,36 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // untouched.
       ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️', soon:true }] : []),
     ]},
+    // "Texts and scripts" split in two (Settings slice 4, 2026-11-13): Call
+    // scripts is a section; Text messaging is greyed with a "Soon" chip, the
+    // treatment Tags got, because nothing is sent by text today.
     { title:'Client messages', items: ownerConfig ? [
-      { key:'emails', label:'Emails',            icon:'📧' },
-      { key:'texts',  label:'Texts and scripts', icon:'💬' },
+      { key:'emails',  label:'Emails',         icon:'📧' },
+      { key:'scripts', label:'Call scripts',   icon:'📞' },
+      { key:'texting', label:'Text messaging', icon:'💬', soon:true },
     ] : []},
-    { title:'Connections', items: ownerConfig ? [
-      { key:'slack',  label:'Slack',  icon:'#️⃣' },
-      { key:'jobber', label:'Jobber', icon:'🔗' },
-      // No longer muted (issue 246 step 2): there is a real connect flow behind
-      // it now, so it reads like the live rows above it.
-      { key:'mailchimp', label:'Mailchimp', icon:'📬' },
+    // ONE item where there were three (slice 4). Slack, Jobber and Mailchimp
+    // are cards on the Connections page; each card opens the screen that item
+    // used to open (CONNECTION_SECTIONS, below). Mailchimp is a live
+    // connection like the other two (issue 246 step 2: there is a real
+    // connect flow behind it).
+    { title:'Apps', items: ownerConfig ? [
+      { key:'connections', label:'Connections', icon:'🔌' },
     ] : []},
   ].filter(g => g.items.length > 0)
    // …and a group with nothing in it that can be OPENED goes too, so nobody
    // is shown a heading standing over a lone greyed item.
    .filter(g => g.items.some(i => !i.soon))
   const sections = SECTION_GROUPS.flatMap(g => g.items)
+  // The three connection screens. Not in the nav any more, but still real
+  // places: a card on Connections opens one, and an old ?section=slack,
+  // ?section=jobber or ?section=mailchimp link still lands on it. Owner-only,
+  // by the same predicate that gates Connections itself.
+  const CONNECTION_SECTIONS = ownerConfig ? ['slack', 'jobber', 'mailchimp'] : []
   // Deep-link / stale-state safety: if activeSection isn't one this role can
   // see (e.g. manager hits ?section=billing), show a polite no-access notice
   // instead of leaking the hidden section's UI.
-  const sectionAllowed = sections.some(s => s.key === activeSection)
+  const sectionAllowed = sections.some(s => s.key === activeSection) || CONNECTION_SECTIONS.includes(activeSection)
 
   return (
     // The font here is still DM Sans ON PURPOSE: it is what every section that
@@ -23939,7 +23958,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         {/* ── The rail (≥768px) ──────────────────────────────────────────
             Drawn by SettingsShell.jsx from SECTION_GROUPS exactly as built
             above — the gating is not repeated or re-decided there. */}
-        <SUI.SettingsRail groups={SECTION_GROUPS} active={activeSection} onOpen={openSection} />
+        {/* On one of the three connection screens, Connections is the lit item. */}
+        <SUI.SettingsRail groups={SECTION_GROUPS} active={CONNECTION_SECTIONS.includes(activeSection) ? 'connections' : activeSection} onOpen={openSection} />
 
         <div style={{ flex:'1 1 auto', minWidth:0, paddingBottom:'5rem' }}>
 
@@ -24052,16 +24072,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             mounted by anything. Whoever arrives here — and only someone who
             could have opened it before; anyone else still gets the no-access
             notice above — is told tags are being rebuilt. */}
-        {activeSection==='tags'&&(
+        {CLOSED_SETTINGS_SECTIONS.includes(activeSection)&&(()=>{
+          // Text messaging (slice 4): the same line, in its own words. It has
+          // never sent anything, so it says that rather than "rebuilt".
+          const closed = activeSection==='tags'
+            ? { title:'Tags', head:'Tags are being rebuilt.', body:'This page is closed for now. You can still add and remove tags on a client or a Network contact, exactly as before.' }
+            : { title:'Text messaging', head:'Text messaging is on its way.', body:'Nothing is sent by text today, and there is nothing to switch on yet. Your call scripts are on Call scripts.' }
+          return (
           <SUI.SettingsPage>
-            <SUI.PageHeader title="Tags" />
-            <SUI.Notice tone="quiet" data-section-closed="tags"
+            <SUI.PageHeader title={closed.title} />
+            <SUI.Notice tone="quiet" data-section-closed={activeSection}
               actions={<SUI.Btn data-closed-back onClick={()=>openSection('profile', { push:false })}>Go to Profile</SUI.Btn>}>
-              <span style={{ display:'block', fontSize:'14px', lineHeight:'20px', fontWeight:700, color:SUI.FG }}>Tags are being rebuilt.</span>
-              This page is closed for now. You can still add and remove tags on a client or a Network contact, exactly as before.
+              <span style={{ display:'block', fontSize:'14px', lineHeight:'20px', fontWeight:700, color:SUI.FG }}>{closed.head}</span>
+              {closed.body}
             </SUI.Notice>
           </SUI.SettingsPage>
-        )}
+          )
+        })()}
 
         {/* ── Location ── rebuilt to the new look (slice 3, 2026-11-13).
             The rows are components/settings/LocationRows.jsx. Every save is
@@ -24395,6 +24422,20 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             a connection to another product, which is a different kind of thing
             from "who on my team hears about a lead" — it was filed under the
             latter because that is where new-lead notifications lived. */}
+        {/* ── Connections (Settings slice 4, 2026-11-13) ──────────────────
+            The landing page: one card per connection, in this location's own
+            state. A card opens the screen that connection always had, below,
+            unchanged but for the "All connections" link above it. */}
+        {activeSection==='connections'&&(
+          <SUI.SettingsPage>
+            <SUI.PageHeader title="Connections" intro="Plug Bee Hub into the tools you already use." />
+            <CUI.ConnectionsPage location={settings.location} locationId={realLocId} onOpen={key=>openSection(key, { push:true })} />
+          </SUI.SettingsPage>
+        )}
+        {CONNECTION_SECTIONS.includes(activeSection)&&(
+          <CUI.ConnectionsBack onBack={()=>openSection('connections', { push:false })} />
+        )}
+
         {activeSection==='slack'&&(
           <div style={{ paddingBottom:'12px' }}>
 
@@ -24642,23 +24683,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           )
         })()}
 
-        {/* ── Texts & scripts (issue 240 step 4) — the sms + call halves of
-            the old Templates tab, same renderer as the email half. */}
-        {activeSection==='texts'&&(
+        {/* ── Call scripts (Settings slice 4, 2026-11-13) — the call half of
+            what was "Texts and scripts" (issue 240 step 4), on its own. The
+            texts half was TextsComingSoon, a picture of a message that is not
+            sent; it is no longer mounted (Text messaging is a greyed nav item
+            instead). The scripts themselves are untouched: same renderer,
+            same create, edit and delete. NOT restyled. */}
+        {activeSection==='scripts'&&(
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Texts &amp; scripts</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Texts are on their way. Call scripts are notes for you — nothing on this tab is sent to a client today.</p>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Call scripts</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Call scripts are notes for you — nothing on this tab is sent to a client.</p>
             </div>
-
-            {/* Texts first, inert (issue 240 step 6). This REPLACES the locked
-                "Text Templates" accordion that step 4 moved here. Nothing is
-                lost: its three sms templates are the quarantined Gen 1 rows,
-                all is_active=false, so it rendered an empty accordion behind
-                an "Add-on needed" chip that could never be earned — there is
-                no sms_enabled column for the flag to read. */}
-            <TextsComingSoon />
 
             {/* Call scripts stay exactly as they were: create, edit, delete
                 through the same renderer, now given only the call section. */}

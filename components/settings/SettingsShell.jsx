@@ -37,9 +37,9 @@ import React from 'react'
 import { T, R, FONT, SHADOW, FONT_STYLESHEET_HREF, HONEYCOMB, alpha } from '@/components/design/tokens'
 // Reused from Bee Hub's own icon set (Tabler outlines, already inline SVG).
 import {
-  IconUsers, IconMail, IconMessage, IconMapPin, IconSend,
+  IconUsers, IconMail, IconMessage, IconMapPin,
   IconPencil, IconLogout, IconCheck, IconChevronRight,
-  IconPlus, IconAlertTriangle,
+  IconPlus, IconAlertTriangle, IconPhone,
 } from '@/components/ui/icons'
 
 // ── Icons Bee Hub did not have ────────────────────────────────────────────
@@ -70,6 +70,8 @@ export const IconRefresh = draw(<><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v
 export { IconPlus, IconAlertTriangle, IconMail, IconPencil, IconChevronRight, IconCheck, IconMapPin }
 // Slice 3 (Location).
 export const IconHome = draw(<><path d="M5 12H3l9 -9l9 9h-2" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></>)
+// Slice 4 (Connections).
+export const IconPlug = draw(<><path d="M9.785 6L18 14.215l-2.054 2.054a5.81 5.81 0 1 1 -8.215 -8.215L9.785 6z" /><path d="M4 20l3.5 -3.5" /><path d="M15 4l-3.5 3.5" /><path d="M20 9l-3.5 3.5" /></>)
 export const IconMonitor = draw(<><rect x="3" y="4" width="18" height="12" rx="1" /><path d="M7 20h10" /><path d="M9 16v4" /><path d="M15 16v4" /></>)
 
 // One outline per section KEY. The key is all the nav is told about a
@@ -81,10 +83,9 @@ const SECTION_ICONS = {
   team: IconUsers,
   tags: IconTag,
   emails: IconMail,
-  texts: IconMessage,
-  slack: IconHash,
-  jobber: IconLink,
-  mailchimp: IconSend,
+  scripts: IconPhone,      // Call scripts (slice 4)
+  texting: IconMessage,    // Text messaging — closed, greyed (slice 4)
+  connections: IconPlug,   // one page where Slack, Jobber and Mailchimp were three items (slice 4)
 }
 const iconFor = key => SECTION_ICONS[key] || IconSliders
 
@@ -126,6 +127,8 @@ export const SETTINGS_CSS = `
 [data-sfields]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 [data-striple]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 [data-schoices]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+[data-scards]{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}
+[data-settings-ui] [data-scard]:hover{border-color:${T.gold}!important;box-shadow:${SHADOW.pop};transform:translateY(-2px)}
 @media (min-width:640px){
 [data-striple]{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}
 [data-schoices]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -538,7 +541,7 @@ export const IconSignOut = IconLogout
 // here. BeeHub.jsx paints the screen PAGE_BG behind one of these and leaves
 // the old cream behind every other section, so a short rebuilt page has no
 // band of the old colour under it.
-export const REBUILT_SECTIONS = ['profile', 'team', 'location', 'tags']
+export const REBUILT_SECTIONS = ['profile', 'team', 'location', 'tags', 'connections', 'texting']
 export const PAGE_BG = T.background
 export const MUTED_FG = T.mutedFg
 export const FG = T.foreground

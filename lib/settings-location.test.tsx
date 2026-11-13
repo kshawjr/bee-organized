@@ -467,7 +467,7 @@ describe('Settings → Tags cannot be opened by any road', () => {
       expect(read(f), f).not.toContain('<OwnTagsSettings')
       expect(read(f), f).not.toMatch(/import OwnTagsSettings/)
     }
-    expect(HUB).toContain("const CLOSED_SETTINGS_SECTIONS = ['tags']")
+    expect(HUB).toContain("const CLOSED_SETTINGS_SECTIONS = ['tags', 'texting']")   // 'texting' joined in slice 4
     expect(HUB).toContain('if (CLOSED_SETTINGS_SECTIONS.includes(key)) return')
     expect(HUB).not.toContain('/api/tags/own')
   })
@@ -552,13 +552,14 @@ describe('nobody is shown a heading over nothing they can open', () => {
     expect(groups(drill())).toEqual(want)
   })
 
-  it('an owner: the same four groups, Tags greyed between Team and Emails', async () => {
+  it('an owner: four groups, Tags greyed under Team', async () => {
     await mount({ initialSection: 'profile' })
     expect(groups(rail())).toEqual([
       { title: 'You', open: ['profile'], closed: [] },
       { title: 'Your business', open: ['location', 'team'], closed: ['tags'] },
-      { title: 'Client messages', open: ['emails', 'texts'], closed: [] },
-      { title: 'Connections', open: ['slack', 'jobber', 'mailchimp'], closed: [] },
+      // Slice 4: Call scripts, a greyed Text messaging, and one Connections item.
+      { title: 'Client messages', open: ['emails', 'scripts'], closed: ['texting'] },
+      { title: 'Apps', open: ['connections'], closed: [] },
     ])
   })
 

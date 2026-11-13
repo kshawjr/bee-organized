@@ -241,10 +241,11 @@ describe('mobile drill-down: list → section → back → list', () => {
     // into, which is worse than the <select> this replaced.
     await mount(null)
     const push = vi.spyOn(window.history, 'pushState')
-    await act(async () => { rowIn(drill(), 'texts').click() })
+    // 'scripts' since 2026-11-13: Texts and scripts split, and Call scripts is the row.
+    await act(async () => { rowIn(drill(), 'scripts').click() })
     expect(push, 'drilling in pushed a history entry').toHaveBeenCalledTimes(1)
-    expect(push.mock.calls[0][2]).toContain('section=texts')
-    expect(window.location.search).toContain('section=texts')
+    expect(push.mock.calls[0][2]).toContain('section=scripts')
+    expect(window.location.search).toContain('section=scripts')
   })
 
   it('the back control calls history.back() — the same action as the back gesture', async () => {
@@ -280,7 +281,8 @@ describe('mobile drill-down: list → section → back → list', () => {
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     expect(hidden(drill())).toBe(true)
-    expect(container.textContent).toContain('Texts are on their way')
+    // An old ?section=texts link lands on Call scripts (slice 4).
+    expect(container.textContent).toContain('Call scripts are notes for you')
   })
 
   it('a retired key arriving by popstate resolves rather than blanking the pane', async () => {
@@ -343,17 +345,20 @@ describe('mobile drill-down: list → section → back → list', () => {
 // in lib/beta-mailchimp-connect-246-step2.test.tsx, next to the guard and the
 // pure state module it shares them with.
 describe('Connections › Mailchimp is a live row', () => {
-  it('the row is present in both navs, and no longer muted against its neighbours', async () => {
-    await mount(null)
-    for (const nav of [rail(), drill()]) {
-      const row = rowIn(nav, 'mailchimp')
-      expect(row, 'a Mailchimp row').toBeTruthy()
-      const label = row.querySelector('span:not([aria-hidden])') as HTMLElement
-      // It now reads like Slack and Jobber — the live rows beside it. This is
-      // the exact inverse of the step 1 assertion, which required it to DIFFER.
-      const live = rowIn(nav, 'slack').querySelector('span:not([aria-hidden])') as HTMLElement
-      expect(label.style.color).toBe(live.style.color)
-    }
+  // 2026-11-13 (Settings slice 4): Slack, Jobber and Mailchimp are no longer
+  // nav rows — they are cards on one Connections page. The point of this test
+  // is unchanged and is made on the cards: Mailchimp reads like the other two
+  // (a live connection you can open), never muted or "coming soon".
+  it('the card is on Connections, and is not muted against its neighbours', async () => {
+    await mount('connections')
+    const card = (k: string) => container.querySelector(`[data-connection="${k}"]`) as HTMLButtonElement
+    for (const k of ['slack', 'jobber', 'mailchimp']) expect(card(k), `a ${k} card`).toBeTruthy()
+    expect(card('mailchimp').tagName).toBe('BUTTON')
+    expect(card('mailchimp').disabled).toBe(false)
+    expect(card('mailchimp').style.opacity).toBe(card('slack').style.opacity)
+    expect(card('mailchimp').style.filter).toBe('')
+    expect(card('mailchimp').textContent).not.toMatch(/coming soon|soon/i)
+    for (const nav of [rail(), drill()]) expect(rowIn(nav, 'connections'), 'a Connections row').toBeTruthy()
   })
 
   it('selecting it opens the real card, not the placeholder', async () => {
