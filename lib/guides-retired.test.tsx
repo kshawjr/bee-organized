@@ -369,9 +369,15 @@ describe('the slides stay as rows', () => {
   })
 
   it('the page load that reads the rows, and the record of both tables’ columns, are byte-for-byte what they were', () => {
-    for (const f of ['app/_hub-page.tsx', 'lib/db-columns.snapshot.txt']) expect(read(f), f).toBe(atHead(f))
-    expect(read('lib/db-columns.snapshot.txt')).toMatch(/^guide_slides:/m)
-    expect(read('lib/db-columns.snapshot.txt')).toMatch(/^manual_slides:/m)
+    expect(read('app/_hub-page.tsx'), 'app/_hub-page.tsx').toBe(atHead('app/_hub-page.tsx'))
+    // The record of the two slide tables' columns: THEIR two lines, byte for
+    // byte. This used to compare the whole snapshot file, so it went red the
+    // day any other table was added (client_files, 13 Nov 2026) — the same
+    // too-wide pin the migrations check above had. A new table's line is not
+    // a change to the slides; a change to either slide line still fails here.
+    const slideLines = (text: string) => text.split('\n').filter(l => /^(guide_slides|manual_slides):/.test(l))
+    expect(slideLines(read('lib/db-columns.snapshot.txt'))).toEqual(slideLines(atHead('lib/db-columns.snapshot.txt')))
+    expect(slideLines(read('lib/db-columns.snapshot.txt'))).toHaveLength(2)
   })
 })
 
