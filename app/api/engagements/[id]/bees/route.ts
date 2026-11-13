@@ -22,6 +22,7 @@ import {
   assignBee, mirrorBee, readBeeRow, readEngagementBees, readLocationSlackFull, unassignBee, storeProblems,
   beesTableMissing, type BeeSlackOutcome, type EngagementForBees,
 } from '@/lib/engagement-bees'
+import { engagementHasJob } from '@/lib/engagement-has-job'
 import { canReconnectSlack, gateEngagement, isUuid, publicChannel } from '@/lib/engagement-bees-gate'
 
 export const runtime = 'nodejs'
@@ -59,6 +60,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         channelsSetUp: eng.channelColumns,
         channel: publicChannel(eng),
         closed: !!eng.closed_at,
+        // A channel is for a job: the Slack mark is only offered when this
+        // deal has one (lib/engagement-bees engagementHasJob). A failed read
+        // counts as none. The create route checks again, on its own.
+        hasJob: (await engagementHasJob(supabaseService, eng.id)) === true,
         // What the unattended sweep couldn't do when this job reopened.
         reconcile: eng.slack_channel_problems,
       },

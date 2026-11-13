@@ -19,7 +19,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import EngagementPanel from '@/components/hive/EngagementPanel'
-import { BEES_FROM_JOBBER, NO_BEES_YET, PUT_IN_SLACK, RECONNECT_LINE, MAX_BEE_FACES, SLACK_BTN, SLACK_MARK, beesSlackDoesNotKnow } from '@/components/hive/BeesOnJob'
+import { BEES_FROM_JOBBER, NO_BEES_YET, PUT_IN_SLACK, RECONNECT_LINE, MAX_BEE_FACES, SLACK_BTN, SLACK_MARK, NO_JOB_LINE, BeeSlackButton, useJobBees, beesSlackDoesNotKnow } from '@/components/hive/BeesOnJob'
 import { SLACK_MARK_PATHS, SLACK_MARK_PILL_RATIO } from '@/components/hive/shared/SlackMark'
 import { FACE_OVERLAP } from '@/components/hive/shared/AssigneeCorner'
 import { assigneeSyncNote } from '@/components/hive/shared/AssigneeSyncStatus'
@@ -35,7 +35,7 @@ const bee = (i: number, name: string, extra: any = {}) => ({
   slack_user_id: `U${i}`, slack_checked_at: '2026-11-01', assigned_at: `2026-11-01T00:00:0${i}Z`, ...extra,
 })
 const ANA = bee(1, 'Ana Bee'), SAM = bee(2, 'Sam Carpenter'), NORA = bee(3, 'Nora Nobody'), UNA = bee(4, 'Una Unchecked'), ZOE = bee(5, 'Zoe New')
-const READY = { connected: true, canManageChannels: true, canReconnect: true, channelsSetUp: true, channel: null, closed: false, reconcile: null }
+const READY = { connected: true, canManageChannels: true, canReconnect: true, channelsSetUp: true, channel: null, closed: false, reconcile: null, hasJob: true }
 const CHANNEL = { id: 'C1', name: 'sarah-mcallister-pantry', archived: false }
 
 let engBody: any, beesBody: any, calls: { url: string; method: string; body: any }[], channelAnswer: any, toasts: any[]
@@ -429,9 +429,122 @@ describe('"Put this job in Slack" is Slack’s mark in the corner, with a small 
   // refuses (closed job, not reconnected, no Slack) BEFORE any Slack call —
   // lib/beta-job-channels.test.tsx, "Part B — making the channel". This pins
   // that the route file itself did not move.
+  // (Edited on purpose 2026-11-12: two refusals added to its list of words —
+  // no_job and job_unreadable. Nothing else in the route moved.)
   it('the server route that refuses before calling Slack is byte-for-byte what was pushed', () => {
     expect(createHash('sha256').update(readFileSync('app/api/engagements/[id]/slack-channel/route.ts')).digest('hex'))
-      .toBe('da053ab5fd04abd1428da9dc9f6c81e9ec85a1c45418001e16fb80bba1627ca6')
+      .toBe('9172f8c6e975dcfc9b636aaf6614d905eb53f5c7b2a4cd70e5105d2a7bbbaa5c')
+  })
+})
+
+describe('NO JOB, NO MARK: a channel is for a job, not a request', () => {
+  const mark = () => host.querySelector('[data-bee-make-channel]')
+  // Everything else says "offer it": reconnected, no channel, open, set up, an owner looking.
+  const NO_JOB: [string, any][] = [
+    ['the server says it has no job', { ...READY, hasJob: false }],
+    ['the server says nothing about a job (an older answer)', (() => { const { hasJob, ...rest } = READY as any; return rest })()],
+    ['the answer is not a plain yes', { ...READY, hasJob: 'true' }],
+    ['null', { ...READY, hasJob: null }],
+  ]
+  const BEES: [string, any[]][] = [['with bees', [ANA, SAM]], ['with no bees', []], ['with many bees', [ANA, SAM, NORA, UNA, ZOE]]]
+  for (const [why, slackState] of NO_JOB) for (const [beesWhy, bees] of BEES) {
+    it(`no mark when ${why} — ${beesWhy}`, async () => {
+      beesBody.slack = slackState; beesBody.bees = bees
+      await mount()
+      expect(mark()).toBeNull()
+      // NOTHING is drawn in its place: no greyed mark, no hint, no empty row.
+      expect(host.querySelector('[data-bee-slack], [data-slack-mark], [data-bee-slack-confirm]')).toBeNull()
+      expect(people().children).toHaveLength(2)
+      expect(people().textContent).not.toMatch(/slack|job yet/i)
+      for (const el of Array.from(people().querySelectorAll('[title],[aria-label]'))) {
+        expect((el.getAttribute('title') || '') + (el.getAttribute('aria-label') || '')).not.toMatch(/slack/i)
+      }
+      // The faces are untouched.
+      expect(beeRow()).not.toBeNull()
+      expect(beeRow()!.querySelectorAll('[data-bee-face]')).toHaveLength(Math.min(bees.length, MAX_BEE_FACES))
+      // …and no other route to it: not in the ··· menu, not in the bees card.
+      await openMenu()
+      expect(menuLabels().join(' ')).not.toMatch(/slack/i)
+      expect(doc().textContent).not.toContain(PUT_IN_SLACK)
+      expect(calls.some(c => c.method === 'POST')).toBe(false)
+    })
+  }
+
+  it('the same record WITH a job shows the mark (hasJob is the only thing that changed)', async () => {
+    beesBody.slack = { ...READY, hasJob: false }
+    await mount()
+    expect(mark()).toBeNull()
+    act(() => root.unmount()); host.remove()
+    beesBody.slack = { ...READY, hasJob: true }
+    await mount()
+    expect(mark()).not.toBeNull()
+    expect(people().children).toHaveLength(3)
+  })
+
+  it('it is the JOB, not the stage: a deal at "Job in Progress" with no job has no mark; a deal at "Request" with a job has one', async () => {
+    engBody.engagement.stage = 'Job in Progress'; beesBody.slack = { ...READY, hasJob: false }
+    await mount()
+    expect(mark()).toBeNull()
+    act(() => root.unmount()); host.remove()
+    engBody.engagement.stage = 'Request'; beesBody.slack = { ...READY, hasJob: true }
+    await mount()
+    expect(mark()).not.toBeNull()
+    expect(code('components/hive/BeesOnJob.jsx')).not.toMatch(/stage/i)
+  })
+
+  it('a no-job record that already has a (stray) channel still shows its channel line, and still no mark', async () => {
+    beesBody.slack = { ...READY, hasJob: false, channel: { id: 'CSTRAY', name: 'dup-one-organizing', archived: false } }
+    await mount()
+    expect(mark()).toBeNull()
+    expect(host.querySelector('[data-bee-channel]')!.textContent).toBe('Slack channel #dup-one-organizing')
+  })
+
+  // BELT AND BRACES. The box cannot be opened by tapping (there is no mark to
+  // tap), so it is forced open here.
+  const forced = async (over: any = {}) => {
+    const made = vi.fn(), closed = vi.fn()
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    const ctl = { showCreate: true, dialog: true, hasJob: false, bees: [ANA, SAM], creating: false, openDialog() {}, closeDialog: closed, createChannel: made, ...over }
+    const props: any = { ctl, clientName: 'Dup One', projectType: 'Organizing' }
+    await act(async () => { root.render(<BeeSlackButton {...props} />) })
+    return { made, closed }
+  }
+
+  it('the confirm box, forced open with no job: it refuses, says why in one line, and offers nothing that could make a channel', async () => {
+    const { made, closed } = await forced()
+    const box = host.querySelector('[data-bee-slack-confirm]')!
+    expect(Array.from(box.querySelectorAll('p')).map(p => p.textContent)).toEqual([NO_JOB_LINE])
+    expect(NO_JOB_LINE).toBe('This isn’t a job yet. A Slack channel can be made once it is a job.')
+    expect(box.querySelector('[data-bee-confirm-refused]')!.getAttribute('role')).toBe('alert')
+    expect(Array.from(box.querySelectorAll('button')).map(b => b.textContent)).toEqual(['Close'])
+    expect(box.querySelector('[data-bee-make-channel-confirm]')).toBeNull()
+    expect(box.textContent).not.toMatch(/dup-one|#|Going in|Make it/)   // no channel name is dangled either
+    for (const el of Array.from(box.querySelectorAll('*'))) await act(async () => { (el as HTMLElement).click?.() })
+    expect(made).not.toHaveBeenCalled()
+    expect(closed).toHaveBeenCalled()
+    expect(calls.some(c => c.method === 'POST')).toBe(false)
+  })
+
+  it('the same box with a job is the normal confirm', async () => {
+    await forced({ hasJob: true })
+    const box = host.querySelector('[data-bee-slack-confirm]')!
+    expect(box.querySelector('[data-bee-confirm-refused]')).toBeNull()
+    expect(Array.from(box.querySelectorAll('button')).map(b => b.textContent)).toEqual(['Cancel', 'Make it'])
+  })
+
+  it('and if "make the channel" is somehow called with no job, the screen does not even ask the server', async () => {
+    beesBody.slack = { ...READY, hasJob: false }
+    let ctl: any = null
+    const opts: any = { setToast: (t: any) => { toasts.push(t) } }
+    const Probe = () => { ctl = useJobBees(ENG, opts); return null }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    await act(async () => { root.render(<Probe />) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(ctl.ready).toBe(true)
+    expect(ctl).toMatchObject({ hasJob: false, showCreate: false })
+    await act(async () => { await ctl.createChannel() })
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
+    expect(toasts.at(-1)).toEqual({ kind: 'error', msg: NO_JOB_LINE })
   })
 })
 
@@ -612,10 +725,12 @@ describe('slice 1’s mirror is untouched, by fingerprint', () => {
   // automatic job channels from JOB_CREATE; its hash here is that version.
   // lib/engagement-bees.ts was edited on purpose for the pinned job card: the
   // opening message became the card. Who is in a channel is untouched —
-  // lib/beta-job-channel-card.test.ts pins that.)
+  // lib/beta-job-channel-card.test.ts pins that. Edited again on purpose for
+  // "a channel is for a job, not a request": createJobChannel refuses a deal
+  // with no job — lib/beta-job-channel-needs-job.test.ts.)
   const PUSHED: Record<string, string> = {
     'lib/jobber-crew-mirror.ts': 'f3df7822fb40c77cfbb8fe5e2abfc6192fdf28855eaa9a64314f082d417ad0ef',
-    'lib/engagement-bees.ts': '3e44b3965721faa500bb90d5535e517b2f3335bf16f5ffcba880d6d84b619f9a',
+    'lib/engagement-bees.ts': '6b558d16104034144133cd6ce8fb6686938ec9943a5218da138eaa834b887331',
     'lib/jobber-webhook-handlers.ts': '4252fc55e6b33424cfb62f03a8a7fbfa9db022d0dc6701114c68eca69e528208',
     'app/api/cron/job-channels/route.ts': 'bec11c38d6fbab16104a897ad4444031534d92bf85db4238f207636e00705b60',
     'lib/location-bees.ts': 'a8870029550a48572bc08ae6a01ada11d60f468f86afffef1aef2d88b26450b7',

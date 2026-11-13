@@ -56,6 +56,9 @@ export const RECONNECT_LINE = 'Reconnect Slack to turn on channels for your jobs
 export const BEES_FROM_JOBBER = 'Bees come from Jobber: whoever is on this job’s visits. Change it there.'
 export const NO_BEES_YET = 'Nobody is on this job’s visits in Jobber yet.'
 export const PUT_IN_SLACK = 'Put this job in Slack'
+// A channel is for a job, not a request (2026-11-12). The server's own words
+// for the same refusal (app/api/engagements/[id]/slack-channel).
+export const NO_JOB_LINE = 'This isn’t a job yet. A Slack channel can be made once it is a job.'
 
 // ── The shared state ─────────────────────────────────────────
 // One GET per open job. Returns a controller the four pieces read; every
@@ -84,6 +87,9 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
 
   async function createChannel() {
     if (creating) return
+    // Belt and braces: never even ask the server for a record with no job.
+    // (The server refuses on its own, whatever the browser sends.)
+    if (!hasJob) { setToast({ kind: 'error', msg: NO_JOB_LINE }); return }
     setCreating(true)
     try {
       const res = await fetch(`/api/engagements/${engagementId}/slack-channel`, { method: 'POST' })
@@ -115,7 +121,12 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
 
   // Exactly the conditions it has always had, as a button, a menu item, and
   // now Slack's mark in the corner.
-  const showCreate = ready && !readOnly && !slack.channel && !!slack.connected && !!slack.canManageChannels && !!slack.channelsSetUp && !slack.closed
+  // …and, since 2026-11-12, ONLY WHEN THE RECORD HAS A JOB (slack.hasJob, from
+  // the server: a live job row on this deal — not its stage name). No job, no
+  // mark: nothing is drawn in its place. A request has no visits, so no crew
+  // would ever arrive in its channel.
+  const hasJob = ready && slack.hasJob === true
+  const showCreate = ready && hasJob && !readOnly && !slack.channel && !!slack.connected && !!slack.canManageChannels && !!slack.channelsSetUp && !slack.closed
   // Only to someone who can act on it (the owner, or an admin): a manager or a
   // read-only user has no Slack settings to go to, and an instruction nobody
   // can follow is noise. The server decides (slack.canReconnect).
@@ -126,7 +137,7 @@ export function useJobBees(engagementId, { readOnly = false, setToast = () => {}
   return {
     ready, readOnly, bees, slack, sync,
     reconcile: slack.reconcile?.items?.length ? slack.reconcile.items : null,
-    showRow, showCreate, showReconnect,
+    showRow, showCreate, showReconnect, hasJob,
     dialog, openDialog: () => setDialog(true), closeDialog: () => { if (!creating) setDialog(false) },
     creating, createChannel, clearing, clearReconcile,
   }
@@ -320,6 +331,20 @@ export function BeeSlackButton({ ctl, clientName = null, projectType = null }) {
             background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset,
             boxShadow: T.shadow.pop, padding: '12px',
           }}>
+          {!ctl.hasJob ? (
+            /* It should be impossible to get here: the mark is not drawn
+               without a job. If the box is open anyway, it refuses, says why
+               in one line, and offers nothing that could make a channel. */
+            <>
+              <p data-bee-confirm-refused role="alert" style={{ margin: 0, fontSize: '12px', fontWeight: 500, lineHeight: 1.45, color: T.ink.primary }}>{NO_JOB_LINE}</p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                <button type="button" className="bee-small-action" data-bee-confirm-cancel onClick={close}
+                  style={{ ...small, border: 'none', background: 'transparent', color: T.ink.muted, cursor: 'pointer' }}>
+                  Close
+                </button>
+              </div>
+            </>
+          ) : (<>
           <p data-bee-confirm-what style={{ margin: 0, fontSize: '12px', lineHeight: 1.45, color: T.ink.secondary }}>
             Make a public Slack channel for this job?
           </p>
@@ -346,6 +371,7 @@ export function BeeSlackButton({ ctl, clientName = null, projectType = null }) {
               {creating ? 'Making…' : 'Make it'}
             </button>
           </div>
+          </>)}
         </div>
       )}
     </span>

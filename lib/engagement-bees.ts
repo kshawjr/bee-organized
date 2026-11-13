@@ -43,6 +43,7 @@ export const channelColumnsMissing = (msg: unknown) => notSetUp(msg, /slack_chan
 // create dialog can preview the exact name).
 export { SLACK_CHANNEL_MAX, slugForSlack, slackJobChannelName, isValidSlackChannelName } from '@/lib/slack-channel-name'
 import { slackJobChannelName } from '@/lib/slack-channel-name'
+import { engagementHasJob } from '@/lib/engagement-has-job'
 import { postJobCard, type CardResult } from '@/lib/job-channel-card'
 
 // ── One Slack Web API call ───────────────────────────────────
@@ -342,7 +343,7 @@ export async function readBeeRow(db: Db, beeId: string): Promise<BeeRow | null> 
 // ── Part B: making the channel ───────────────────────────────
 export type CreateResult =
   | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[]; card?: CardResult }
-  | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' | 'client_unreadable' }
+  | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'no_job' | 'job_unreadable' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' | 'client_unreadable' }
 
 const NAME_ATTEMPTS = 6
 
@@ -358,6 +359,13 @@ export async function createJobChannel(
   if (eng.closed_at) return { ok: false, reason: 'closed' }
   if (!slack.connected || !slack.token || !slack.canManageChannels) return { ok: false, reason: 'not_ready' }
   const token = slack.token
+
+  // A job must exist. Checked HERE — the one function the Slack mark's route
+  // and automatic channels both call — and before anything is asked of Slack,
+  // so a forged request and a notice out of order get the same answer.
+  const hasJob = await engagementHasJob(db, eng.id)
+  if (hasJob === 'unknown') return { ok: false, reason: 'job_unreadable' }
+  if (!hasJob) return { ok: false, reason: 'no_job' }
 
   // Bees must be readable BEFORE a channel exists — if the table isn't
   // there yet, make nothing.

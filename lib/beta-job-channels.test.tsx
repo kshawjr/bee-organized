@@ -225,6 +225,9 @@ beforeEach(() => {
       bee(B_OTHER, LOC2, 'Otto Other', 'otto@bee.com', 'U_OTTO'),
     ],
     engagement_bees: [],
+    // Every deal here HAS a job (a channel is for a job, not a request —
+    // lib/beta-job-channel-needs-job.test.ts covers the ones that have none).
+    jobs: [ENG, ENG2, ENG_NOCHAN].map((e, i) => ({ id: `job-${i + 1}`, engagement_id: e, jobber_job_id: String(500 + i), status: 'upcoming' })),
     hub_users: [owner, { id: 'u-mgr', role: 'manager', location_id: LOC, email: 'mgr@bee.com' }],
     engagement_assignees: [],
   }
@@ -467,6 +470,7 @@ describe('Part B — making the channel', () => {
     // A second job, owner now in Slack → nothing to say.
     slack.users['owner@bee.com'] = 'U_OWNER'
     h.db.tables.engagements.push({ id: 'eeeeeeee-eeee-4eee-8eee-0000000000aa', location_uuid: LOC, client_id: 'lead-9', project_type: 'Attic', closed_at: null, slack_channel_id: null, slack_channel_name: null, slack_channel_archived_at: null })
+    h.db.tables.jobs.push({ id: 'job-aa', engagement_id: 'eeeeeeee-eeee-4eee-8eee-0000000000aa', jobber_job_id: '599', status: 'upcoming' })
     expect((await create('eeeeeeee-eeee-4eee-8eee-0000000000aa')).j.problems).toEqual([])
   })
 

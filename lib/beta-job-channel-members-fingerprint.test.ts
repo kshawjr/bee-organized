@@ -224,7 +224,14 @@ function seed() {
   vi.spyOn(console, 'error').mockImplementation(() => {})
 }
 const members = (id = 'CNEW1') => Array.from(slack.channels.get(id)!.members).sort()
+// Every deal a channel is made for by hand HAS a job (a channel is for a job,
+// not a request). Put there directly, not through the app, so it is not one of
+// the database writes these tests count.
+const giveJob = (deal: number) => {
+  if (!h.db.tables.jobs.some((j: any) => j.engagement_id === engId(deal))) h.db.tables.jobs.push({ id: `10000000-0000-4000-8000-${String(deal).padStart(12, '0')}`, location_id: 'loc_test', jobber_job_id: String(8000 + deal), engagement_id: engId(deal), lead_id: 'lead-7001', status: 'upcoming' })
+}
 const byHand = async (deal: number) => {
+  giveJob(deal)
   const e = await loadEngagementForBees(db, engId(deal))
   return createJobChannel(db, { eng: e!, slack: await readLocationSlackFull(db, LOC), baseUrl: 'https://hub.test' })
 }

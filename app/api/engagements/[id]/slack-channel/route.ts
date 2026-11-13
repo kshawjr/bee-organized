@@ -28,6 +28,9 @@ const REFUSALS: Record<string, [number, string]> = {
   not_set_up_yet: [409, 'Job channels aren’t switched on yet.'],
   not_ready: [409, 'Reconnect Slack to turn on channels for your jobs.'],
   closed: [400, 'This job is closed, so it can’t get a new channel.'],
+  // A channel is for a job, not a request. Refused before Slack is asked.
+  no_job: [409, 'This isn’t a job yet. A Slack channel can be made once it is a job.'],
+  job_unreadable: [500, 'Couldn’t check whether this has a job just now — nothing was made. Try again.'],
   scope_lost: [409, 'Slack no longer lets Bee Hub make channels. Reconnect Slack in Settings to turn it back on.'],
   name_unavailable: [409, 'Slack already has channels with this job’s name. Rename one in Slack, then try again.'],
   slack_unavailable: [502, 'Slack didn’t answer — nothing was made. Try again shortly.'],
