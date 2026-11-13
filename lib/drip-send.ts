@@ -23,7 +23,7 @@ import { blockedOnMissingRate } from './rate-guard'
 import {
   resolveOwnerBookingLink,
   blockedOnMissingBookingLink,
-  MISSING_BOOKING_LINK_MESSAGE,
+  missingBookingLinkMessage,
 } from './booking-link'
 import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
@@ -347,24 +347,21 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // sets a link. Visible the same three ways (lead drip status below, cron
   // held_missing_booking_link counter, digest section); what never happens is
   // the client reading "Please click here () to select a day and time."
-  if (
-    blockedOnMissingBookingLink(
-      { subject: subjectSource, body: guardBody },
-      {
-        ownerBookingLink,
-        locationCalendarLink: loc.calendar_link,
-        discoveryBookingLink: emailOptions.discoveryBookingLink,
-        virtualBookingLink: emailOptions.virtualBookingLink,
-      },
-    )
-  ) {
+  const bookingLinks = {
+    ownerBookingLink,
+    locationCalendarLink: loc.calendar_link,
+    discoveryBookingLink: emailOptions.discoveryBookingLink,
+    virtualBookingLink: emailOptions.virtualBookingLink,
+  }
+  if (blockedOnMissingBookingLink({ subject: subjectSource, body: guardBody }, bookingLinks)) {
     console.warn('[drip-send] held: template quotes a booking tag but no link resolves', {
       leadId: row.lead_id, locationId: loc.id, step: row.current_step,
     })
     await recordDripSendStatus(row.lead_id, {
       status: 'failed',
       step: row.current_step,
-      error: MISSING_BOOKING_LINK_MESSAGE,
+      // Names the field that is actually blank (lib/booking-link.ts).
+      error: missingBookingLinkMessage({ subject: subjectSource, body: guardBody }, bookingLinks),
     })
     return { sent: false, error: 'missing_booking_link' }
   }

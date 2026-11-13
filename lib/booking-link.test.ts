@@ -92,6 +92,10 @@ const LOC_LINK = 'https://calendly.com/location'
 // The live sentence from the -b/-d master templates.
 const BOOKING_BODY =
   'Please click HERE ({{book_assessment_link}}) to select a day and time that will work best for you.'
+// What a lead held on BOOKING_BODY (the in-home tag, in-home box blank) is told.
+const HELD_MESSAGE_FOR_BOOKING_BODY =
+  'This email asks the client to click a booking link that is blank. Fill in the In-home assessment link in Settings → Emails → Your details. ' +
+  'The email is held until then and goes out on its own once it is saved.'
 // The same sentence rewritten onto the new per-assignee tag.
 const OWNER_BOOKING_BODY =
   'Please click HERE ({{owner_booking_link}}) to select a day and time that will work best for you.'
@@ -316,6 +320,10 @@ describe('booking guard — drip (sendDripStepForRow)', () => {
     expect(leadWrites).toHaveLength(1)
     expect(leadWrites[0].drip_last_send_status).toBe('failed')
     expect(leadWrites[0].drip_last_send_error).toMatch(/booking link/i)
+    // 2026-11-13 — it names the box that releases THIS email. It used to send
+    // every owner to Settings → Profile → Booking Link, which only fills the
+    // assigned person's tag; an owner who followed it stayed stuck.
+    expect(leadWrites[0].drip_last_send_error).toBe(HELD_MESSAGE_FOR_BOOKING_BODY)
   })
 
   it('same template + a location calendar_link → SENDS (guard is link-conditional, not template-conditional)', async () => {

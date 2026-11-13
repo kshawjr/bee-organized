@@ -446,14 +446,22 @@ const panelScript = async () => {
 }
 
 describe('the turn-on panel is what it was on main, apart from the address check', () => {
+  // RE-TAKEN 2026-11-13 (the first three; the rate one is untouched). The
+  // "Your details" section was reworded and re-ordered on purpose that day:
+  // in-home first, what each link is for, the two false sentences corrected,
+  // and one sentence added to this panel ("No email uses them until you add a
+  // button for one."). The same three scripts were run on 4c956ba and on the
+  // change and their captures compared line by line: every write, every
+  // switch state and the stored values were identical; the only lines that
+  // differed were the section's own words and that one sentence in the panel.
   it('its markup, every good-address path through it, and every write: one fingerprint, taken on 2cc7183', async () => {
-    expect(fingerprint(await panelScript())).toBe('3a59580c3144b6a1')   // from main 2cc7183, same script
+    expect(fingerprint(await panelScript())).toBe('cd5928cff4a4e997')   // same script as on main 2cc7183
   })
   it('a location already on, in-home link only: untouched', async () => {
-    expect(fingerprint(await alreadyOn({}))).toBe('2a5c4db0ff701800')
+    expect(fingerprint(await alreadyOn({}))).toBe('74291e4ed6c1f28c')
   })
   it('a location already on, all three links: untouched', async () => {
-    expect(fingerprint(await alreadyOn({ discovery: DISCOVERY, video: VIDEO }))).toBe('c560e0a3c042e77c')
+    expect(fingerprint(await alreadyOn({ discovery: DISCOVERY, video: VIDEO }))).toBe('325beacecd83bd66')
   })
   it('the rate switch: untouched', async () => {
     expect(fingerprint(await rateScript())).toBe('0c7ae05f1bc3695c')

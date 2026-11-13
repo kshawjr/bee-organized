@@ -314,6 +314,69 @@ export const FIELD_ID = {
 
 const blank = (v) => v == null || String(v).trim() === ''
 
+// ── Which booking links, and how many buttons, a location's emails use ────
+// (2026-11-13.) An owner at Portland saved a discovery call link, picked a
+// look from a sample showing a "Book a Discovery Call" button, and got
+// neither: NO email anywhere used the discovery or video link, and no email
+// had a button. Both were saved correctly and did nothing, and the screen said
+// "Used in 0 emails · optional" in small grey under the box.
+//
+// HOW "UNUSED" IS DECIDED. `rows` is every email this location can send, as
+// its own Emails list resolves them: the new-client emails for organizing AND
+// for moving, the returning-client emails, the welcome and the job follow-ups.
+// Each row is already the wording that would go — the location's own copy
+// where it has one, the Bee Organized wording where it has not — so this is
+// neither "masters" nor "own steps" but whichever of the two this location
+// sends. A removed email is not counted; a paused one is (the link is in an
+// email, and that email says for itself that it is paused). A link is used
+// when its tag is in a row's subject, message or button link — the three
+// places the send-time guard reads (rowNeeds below, lib/booking-link.ts).
+//
+//   → { discovery, inHome, video, buttons }   counts of rows
+const LINK_TAGS = {
+  discovery: ['{{discovery_booking_link}}'],
+  inHome: ['{{book_assessment_link}}', '{{booking_link}}'],
+  video: ['{{virtual_booking_link}}'],
+}
+export function linkUsage(rows = []) {
+  const out = { discovery: 0, inHome: 0, video: 0, buttons: 0 }
+  for (const r of rows || []) {
+    if (!r || r.removed) continue
+    const src = `${r.subject ?? ''}\n${r.body ?? ''}\n${r.buttonLink ?? ''}`
+    for (const id of Object.keys(LINK_TAGS)) if (LINK_TAGS[id].some(t => src.includes(t))) out[id] += 1
+    if (String(r.buttonText || '').trim() && String(r.buttonLink || '').trim()) out.buttons += 1
+  }
+  return out
+}
+
+// Two boxes holding the same address. The Portland owner had one Google
+// Calendar address as her own booking link (Settings → Profile) AND as the
+// discovery call link, which is what made one of them seem to have vanished.
+// Compared as a client's browser would land on them: case, a trailing slash
+// and http/https do not make two pages.
+//   values { inHome, discovery, video, own }  → { [id]: [ids it matches] }
+export const LINK_FIELD_NAME = {
+  inHome: 'In-home assessment link',
+  discovery: 'Discovery call link',
+  video: 'Video assessment link',
+  own: 'own booking link in Settings → Profile',
+}
+const sameKey = (v) => String(v ?? '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '')
+export function sameAddressFields(values = {}) {
+  const out = {}
+  const ids = Object.keys(LINK_FIELD_NAME).filter(id => sameKey(values[id]))
+  for (const a of ids) for (const b of ids) {
+    if (a !== b && sameKey(values[a]) === sameKey(values[b])) (out[a] = out[a] || []).push(b)
+  }
+  return out
+}
+export function sameAddressWarning(id, matches) {
+  if (!matches || !matches.length) return null
+  const names = matches.map(m => (m === 'own' ? `your ${LINK_FIELD_NAME.own}` : `your ${LINK_FIELD_NAME[m]}`))
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  return `This is the same address as ${list}. If they are booked on different pages, one of them has the wrong address.`
+}
+
 // Which blank details hold this row back — the same rules as the send-time
 // guards (lib/rate-guard.ts, lib/booking-link.ts).
 //   cfg { ratePerHour, ownerBookingLink, locationCalendarLink,
@@ -618,7 +681,9 @@ export function EmailFrame({ html, fit = false }) {
   )
 }
 
-export function EmailStyleSection({ style, onPick, ready = true, saving = false }) {
+// buttonCount: how many of this location's emails have a button (linkUsage).
+// null → not known here (tests, a mount with no list), say nothing.
+export function EmailStyleSection({ style, onPick, ready = true, saving = false, buttonCount = null, onAddButton = null }) {
   const current = normalizeEmailStyle(style)
   const htmlFor = React.useMemo(() => Object.fromEntries(EMAIL_STYLES.map(s => [s.id, sampleEmailHtml(s.id)])), [])
   return (
@@ -626,6 +691,15 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false 
       intro="Pick one look for every email you send. Your logo, colours and wording stay the same — only the button changes. Most locations keep Soft.">
       {/* Layout is EMAILS_CSS [data-look-row]: a snap-scrolling row of 160px
           cards on a phone, five equal columns from 640px (export StyleSection). */}
+      {/* The samples all show a button. When none of this location's emails
+          has one, the look they pick changes next to nothing, and it has to
+          say so (2026-11-13) rather than let the sample promise it. */}
+      {buttonCount === 0 && (
+        <ENote tone="warning" style={{ marginBottom:'12px', display:'flex', gap:'8px 12px', alignItems:'center', flexWrap:'wrap' }}>
+          <span data-no-buttons style={{ flex:'1 1 260px' }}>None of your emails has a button yet. The samples below show one so you can compare the looks, but until an email of yours has a button, changing the look will barely change your emails.</span>
+          {onAddButton && <EBtn size="sm" data-add-button="look" onClick={() => onAddButton(null)}>Add a button to an email</EBtn>}
+        </ENote>
+      )}
       <div role="radiogroup" aria-label="Email look" data-look-row>
         {EMAIL_STYLES.map(s => {
           const on = current === s.id
@@ -829,7 +903,7 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
           <p style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>We need {what} before this can turn on — it’s written into your emails, so without it they’d wait.{offered.length > 0 ? ' It’s the only one you need.' : ''}</p>
           {offered.length > 0 && (
             <div data-optional-links style={{ marginTop:'12px', paddingTop:'10px', borderTop:`1px solid ${alpha(ET.warning, 0.3)}` }}>
-              <p style={{ margin:'0 0 8px', fontSize:'12px', color:ET.mutedFg }}>If you have these too, add them now. They’re optional — leave them blank and it still turns on, and you can add them later.</p>
+              <p style={{ margin:'0 0 8px', fontSize:'12px', color:ET.mutedFg }}>If you have these too, add them now. They’re optional — leave them blank and it still turns on, and you can add them later. No email uses them until you add a button for one.</p>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'8px' }}>
                 {offered.map(x => (
                   <label key={x.key} style={{ display:'block', fontSize:'13px', fontWeight:600, color:ET.foreground }}>
@@ -853,16 +927,52 @@ export function VariantSwitch({ label, on, need, haveValue, onText, offText, dis
   )
 }
 
-export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, ready, counts, waiting, nothingWaiting, onSaveLocation, onSaveOption, variant, onVariant }) {
+// One booking-link box with what it is for above nothing and three possible
+// lines under it: how many emails use it, that none does (with the way out),
+// and that it holds the same address as another box.
+//   uses         how many of this location's emails use this link (linkUsage)
+//   onAddButton  opens "which email?" for this link; absent → no action shown
+//   uses         … or null when the emails are not known here (still
+//                loading, or a mount with no list): then nothing is said
+//                about use either way — never "unused" on a guess
+export function BookingLinkField({ id, linkId, label, purpose, value, placeholder = 'https://calendly.com/…', readOnly = false, problem, uses = null, optional = false, sameAs = null, onSave, onAddButton = null }) {
+  const saved = !blank(value)
+  const unused = saved && uses === 0
+  const usedHint = uses > 0 ? `Used in ${uses} email${uses === 1 ? '' : 's'}` : null
+  const hint = readOnly ? 'Isn’t switched on yet.' : [purpose, usedHint || (!saved && optional ? 'Optional' : null)].filter(Boolean).join(' · ')
+  const warn = sameAddressWarning(linkId, sameAs)
+  return (
+    <div data-link-field={linkId}>
+      <EField id={id} label={label} value={value || ''} placeholder={placeholder} readOnly={readOnly} problem={problem} hint={hint} onSave={onSave} />
+      {unused && !readOnly && (
+        <p data-link-unused={linkId} style={{ margin:'6px 0 0', display:'flex', gap:'4px 8px', alignItems:'center', flexWrap:'wrap', fontSize:'12px', lineHeight:1.45, color:ET.warning, fontFamily:EF.ui }}>
+          <span>Saved, but none of your emails use it yet.</span>
+          {onAddButton && <EBtn variant="link" data-add-button={linkId} onClick={() => onAddButton(linkId)} style={{ fontSize:'12px' }}>Add it to an email</EBtn>}
+        </p>
+      )}
+      {warn && <p role="status" data-same-address={linkId} style={{ margin:'6px 0 0', fontSize:'12px', lineHeight:1.45, color:ET.warning, fontFamily:EF.ui }}>⚠ {warn}</p>}
+    </div>
+  )
+}
+
+//   usage        linkUsage(...) for this location's emails; null → not known
+//                (emails still loading): the link boxes never say "unused"
+//   ownBookingLink  the signed-in person's own link (Settings → Profile), only
+//                to notice it is the same address as one of the three
+//   onAddButton(linkId)  opens "which email?" (BeeHub)
+export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, ready, counts, waiting, nothingWaiting, onSaveLocation, onSaveOption, variant, onVariant, usage = null, ownBookingLink = null, onAddButton = null }) {
   const seqs = (variant && variant.sequences) || []
   const usesRates = seqs.some(q => q.rate)
   const usesLinks = seqs.some(q => q.link)
   const prob = (k) => (waiting[k] ? `${waiting[k]} ${waiting[k] === 1 ? 'email is' : 'emails are'} waiting for this` : undefined)
   const used = (k, extra = '') => `Used in ${counts[k] || 0} email${counts[k] === 1 ? '' : 's'}${extra}`
   const canSwitch = !!onVariant
+  // With no usage handed in, nothing is said about use (BookingLinkField).
+  const uses = usage || { inHome: null, discovery: null, video: null }
+  const same = sameAddressFields({ inHome: calendarLink, discovery: options.discoveryBookingLink, video: options.virtualBookingLink, own: ownBookingLink })
   return (
     <ESection id="details" eyebrow="Your details" title="What your emails mention"
-      intro="These are written into your emails for you. If one is blank, the emails that need it are skipped.">
+      intro="Your hourly rate, in-home assessment link and Google Reviews link are written into your emails for you. The discovery call and video assessment links are only used in an email you add a button for. If one is blank, the emails that need it are skipped.">
       {seqs.map(q => (
         <div key={q.key} data-variant-seq={q.key} style={{ marginBottom:'20px' }}>
           {q.label && <p style={{ margin:'0 0 8px', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:ET.mutedFg, fontFamily:EF.ui }}>{q.label}</p>}
@@ -876,28 +986,102 @@ export function EmailDetailsSection({ rate, calendarLink, reviewsLink, options, 
                 { key: 'discovery_booking_link', label: 'Discovery call link', value: options.discoveryBookingLink || '' },
                 { key: 'virtual_booking_link', label: 'Video assessment link', value: options.virtualBookingLink || '' },
               ] : null} onSaveExtras={onSaveOption}
-              onText="Emails include your booking links." offText="Clients reply to book instead — your emails ask them to reply rather than click a link." />
+              onText="Your emails include your in-home assessment link." offText="Clients reply to book instead — your emails ask them to reply rather than click a link." />
           </div>
         </div>
       ))}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'16px' }}>
         {usesRates && <EField id="field-rate" label="Hourly rate" value={rate || ''} placeholder="$85" problem={prob('rate')} hint={used('rate')} onSave={v => onSaveLocation('rate', v)} />}
-        <EField id="field-reviews" label="Google Reviews link" value={reviewsLink || ''} placeholder="https://g.page/…" hint={used('reviews')} onSave={v => onSaveLocation('reviews', v)} />
         {/* THREE LINKS, EACH OPTIONAL (Kevin, 2026-10-30). Shown while the link
             switch is on; hidden, never cleared, while it is off. A blank one is
-            normal — only an email that uses its tag waits for it. */}
+            normal — only an email that uses its tag waits for it.
+            IN-HOME FIRST (2026-11-13): it is the one the emails we write link
+            to, and it used to sit last, alone on a second row. */}
         {usesLinks && <>
-          <EField id="field-discovery-booking" label="Discovery call link" value={options.discoveryBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
-            problem={prob('discoveryBooking')} hint={ready.links ? used('discoveryBooking', ' · optional') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ discovery_booking_link: v })} />
-          <EField id="field-virtual-booking" label="Video assessment link" value={options.virtualBookingLink || ''} placeholder="https://calendly.com/…" readOnly={!ready.links}
-            problem={prob('virtualBooking')} hint={ready.links ? used('virtualBooking', ' · optional') : 'Isn’t switched on yet.'} onSave={v => onSaveOption({ virtual_booking_link: v })} />
-          <EField id="field-booking" label="In-home assessment link" value={calendarLink || ''} placeholder="https://calendly.com/…"
-            problem={prob('booking')} hint={used('booking')} onSave={v => onSaveLocation('booking', v)} />
+          <BookingLinkField id="field-booking" linkId="inHome" label="In-home assessment link" purpose="The link in the emails we write for you" value={calendarLink}
+            problem={prob('booking')} uses={uses.inHome} sameAs={same.inHome} onSave={v => onSaveLocation('booking', v)} onAddButton={onAddButton} />
+          <BookingLinkField id="field-discovery-booking" linkId="discovery" label="Discovery call link" purpose="For a phone or video chat before an assessment" value={options.discoveryBookingLink} readOnly={!ready.links}
+            problem={prob('discoveryBooking')} uses={uses.discovery} optional sameAs={same.discovery} onSave={v => onSaveOption({ discovery_booking_link: v })} onAddButton={onAddButton} />
+          <BookingLinkField id="field-virtual-booking" linkId="video" label="Video assessment link" purpose="For an assessment done over video" value={options.virtualBookingLink} readOnly={!ready.links}
+            problem={prob('virtualBooking')} uses={uses.video} optional sameAs={same.video} onSave={v => onSaveOption({ virtual_booking_link: v })} onAddButton={onAddButton} />
         </>}
+        <EField id="field-reviews" label="Google Reviews link" value={reviewsLink || ''} placeholder="https://g.page/…" hint={used('reviews')} onSave={v => onSaveLocation('reviews', v)} />
       </div>
       {nothingWaiting && <p style={{ margin:'16px 0 0', display:'flex', alignItems:'center', gap:'6px', fontSize:'12px', color:ET.success, fontFamily:EF.ui }}>✓ Nothing is waiting on these.</p>}
     </ESection>
   )
+}
+
+// ── "Which email?" — the way out for a link no email uses ─────────────────
+// Opened from an unused link (linkId) or from the look section (linkId null).
+// It only chooses the email. The email's own editor then opens with the
+// button picker showing — and, for an email with no button, this link already
+// picked — and NOTHING is saved until the owner presses Save there.
+//   rows   the emails, as the list shows them: { key, subject, when, group,
+//          buttonText, buttonLink }
+export function AddButtonDialog({ linkId = null, rows = [], onPick, onClose }) {
+  const link = BUTTON_LINKS.find(l => l.id === linkId) || null
+  const groups = []
+  for (const r of rows) {
+    let g = groups.find(x => x.label === (r.group || ''))
+    if (!g) groups.push(g = { label: r.group || '', rows: [] })
+    g.rows.push(r)
+  }
+  return (
+    <EDialog label="Add a button to an email" eyebrow="Add a button" title={link ? `Which email should offer your ${link.name}?` : 'Which email should have a button?'} onClose={onClose}
+      footer={<EBtn onClick={onClose}>Cancel</EBtn>}>
+      <p data-add-button-intro style={{ ...eHintStyle, margin:'0 0 12px' }}>
+        {link
+          ? `Pick an email. It opens with a “${BUTTON_DEFAULT_TEXT[link.id]}” button ready for you to check. Nothing changes until you press Save there.`
+          : 'Pick an email. It opens at the button, where you choose what it links to. Nothing changes until you press Save there.'}
+      </p>
+      {rows.length === 0 && <ENote>There are no emails to add a button to yet.</ENote>}
+      {groups.map(g => (
+        <div key={g.label} style={{ marginBottom:'12px' }}>
+          {g.label && <p style={{ margin:'0 0 6px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:ET.mutedFg, fontFamily:EF.ui }}>{g.label}</p>}
+          <div style={{ display:'grid', gap:'6px' }}>
+            {g.rows.map(r => {
+              const has = String(r.buttonText || '').trim() && String(r.buttonLink || '').trim()
+              return (
+                <button key={r.key} type="button" data-add-button-row={r.key} data-ehover="muted" onClick={() => onPick(r)}
+                  style={{ display:'block', width:'100%', minHeight:'44px', boxSizing:'border-box', textAlign:'left', borderRadius:ER.lg, border:`1px solid ${ET.border}`, background:ET.card, padding:'8px 12px', cursor:'pointer', fontFamily:EF.ui }}>
+                  <span style={{ display:'block', fontSize:'14px', fontWeight:600, color:ET.foreground, overflowWrap:'anywhere' }}>{r.subject || 'No subject'}</span>
+                  <span style={{ display:'block', fontSize:'12px', color:ET.mutedFg }}>
+                    {r.when}{has ? ` · already has a button: “${String(r.buttonText).trim()}”` : ''}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </EDialog>
+  )
+}
+
+// What an editor opened from "Which email?" starts with. An email that has no
+// button gets this link picked and its usual words, as a DRAFT; an email that
+// already has a button keeps it untouched — replacing it is the owner's to do.
+//   startButton  'discovery' | 'inHome' | 'video' | 'pick' | null
+export function startButtonDraft(existingText, existingLink, startButton) {
+  const text = existingText || ''
+  const link = existingLink || ''
+  const l = BUTTON_LINKS.find(x => x.id === startButton)
+  if (!l || link.trim()) return { text, link, picked: false }
+  return { text: BUTTON_DEFAULT_TEXT[l.id], link: l.tag, picked: true }
+}
+// The line above the button fields in such an editor, and the scroll to it.
+export function StartButtonNote({ startButton, picked, hadButton }) {
+  const ref = React.useRef(null)
+  React.useEffect(() => { ref.current?.scrollIntoView?.({ block: 'center' }) }, [])
+  if (!startButton) return null
+  const l = BUTTON_LINKS.find(x => x.id === startButton)
+  const text = picked
+    ? `We’ve set the button to your ${l.name}. Check the words, press Preview to see it, then Save. Cancel and this email stays as it was.`
+    : hadButton && l
+      ? `This email already has a button, so we’ve left it alone. Choose ${l.label} below if you want it to go to your ${l.name} instead.`
+      : 'Choose what the button links to. Nothing changes until you press Save.'
+  return <ENote tone="gold" style={{ marginBottom:'4px' }}><span ref={ref} data-start-button-note>{text}</span></ENote>
 }
 
 // ── Signature (export SignatureSection, 2026-10-31 to Lovable's design) ──

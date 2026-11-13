@@ -125,8 +125,41 @@ export function blockedOnMissingBookingLink(
 }
 
 // Owner-actionable copy for the held-send status write on the lead row.
-// Kept next to the guard so all three rails say the same thing.
-export const MISSING_BOOKING_LINK_MESSAGE =
-  'No booking link resolves for this lead — the email asks the client to click a scheduling link. ' +
-  'Set your own link in Settings → Profile → Booking Link, or the location Booking Link in ' +
-  'Settings → My Location. Send is held until one is set.'
+//
+// IT NAMES THE FIELD THAT RELEASES THE EMAIL (2026-11-13). The one sentence it
+// used to be sent every owner to Settings → Profile → Booking Link. That link
+// fills {{owner_booking_link}} ONLY. An email held on the in-home tags
+// ({{book_assessment_link}} / {{booking_link}}) reads locations.calendar_link
+// and nothing else, so an owner who followed the instruction stayed stuck —
+// Portland, 13 Nov: the owner's own link was set and the first email still
+// waited. Same per-tag checks, in the same order, as the guard above; the two
+// are pinned against each other (a held email always gets a named field).
+const HELD_TAIL = 'The email is held until then and goes out on its own once it is saved.'
+export function missingBookingLinkMessage(
+  template: { subject: string | null; body: string | null },
+  links: Parameters<typeof blockedOnMissingBookingLink>[1],
+): string {
+  const source = `${template.subject ?? ''}\n${template.body ?? ''}`
+  const fields: string[] = []
+  if (LOCATION_BOOKING_TAGS.some((t) => source.includes(t)) && blank(links.locationCalendarLink)) {
+    fields.push('In-home assessment link')
+  }
+  if (source.includes(DISCOVERY_BOOKING_TAG) && blank(links.discoveryBookingLink)) fields.push('Discovery call link')
+  if (source.includes(VIRTUAL_BOOKING_TAG) && blank(links.virtualBookingLink)) fields.push('Video assessment link')
+  const ownerHeld = source.includes(OWNER_BOOKING_TAG) && blank(links.ownerBookingLink)
+  const parts: string[] = []
+  if (fields.length) {
+    const names = fields.length === 1 ? fields[0] : `${fields.slice(0, -1).join(', ')} and ${fields[fields.length - 1]}`
+    parts.push(
+      `This email asks the client to click a booking link that is blank. Fill in the ${names} in Settings → Emails → Your details.`,
+    )
+  }
+  if (ownerHeld) {
+    parts.push(
+      'This email uses the assigned person’s own booking link and none is saved. Set it in Settings → Profile → Booking Link, ' +
+      'or fill in the In-home assessment link in Settings → Emails → Your details.',
+    )
+  }
+  if (!parts.length) parts.push('This email asks the client to click a booking link that is blank. Check the links in Settings → Emails → Your details.')
+  return `${parts.join(' ')} ${HELD_TAIL}`
+}

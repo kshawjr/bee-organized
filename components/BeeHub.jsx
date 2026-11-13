@@ -47,7 +47,7 @@ import {
   ESelect, EDialog, ENote, ERadioCard, eBtnStyle, eInputStyle, eTextareaStyle, eLabelStyle, eHintStyle,
   EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
   goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
-  buttonProblem, buttonForSave, EditorPreview,
+  buttonProblem, buttonForSave, EditorPreview, linkUsage, AddButtonDialog, startButtonDraft, StartButtonNote,
 } from "@/components/settings/EmailsScreen"
 // Settings, rebuilt to the new look one section at a time (slice 1, 2026-11-13:
 // the nav, the page header, the card, and Profile). The pieces; this file
@@ -18549,11 +18549,13 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
 // Subject + body only, matching what reset restores and what
 // mergeForkOverMaster overrides at send time. The owner never sees
 // "duplicate", "master" or "custom template"; the fork is plumbing.
-export function EmailTemplateEditor({ row, onCancel, onSave, links = null, alignReady = false, preview = null }) {
+export function EmailTemplateEditor({ row, onCancel, onSave, links = null, alignReady = false, preview = null, startButton = null }) {
   const [subject, setSubject] = React.useState(row.subject || '')
   const [body, setBody] = React.useState(row.body || '')
-  const [buttonText, setButtonText] = React.useState(row.buttonText || '')
-  const [buttonLink, setButtonLink] = React.useState(row.buttonLink || '')
+  // startButton: opened from "Which email?" — a DRAFT button, saved only by Save.
+  const start = React.useMemo(() => startButtonDraft(row.buttonText, row.buttonLink, startButton), [])
+  const [buttonText, setButtonText] = React.useState(start.text)
+  const [buttonLink, setButtonLink] = React.useState(start.link)
   const [buttonAlign, setButtonAlign] = React.useState(row.buttonAlign || null)
   // Preview swaps the form for the real email; the drafts above stay put.
   const [previewing, setPreviewing] = React.useState(false)
@@ -18598,6 +18600,7 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
         <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
       </div>
       <div style={{ marginTop:'16px' }}>
+        <StartButtonNote startButton={startButton} picked={start.picked} hadButton={!!(row.buttonLink || '').trim()} />
         <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
           alignReady={alignReady} links={links} />
       </div>
@@ -22502,6 +22505,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // then materialized into live per-location paths.
   // issue 240 step 8b — rail B/C editor target: { row, saving } or null.
   const [emailTemplateEditor, setEmailTemplateEditor] = useState(null)
+  // 2026-11-13 — "Which email?", opened from a booking link no email uses or
+  // from the look section: { linkId } (null linkId = any button) or null.
+  const [addButtonFor, setAddButtonFor] = useState(null)
   const [pathSteps, setPathSteps]   = useState({})
   // dbPaths is keyed by path_key (e.g. 'organizing-a') so the UI's existing
   // pathId mental model maps 1:1. Each entry holds the DB row's id so
@@ -23159,18 +23165,21 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // master. In particular rail A's reset leaves delay_days alone: timing is
   // step 10's, and a reset that also moved a send date would be a second,
   // unasked-for write.
-  async function emailsRowEdit(row) {
+  // startButton (2026-11-13): set when the editor is opened from "Which
+  // email?" — the editor then shows the button picker with that link picked
+  // as a draft. Nothing is written here; only the editor's Save writes.
+  async function emailsRowEdit(row, startButton = null) {
     if (row.rail === 'drip') {
       // Existing proven flow; ensureOwnedThen raises the fork confirm itself.
       ensureOwnedThen(row.pathKey, (steps) => {
         const target = steps.find(s => Number(s.order) === Number(row.order))
         if (!target) { alert('Could not find that email to edit.'); return }
-        setStepContentEditor({ pathId: row.pathKey, step: target })
+        setStepContentEditor({ pathId: row.pathKey, step: target, startButton })
       })
       return
     }
     // Rail B/C — edit the location's own copy, making one first if needed.
-    setEmailTemplateEditor({ row, saving:false })
+    setEmailTemplateEditor({ row, saving:false, startButton })
   }
 
   // Create-or-reuse the location's fork of a master template, then patch it.
@@ -24335,6 +24344,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             virtualBooking: usedIn('{{virtual_booking_link}}'),
             reviews: usedIn('{{reviews_link}}'),
           }
+          // 2026-11-13 — which booking links, and how many buttons, this
+          // location's emails use (linkUsage, EmailsScreen.jsx). statusRows is
+          // the organizing side; the moving emails are their own rows whether
+          // or not they read the same, so they are added here. Used only for
+          // the three link boxes, the look note and "Which email?".
+          const movingRows = settings.paths.moveDefault
+            ? buildEmailList({ pathSteps, templates, pathKey: settings.paths.moveDefault }).newLead.filter(r => r.rail === 'drip' && !r.removed)
+            : []
+          const usageRows = [...statusRows, ...movingRows]
+          // No rows = the emails have not loaded (or there are none): not
+          // known, so nothing is called unused on a guess.
+          const usage = usageRows.length ? linkUsage(usageRows) : null
+          const groupOf = r => movingRows.includes(r) ? 'When someone moving gets in touch'
+            : r.rail === 'drip' && r.pathKey !== settings.paths.generalDefault ? 'When a past client comes back'
+            : r.rail === 'drip' || r.rail === 'welcome' ? 'When someone new gets in touch' : 'After a job'
+          const addButtonRows = usageRows.filter(r => !r.contentMissing).map(r => ({ ...r, group: groupOf(r) }))
+          const openAddButton = realLocId ? (linkId => setAddButtonFor({ linkId: linkId || null })) : null
           const waiting = {}
           for (const h of held) waiting[h.need === 'ownerBooking' ? 'booking' : h.need] = (waiting[h.need === 'ownerBooking' ? 'booking' : h.need] || 0) + h.subjects.length
           const previewValues = emailsPreviewValues()
@@ -24406,10 +24432,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 nothingWaiting={held.length === 0}
                 onSaveLocation={(kind, v) => kind === 'reviews' && validateReviewsLink(v) ? Promise.resolve(validateReviewsLink(v)) : emailsSaveLocation(kind, v)} onSaveOption={saveEmailSettings}
                 // The two switches ARE the sequence variant (emailsSetVariant).
-                variant={variantSwitches} onVariant={realLocId ? emailsSetVariant : null} />
+                variant={variantSwitches} onVariant={realLocId ? emailsSetVariant : null}
+                usage={usage} ownBookingLink={settings.profile.bookingLink} onAddButton={openAddButton} />
 
               <EmailStyleSection style={es.style} ready={emailSettings.ready.style}
-                onPick={id => saveEmailSettings({ email_style: id })} />
+                onPick={id => saveEmailSettings({ email_style: id })}
+                buttonCount={usage ? usage.buttons : null} onAddButton={openAddButton} />
+              {addButtonFor && (
+                <AddButtonDialog linkId={addButtonFor.linkId} rows={addButtonRows} onClose={() => setAddButtonFor(null)}
+                  onPick={row => { const linkId = addButtonFor.linkId; setAddButtonFor(null); emailsRowEdit(row, linkId || 'pick') }} />
+              )}
 
               <ESection id="emails" eyebrow="The emails" title="Every email a client can receive"
                 intro="They go out on their own, in this order. Tap the day on any email to change when it goes out.">
@@ -24576,6 +24608,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         <EmailTemplateEditor
           {...emailsEditorProps()}
           row={emailTemplateEditor.row}
+          startButton={emailTemplateEditor.startButton || null}
           onCancel={() => setEmailTemplateEditor(null)}
           onSave={async (subject, body, button) => {
             await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body, button)
@@ -24607,6 +24640,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             button_link: stepContentEditor.step.buttonLink || '',
             button_align: stepContentEditor.step.buttonAlign || null,
           }}
+          startButton={stepContentEditor.startButton || null}
           onSave={saveStepContent}
           onClose={()=>setStepContentEditor(null)}
         />
@@ -32968,12 +33002,14 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // yet (+ Add an email here → A blank email). Same two refusals — no subject,
 // no message — so the step is only ever created whole. Its day is fixed by
 // where it lands (appendedStepPosition), so the delay field is not offered.
-export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null, isNew = false }) {
+export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null, isNew = false, startButton = null }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
   // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
-  const [buttonText, setButtonText] = useState(step.button_text || '')
-  const [buttonLink, setButtonLink] = useState(step.button_link || '')
+  // startButton: opened from "Which email?" — a DRAFT button, saved only by Save.
+  const start = React.useMemo(() => startButtonDraft(step.button_text, step.button_link, startButton), [])
+  const [buttonText, setButtonText] = useState(start.text)
+  const [buttonLink, setButtonLink] = useState(start.link)
   const [buttonAlign, setButtonAlign] = useState(step.button_align || null)
   // Preview swaps the form for the real email; the drafts above stay put.
   const [previewing, setPreviewing] = useState(false)
@@ -33054,6 +33090,9 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
           <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />
           <span style={eHintStyle}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</span>
         </label>}
+        {/* Renders nothing unless opened from "Which email?" — so the admin
+            master editor, which shares this component, is exactly as it was. */}
+        <StartButtonNote startButton={startButton} picked={start.picked} hadButton={!!(step.button_link || '').trim()} />
         <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
           alignReady={alignReady} links={links} />
         {localErr && <p style={{ margin:0, fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
