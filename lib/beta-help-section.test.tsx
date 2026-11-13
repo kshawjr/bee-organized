@@ -26,10 +26,10 @@ import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 
 const node = (over: any) => ({
   id: 'x', kind: 'item', parent_id: null, position: 0, title: 'Row', status: 'published', deleted_at: null,
-  steps: [], media_kind: null, media_path: null, media_url: null, lead: null, callout: null, icon: null, children: [], ...over,
+  steps: '', media_kind: null, media_path: null, media_url: null, lead: null, callout: null, icon: null, children: [], ...over,
 })
-const video = node({ id: 'i1', kind: 'item', parent_id: 't1', title: 'Turn on alerts', lead: 'Get a text the moment a lead lands.', media_kind: 'video', media_path: 'video/a.mp4', media_url: 'https://p.supabase.co/storage/v1/object/public/help-media/video/a.mp4', steps: ['Open Settings', 'Tap Notifications'], callout: 'Only the assignee is told.' })
-const shot = node({ id: 'i2', kind: 'item', parent_id: 't1', title: 'Find the inbox', position: 1, media_kind: 'image', media_path: 'image/b.png', media_url: 'https://p.supabase.co/storage/v1/object/public/help-media/image/b.png', steps: ['Tap Clients'] })
+const video = node({ id: 'i1', kind: 'item', parent_id: 't1', title: 'Turn on alerts', lead: 'Get a text the moment a lead lands.', media_kind: 'video', media_path: 'video/a.mp4', media_url: 'https://p.supabase.co/storage/v1/object/public/help-media/video/a.mp4', steps: '1) Open Settings\n2) Tap Notifications\n\nNote: do this once.', callout: 'Only the assignee is told.' })
+const shot = node({ id: 'i2', kind: 'item', parent_id: 't1', title: 'Find the inbox', position: 1, media_kind: 'image', media_path: 'image/b.png', media_url: 'https://p.supabase.co/storage/v1/object/public/help-media/image/b.png', steps: '' })
 const draft = node({ id: 'i3', kind: 'item', parent_id: 't1', title: 'Half written', position: 2, status: 'draft' })
 const topic = (children: any[]) => node({ id: 't1', kind: 'topic', parent_id: 's1', title: 'Connect Jobber', children })
 const section = (children: any[]) => node({ id: 's1', kind: 'section', title: 'Getting started', icon: '🚀', children })
@@ -158,8 +158,11 @@ describe('an item renders', () => {
     expect(v.hasAttribute('controls')).toBe(true)
     expect(v.hasAttribute('playsinline')).toBe(true)
     expect(host.querySelector('img[data-help-media]')).toBeNull()
-    const steps = Array.from(host.querySelectorAll('ol li')).map(li => li.textContent)
-    expect(steps).toEqual(['Open Settings', 'Tap Notifications'])
+    // free text, exactly as typed — the editor's own numbering, no list and no numbers added
+    const steps = host.querySelector('[data-help-steps]') as HTMLElement
+    expect(steps.textContent).toBe('1) Open Settings\n2) Tap Notifications\n\nNote: do this once.')
+    expect(steps.style.whiteSpace).toBe('pre-wrap')
+    expect(host.querySelector('ol')).toBeNull()
     expect(host.textContent).toContain('Get a text the moment a lead lands.')
     expect(host.textContent).toContain('Only the assignee is told.')
     await unmount()
@@ -174,6 +177,8 @@ describe('an item renders', () => {
     expect(img).toBeTruthy()
     expect(img.getAttribute('src')).toBe(shot.media_url)
     expect(host.querySelector('video')).toBeNull()
+    // this item has no step-by-step: nothing is shown in its place — no empty box, no heading
+    expect(host.querySelector('[data-help-steps]')).toBeNull()
     await unmount()
   })
 })

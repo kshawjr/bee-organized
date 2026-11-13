@@ -3175,8 +3175,8 @@
       ],
       "note": "Authoring controls render only when canEdit (super_admin/corporate, never under view-as); the server filters drafts and 403s writes for everyone else. My requests mounts OwnerFeedbackScreen for franchise owner/manager and a list of the viewer’s own items for other roles; both render the one FeedbackCard. The ask strip (components/help/AskStrip.jsx) opens every Help level.",
       "lines": [
-        171,
-        423
+        172,
+        424
       ]
     },
     {
@@ -3206,8 +3206,8 @@
       ],
       "note": "Bytes go browser → Supabase Storage via a signed upload URL (components/help/helpMedia.js); the sign route only checks role, type, size and duration.",
       "lines": [
-        39,
-        227
+        40,
+        229
       ]
     },
     {

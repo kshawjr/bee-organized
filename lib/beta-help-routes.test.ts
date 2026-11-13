@@ -13,10 +13,12 @@
 //   · the ask strip's help_entry_id survives the feedback context whitelist
 //   · /help is a Hub route: URL ↔ nav both ways
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import {
-  buildHelpTree, deletedRoots, moveSibling, normalizeSteps, normalizeEntryInput,
+  buildHelpTree, deletedRoots, moveSibling, stepsText, normalizeEntryInput,
   helpMediaUrl, helpBreadcrumb, isHelpEditorRole, isMissingHelpTable, mediaLimitProblem,
-  HELP_VIDEO_MAX_BYTES, HELP_IMAGE_MAX_BYTES,
+  HELP_VIDEO_MAX_BYTES, HELP_IMAGE_MAX_BYTES, HELP_LIMITS,
 } from '@/lib/help-content'
 import { buildSafeContext } from '@/lib/feedback-context'
 import { parseHubUrl, NAV_TO_URL, ROUTE_TO_NAV, navScreenLabel } from '@/components/hive/shared/hubUrl'
@@ -190,12 +192,12 @@ describe('an editor writes', () => {
       if (ctx.op === 'insert') return { data: { id: 'new', ...ctx.payload }, error: null }
       return { data: null, error: null }
     }
-    const res = await POST(req('POST', { kind: 'item', parent_id: 't1', title: '  Turn on alerts ', lead: 'One line', steps: '1. Open Settings\n2. Tap Notifications\n\n', callout: 'Only the assignee', status: 'draft', media_kind: 'image', media_path: 'image/abc.png' }))
+    const res = await POST(req('POST', { kind: 'item', parent_id: 't1', title: '  Turn on alerts ', lead: 'One line', steps: '1. Open Settings\r\n2. Tap Notifications\n\n', callout: 'Only the assignee', status: 'draft', media_kind: 'image', media_path: 'image/abc.png' }))
     expect(res.status).toBe(201)
     const ins = h.state.calls.find(c => c.op === 'insert')
     expect(ins.payload).toMatchObject({
       kind: 'item', parent_id: 't1', title: 'Turn on alerts', lead: 'One line',
-      steps: ['Open Settings', 'Tap Notifications'], callout: 'Only the assignee', status: 'draft',
+      steps: '1. Open Settings\n2. Tap Notifications', callout: 'Only the assignee', status: 'draft',
       media_kind: 'image', media_path: 'image/abc.png', position: 5, created_by: 'u-corp',
     })
   })
@@ -242,7 +244,7 @@ describe('an editor writes', () => {
     const res = await PATCH(req('PATCH', { title: 'Now written', steps: ['Do this'], status: 'published' }), { params: { id: 'i2' } })
     expect(res.status).toBe(200)
     const upd = h.state.calls.find(c => c.op === 'update')
-    expect(upd.payload).toMatchObject({ title: 'Now written', steps: ['Do this'], status: 'published' })
+    expect(upd.payload).toMatchObject({ title: 'Now written', steps: 'Do this', status: 'published' })
   })
 
   it('move swaps positions with the neighbour and renumbers the level', async () => {
@@ -328,10 +330,39 @@ describe('lib/help-content', () => {
     expect(moveSibling(sib, 'c', 'up')).toEqual([{ id: 'a', position: 0 }, { id: 'b', position: 2 }, { id: 'c', position: 1 }])
   })
 
-  it('normalizeSteps takes an array or one-per-line text, strips numbering and bullets', () => {
-    expect(normalizeSteps('1. Open Settings\n- Tap Notifications\n• Turn it on\n\n  ')).toEqual(['Open Settings', 'Tap Notifications', 'Turn it on'])
-    expect(normalizeSteps(['  a ', '', 'b'])).toEqual(['a', 'b'])
-    expect(normalizeSteps(null)).toEqual([])
+  it('stepsText keeps free text exactly as typed — the editor\'s own numbering, bullets and blank lines stay', () => {
+    const typed = '1. Open Settings\n2. Tap Notifications\n\nNote:\n  - only the assignee is told\n  • nobody else'
+    expect(stepsText(typed)).toBe(typed)
+    expect(stepsText('\n\n  indented first line\r\nsecond\n\n  ')).toBe('  indented first line\nsecond')
+    expect(stepsText(null)).toBe('')
+    expect(stepsText(undefined)).toBe('')
+    expect(stepsText([])).toBe('')
+  })
+
+  it('stepsText reads the OLD stored list as text: every step, in order, one per line', () => {
+    expect(stepsText(['Open Settings', 'Tap Notifications', 'Turn it on'])).toBe('Open Settings\nTap Notifications\nTurn it on')
+    const old = Array.from({ length: 30 }, (_, i) => `Old step ${i + 1}`)
+    expect(stepsText(old).split('\n')).toEqual(old)
+  })
+
+  it('the step-by-step has NO limit: 500 lines and a 5,000-character line survive a save whole', async () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `${i + 1}. Step number ${i + 1}`)
+    lines[40] = '41. ' + 'x'.repeat(5000)
+    const typed = lines.join('\n')
+    const { input } = normalizeEntryInput({ kind: 'item', parent_id: 't1', title: 'Long one', steps: typed })
+    expect(input!.steps).toBe(typed)
+    expect(input!.steps.split('\n')).toHaveLength(500)
+    // and it comes back out of the tree whole, for an owner
+    const tree = buildHelpTree([
+      row({ id: 's', kind: 'section', title: 'S' }),
+      row({ id: 't', kind: 'topic', parent_id: 's', title: 'T' }),
+      row({ id: 'i', kind: 'item', parent_id: 't', title: 'Long one', steps: typed }),
+    ] as any, { includeDrafts: false })
+    expect(tree[0].children[0].children[0].steps).toBe(typed)
+    // no cap is left in the shared rules for anything to reach for
+    expect(Object.keys(HELP_LIMITS)).toEqual(['title', 'lead', 'callout', 'icon'])
+    const src = fs.readFileSync(path.join(process.cwd(), 'lib/help-content.ts'), 'utf8')
+    expect(src).not.toMatch(/slice\(0,\s*HELP_LIMITS\.steps?\)/)
   })
 
   it('normalizeEntryInput enforces the shape rules in words', () => {

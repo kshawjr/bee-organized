@@ -4,7 +4,8 @@
 // a phone, centred dialog on a desktop — OverlayShell, the same chrome every
 // other overlay wears. Kevin writes these at night on a phone, so:
 //   · inputs are 16px (formKit.inp) — iOS never zooms
-//   · steps are ONE textarea, a step per line — not N fields to tap into
+//   · the step-by-step is ONE free text box — typed however he likes,
+//     his own numbering, no limit on lines or length, saved as typed
 //   · a video or screenshot is one tap: the file picker offers the camera
 //     roll or a fresh recording, and the upload runs while he keeps typing
 //   · Save as draft and Publish are both one tap, side by side
@@ -19,7 +20,7 @@ import OverlayShell from '@/components/hive/OverlayShell'
 import { T } from '@/components/hive/shared/tokens'
 import { inp, lbl } from '@/components/hive/shared/formKit'
 import { uploadHelpMedia } from '@/components/help/helpMedia'
-import { HELP_LIMITS } from '@/lib/help-content'
+import { HELP_LIMITS, stepsText } from '@/lib/help-content'
 
 const KIND_WORD = { section: 'section', topic: 'topic', item: 'item' }
 
@@ -49,7 +50,7 @@ export default function HelpEntryForm({
   const [title, setTitle]     = useState(entry?.title || '')
   const [icon, setIcon]       = useState(entry?.icon || '')
   const [lead, setLead]       = useState(entry?.lead || '')
-  const [steps, setSteps]     = useState(Array.isArray(entry?.steps) ? entry.steps.join('\n') : '')
+  const [steps, setSteps]     = useState(stepsText(entry?.steps))
   const [callout, setCallout] = useState(entry?.callout || '')
   const [media, setMedia]     = useState(entry?.media_path ? { path: entry.media_path, kind: entry.media_kind, publicUrl: entry.media_url || null } : null)
   const [uploadStatus, setUploadStatus] = useState(null)
@@ -88,7 +89,7 @@ export default function HelpEntryForm({
       lead: isItem ? lead.trim() : null,
       media_kind: isItem && media ? media.kind : null,
       media_path: isItem && media ? media.path : null,
-      steps: isItem ? steps : [],
+      steps: isItem ? steps : '',
       callout: isItem ? callout.trim() : null,
       status: isItem ? status : 'published',
     }
@@ -178,9 +179,10 @@ export default function HelpEntryForm({
             </div>
 
             <div>
-              <label style={lbl} htmlFor="help-steps">Steps — one per line</label>
-              <textarea id="help-steps" value={steps} onChange={e => setSteps(e.target.value)} rows={6} style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }}
-                placeholder={'Open Settings\nTap Notifications\nTurn on Text me for new leads'} />
+              <label style={lbl} htmlFor="help-steps">Step-by-step</label>
+              <textarea id="help-steps" value={steps} onChange={e => setSteps(e.target.value)} rows={isMobile ? 10 : 14} style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }}
+                placeholder={'1. Open Settings\n2. Tap Notifications\n3. Turn on Text me for new leads\n\nNote: only the person the lead is assigned to gets the text.'} />
+              <p style={{ fontSize: '12px', color: T.ink.quiet, margin: '6px 0 0', lineHeight: 1.45 }}>Write it your way — your own numbers, blank lines, notes. Owners see it exactly as typed. No limit on length.</p>
             </div>
 
             <div>

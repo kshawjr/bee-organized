@@ -4,8 +4,8 @@
 //
 //   Help         sections › topics › items, drilled one level at a time so a
 //                phone screen only ever shows one list. An item is a title, a
-//                one-line lead, EITHER a video OR a screenshot, the steps one
-//                per line, and one optional callout for the thing people get
+//                one-line lead, EITHER a video OR a screenshot, the step-by-step
+//                as free text, and one optional callout for the thing people get
 //                wrong. Every level OPENS with the ask strip (it used to end
 //                each level, after the whole article list).
 //
@@ -46,7 +46,7 @@ import FeedbackCard, { isUnreadReply, seenSupported, useFeedbackCardHandlers } f
 import { AskStrip } from '@/components/help/AskStrip'
 import HelpEntryForm from '@/components/help/HelpEntryForm'
 import WhatsNew from '@/components/help/WhatsNew'
-import { helpBreadcrumb } from '@/lib/help-content'
+import { helpBreadcrumb, stepsText } from '@/lib/help-content'
 
 const FONT = '"DM Sans",system-ui,sans-serif'
 
@@ -114,12 +114,13 @@ export function HelpItemView({ item }) {
         <img src={item.media_url} alt={item.title} data-help-media="image"
           style={{ width: '100%', borderRadius: T.radius.inset, border: T.border.thin, marginBottom: '14px', display: 'block' }} />
       )}
-      {item.steps.length > 0 && (
-        <ol style={{ margin: '0 0 14px', padding: '0 0 0 22px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {item.steps.map((s, i) => (
-            <li key={i} style={{ fontSize: '15px', color: T.ink.primary, lineHeight: 1.5 }}>{s}</li>
-          ))}
-        </ol>
+      {/* The step-by-step is free text, shown exactly as the editor typed it:
+          their own numbering, their line breaks, their blank lines. No list,
+          no numbers added. An item with none shows nothing here at all. */}
+      {stepsText(item.steps) && (
+        <div data-help-steps style={{ margin: '0 0 14px', fontSize: '15px', color: T.ink.primary, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {stepsText(item.steps)}
+        </div>
       )}
       {item.callout && (
         <div style={{ background: T.brand.goldSoft, borderLeft: `3px solid ${T.brand.gold}`, borderRadius: '0 8px 8px 0', padding: '11px 14px' }}>

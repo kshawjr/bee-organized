@@ -10,7 +10,7 @@
 // table because the three levels share every operation the editor needs —
 // add at the bottom, rename, move up/down, soft-delete, restore — and one
 // route per operation is simpler than three. The item-only columns (lead,
-// media, steps, callout, draft status) are nullable on the other two kinds
+// media, step-by-step text, callout, draft status) are nullable on the other two kinds
 // and guarded by CHECK constraints in migrations/help_entries.sql. The read
 // side is one ordered query and a tree build; that same flat, ordered,
 // text-first shape is what will let Ask Bee Hub read the content later.
@@ -43,7 +43,7 @@ export type HelpRow = {
 
 export type HelpNode = HelpRow & {
   media_url: string | null
-  steps: string[]
+  steps: string
   children: HelpNode[]
 }
 
@@ -111,20 +111,31 @@ export function helpMediaPath(kind: HelpMediaKind, mime: string, uuid: string): 
 }
 
 // ── row input, sanitised ──────────────────────────────────────────
-// Caps are generous for prose and tight for anything that is a handle. Steps
-// arrive as an array of strings OR one string with a step per line (the
-// phone form is a single textarea — the least friction at 11pm).
-export const HELP_LIMITS = { title: 120, lead: 240, callout: 400, step: 300, steps: 30, icon: 8 } as const
+// Caps are generous for prose and tight for anything that is a handle.
+//
+// THE STEP-BY-STEP IS FREE TEXT, AND HAS NO LIMIT. It used to be a list:
+// one step per line, any "1." or "-" the editor typed stripped off, cut to
+// the first 30 lines and each line cut to 300 characters — silently, on
+// save. Six entries were cut off mid-instruction that way. Now it is one
+// piece of text kept exactly as typed: the editor's own numbering, blank
+// lines and notes all stay, and nothing counts or cuts lines or characters.
+// Do not add a cap here; if one is ever needed, REFUSE the save in words —
+// never trim what someone wrote.
+export const HELP_LIMITS = { title: 120, lead: 240, callout: 400, icon: 8 } as const
 
-export function normalizeSteps(raw: unknown): string[] {
-  let list: unknown[] = []
-  if (Array.isArray(raw)) list = raw
-  else if (typeof raw === 'string') list = raw.split(/\r?\n/)
-  return list
-    .map(s => String(s ?? '').trim().replace(/^\s*(?:\d+[.)]|[-•*])\s*/, ''))
-    .filter(Boolean)
-    .slice(0, HELP_LIMITS.steps)
-    .map(s => s.slice(0, HELP_LIMITS.step))
+// Whatever is stored or sent → the step-by-step text.
+//   · a string  — the text itself (how every save since this change stores
+//                 it). Line endings are made uniform and the blank space
+//                 around the whole thing is dropped; nothing inside changes.
+//   · an array  — the OLD stored shape (a list of steps). Joined one per
+//                 line, in order, every step kept. This is what lets the
+//                 rows written before the change show up whole without
+//                 anything being rewritten in the database: an old row is
+//                 read as text, and becomes text for good the next time it
+//                 is saved.
+export function stepsText(raw: unknown): string {
+  const text = Array.isArray(raw) ? raw.map(s => String(s ?? '')).join('\n') : typeof raw === 'string' ? raw : ''
+  return text.replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+/, '').trimEnd()
 }
 
 export type HelpEntryInput = {
@@ -136,7 +147,7 @@ export type HelpEntryInput = {
   lead: string | null
   media_kind: HelpMediaKind | null
   media_path: string | null
-  steps: string[]
+  steps: string
   callout: string | null
   status: HelpStatus
 }
@@ -163,7 +174,7 @@ export function normalizeEntryInput(raw: unknown): { input: HelpEntryInput; prob
         kind, parent_id, title,
         icon: kind === 'section' ? str(src.icon, HELP_LIMITS.icon) : null,
         tab_key: kind === 'section' ? str(src.tab_key, 32) : null,
-        lead: null, media_kind: null, media_path: null, steps: [], callout: null,
+        lead: null, media_kind: null, media_path: null, steps: '', callout: null,
         status: 'published',
       },
       problem: null,
@@ -182,7 +193,7 @@ export function normalizeEntryInput(raw: unknown): { input: HelpEntryInput; prob
       lead: str(src.lead, HELP_LIMITS.lead),
       media_kind: media_kind as HelpMediaKind | null,
       media_path,
-      steps: normalizeSteps(src.steps),
+      steps: stepsText(src.steps),
       callout: str(src.callout, HELP_LIMITS.callout),
       status,
     },
@@ -216,7 +227,7 @@ export function buildHelpTree(rows: HelpRow[], opts: { includeDrafts: boolean; s
       if (r.kind === 'item' && r.status === 'draft' && !opts.includeDrafts) continue
       const node: HelpNode = {
         ...r,
-        steps: normalizeSteps(r.steps),
+        steps: stepsText(r.steps),
         media_url: helpMediaUrl(r.media_path, opts.supabaseUrl),
         children: r.kind === 'item' ? [] : build(r.id, depth + 1),
       }
