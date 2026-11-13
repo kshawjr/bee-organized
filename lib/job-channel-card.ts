@@ -7,11 +7,7 @@
 //   *Client name* — Job type
 //   *Address:* 6711 Calvert Commons Drive, Huntersville, NC, 28078   (a map link)
 //   *Phone:* (303) 751-1112
-//   *Email:* test@bmave.com
 //   *Next assessment:* Fri, Nov 13 at 12:00 PM
-//
-//   *What they asked for:*
-//   > the deal's description, when there is one
 //
 //   Open the job in Bee Hub
 //   _Details as of Nov 12. Bee Hub has the latest._
@@ -38,12 +34,21 @@
 // (recordSlackMissingScope): the location can still make channels.
 //
 // A card that cannot be fully filled in is still posted. Every read here is
-// best effort: a missing address says so in words, a missing phone or email
-// or assessment drops its line. The name, the job type and the link are
+// best effort: a missing address says so in words, a missing phone or
+// assessment drops its line. The name, the job type and the link are
 // handed in by the caller, which already has them.
 //
 // PUBLIC CHANNELS: this puts a client's home address and phone number where
 // any member of that Slack workspace can read them. Kevin's decision.
+//
+// NOT ON THE CARD, ON PURPOSE (Kevin, 2026-11-12) — do not add them back:
+//   · the client's EMAIL. A crew at the door does not email the client.
+//   · the deal's DESCRIPTION. It is whatever the client typed, and it can be
+//     a divorce, a death in the family, hoarding, an alarm code. With
+//     automatic channels on it would go into a channel any workspace member
+//     can open, with nobody choosing to put it there.
+// Neither is read from the database here at all, so neither can reach the
+// text by accident. lib/beta-job-channel-card.test.ts pins both.
 //
 // Logs ids and Slack codes only — no names, no addresses, no token.
 // ─────────────────────────────────────────────────────────────
@@ -54,7 +59,6 @@ import { formatLeadAddress, normalizeAddressKey } from '@/lib/lead-address'
 type Db = { from: (table: string) => any }
 type SlackCall = (token: string, method: string, body: Record<string, unknown>) => Promise<any>
 
-export const CARD_DESCRIPTION_MAX = 400
 export const CARD_NO_ADDRESS = 'not on file yet. Check the job in Bee Hub before you go.'
 export const cardNoStreet = (area: string) => `no street on file yet (${area}). Check the job in Bee Hub before you go.`
 
@@ -64,10 +68,8 @@ export type JobCardData = {
   address: string | null        // one line, already joined
   area?: string | null          // town / zip, when there is no street
   phone: string | null
-  email: string | null
   nextAssessmentAt: string | null
   timezone: string | null       // IANA, or null when the location's is unknown
-  description: string | null
   url: string | null
   asOf: string                  // ISO
 }
@@ -121,16 +123,10 @@ export function jobCardText(d: JobCardData): string {
     lines.push(`*Address:* ${d.area ? cardNoStreet(esc(d.area)) : CARD_NO_ADDRESS}`)
   }
   if (d.phone) lines.push(`*Phone:* ${esc(d.phone)}`)
-  if (d.email) lines.push(`*Email:* ${esc(d.email)}`)
   // A time is only shown when the location's time zone is known: a wrong
   // hour on a card about turning up at someone's house is worse than none.
   const assessment = d.nextAssessmentAt && d.timezone ? when(d.nextAssessmentAt, d.timezone, true) : null
   if (assessment) lines.push(`*Next assessment:* ${assessment}`)
-
-  if (d.description) {
-    const text = d.description.length > CARD_DESCRIPTION_MAX ? `${d.description.slice(0, CARD_DESCRIPTION_MAX).trimEnd()}…` : d.description
-    lines.push('', '*What they asked for:*', ...text.split(/\r?\n/).map(l => `> ${esc(l)}`))
-  }
 
   lines.push('')
   if (d.url) lines.push(`<${d.url}|Open the job in Bee Hub>`)
@@ -147,25 +143,19 @@ export async function readJobCardData(
 ): Promise<JobCardData> {
   const now = args.now ?? new Date()
   const d: JobCardData = {
-    clientName: args.clientName, projectType: args.projectType, address: null, area: null, phone: null, email: null,
-    nextAssessmentAt: null, timezone: null, description: null, url: args.url, asOf: now.toISOString(),
+    clientName: args.clientName, projectType: args.projectType, address: null, area: null, phone: null,
+    nextAssessmentAt: null, timezone: null, url: args.url, asOf: now.toISOString(),
   }
   const soft = async (what: string, fn: () => Promise<void>) => {
     try { await fn() } catch (e: any) { console.warn(`[job-channel-card] ${what} not read engagement=${args.engagementId} —`, e?.name || 'error') }
   }
   await soft('client', async () => {
     if (!args.clientId) return
-    const { data, error } = await db.from('leads').select('address, street2, city, state, zip, phone, email').eq('id', args.clientId).maybeSingle()
+    const { data, error } = await db.from('leads').select('address, street2, city, state, zip, phone').eq('id', args.clientId).maybeSingle()
     if (error || !data) return
     d.address = oneLineAddress(data)
     d.area = areaOnly(data)
     d.phone = clean(displayPhone(data.phone))
-    d.email = clean(data.email)
-  })
-  await soft('description', async () => {
-    const { data, error } = await db.from('engagements').select('description').eq('id', args.engagementId).maybeSingle()
-    if (error || !data) return
-    d.description = typeof data.description === 'string' && data.description.trim() ? data.description.trim() : null
   })
   await soft('time zone', async () => {
     const { data, error } = await db.from('locations').select('timezone').eq('id', args.locationUuid).maybeSingle()

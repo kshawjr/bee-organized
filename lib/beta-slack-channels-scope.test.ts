@@ -146,8 +146,13 @@ describe('the connect URL', () => {
     expect((await scopesAsked()).has('channels:manage')).toBe(true)
   })
 
-  it('does not ask for groups:write (public channels only)', async () => {
-    expect((await scopesAsked()).has('groups:write')).toBe(false)
+  // Changed on purpose 2026-11-12 (Kevin): groups:write IS asked for now, with
+  // nothing using it, so that private job channels never cost a third round
+  // of 43 reconnects. Job channels are still made PUBLIC (is_private: false —
+  // lib/beta-job-channels.test.tsx). The whole list: lib/beta-slack-scope-list.test.ts.
+  it('asks for groups:write ahead of need, and still never for reading messages', async () => {
+    expect((await scopesAsked()).has('groups:write')).toBe(true)
+    expect((await scopesAsked()).has('channels:history')).toBe(false)
   })
 
   it('still asks for everything it asked for before', async () => {

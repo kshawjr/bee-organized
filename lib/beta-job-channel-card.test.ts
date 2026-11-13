@@ -149,7 +149,7 @@ import * as check from '@/lib/db-columns-check'
 import { supabaseService } from '@/lib/supabase-service'
 import { TOPIC_HANDLERS } from '@/lib/jobber-webhook-handlers'
 import { createJobChannel, loadEngagementForBees, readLocationSlackFull, sweepJobChannels } from '@/lib/engagement-bees'
-import { jobCardText, oneLineAddress, areaOnly, readJobCardData, postJobCard, CARD_NO_ADDRESS, CARD_DESCRIPTION_MAX, type JobCardData } from '@/lib/job-channel-card'
+import { jobCardText, oneLineAddress, areaOnly, readJobCardData, postJobCard, CARD_NO_ADDRESS, type JobCardData } from '@/lib/job-channel-card'
 import { autoNote } from '@/lib/job-channel-auto'
 const db = supabaseService as any
 
@@ -249,8 +249,8 @@ const pins = () => slack.calls.filter(c => c.method === 'pins.add')
 const NOW = new Date('2026-11-12T20:00:00Z')
 const FULL: JobCardData = {
   clientName: 'Test FailSafe', projectType: 'Moving/Relocation',
-  address: '6711 Calvert Commons Drive, Huntersville, NC, 28078', area: null, phone: '(303) 751-1112', email: 'test@bmave.com',
-  nextAssessmentAt: '2026-11-13T17:00:00Z', timezone: 'America/New_York', description: null,
+  address: '6711 Calvert Commons Drive, Huntersville, NC, 28078', area: null, phone: '(303) 751-1112',
+  nextAssessmentAt: '2026-11-13T17:00:00Z', timezone: 'America/New_York',
   url: 'https://beehive.beeorganized.com/clients/lead-7001?e=' + engId(1), asOf: NOW.toISOString(),
 }
 
@@ -260,7 +260,6 @@ describe('the card’s text, exactly as Slack is sent it', () => {
       '*Test FailSafe* — Moving/Relocation',
       '*Address:* <https://www.google.com/maps/search/?api=1&query=6711%20Calvert%20Commons%20Drive%2C%20Huntersville%2C%20NC%2C%2028078|6711 Calvert Commons Drive, Huntersville, NC, 28078>',
       '*Phone:* (303) 751-1112',
-      '*Email:* test@bmave.com',
       '*Next assessment:* Fri, Nov 13 at 12:00 PM',
       '',
       `<https://beehive.beeorganized.com/clients/lead-7001?e=${engId(1)}|Open the job in Bee Hub>`,
@@ -268,13 +267,8 @@ describe('the card’s text, exactly as Slack is sent it', () => {
     ].join('\n'))
   })
 
-  it('with a description: quoted under its own heading, every line of it', () => {
-    const t = jobCardText({ ...FULL, description: 'Packing a 3-bed house.\nPiano on the ground floor.' })
-    expect(t).toContain('*Next assessment:* Fri, Nov 13 at 12:00 PM\n\n*What they asked for:*\n> Packing a 3-bed house.\n> Piano on the ground floor.\n\n<https://')
-  })
-
   it('address and phone come first, straight after the name: what a crew at the door needs', () => {
-    const lines = jobCardText({ ...FULL, description: 'x' }).split('\n')
+    const lines = jobCardText(FULL).split('\n')
     expect(lines[0]).toMatch(/^\*Test FailSafe\*/)
     expect(lines[1]).toMatch(/^\*Address:\*/)
     expect(lines[2]).toMatch(/^\*Phone:\*/)
@@ -289,11 +283,11 @@ describe('the card’s text, exactly as Slack is sent it', () => {
   })
 
   it('a job with nothing but a name is still a card: name, the no-address line, the link', () => {
-    expect(jobCardText({ ...FULL, projectType: null, address: null, phone: null, email: null, nextAssessmentAt: null, description: null })).toBe([
+    expect(jobCardText({ ...FULL, projectType: null, address: null, phone: null, nextAssessmentAt: null })).toBe([
       '*Test FailSafe*', `*Address:* ${CARD_NO_ADDRESS}`, '',
       `<https://beehive.beeorganized.com/clients/lead-7001?e=${engId(1)}|Open the job in Bee Hub>`, '_Details as of Nov 12. Bee Hub has the latest._',
     ].join('\n'))
-    expect(jobCardText({ ...FULL, clientName: null, url: null, address: null, phone: null, email: null, nextAssessmentAt: null, timezone: null }))
+    expect(jobCardText({ ...FULL, clientName: null, url: null, address: null, phone: null, nextAssessmentAt: null, timezone: null }))
       .toBe(`*this client* — Moving/Relocation\n*Address:* ${CARD_NO_ADDRESS}\n\n_Details as of when this channel was made. Bee Hub has the latest._`)
   })
 
@@ -309,21 +303,13 @@ describe('the card’s text, exactly as Slack is sent it', () => {
   })
 
   it('what a client typed cannot break the message or forge a link', () => {
-    const t = jobCardText({ ...FULL, clientName: 'A & B <Smith>', address: '1 <Main> St | Unit 2, Town, NC 28078', description: '<!channel> call me <https://evil.test|here> & soon', email: 'a<b@x.test' })
+    const t = jobCardText({ ...FULL, clientName: 'A & B <Smith>', address: '1 <Main> St | Unit 2, Town, NC 28078', projectType: '<!channel> & <https://evil.test|here>', phone: '<tel:1|x>' })
     expect(t).toContain('*A &amp; B &lt;Smith&gt;*')
     expect(t).toContain('|1 &lt;Main&gt; St / Unit 2, Town, NC 28078>')
-    expect(t).toContain('> &lt;!channel&gt; call me &lt;https://evil.test|here&gt; &amp; soon')
-    expect(t).toContain('*Email:* a&lt;b@x.test')
+    expect(t).toContain(' — &lt;!channel&gt; &amp; &lt;https://evil.test|here&gt;')
+    expect(t).toContain('*Phone:* &lt;tel:1|x&gt;')
     expect(t.match(/<https?:[^>]*>/g)).toHaveLength(2)            // the map and Bee Hub, nothing else
     expect(t).not.toMatch(/<!/)
-  })
-
-  it('a long description is cut, with a mark that it was', () => {
-    const t = jobCardText({ ...FULL, description: 'word '.repeat(400) })
-    const quoted = t.split('\n').find(l => l.startsWith('> '))!
-    expect(quoted.length).toBeLessThanOrEqual(CARD_DESCRIPTION_MAX + 3)
-    expect(quoted.endsWith('…')).toBe(true)
-    expect(CARD_DESCRIPTION_MAX).toBe(400)
   })
 
   it('THE ADDRESS IS NEVER DOUBLED: an imported client’s street line already holds the town, state and zip (the real Test Location row)', () => {
@@ -355,7 +341,7 @@ describe('the card’s text, exactly as Slack is sent it', () => {
 describe('what goes on it is read from what Bee Hub already holds', () => {
   const read = (over: any = {}) => readJobCardData(db, { engagementId: engId(1), locationUuid: LOC, clientId: 'lead-7001', clientName: 'Test FailSafe', projectType: 'Moving/Relocation', url: 'https://hub.test/x', now: NOW, ...over })
 
-  it('address, phone (shown the house way) and email from the client; description from the deal; the next SCHEDULED assessment still ahead; the location’s time zone', async () => {
+  it('address and phone (shown the house way) from the client; the next SCHEDULED assessment still ahead; the location’s time zone', async () => {
     h.db.tables.engagements.push(eng(1, { description: '  Packing a 3-bed house. ' }))
     h.db.tables.leads[0].phone = '3037511112'                     // stored bare: the card shows it the house way
     h.db.tables.assessments.push(
@@ -365,13 +351,13 @@ describe('what goes on it is read from what Bee Hub already holds', () => {
       { id: 'a5', engagement_id: engId(1), status: 'scheduled', scheduled_at: '2026-12-01T15:00:00Z' },   // this deal, but later
       { id: 'a3', engagement_id: engId(1), status: 'scheduled', scheduled_at: '2026-11-13T17:00:00Z' },
     )
-    expect(await read()).toEqual({ ...FULL, description: 'Packing a 3-bed house.', url: 'https://hub.test/x' })
+    expect(await read()).toEqual({ ...FULL, url: 'https://hub.test/x' })
   })
 
-  it('no address on the client, no assessment, no description: those are simply absent', async () => {
+  it('no address on the client, no phone, no assessment: those are simply absent', async () => {
     h.db.tables.engagements.push(eng(1))
     Object.assign(h.db.tables.leads[0], { address: null, city: 'Huntersville', phone: null, email: '  ' })
-    expect(await read()).toMatchObject({ address: null, area: 'Huntersville, NC 28078', phone: null, email: null, nextAssessmentAt: null, description: null, timezone: 'America/New_York' })
+    expect(await read()).toMatchObject({ address: null, area: 'Huntersville, NC 28078', phone: null, nextAssessmentAt: null, timezone: 'America/New_York' })
   })
 
   it('a location with no time zone, or one Bee Hub cannot read, gives none', async () => {
@@ -405,14 +391,12 @@ describe('THE CARD IS POSTED WHEN A CHANNEL IS MADE, by the Slack mark and by au
     expect(posts()).toHaveLength(1)
     const post = posts()[0].body
     expect(post).toMatchObject({ channel: 'CNEW1', unfurl_links: false, unfurl_media: false })
-    expect(post.text.split('\n').slice(0, 4)).toEqual([
+    expect(post.text.split('\n').slice(0, 3)).toEqual([
       '*Test FailSafe* — Moving/Relocation',
       '*Address:* <https://www.google.com/maps/search/?api=1&query=6711%20Calvert%20Commons%20Drive%2C%20Huntersville%2C%20NC%2C%2028078|6711 Calvert Commons Drive, Huntersville, NC, 28078>',
       '*Phone:* (303) 751-1112',
-      '*Email:* test@bmave.com',
     ])
     expect(post.text).toContain('*Next assessment:* ')
-    expect(post.text).toContain('> Packing a 3-bed house.')
     expect(post.text).toContain(`<https://hub.test/clients/lead-7001?e=${engId(1)}|Open the job in Bee Hub>`)
     expect(pins()).toHaveLength(1)
     const sent = slack.calls.map(c => c.method)
@@ -454,11 +438,58 @@ describe('THE CARD IS POSTED WHEN A CHANNEL IS MADE, by the Slack mark and by au
     // No other code posts a message into a job's channel or pins anything.
     expect(using(/pins\.add/, 'lib/job-channel-card.ts')).toEqual([])
   })
+})
 
-  it('the "Add to Slack" link asks for the pin permission', () => {
-    const src = readFileSync('app/api/slack/connect/route.ts', 'utf8')
-    const scopes = src.match(/const SLACK_SCOPES =\s*'([^']+)'/)![1].split(',')
-    expect(scopes).toEqual(['chat:write', 'chat:write.public', 'channels:read', 'channels:manage', 'incoming-webhook', 'users:read', 'users:read.email', 'pins:write'])
+describe('THE CARD CARRIES NO EMAIL ADDRESS AND NO DESCRIPTION, in every state', () => {
+  const SECRET = 'Going through a divorce. Alarm code 4471.\nMum died in March; her things are in the garage.'
+  const PRIVATE = /private\.person|example\.test|@|e-?mail|What they asked|divorce|4471|Mum died|garage|^> /im
+  const STATES: [string, () => void][] = [
+    ['everything on file', () => {}],
+    ['no street, only a town', () => { h.db.tables.leads[0].address = null }],
+    ['no address at all', () => { Object.assign(h.db.tables.leads[0], { address: null, city: null, state: null, zip: null }) }],
+    ['no phone', () => { h.db.tables.leads[0].phone = null }],
+    ['nothing but a name', () => { Object.assign(h.db.tables.leads[0], { address: null, city: null, state: null, zip: null, phone: null }) }],
+    ['no time zone on the location', () => { h.db.tables.locations[0].timezone = null }],
+    ['an assessment ahead', () => { h.db.tables.assessments.push({ id: 'a1', engagement_id: engId(1), status: 'scheduled', scheduled_at: '2099-11-13T17:00:00Z' }) }],
+    ['the email is the only contact on file', () => { Object.assign(h.db.tables.leads[0], { phone: null, address: null }) }],
+  ]
+  for (const [state, arrange] of STATES) {
+    for (const how of ['the Slack mark', 'auto-create'] as const) {
+      it(`${state} — ${how}`, async () => {
+        h.db.tables.leads[0].email = 'private.person@example.test'
+        h.db.tables.engagements.push(eng(1, { description: SECRET }))
+        arrange()
+        if (how === 'the Slack mark') await byHand(1)
+        else { jobInJobber('501', 1); await fire('JOB_CREATE', 'Job', '501') }
+        expect(posts()).toHaveLength(1)
+        const text: string = posts()[0].body.text
+        expect(text).not.toMatch(PRIVATE)
+        expect(text).toMatch(/^\*Test FailSafe\*/)                 // it is still a card
+        // …and nothing else Bee Hub sent to Slack carries them either.
+        expect(JSON.stringify(slack.calls.filter(c => c.method !== 'users.lookupByEmail'))).not.toMatch(/private\.person|divorce|4471|Mum died/)
+      })
+    }
+  }
+
+  it('the text builder cannot print them even if handed them', () => {
+    const t = jobCardText({ ...FULL, email: 'private.person@example.test', description: SECRET } as any)
+    expect(t).toBe(jobCardText(FULL))
+    expect(t).not.toMatch(PRIVATE)
+  })
+
+  it('the card’s code never asks the database for either: no email column, no description column, no line for them', () => {
+    const code = readFileSync('lib/job-channel-card.ts', 'utf8').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+    expect(code).not.toMatch(/email|description|What they asked/i)
+    const selects = code.match(/\.select\('[^']*'\)/g)!
+    expect(selects).toEqual([".select('address, street2, city, state, zip, phone')", ".select('timezone')", ".select('scheduled_at, status')"])
+  })
+
+  it('reading the card’s details returns exactly these fields', async () => {
+    h.db.tables.leads[0].email = 'private.person@example.test'
+    h.db.tables.engagements.push(eng(1, { description: SECRET }))
+    const d = await readJobCardData(db, { engagementId: engId(1), locationUuid: LOC, clientId: 'lead-7001', clientName: 'Test FailSafe', projectType: 'Moving/Relocation', url: 'u', now: NOW })
+    expect(Object.keys(d).sort()).toEqual(['address', 'area', 'asOf', 'clientName', 'nextAssessmentAt', 'phone', 'projectType', 'timezone', 'url'])
+    expect(JSON.stringify(d)).not.toMatch(/private\.person|divorce/)
   })
 })
 

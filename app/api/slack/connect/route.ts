@@ -29,29 +29,55 @@ export const runtime = 'nodejs'
 
 const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 
-// Bot scopes: chat:write to post the notification, chat:write.public so the bot
-// can post to a public channel it hasn't been manually invited to (kills the
-// not_in_channel step at scale), channels:read for channel metadata,
-// incoming-webhook so the install picks the target channel inside Slack and
-// hands back its id/name, and users:read + users:read.email so users.info can
-// resolve a clicking Slack user → email for touchpoint attribution (the email
-// field requires users:read.email AND users.info itself requires users:read).
+// ── What "Add to Slack" asks each workspace for ──────────────
+// Slack fixes a workspace's permissions at install: adding one later means
+// every location reconnects again (there are 44). So this list is decided as
+// a whole, it must match Bot Token Scopes in the Slack app's own settings,
+// and the callback records what each install was actually granted in
+// locations.slack_scopes (lib/slack-scopes.ts).
 //
-// channels:manage — job channels (create, invite, kick, archive, unarchive) for
-// PUBLIC channels only. Slack fixes scopes at install, so every workspace that
-// connected before this must reconnect to get it; the callback records what
-// was actually granted in locations.slack_scopes (see lib/slack-scopes.ts).
-// groups:write (private channels) is deliberately NOT asked for: job channels
-// are public by Kevin's decision, and asking 44 independent owners for write
-// access to their private channels for something never used is a bigger trust
-// ask than it is worth. Private channels later = a second round of reinstalls.
+// IN USE
+//   chat:write          post the new-lead notice and the job card
+//   chat:write.public   …to a public channel the app was never invited to
+//   channels:read       channel names and ids
+//   incoming-webhook    makes Slack's own screen ask which channel leads go
+//                       to, and hands back its id and name
+//   users:read          who clicked a button on a lead card
+//   users:read.email    …and their email, to match them to a Bee Hub user;
+//                       also finds a bee in Slack by email
+//   channels:manage     job channels: make, invite, remove, archive,
+//                       unarchive. PUBLIC channels only
+//   pins:write          pin the job card (lib/job-channel-card.ts). A
+//                       location that connected before this was asked for
+//                       gets its cards posted and simply not pinned
 //
-// pins:write — pin the job card in a job's channel (lib/job-channel-card.ts).
-// It must ALSO be listed under Bot Token Scopes in the Slack app's own
-// settings. A location that connected before this was asked for has no pin
-// permission: its cards are posted and simply not pinned, until it reconnects.
-const SLACK_SCOPES =
-  'chat:write,chat:write.public,channels:read,channels:manage,incoming-webhook,users:read,users:read.email,pins:write'
+// REQUESTED ON PURPOSE, NOT USED YET — DO NOT DELETE AS DEAD.
+// Kevin approved each in the Slack app's settings on 2026-11-12, ahead of
+// asking 43 owners to reconnect once. Taking one out here means that when it
+// is wanted, all of them reconnect again.
+//   groups:write        make and manage PRIVATE channels. Job channels are
+//                       public today and the job card puts a client's home
+//                       address in them. If that ever becomes a problem,
+//                       private channels are the fix, and this is the
+//                       permission they need
+//   pins:read           see what is pinned in a channel (to find or replace
+//                       the job card later). The card does not need it yet
+//   channels:join       join a public channel someone made by hand, so a
+//                       job can adopt it
+//   bookmarks:write     put an "Open in Bee Hub" link in a channel's header
+//   files:write         post a file — a quote, photos
+//   reactions:write     mark a message, e.g. tick the card when a job is done
+//
+// DELIBERATELY NOT REQUESTED: channels:history. It would let the app read
+// every message in every public channel of a franchise's workspace. Their
+// Slack is theirs (Kevin's standing rule), and it would make the approval
+// screen 43 owners see look far more invasive than anything here needs.
+// Nothing may be built that needs it. lib/beta-slack-scope-list.test.ts
+// fails if it, or any other "read their messages" permission, appears.
+const SLACK_SCOPES = [
+  'chat:write', 'chat:write.public', 'channels:read', 'channels:manage', 'incoming-webhook', 'users:read', 'users:read.email',
+  'pins:write', 'pins:read', 'channels:join', 'bookmarks:write', 'files:write', 'reactions:write', 'groups:write',
+].join(',')
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
