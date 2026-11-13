@@ -112,9 +112,11 @@ describe('the tab as a whole', () => {
   // 2026-11-13 (Settings slice 4): the tab is Call scripts alone. The texts
   // preview above is still a component (mounted directly by the tests above)
   // but Settings no longer mounts it; Text messaging is a greyed nav item.
+  // 2026-11-13 (Settings slice 5): the Call scripts page is in the new look;
+  // its own tests are in lib/settings-call-scripts.test.tsx.
   it('is call scripts, without the texts preview', async () => {
     const text = (await mountTab()).textContent ?? ''
-    expect(text).toContain('Call Scripts')
+    expect(text).toContain('Call scripts')
     expect(text).not.toContain('Text messages')
     expect(text).not.toContain('Not sending yet')
   })
@@ -127,33 +129,17 @@ describe('the tab as a whole', () => {
   })
 
   it('says call scripts are not sent to anyone', async () => {
-    expect((await mountTab()).textContent).toContain('nothing here is sent to anyone')
+    expect((await mountTab()).textContent).toContain('Nothing here is sent to anyone')
   })
 
   it('call scripts remain editable — the create affordance is present', async () => {
     await mountTab()
-    const buttons = Array.from(container.querySelectorAll('button')).map(b => b.textContent ?? '')
-    // The section is collapsed by default, so open it first.
-    const header = Array.from(container.querySelectorAll('p')).find(p => p.textContent?.includes('Call Scripts'))
-    expect(header, 'the Call Scripts section header').toBeTruthy()
-    await act(async () => { (header!.closest('div[style]') as HTMLElement).click() })
-    const after = Array.from(container.querySelectorAll('button')).map(b => b.textContent ?? '')
-    expect(after.some(t => t.includes('Create Template'))).toBe(true)
-    expect(after.length).toBeGreaterThan(buttons.length)
+    expect(container.querySelector('[data-call-scripts] [data-cs-new]'), 'New script').toBeTruthy()
   })
 })
 
 describe('controls are capped', () => {
   const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-
-  it('the create button carries the shared action cap', async () => {
-    await mountTab()
-    const header = Array.from(container.querySelectorAll('p')).find(p => p.textContent?.includes('Call Scripts'))
-    await act(async () => { (header!.closest('div[style]') as HTMLElement).click() })
-    const create = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Create Template')) as HTMLElement
-    expect(create, 'the create button').toBeTruthy()
-    expect(create.style.maxWidth).toMatch(/^\d+px$/)
-  })
 
   it('the texts preview caps its own width rather than filling the page', async () => {
     await mountTexts()

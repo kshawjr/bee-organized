@@ -697,83 +697,19 @@ describe('Text messaging is greyed with the exact treatment Tags got', () => {
   })
 })
 
-describe('Call scripts is its own section, holding what the call half held', () => {
-  const SCRIPT = { id: 't1', legacy_id: null, name: 'First call', type: 'call', subject: '', body: 'Say hello and ask about the space.', is_active: true, is_own_custom: true, is_master: false, location_uuid: LOC }
-  const mountScripts = async () => {
-    await mount({ initialSection: 'scripts' })
-    // The Call Scripts list opens from its header.
-    const sub = Array.from(container.querySelectorAll('*')).find(el => el.textContent?.trim().startsWith('Talking points for you'))
-    expect(sub, 'the Call Scripts header').toBeTruthy()
-    for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
-      await act(async () => { el!.click() })
-      if (Array.from(container.querySelectorAll('button')).some(b => (b.textContent || '').includes('Create Template'))) break
-    }
-    await settle()
-  }
-  const button = (text: string) => Array.from(document.body.querySelectorAll('button')).find(b => (b.textContent || '').trim() === text) as HTMLButtonElement
-
+// Call scripts moved into the new look in slice 5 (2026-11-13). Its create,
+// edit and delete — still the same three routes — are clicked through in
+// lib/settings-call-scripts.test.tsx. What stays here is slice 4's own claim:
+// it is its own section, in the nav, apart from Text messaging.
+describe('Call scripts is its own section', () => {
   it('it is in the nav as "Call scripts", and the page says scripts are not sent to anyone', async () => {
     await mount({ initialSection: 'scripts' })
     expect(rail().querySelector('[data-section="scripts"]')!.textContent).toBe('Call scripts')
     expect(railCurrent()).toBe('scripts')
     expect(pane().querySelector('h1')!.textContent).toBe('Call scripts')
-    expect(pane().textContent).toContain('nothing on this tab is sent to a client')
-    expect(pane().textContent).toContain('Call Scripts')
+    expect(pane().textContent).toContain('Nothing here is sent to anyone')
+    expect(pane().querySelector('[data-call-scripts]')).toBeTruthy()
     expect(pane().textContent).not.toContain('Text messages')
     expect(pane().textContent).not.toContain('Email Templates')
-  })
-
-  it('a script can be CREATED: the editor opens on a call script and posts one', async () => {
-    await mountScripts()
-    await click(button('+ Create Template') || Array.from(container.querySelectorAll('button')).find(b => (b.textContent || '').includes('Create Template')))
-    const name = document.body.querySelector('input[placeholder="e.g. Welcome Email"]')
-    expect(name, 'the editor’s name box').toBeTruthy()
-    // The editor opens on Email whichever list it was opened from (as it did
-    // before this slice — reported, not changed here); the owner picks Call.
-    const pickCall = Array.from(document.body.querySelectorAll('button')).find(b => /call/i.test(b.textContent || '') && !/Create Template/.test(b.textContent || '') && b.closest('[data-settings-nav]') == null && (b.textContent || '').length < 30)
-    expect(pickCall, 'the Call choice in the editor').toBeTruthy()
-    await click(pickCall)
-    const body = document.body.querySelector('textarea[placeholder="Write your call script or talking points..."]')
-    expect(body, 'the editor is on a CALL script').toBeTruthy()
-    await type(name, 'Second call'); await type(body, 'Confirm the date.')
-    calls = []
-    await click(button('Save Template'))
-    const post = calls.filter(c => c.method === 'POST')
-    expect(post.map(c => c.url)).toEqual(['/api/templates'])
-    expect(post[0].body).toMatchObject({ name: 'Second call', type: 'call', body: 'Confirm the date.' })
-    expect(alerts).toEqual([])
-    expect(container.textContent).toContain('Second call')
-  })
-
-  it('a script can be EDITED: one PATCH to that script', async () => {
-    templates = [SCRIPT]
-    await mountScripts()
-    expect(container.textContent).toContain('First call')
-    await click(button('Edit'))
-    const body = document.body.querySelector('textarea[placeholder="Write your call script or talking points..."]') as HTMLTextAreaElement
-    expect(body.value).toBe('Say hello and ask about the space.')
-    await type(body, 'Say hello, then listen.')
-    calls = []
-    await click(button('Save Template'))
-    const patch = calls.filter(c => c.method === 'PATCH')
-    expect(patch.map(c => c.url)).toEqual(['/api/templates/t1'])
-    expect(patch[0].body).toMatchObject({ name: 'First call', type: 'call', body: 'Say hello, then listen.' })
-    expect(alerts).toEqual([])
-  })
-
-  it('a script can be DELETED: one DELETE, and it leaves the list', async () => {
-    templates = [SCRIPT]
-    await mountScripts()
-    calls = []
-    await click(button('Delete'))
-    expect(calls.filter(c => c.method === 'DELETE').map(c => c.url)).toEqual(['/api/templates/t1'])
-    expect(container.textContent).not.toContain('First call')
-  })
-
-  it('it is the same renderer given the same one section, and nothing else was put on the page', () => {
-    expect(SETTINGS).toContain("{activeSection==='scripts'&&(")
-    expect(SETTINGS).toContain('{renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.call])}')
-    expect(SETTINGS.split('renderTemplateTypeSections([').length - 1).toBe(1)
-    expect(SETTINGS).not.toContain("activeSection==='texts'")
   })
 })

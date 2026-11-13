@@ -121,7 +121,7 @@ describe('the sections exist and render', () => {
     // Lower-cased mid-sentence since issue 246 step 1: the subtitle now leads
     // with "Who your emails come from", because the sending identity moved in.
     expect(await mount('emails')).toContain('Everything about the emails your clients receive, in one place.')   // 2026-10-30 design
-    expect(await mount('texts')).toContain('Call scripts are notes for you')   // 'texts' lands on Call scripts (slice 4)
+    expect(await mount('texts')).toContain('Nothing here is sent to anyone')   // 'texts' lands on Call scripts (slice 4)
     // The three addresses Your team's contents moved to (issue 246 step 1).
     // New leads retired 2026-11-13 (Settings slice 2): the key lands on Team.
     expect(await mount('newleads')).toContain('who hears about new leads')
@@ -227,7 +227,8 @@ describe('nothing that worked before is unreachable', () => {
     // is a greyed nav item, and this page is Call scripts alone.
     expect(texts).not.toContain('Text messages')
     expect(texts).not.toContain('Text Templates')
-    expect(texts).toContain('Call Scripts')
+    expect(texts).toContain('Nothing here is sent to anyone')   // Call scripts (the heading itself is stripped by bodyText)
+    expect(texts).toContain('New script')
     expect(texts).not.toContain('Email Templates')
   })
 })

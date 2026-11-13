@@ -56,6 +56,7 @@ import * as SUI from "@/components/settings/SettingsShell"
 import * as TUI from "@/components/settings/TeamAndLeads"
 import * as LUI from "@/components/settings/LocationRows"
 import * as CUI from "@/components/settings/ConnectionsPage"
+import * as SCUI from "@/components/settings/CallScripts"
 import { AppRail, ClosedSection, RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY } from "@/components/design/AppRail"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
@@ -22516,16 +22517,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // repaints locally after the DB copy is deleted.
   const [masterSteps, setMasterSteps] = useState({})
   const [pathsErr, setPathsErr] = useState(null)
-  const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
-  const [previewTemplate, setPreviewTemplate] = useState(null)
   // Edit-in-place: the step whose subject/body is open in DripPathStepEditor.
   const [stepContentEditor, setStepContentEditor] = useState(null) // { pathId, step }
   // Fork-on-edit confirm for master-backed paths: { pathId, proceed } where
   // proceed(steps) continues the pending mutation on the freshly-cloned copy.
   const [forkConfirm, setForkConfirm] = useState(null)
-  // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
-  const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
-  const [tplTypeHover, setTplTypeHover]       = useState(null)
 
   // Real franchise location? settings.location.locId will be a Supabase UUID.
   // Demo / view-as paths get string ids like 'loc_kc' — skip DB writes there.
@@ -23527,108 +23523,89 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // so the flow looked real but never persisted. The component is retained
   // unmounted below in this file.
 
-  // Persist template changes to /api/templates. Super admins edit masters or
-  // their own customs; owners edit only their location's customs (the API
-  // enforces this regardless of what the UI sends).
-  async function saveTemplate(data) {
-    const isNew = editingTemplate === 'new'
-    const target = !isNew ? (editingTemplate.master || editingTemplate.tpl) : null
-
-    try {
-      if (isNew) {
-        // For non-admin callers the API forces location_uuid to their own
-        // location anyway, but we still include the explicit hint when known.
-        const payload = { name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }
-        if (data.location_uuid !== undefined) payload.location_uuid = data.location_uuid
-        const res = await fetch('/api/templates', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const j = await res.json().catch(()=>({}))
-        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-        const r = j.template
-        setTemplates(prev => [...prev, {
-          id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
-          name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
-          isActive: r.is_active !== false,
-          locationUuid: r.location_uuid || null,
-          isMaster: r.is_master === true,
-          isOwnCustom: r.is_own_custom === true,
-          clonedFromId: r.cloned_from_id || null,
-          usedIn: [],
-        }])
-      } else {
-        const refId = target.dbId || target.legacyId || target.id
-        const res = await fetch(`/api/templates/${encodeURIComponent(refId)}`, {
-          method: 'PATCH',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: data.name, type: data.type, subject: data.subject || null, body: data.body }),
-        })
-        const j = await res.json().catch(()=>({}))
-        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-        const r = j.template
-        setTemplates(prev => prev.map(t => (t.dbId === r.id || t.id === target.id) ? {
-          ...t,
-          name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
-          isActive: r.is_active !== false,
-        } : t))
-      }
-    } catch (e) {
-      alert('Could not save template: ' + (e?.message || e))
-      return
-    }
-    setEditingTemplate(null)
+  // ─── CALL SCRIPTS (Settings slice 5, 2026-11-13) ───
+  //
+  // The four things the Call scripts page can do, through the same three
+  // /api/templates routes the old page called — nothing on the server
+  // changed. Each answers { ok, tpl } or { ok:false, error } and the page
+  // shows the error itself; no alert(), no confirm().
+  //
+  // These replaced saveTemplate / deleteTemplate / duplicateMasterTemplate
+  // and the pop-up editor and preview they drove. Call scripts were the last
+  // thing in Settings that used them (emails have been edited in the Emails
+  // list since issue 240 step 11), so they are gone rather than left unused.
+  // The old preview also filled {{braces}} with sample client details, which
+  // a call script must never do: those blanks are for the person on the call.
+  //
+  // `location_uuid` is sent on a create and a copy whenever this screen is
+  // showing a real location. For an owner the server ignores it and uses
+  // their own; for corporate it is what makes the script that LOCATION's
+  // rather than a new script for every location.
+  const CALL_SCRIPT_ERRORS = {
+    forbidden_read_only: 'Your login cannot change call scripts.',
+    forbidden_cannot_edit_master: 'This is one of Bee Organized’s scripts and cannot be changed here.',
+    forbidden_cannot_delete_master: 'This is one of Bee Organized’s scripts and cannot be deleted here.',
+    forbidden_wrong_location: 'That script belongs to another location.',
+    no_target_location: 'Pick a location first, then make the copy.',
+    owner_has_no_location: 'Your login is not attached to a location yet.',
+    name_required: 'Give the script a title.',
+    body_required: 'Write at least one stage.',
+    not_found: 'That script is no longer there. Reload the page.',
+    source_not_found: 'That script is no longer there. Reload the page.',
   }
-
-  async function deleteTemplate(tpl) {
-    if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return
-    const refId = tpl.dbId || tpl.legacyId || tpl.id
+  const callScriptError = (j, res) => CALL_SCRIPT_ERRORS[j?.error] || j?.detail || 'That did not save. Nothing was changed.'
+  const callScriptRow = (r) => ({
+    id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
+    name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
+    isActive: r.is_active !== false,
+    locationUuid: r.location_uuid || null,
+    isMaster: r.is_master === true,
+    isOwnCustom: r.is_own_custom === true,
+    clonedFromId: r.cloned_from_id || null,
+    updatedAt: r.updated_at || null,
+    buttonText: '', buttonLink: '', buttonAlign: null,
+    usedIn: [],
+  })
+  async function callScriptRequest(url, method, payload) {
     try {
-      const res = await fetch(`/api/templates/${encodeURIComponent(refId)}`, {
-        method: 'DELETE',
-        credentials: 'include',
+      const res = await fetch(url, {
+        method, credentials: 'include',
+        ...(payload ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } : {}),
       })
-      const j = await res.json().catch(()=>({}))
-      // 409 template_in_use carries a human sentence in detail — prefer it.
-      if (!res.ok) throw new Error(j?.detail || j?.error || `HTTP ${res.status}`)
-      setTemplates(prev => prev.filter(t => t.id !== tpl.id))
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok:false, error: callScriptError(j, res) }
+      return { ok:true, json:j }
     } catch (e) {
-      alert('Could not delete template: ' + (e?.message || e))
+      return { ok:false, error: 'Bee Hub could not be reached. Nothing was changed.' }
     }
   }
-
-  // Duplicate a master into the caller's location. On success, push the new
-  // custom into local state and immediately open the editor.
-  async function duplicateMasterTemplate(master) {
-    const refId = master.dbId || master.legacyId || master.id
-    try {
-      const res = await fetch(`/api/templates/${encodeURIComponent(refId)}/duplicate`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      const j = await res.json().catch(()=>({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      const r = j.template
-      const newTpl = {
-        id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
-        name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
-        isActive: r.is_active !== false,
-        locationUuid: r.location_uuid || null,
-        isMaster: r.is_master === true,
-        isOwnCustom: r.is_own_custom === true,
-        clonedFromId: r.cloned_from_id || null,
-        usedIn: [],
-      }
-      setTemplates(prev => [...prev, newTpl])
-      // Open the editor on the new custom so the user can immediately tweak it.
-      setEditingTemplate({ master: newTpl, tpl: newTpl })
-    } catch (e) {
-      alert('Could not duplicate template: ' + (e?.message || e))
-    }
+  async function createCallScript({ name, body }) {
+    const r = await callScriptRequest('/api/templates', 'POST', { name, type:'call', subject:null, body, tag:'custom', ...(realLocId ? { location_uuid: realLocId } : {}) })
+    if (!r.ok) return r
+    const tpl = callScriptRow(r.json.template)
+    setTemplates(prev => [...prev, tpl])
+    return { ok:true, tpl }
+  }
+  async function updateCallScript(target, { name, body }) {
+    const r = await callScriptRequest(`/api/templates/${encodeURIComponent(target.dbId || target.legacyId || target.id)}`, 'PATCH', { name, type:'call', subject:null, body })
+    if (!r.ok) return r
+    const row = r.json.template
+    let tpl = null
+    setTemplates(prev => prev.map(t => (t.dbId === row.id || t.id === target.id) ? (tpl = { ...t, name: row.name, body: row.body || '', isActive: row.is_active !== false, updatedAt: row.updated_at || t.updatedAt }) : t))
+    return { ok:true, tpl }
+  }
+  async function deleteCallScript(target) {
+    const r = await callScriptRequest(`/api/templates/${encodeURIComponent(target.dbId || target.legacyId || target.id)}`, 'DELETE')
+    if (!r.ok) return r
+    setTemplates(prev => prev.filter(t => t.id !== target.id))
+    return { ok:true }
+  }
+  async function copyCallScript(master) {
+    const r = await callScriptRequest(`/api/templates/${encodeURIComponent(master.dbId || master.legacyId || master.id)}/duplicate`, 'POST', realLocId ? { location_uuid: realLocId } : {})
+    if (!r.ok) return r
+    const tpl = callScriptRow(r.json.template)
+    setTemplates(prev => [...prev, tpl])
+    return { ok:true, tpl }
   }
 
   // Team management (invite/remove/role change → billable seats) is owner-only.
@@ -23682,195 +23659,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const canSeeSeats = canManageTeam
   const canSeeBees = canManageOwnTags
   const canSeeTeamScreen = canSeeSeats || canSeeBees
-  // ─── issue 240 step 4 — one template renderer, two tabs ───
-  //
-  // The old Templates tab rendered three collapsible type sections from one
-  // body. Emails now owns the email section and Texts & scripts owns sms +
-  // call, so that body became a function taking the sections it should draw.
-  // Everything inside is the previous code verbatim; only the loop input and
-  // the indentation changed.
-  const TEMPLATE_TYPE_SECTIONS = {
-    email: { type:'email', heading:'Email Templates', sub:'Subject lines and bodies for client emails' },
-    sms:   { type:'sms',   heading:'Text Templates',  sub:'SMS message templates' },
-    // "Nothing is sent to anyone" is the distinction the app has never drawn
-    // (issue 240 step 6). Every other template type on this screen leaves the
-    // building; a call script is a note the owner reads aloud.
-    call:  { type:'call',  heading:'Call Scripts',    sub:'Talking points for you — nothing here is sent to anyone' },
-  }
-  function renderTemplateTypeSections(TYPE_SECTIONS) {
-    const masters = templates.filter(t => t.isMaster && t.isActive)
-    const myCustoms = templates.filter(t => t.isOwnCustom && t.isActive)
-    const TYPE_META = {
-      email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
-      sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
-      call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
-    }
-    function renderTplRow(tpl, opts) {
-      const { actions } = opts
-      const tc = TYPE_META[tpl.type] || TYPE_META.email
-      return (
-        <div style={{ background:'white', borderBottom:opts.lastInGroup?'none':'1px solid rgba(0,0,0,0.05)' }}>
-          <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
-            <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
-                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
-                {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{tpl.tag}</span>}
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {tpl.type==='email' && tpl.subject ? tpl.subject : tpl.body.slice(0,60)+'…'}
-              </p>
-            </div>
-            <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-              {actions}
-            </div>
-          </div>
-        </div>
-      )
-    }
-    // Renders a single rounded card of template rows (no type label — the
-    // parent collapsible section already conveys the type).
-    function renderRowsCard(rows, actionsFn) {
-      if (!rows.length) return null
-      return (
-        <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-          {rows.map((tpl, i)=>(
-            <div key={tpl.dbId || tpl.id}>
-              {renderTplRow(tpl, { lastInGroup: i === rows.length - 1, actions: actionsFn(tpl) })}
-            </div>
-          ))}
-        </div>
-      )
-    }
-
-    // Tag-based grouping for the masters list: surface Welcome and the 6
-    // Opportunity Stage masters as their own labeled sections so owners
-    // can find them quickly (the generic "Other Templates" bucket holds
-    // legacy t1–t9 / ta-td masters). Rows are mapped to camelCase on
-    // fetch, so the key is `legacyId` — reading `legacy_id` here left
-    // both Gen 2 groups permanently empty and dumped every master into
-    // the Other bucket.
-    const welcomeMasters = masters.filter(t => t.legacyId === 'welcome')
-    const oppStageMasters = masters.filter(t => (t.legacyId || '').startsWith('opp_'))
-    const otherMasters = masters.filter(t =>
-      t.legacyId !== 'welcome' && !(t.legacyId || '').startsWith('opp_'))
-    const masterActions = (tpl) => (
-      <>
-        <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-        <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
-      </>
-    )
-
-    const customActions = (tpl) => (
-      <>
-        <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-        <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
-        <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
-      </>
-    )
-
-    // Three top-level collapsible sections, one per template type. Each is
-    // closed by default and contains a Master sub-group (corp, read-only)
-    // and a My Templates sub-group (per-location, editable). Mirrors the
-    // Communication tab's "New Lead Emails" collapsible pattern (d3e5ce1).
-    return (
-      <div style={{ padding:'0 12px 32px' }}>
-        {TYPE_SECTIONS.map(({ type, heading, sub })=>{
-          const tc = TYPE_META[type]
-          const typeMasters = masters.filter(t=>t.type===type)
-          const typeCustoms = myCustoms.filter(t=>t.type===type)
-          const count = typeMasters.length + typeCustoms.length
-          const isLocked = type==='sms' && !settings.location.smsEnabled
-          const open = !!tplTypeExpanded[type]
-          const hovered = tplTypeHover===type
-          const wWelcome = welcomeMasters.filter(t=>t.type===type)
-          const wOpp = oppStageMasters.filter(t=>t.type===type)
-          const wOther = otherMasters.filter(t=>t.type===type)
-          return (
-            <div key={type} style={{ marginBottom:'8px' }}>
-              {/* Collapsible header (toggle) */}
-              <div
-                onClick={()=>setTplTypeExpanded(prev=>({ ...prev, [type]:!prev[type] }))}
-                onMouseEnter={()=>setTplTypeHover(type)}
-                onMouseLeave={()=>setTplTypeHover(null)}
-                style={{ padding:'14px', margin:'0 -2px', borderRadius:'10px', cursor:'pointer', background:hovered?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
-              >
-                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
-                  <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{open?'▼':'▶'}</span>
-                  <p style={{ fontSize:'13px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>{tc.icon} {heading}</p>
-                  {count>0 && <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{count}</span>}
-                  {isLocked && <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
-                </div>
-                <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>{sub} ({count} template{count===1?'':'s'})</p>
-              </div>
-
-              {open && (
-                <div style={{ padding:'4px 2px 10px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
-                  {/* Master Templates sub-group (corp, read-only) */}
-                  {typeMasters.length>0 && (
-                    <>
-                      <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'8px 4px 6px' }}>📚 Master Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· from Bee Organized HQ</span></p>
-                      {wWelcome.length>0 && (
-                        <>
-                          <div style={{ padding:'8px 4px 4px' }}>
-                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
-                            {/* issue 314 retired it and captioned it "Retired";
-                                restored, so the caption says when it fires again —
-                                and who it never goes to. */}
-                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of a new lead's sequence. Never sent to a returning client.</p>
-                          </div>
-                          {renderRowsCard(wWelcome, masterActions)}
-                        </>
-                      )}
-                      {wOpp.length>0 && (
-                        <>
-                          <div style={{ padding:'10px 4px 4px' }}>
-                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
-                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo). The Estimate Sent follow-ups were retired in issue 240 step 3 — Jobber sends its own.</p>
-                          </div>
-                          {renderRowsCard(wOpp, masterActions)}
-                        </>
-                      )}
-                      {wOther.length>0 && (
-                        <>
-                          <div style={{ padding:'10px 4px 4px' }}>
-                            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
-                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom sequences.</p>
-                          </div>
-                          {renderRowsCard(wOther, masterActions)}
-                        </>
-                      )}
-                    </>
-                  )}
-
-                  {/* My Templates sub-group (per-location, editable) */}
-                  <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'14px 4px 6px' }}>✏️ Your Custom Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· only your location uses these</span></p>
-                  {typeCustoms.length===0 ? (
-                    <div style={{ background:'white', padding:'16px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
-                      {/* "Duplicate a master above" only holds when there IS
-                          one. Every call master in production is a quarantined
-                          Gen 1 row (is_active=false), so for call scripts the
-                          masters group renders nothing and that sentence sent
-                          the owner looking for a button that is not there
-                          (issue 240 step 6). */}
-                      <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-                        No {heading.toLowerCase()} yet.{' '}
-                        {typeMasters.length > 0
-                          ? 'Duplicate a master above or create one from scratch.'
-                          : 'Create one from scratch below.'}
-                      </p>
-                    </div>
-                  ) : renderRowsCard(typeCustoms, customActions)}
-                  <button onClick={()=>setEditingTemplate('new')} style={{ width:'100%', maxWidth:CONTROL_W.action, marginTop:'8px', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
   // ─── THE SIDEBAR (issue 246 step 1) ───
   //
   // Six horizontal tabs became a grouped rail. The sections did not change;
@@ -24666,7 +24454,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 inside them — the path-style radios, Customize, Reset to
                 master, the step rows with Preview/Edit/Change, + Add step,
                 the delay chips — and the Email Templates section
-                (renderTemplateTypeSections with the email slice).
+                (the old shared template renderer, with the email slice).
 
                 Each email now has exactly ONE place it can be edited: the
                 list above. What the tiles used to do lives there —
@@ -24686,34 +24474,40 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                     and the whole-path version deleted an owner's entire fork
                     in one click that never said so.
 
-                Texts & scripts is untouched: renderTemplateTypeSections is
-                still called there with the call slice, so call scripts stay
-                creatable, editable and deletable. ───────────────────── */}
+                Call scripts have their own page (slice 5, 2026-11-13); the
+                shared renderer this note used to mention is gone. ───── */}
 
           </div>
           )
         })()}
 
-        {/* ── Call scripts (Settings slice 4, 2026-11-13) — the call half of
-            what was "Texts and scripts" (issue 240 step 4), on its own. The
-            texts half was TextsComingSoon, a picture of a message that is not
-            sent; it is no longer mounted (Text messaging is a greyed nav item
-            instead). The scripts themselves are untouched: same renderer,
-            same create, edit and delete. NOT restyled. */}
-        {activeSection==='scripts'&&(
-          <div style={{ paddingBottom:'12px' }}>
+        {/* ── Call scripts (Settings slice 5, 2026-11-13) — in the new look
+            (components/settings/CallScripts.jsx). The scripts are still
+            `templates` rows of type 'call': Bee Organized's own for every
+            location, and the location's own, which its owner can write,
+            change and delete as before. The {{braces}} in a script are NOT
+            merge tags and are never filled in by Bee Hub.
 
-            <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Call scripts</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Call scripts are notes for you — nothing on this tab is sent to a client.</p>
-            </div>
-
-            {/* Call scripts stay exactly as they were: create, edit, delete
-                through the same renderer, now given only the call section. */}
-            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.call])}
-
-          </div>
-        )}
+            Who is who, unchanged: only an owner is shown this section
+            (ownerConfig, SECTION_GROUPS). Corporate, who is handed every
+            location's rows, sees the location they are looking at — and with
+            no location chosen can read Bee Organized's scripts but has no
+            location to write one for. Only a super admin as themselves may
+            change one of Bee Organized's, as the old editor allowed. */}
+        {activeSection==='scripts'&&(()=>{
+          const elevatedCaller = appRole==='super_admin' || appRole==='corporate'
+          const canWriteOwn = ownerConfig && (!elevatedCaller || !!realLocId)
+          return (
+            <SUI.SettingsPage>
+              <SUI.PageHeader title="Call scripts" intro={SCUI.NOT_SENT_LINE} />
+              <SCUI.CallScripts
+                templates={templates} loading={templatesLoading} error={templatesError}
+                locationId={elevatedCaller ? realLocId : null}
+                canEdit={canWriteOwn} canCopy={canWriteOwn} canEditMasters={isSuperAdmin}
+                onCreate={createCallScript} onUpdate={updateCallScript} onDelete={deleteCallScript} onCopy={copyCallScript} />
+            </SUI.SettingsPage>
+          )
+        })()}
 
         </>)}
 
@@ -24787,23 +24581,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body, button)
             setEmailTemplateEditor(null)
           }}
-        />
-      )}
-      {/* Preview a template — restored in issue 240 step 11. Step 4's splice
-          took this mount out with the tab rewrite while leaving the Preview
-          buttons and setPreviewTemplate in place, so Preview has silently done
-          nothing since. The unbound sweep cannot see this class: the state
-          still resolves, it just has no reader. */}
-      {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
-      {/* Template editor popup */}
-      {editingTemplate&&(
-        <TemplateEditorPopup
-          template={editingTemplate==='new' ? null : editingTemplate.tpl}
-          isNew={editingTemplate==='new'}
-          isMasterEdit={isSuperAdmin && editingTemplate!=='new'}
-          settings={settings}
-          onSave={saveTemplate}
-          onClose={()=>setEditingTemplate(null)}
         />
       )}
       {/* Fork-on-edit confirm — a master-backed path forks (clones) before any

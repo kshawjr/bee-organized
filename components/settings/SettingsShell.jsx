@@ -542,7 +542,7 @@ export const IconSignOut = IconLogout
 // here. BeeHub.jsx paints the screen PAGE_BG behind one of these and leaves
 // the old cream behind every other section, so a short rebuilt page has no
 // band of the old colour under it.
-export const REBUILT_SECTIONS = ['profile', 'team', 'location', 'tags', 'connections', 'texting']
+export const REBUILT_SECTIONS = ['profile', 'team', 'location', 'tags', 'connections', 'texting', 'scripts']
 export const PAGE_BG = T.background
 export const MUTED_FG = T.mutedFg
 export const FG = T.foreground

@@ -128,19 +128,15 @@ describe('the retired surfaces do not render on Emails', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Texts & scripts is untouched — call scripts still fully editable', () => {
+  // 2026-11-13 (Settings slice 5): the call section is its own page in the
+  // new look (lib/settings-call-scripts.test.tsx clicks through all three).
   it('the call section renders with create, edit and delete', async () => {
     await mount('texts')
-    const sub = Array.from(container.querySelectorAll('*')).find(
-      el => el.textContent?.trim().startsWith('Talking points for you'))
-    expect(sub, 'the Call Scripts section').toBeTruthy()
-    for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
-      await act(async () => { el!.click() })
-      if ((container.textContent || '').includes('My Script')) break
-    }
+    expect(container.textContent).toContain('My Script')
     const b = buttons()
     expect(b).toContain('Edit')       // own-custom is editable in place
     expect(b).toContain('Delete')
-    expect(b.some(x => x?.includes('Create Template'))).toBe(true)
+    expect(b).toContain('New script')
   })
 
   it('and it did NOT inherit the email slice on the way through', async () => {

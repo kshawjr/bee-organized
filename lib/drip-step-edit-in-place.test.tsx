@@ -370,57 +370,29 @@ describe('a commit failure leaves the sequence unchanged', () => {
   })
 })
 
-// ═══════════════════════════════════════════════════════════════════════════
-describe('preview parity — all 14 send-time variables render', () => {
-  it('Preview fills rate, owner name, and both booking tags — no holes, no literal {{…}}', async () => {
-    // Texts & scripts, whose Preview button is the one still standing. It
-    // opens TemplatePreviewModal, which shares RenderedTemplatePreview (and
-    // therefore applyPreviewVars) with the peek modal the tiles used — so this
-    // pins the same fill, and additionally proves the modal is MOUNTED. It was
-    // not: step 4's splice dropped the mount while leaving the buttons, and
-    // step 11 restored it.
+// ═════════════════════════════════════════════════════════════════════════════
+// The "preview parity" test was here: it opened a CALL SCRIPT's Preview in
+// Settings and checked all 14 send-time variables were filled in. That was
+// the wrong thing for a call script to do — its {{braces}} are blanks for the
+// person on the call, not merge tags — and Settings slice 5 (2026-11-13)
+// removed that Preview. So the same script now pins the opposite: on the
+// Call scripts page every one of the 14 is shown exactly as written.
+// The fill itself (all 14, no holes) is pinned where it belongs, in
+// lib/preview-vars.test.ts.
+describe('a call script is never filled in — all 14 names stay as written', () => {
+  it('the Call scripts page shows every {{…}} intact, with none of this location’s values', async () => {
     await act(async () => {
       root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
-    await act(async () => {})
-    // The type sections start collapsed. The header is a div with onClick, so
-    // clicking any descendant bubbles to it.
-    // The DEEPEST match: the outermost wrapper shares the same text but holds
-    // no handler, and a click on a parent does not reach the child.
-    const hdr = Array.from(container.querySelectorAll('div'))
-      .filter(d => (d.textContent || '').startsWith('\u25b6\ud83d\udcde Call Scripts')).pop()
-    expect(hdr, 'the Call Scripts section header').toBeTruthy()
-    await act(async () => { (hdr as HTMLElement).click() })
-    await clickText('Preview')
-    await act(async () => {})
-
-    // Scoped to the PREVIEW MODAL, which is what this test is about. It used
-    // to scrape the whole screen, which worked only because nothing else
-    // rendered a raw body. Issue 240 step 7 added the read-only Emails list,
-    // which shows bodies with their {{tokens}} INTACT on purpose — it explains
-    // them rather than filling them, because a settings list has no lead to
-    // fill them from. A screen-wide scrape would now fail on that, testing the
-    // wrong surface.
-    // The modal carries no role attribute, so scope by its own header: it
-    // names the template and states who the mail is from.
-    // lastIndexOf, not indexOf: the LIST row above names the template too, and
-    // it shows the body with its {{tokens}} intact on purpose. Anchoring to
-    // the first occurrence would scrape the unfilled copy and always fail.
-    const all = container.textContent || ''
-    const at = all.lastIndexOf('All Tags Script')
-    expect(at, 'the preview modal is open').toBeGreaterThan(-1)
-    const t = all.slice(at)
-    // Every one of the 14 rendered as key=[value]; a hole would read key=[].
-    for (const key of ALL_14) {
-      expect(t, `hole for {{${key}}}`).not.toContain(`${key}=[]`)
-    }
-    expect(t).not.toContain('{{')
-
-    // The named gaps from the 7-variable preview are filled with THIS
-    // location's real values.
-    expect(t).toContain('rate_per_hour=[$88/hr]')
-    expect(t).toContain('owner_name=[Pat Owner]')
-    expect(t).toContain('book_assessment_link=[https://cal.example/loc]')
-    expect(t).toContain('owner_booking_link=[https://cal.example/loc]')
+    await act(async () => { await new Promise(r => setTimeout(r, 15)) })
+    const page = container.querySelector('[data-call-scripts]') as HTMLElement
+    expect(page, 'the Call scripts page').toBeTruthy()
+    const t = page.textContent || ''
+    expect(t).toContain('All Tags Script')
+    for (const key of ALL_14) expect(t, key).toContain(`${key}=[{{${key}}}]`)
+    expect(t).not.toContain('$88/hr')
+    expect(t).not.toContain('Pat Owner')
+    expect(t).not.toContain('https://cal.example/loc')
+    expect(Array.from(page.querySelectorAll('button')).map(b => b.textContent)).not.toContain('Preview')
   })
 })

@@ -349,16 +349,8 @@ describe('quarantined templates disappear from the template sections', () => {
       root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
     await act(async () => {})
-    // The section starts collapsed and its header is a plain div, so walk up
-    // from the sub-label and click ancestors until the list opens.
-    const sub = Array.from(container.querySelectorAll('*')).find(
-      el => el.textContent?.trim().startsWith('Talking points for you'),
-    )
-    expect(sub, 'the Call Scripts section header').toBeTruthy()
-    for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
-      await act(async () => { el!.click() })
-      if ((container.textContent || '').includes('GEN2 Intro Script')) break
-    }
+    // 2026-11-13 (Settings slice 5): the Call scripts page lists them directly.
+    await act(async () => { await new Promise(r => setTimeout(r, 10)) })
 
     const t = container.textContent || ''
     expect(t, 'quarantined row should be hidden').not.toContain('GEN1 Script · Avail + Calendar + Phone')

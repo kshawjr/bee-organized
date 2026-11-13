@@ -117,8 +117,11 @@ describe('every modal SettingsScreen mounts has a live mount AND a live trigger'
     // Remove one email after the first (lib/drip-followups.ts, 2026-09-30).
     'RemoveEmailModal',
     'EmailTemplateEditor',
-    'TemplatePreviewModal',
-    'TemplateEditorPopup',
+    // TemplatePreviewModal and TemplateEditorPopup LEFT Settings 2026-11-13
+    // (slice 5): Call scripts, the last thing here that used them, has its own
+    // page and editor. Removed from this list on purpose;
+    // lib/settings-call-scripts.test.tsx pins that nothing in Settings mounts
+    // them (the preview filled {{braces}} with a sample client's details).
     'ForkConfirmModal',
     'DripPathStepEditor',
     'AddSeatsModal',
@@ -171,42 +174,10 @@ describe('every modal SettingsScreen mounts has a live mount AND a live trigger'
     }
   })
 
-  it("LIVE: the Preview button opens TemplatePreviewModal — the exact control that died in 240 step 4", async () => {
-    // A source pin would have passed all seven commits that bug survived, so
-    // this one clicks. Preview lives on Texts and scripts (call scripts).
-    ;(globalThis.fetch as any) = vi.fn(async (url: string) => ({
-      ok: true, status: 200,
-      json: async () => url.includes('/api/templates')
-        // The body is long on purpose: the LIST ROW shows a truncated
-        // preview of it, so a short body would make this test pass on the row
-        // alone and prove nothing about the modal. Only the modal renders the
-        // tail sentence.
-        ? { templates: [{ id: 't1', legacy_id: 'call-1', name: 'First call', type: 'call', subject: 'Hi', body: 'Say hello. ' + 'Then work through the checklist together. '.repeat(8) + 'ENDOFSCRIPTMARKER', is_active: true, is_master: false, is_own_custom: true }] }
-        : {},
-    }))
-    await mount('texts')
+  // The LIVE test that clicked Preview on a call script was here. The button
+  // and the pop-up are gone from Settings (slice 5); the page that replaced
+  // them is clicked through in lib/settings-call-scripts.test.tsx.
 
-    // Call Scripts renders collapsed — walk up from its sub-label and click
-    // until the row appears (same approach as lib/master-template-grouping).
-    const sub = Array.from(container.querySelectorAll('*')).find(
-      el => el.textContent?.trim().startsWith('Talking points for you'),
-    )
-    expect(sub, 'the Call Scripts section header').toBeTruthy()
-    for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
-      await act(async () => { el!.click() })
-      if ((container.textContent || '').includes('First call')) break
-    }
-
-    const preview = Array.from(container.querySelectorAll('button'))
-      .find(b => b.textContent?.trim() === 'Preview') as HTMLButtonElement
-    expect(preview, 'a Preview button on Texts and scripts').toBeTruthy()
-    expect(container.textContent, 'the row shows a truncated preview only').not.toContain('ENDOFSCRIPTMARKER')
-
-    await act(async () => { preview.click() })
-    // The modal renders the WHOLE body — proof of a live mount, not just a
-    // state variable that resolved.
-    expect(container.textContent, 'TemplatePreviewModal did not open').toContain('ENDOFSCRIPTMARKER')
-  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -282,7 +253,7 @@ describe('mobile drill-down: list → section → back → list', () => {
     })
     expect(hidden(drill())).toBe(true)
     // An old ?section=texts link lands on Call scripts (slice 4).
-    expect(container.textContent).toContain('Call scripts are notes for you')
+    expect(container.textContent).toContain('Nothing here is sent to anyone')
   })
 
   it('a retired key arriving by popstate resolves rather than blanking the pane', async () => {

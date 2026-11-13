@@ -579,15 +579,20 @@ describe('Lato and Arvo cannot leak', () => {
     expect(rootEl.style.fontFamily).not.toMatch(newFace)
   })
 
-  // Location was the example here until it was rebuilt (slice 3). Call
-  // scripts was split out in slice 4 and deliberately NOT restyled.
-  it('an unrebuilt section (Call scripts) carries no new font and sits outside every data-settings-ui', async () => {
-    await mount({ franchiseRole: 'owner', initialSection: 'scripts' })
+  // Location was the example here until it was rebuilt (slice 3), then Call
+  // scripts until slice 5. Jobber's own screen, behind its Connections card,
+  // is still in the old look.
+  it('an unrebuilt section (Jobber) carries no new font and sits outside every data-settings-ui', async () => {
+    await mount({ franchiseRole: 'owner', initialSection: 'jobber' })
     const body = pane().lastElementChild as HTMLElement
-    expect(body.textContent).toContain('Call scripts are notes for you')
-    expect(body.querySelector('[data-settings-ui]'), 'no rebuilt piece inside it').toBeNull()
+    expect(body.textContent).toContain('the client import that runs from it')
+    // The one rebuilt piece on this screen is the "All connections" link
+    // above the card; the card itself is outside it.
+    expect(Array.from(body.querySelectorAll('[data-settings-ui]')).map(e => (e.textContent || '').trim()), 'the only rebuilt piece is the back link').toEqual(['All connections'])
     expect(body.closest('[data-settings-ui]'), 'not inside a rebuilt piece').toBeNull()
-    for (const el of Array.from(body.querySelectorAll('*')) as HTMLElement[]) {
+    const outside = (Array.from(body.querySelectorAll('*')) as HTMLElement[]).filter(el => !el.closest('[data-settings-ui]'))
+    expect(outside.length).toBeGreaterThan(10)
+    for (const el of outside) {
       expect(el.style?.fontFamily || '', el.tagName).not.toMatch(newFace)
     }
   })
@@ -663,11 +668,11 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     const importers = (needle: string) =>
       [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => readFileSync(p, 'utf8').includes(needle)).sort()
     // Slice 2 added the Team pieces and restyled the Bees card.
-    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
     // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
     // ONE colour from the tokens, the gold of its "Change this territory"
     // label. It names no font: see the Lato test above.
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })
@@ -689,16 +694,19 @@ describe('the new pieces are used by Settings and by nothing else', () => {
       await mount({ franchiseRole: 'owner', initialSection: section })
       expect(is(bg(), T.background), `${section}: ${bg()}`).toBe(true)
     }
-    // Emails paints its own background; Call scripts and the three screens
-    // behind a Connections card are not rebuilt.
-    for (const section of ['emails', 'scripts', 'slack', 'jobber', 'mailchimp']) {
+    // Call scripts: slice 5.
+    await mount({ franchiseRole: 'owner', initialSection: 'scripts' })
+    expect(is(bg(), T.background), `scripts: ${bg()}`).toBe(true)
+    // Emails paints its own background; the three screens behind a
+    // Connections card are not rebuilt.
+    for (const section of ['emails', 'slack', 'jobber', 'mailchimp']) {
       await mount({ franchiseRole: 'owner', initialSection: section })
       expect(is(bg(), '#f7f5f0'), `${section}: ${bg()}`).toBe(true)
     }
     // The no-access notice is old-look too.
     await mount({ franchiseRole: 'manager', initialSection: 'emails' })
     expect(is(bg(), '#f7f5f0'), `notice: ${bg()}`).toBe(true)
-    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team', 'location', 'tags', 'connections', 'texting'])
+    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team', 'location', 'tags', 'connections', 'texting', 'scripts'])
   })
 
   it('no new dependency: the shell imports React, the tokens and Bee Hub\'s own icons — nothing else', () => {
