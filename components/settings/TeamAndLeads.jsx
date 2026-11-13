@@ -1,6 +1,6 @@
 // components/settings/TeamAndLeads.jsx
 // ─────────────────────────────────────────────────────────────
-// Settings → Team and leads — slice 2 of 4 of the Settings rebuild
+// Settings → Team — slice 2 of 4 of the Settings rebuild
 // (2026-11-13, the export's `Team` page in src/components/settings/pages.tsx).
 //
 // The export's page is today's Team and Seats with the New leads section

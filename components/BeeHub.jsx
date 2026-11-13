@@ -20844,7 +20844,7 @@ function SmsVoiceInfoModal({ onClose }) {
 
 
 // Rebuilt to the new look in Settings slice 2 (2026-11-13): this is the SEATS
-// card of Settings → Team and leads. Everything it DOES is unchanged — the
+// card of Settings → Team. Everything it DOES is unchanged — the
 // roster, the invite, remove and restore, the Jobber sync, the open seats.
 // What is new: each person carries their "New lead emails" switch
 // (TUI.useLeadRecipients, the calls the retired New leads section made), the
@@ -22302,7 +22302,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // 'yourteam' (issue 246 step 1) split three ways, and the largest part — who
   // hears about a new lead — went to Notifications › New leads. That section
   // retired in its turn (Settings slice 2, 2026-11-13): its switches now sit
-  // under each person on Team and leads. So BOTH old keys land on 'team',
+  // under each person on Team. So BOTH old keys land on 'team',
   // which is where the thing they were for now is. Neither may point at
   // 'newleads': that key draws nothing any more.
   const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'team', newleads:'team' }
@@ -23832,13 +23832,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // 'My Location' in the mobile select — the same surface with two names
       // depending on the width of your screen.
       ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
-      // Team and leads (Team and Seats until 2026-11-13, when New leads folded
+      // Team (Team and Seats until 2026-11-13, when New leads folded
       // into it): ONE screen, two halves. Seats (logins, billed, and who is
       // told about a new lead) stay owner-only — `canSeeSeats` gates that half INSIDE the
       // screen and the seats routes refuse a manager on the server. Bees (a
       // roster: no logins, nobody billed) are owner AND manager, like Tags.
       // So a manager gets this item and sees the Bees half only.
-      ...(canSeeTeamScreen ? [{ key:'team', label:'Team and leads', icon:'👥' }] : []),
+      ...(canSeeTeamScreen ? [{ key:'team', label:'Team', icon:'👥' }] : []),
       // A location's own tags (2026-10-16): owner AND manager — the same
       // people who may create them. Allowlist, like ownerConfig.
       ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
@@ -24085,7 +24085,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             {/* Not here, and each moved for a different reason:
                   the sending identity → Emails (issue 246 step 1)
-                  who hears about a new lead → Team and leads
+                  who hears about a new lead → Team
                   Jobber → Connections › Jobber; it was the sole occupant of
                     an "Integrations" header on this section, which is the
                     definition of a thing filed under the wrong heading. */}
@@ -24157,7 +24157,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               {/* The page lays its blocks out itself (24px apart); this wrapper
                   only names the screen. */}
               <div data-team-screen style={{ display:'flex', flexDirection:'column', gap:'24px', minWidth:0 }}>
-              <SUI.PageHeader title="Team and leads"
+              <SUI.PageHeader title="Team"
                 intro={canSeeSeats
                   ? 'Who signs in, who works your jobs, and who hears about new leads.'
                   : 'The people who work your jobs.'} />
@@ -24344,7 +24344,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             What it still held — who is told about a new lead — is on Team and
             leads, under each person who signs in. Who handles each job type
             had already moved to Emails (2026-10-30). An old 'newleads' or
-            'yourteam' link lands on Team and leads (SETTINGS_RETIRED_SECTIONS). */}
+            'yourteam' link lands on Team (SETTINGS_RETIRED_SECTIONS). */}
 
         {/* ── Connections › Slack (issue 246 step 1) ──────────────────────
             One card, moved out of Your team with its wrapper intact. Slack is
@@ -24359,7 +24359,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               {/* Slack notifications — additive to the new lead emails. New
                   leads ALSO post to the location's Slack channel once the app
                   is installed. */}
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the new lead emails you set on Team and leads.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the new lead emails you set on Team.</p>
             </div>
 
             {/* Half-width: sits at ~half on the wider settings column (auto-fill

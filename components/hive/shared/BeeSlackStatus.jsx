@@ -35,7 +35,7 @@ export function beeSlackNote(sync) {
     case 'add_refused':
       return { tone: 'fail', text: `${sync.bee} is on this job in Bee Hub, but your Slack doesn’t let apps add people to channels. Add them in Slack.` }
     case 'not_in_slack':
-      return { tone: 'info', text: `${sync.bee} is on this job, but nobody in your Slack uses ${sync.email}, so they weren’t added to the channel. Check their email in Settings › Team and leads.` }
+      return { tone: 'info', text: `${sync.bee} is on this job, but nobody in your Slack uses ${sync.email}, so they weren’t added to the channel. Check their email in Settings › Team.` }
     case 'owner_not_in_slack':
       return { tone: 'info', text: `${sync.bee}, the owner, wasn’t added to the channel: nobody in your Slack uses ${sync.email}, the email they sign in to Bee Hub with. Add them in Slack.` }
     case 'owner_not_added':

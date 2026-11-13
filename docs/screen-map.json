@@ -1656,7 +1656,7 @@
     },
     {
       "id": "settings.team",
-      "surface": "Settings → Team and leads — who signs in (seats, invites, billing), who is told about a new lead, and the bees",
+      "surface": "Settings → Team — who signs in (seats, invites, billing), who is told about a new lead, and the bees",
       "nav": "Settings",
       "file": "components/BeeHub.jsx",
       "symbol": "SettingsScreen",
@@ -1941,7 +1941,7 @@
     },
     {
       "id": "settings.new-leads-section",
-      "surface": "Who handles each job type and what it sends as, on Settings → Emails (its 'who is told' half is no longer mounted; that lives on Settings → Team and leads)",
+      "surface": "Who handles each job type and what it sends as, on Settings → Emails (its 'who is told' half is no longer mounted; that lives on Settings → Team)",
       "nav": "Settings",
       "file": "components/BeeHub.jsx",
       "symbol": "NewLeadsSection",
@@ -1983,7 +1983,7 @@
     },
     {
       "id": "settings.team-section",
-      "surface": "The team roster block inside Settings → Team and Seats",
+      "surface": "The team roster block inside Settings → Team",
       "nav": "Settings",
       "file": "components/BeeHub.jsx",
       "symbol": "TeamSection",

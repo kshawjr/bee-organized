@@ -1,6 +1,6 @@
 // components/hive/BeeRosterSettings.jsx
 // ─────────────────────────────────────────────────────────────
-// The Bees card of Settings › Team and leads — the people who work a
+// The Bees card of Settings › Team — the people who work a
 // location's jobs, by name and email. A ROSTER, not logins: nobody here signs
 // in to Bee Hub and nobody is billed. It sits BELOW Seats on that screen and
 // says so in its first line, because that difference is the whole point of

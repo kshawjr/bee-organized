@@ -139,19 +139,24 @@ describe('SettingsScreen sections by franchiseRole', () => {
     }
   })
 
-  it('the item is spelled "Team and leads" — on the nav, and nowhere in the app is it "Team and Leads"', async () => {
+  it('the item is named "Team" — on the nav, and nowhere in the app is it still "Team and leads" or "Team and seats"', async () => {
     await sectionKeys('owner')
     const item = container.querySelector('[data-settings-nav="rail"] [data-section="team"]')!
-    expect(item.textContent).toContain('Team and leads')
+    expect(item.textContent).toBe('Team')
     const { readFileSync, readdirSync, statSync } = await import('node:fs')
     const { join } = await import('node:path')
     const walk = (d: string): string[] => readdirSync(d).flatMap(n => {
       const p = join(d, n)
       return statSync(p).isDirectory() ? walk(p) : /\.(jsx?|tsx?)$/.test(n) && !/\.test\./.test(n) ? [p] : []
     })
-    const offenders = [...walk('components'), ...walk('app')].filter(p => /Team (and|&) seats/.test(readFileSync(p, 'utf8')))
+    // 2026-11-13: renamed twice in a day (Team and Seats → Team-and-leads →
+    // Team). The middle name must be gone from everything that ships,
+    // comments included; lib is walked too because two of its files write
+    // messages owners read. ("Team and Seats", capital S, survives only in
+    // comments that say what the screen used to be called.)
+    const offenders = [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => /Team (and|&) (seats|leads)/i.test(readFileSync(p, 'utf8').replace(/Team and Seats/g, '')))
     expect(offenders).toEqual([])
-    expect(readFileSync('docs/screen-map.json', 'utf8')).not.toMatch(/Team (and|&) seats/)
+    expect(readFileSync('docs/screen-map.json', 'utf8')).not.toMatch(/Team (and|&) (seats|leads)/i)
   })
 
   it("lite_user (franchiseRole 'viewer' — what mapRole actually emits) sees Profile only, no config sections", async () => {
@@ -297,7 +302,7 @@ describe('Team and Seats — two halves, two gates', () => {
     expect(headings()).toEqual([BEES_HEADING])
     expect(container.querySelector('[data-team-bees]')).toBeTruthy()
     // The page's one-line intro drops seats and leads for a manager.
-    expect(container.querySelector('[data-team-screen] header')!.textContent).toBe('Team and leadsThe people who work your jobs.')
+    expect(container.querySelector('[data-team-screen] header')!.textContent).toBe('TeamThe people who work your jobs.')
     // Their half is live — it asked for this location's roster…
     expect(urls()).toContain(BEES_URL)
     // …and the other half is not there.
@@ -376,7 +381,7 @@ describe('groups never render empty (issue 246 step 1)', () => {
     await act(async () => {})
   }
 
-  it('an owner sees all four groups (Notifications went when New leads folded into Team and leads)', async () => {
+  it('an owner sees all four groups (Notifications went when New leads folded into Team)', async () => {
     await mountRole('owner')
     const rail = container.querySelector('[data-settings-nav="rail"]')!
     expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Connections'])

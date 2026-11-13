@@ -152,12 +152,12 @@ describe('each role is offered exactly the sections it was, in both navs', () =>
   })
 
   // Slice 1 changed no name. Slice 2 (2026-11-13) changed two things, both on
-  // Kevin's brief: Team and Seats became Team and leads, and New leads (with
+  // Kevin's brief: Team and Seats became Team, and New leads (with
   // its Notifications group) went, folded into it.
-  it('the names: slice 1\'s list, with Team and leads and no New leads', async () => {
+  it('the names: slice 1\'s list, with Team and no New leads', async () => {
     await mount({ franchiseRole: 'owner' })
     const labels = Array.from(rail().querySelectorAll('[data-section]')).map(b => b.textContent)
-    expect(labels).toEqual(['Profile', 'Location', 'Team and leads', 'Tags', 'Emails', 'Texts and scripts', 'Slack', 'Jobber', 'Mailchimp'])
+    expect(labels).toEqual(['Profile', 'Location', 'Team', 'Tags', 'Emails', 'Texts and scripts', 'Slack', 'Jobber', 'Mailchimp'])
   })
 
   it('the nav has no section list and no role in it — it draws what BeeHub hands it', () => {
@@ -168,7 +168,7 @@ describe('each role is offered exactly the sections it was, in both navs', () =>
     expect(HUB).toContain('<SUI.SettingsDrill groups={SECTION_GROUPS} hidden={mobileDrilled} onOpen={openSection} />')
     // The predicates, word for word as they were on main.
     expect(HUB).toContain("...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),")
-    expect(HUB).toContain("...(canSeeTeamScreen ? [{ key:'team', label:'Team and leads', icon:'👥' }] : []),")
+    expect(HUB).toContain("...(canSeeTeamScreen ? [{ key:'team', label:'Team', icon:'👥' }] : []),")
     expect(HUB).toContain("...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),")
     expect(HUB).toContain("{ title:'Client messages', items: ownerConfig ? [")
     expect(HUB).not.toContain("title:'Notifications'")
@@ -621,7 +621,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
   // The component ends at the first line that is exactly "}" after its start.
   const end = lines.findIndex((l, i) => i > start && l === '}')
 
-  // Slice 2: TeamSection is the Seats card of Settings → Team and leads and is
+  // Slice 2: TeamSection is the Seats card of Settings → Team and is
   // mounted by SettingsScreen and nothing else, so it is Settings too.
   const tStart = lines.findIndex(l => l.startsWith('export function TeamSection('))
   const tEnd = lines.findIndex((l, i) => i > tStart && l === '}')
@@ -649,7 +649,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
   it('the shell and the shared tokens are imported by Settings files and nothing else', () => {
     const importers = (needle: string) =>
       [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => readFileSync(p, 'utf8').includes(needle)).sort()
-    // Slice 2 added the Team and leads pieces and restyled the Bees card.
+    // Slice 2 added the Team pieces and restyled the Bees card.
     expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/TeamAndLeads.jsx'])
     expect(importers("from '@/components/design/tokens'")).toEqual(['components/hive/BeeRosterSettings.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.

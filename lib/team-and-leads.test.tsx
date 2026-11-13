@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// Settings slice 2 of 4 (2026-11-13): Team and leads.
+// Settings slice 2 of 4 (2026-11-13): Team.
 //
 // Today's Team and Seats with the New leads section folded into it, in the new
 // look. The pieces are components/settings/TeamAndLeads.jsx; the Seats card is
@@ -143,14 +143,14 @@ const RECIPIENT_REQUEST = /notification-recipients|project-type-senders/
 describe('who sees which half', () => {
   it('an owner sees the banner, Seats, then Bees — under one page title', async () => {
     await mount()
-    expect(q('[data-team-screen] h1')!.textContent).toBe('Team and leads')
+    expect(q('[data-team-screen] h1')!.textContent).toBe('Team')
     expect(all('[data-team-screen] h2').map(h => h.textContent)).toEqual(['People who sign in', 'Test Location’s bees'])
     expect(all('[data-team-screen] [data-ssection] > div:first-child p:first-child').map(p => p.textContent)).toEqual(['Seats', 'Bees'])
     const order = ['[data-payment-banner]', '[data-team-seats]', '[data-team-bees]'].map(s => q(s)!)
     expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(railCurrent()).toBe('team')
-    expect(q('[data-settings-nav="rail"] [data-section="team"]')!.textContent).toBe('Team and leads')
+    expect(q('[data-settings-nav="rail"] [data-section="team"]')!.textContent).toBe('Team')
   })
 
   it('a manager sees the Bees half only: one heading, no Seats card, no banner, no switch, and asks the server for nothing about seats or leads', async () => {
@@ -169,7 +169,7 @@ describe('who sees which half', () => {
     for (const t of ['People who sign in', 'Seats', 'New lead emails', 'outside email', 'told about new leads', 'Invite', 'Sync Jobber', 'Billing', 'Sponsored', 'who hears about new leads', 'Who signs in']) {
       expect(pane().textContent, `manager must not see "${t}"`).not.toContain(t)
     }
-    expect(q('[data-team-screen] header')!.textContent).toBe('Team and leadsThe people who work your jobs.')
+    expect(q('[data-team-screen] header')!.textContent).toBe('TeamThe people who work your jobs.')
     // Their half is live…
     expect(calls.map(c => c.url)).toContain(`/api/locations/${LOC}/bees`)
     // …and nothing about who is told was even asked for.
@@ -445,10 +445,10 @@ describe('turning a switch on or off changes exactly what it changed before', ()
 // ═══════════════════════════════════════════════════════════════════════════
 describe('nothing points at New leads any more', () => {
   for (const key of ['newleads', 'yourteam', 'bees', 'billing', 'team']) {
-    it(`an owner arriving on '${key}' lands on Team and leads`, async () => {
+    it(`an owner arriving on '${key}' lands on Team`, async () => {
       await mount({ initialSection: key })
       expect(pane().textContent).not.toContain(NO_ACCESS)
-      expect(q('[data-team-screen] h1')!.textContent).toBe('Team and leads')
+      expect(q('[data-team-screen] h1')!.textContent).toBe('Team')
       expect(railCurrent()).toBe('team')
       expect(q('[data-team-seats]')).toBeTruthy()
       // 'billing' still opens the billing details expanded.
@@ -460,7 +460,7 @@ describe('nothing points at New leads any more', () => {
     window.history.replaceState(null, '', '/?section=newleads')
     await mount({ initialSection: undefined })
     await act(async () => { window.dispatchEvent(new PopStateEvent('popstate')) })
-    expect(q('[data-team-screen] h1')!.textContent).toBe('Team and leads')
+    expect(q('[data-team-screen] h1')!.textContent).toBe('Team')
     expect(pane().textContent).not.toContain(NO_ACCESS)
   })
 
@@ -498,7 +498,7 @@ describe('nothing points at New leads any more', () => {
       }
     }
     await render(<CurrentUserContext.Provider value={owner}><SettingsScreen initialSection="slack" franchiseRole="owner" /></CurrentUserContext.Provider>)
-    expect(pane().textContent).toContain('New leads also post to your Slack channel, on top of the new lead emails you set on Team and leads.')
+    expect(pane().textContent).toContain('New leads also post to your Slack channel, on top of the new lead emails you set on Team.')
   })
 
   it('the messages Bee Hub writes elsewhere name pages that exist', () => {
@@ -511,8 +511,8 @@ describe('nothing points at New leads any more', () => {
     }
     expect(read('lib/sender-domain.ts')).toContain('in Settings → Emails, under Who your emails come from.')
     // Two messages named this page by its old title.
-    expect(read('components/hive/shared/BeeSlackStatus.jsx')).toContain('Check their email in Settings › Team and leads.')
-    expect(read('app/api/engagements/[id]/bees/route.ts')).toContain('bring them back in Settings › Team and leads first.')
+    expect(read('components/hive/shared/BeeSlackStatus.jsx')).toContain('Check their email in Settings › Team.')
+    expect(read('app/api/engagements/[id]/bees/route.ts')).toContain('bring them back in Settings › Team first.')
     for (const f of ['components/hive/shared/BeeSlackStatus.jsx', 'app/api/engagements/[id]/bees/route.ts']) expect(read(f), f).not.toContain('Team and Seats')
   })
 })

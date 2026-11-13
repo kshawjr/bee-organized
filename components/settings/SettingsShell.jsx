@@ -63,7 +63,7 @@ export const IconLock = draw(<><rect x="5" y="11" width="14" height="10" rx="2" 
 export const IconKey = draw(<><circle cx="8" cy="15" r="4" /><path d="M11 12l9 -9" /><path d="M17 6l3 3" /><path d="M14 9l2 2" /></>)
 export const IconCircleCheck = draw(<><circle cx="12" cy="12" r="9" /><path d="M8.5 12.5l2.5 2.5l4.5 -5" /></>)
 export const IconChevronLeft = draw(<path d="M15 6l-6 6l6 6" />)
-// Slice 2 (Team and leads).
+// Slice 2 (Team).
 export const IconTrash = draw(<><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7V4a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></>)
 export const IconCard = draw(<><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M3 10h18" /><path d="M7 15h.01" /><path d="M11 15h2" /></>)
 export const IconRefresh = draw(<><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></>)

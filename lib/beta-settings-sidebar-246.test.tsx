@@ -289,7 +289,7 @@ describe('mobile drill-down: list → section → back → list', () => {
       window.history.replaceState({}, '', '/settings?section=yourteam')
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
-    // 'yourteam' lands on Team and leads since New leads folded into it (2026-11-13).
+    // 'yourteam' lands on Team since New leads folded into it (2026-11-13).
     expect(container.textContent).toContain('who hears about new leads')
     expect(container.textContent).not.toContain("You don't have access to this section")
   })
