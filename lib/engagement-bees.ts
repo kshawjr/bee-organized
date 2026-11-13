@@ -43,6 +43,7 @@ export const channelColumnsMissing = (msg: unknown) => notSetUp(msg, /slack_chan
 // create dialog can preview the exact name).
 export { SLACK_CHANNEL_MAX, slugForSlack, slackJobChannelName, isValidSlackChannelName } from '@/lib/slack-channel-name'
 import { slackJobChannelName } from '@/lib/slack-channel-name'
+import { postJobCard, type CardResult } from '@/lib/job-channel-card'
 
 // ── One Slack Web API call ───────────────────────────────────
 // Never throws. A transport failure comes back as Slack-shaped
@@ -339,18 +340,8 @@ export async function readBeeRow(db: Db, beeId: string): Promise<BeeRow | null> 
 }
 
 // ── Part B: making the channel ───────────────────────────────
-const slackEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-export function openingMessage(args: { clientName: string | null; projectType: string | null; url: string | null }): string {
-  const who = slackEscape(args.clientName || 'this client')
-  const what = args.projectType ? ` — ${slackEscape(args.projectType)}` : ''
-  const lines = [`This is the channel for *${who}*${what}.`]
-  if (args.url) lines.push(`<${args.url}|Open the job in Bee Hub>`)
-  return lines.join('\n')
-}
-
 export type CreateResult =
-  | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[] }
+  | { ok: true; channel: { id: string; name: string }; already: boolean; problems: BeeSlackOutcome[]; owners: { invited: number; notInSlack: number }; ownerProblems?: BeeSlackOutcome[]; card?: CardResult }
   | { ok: false; reason: 'not_set_up_yet' | 'not_ready' | 'closed' | 'scope_lost' | 'name_unavailable' | 'slack_unavailable' | 'store_failed' | 'client_unreadable' }
 
 const NAME_ATTEMPTS = 6
@@ -421,14 +412,19 @@ export async function createJobChannel(
   const owners = await inviteOwners(db, token, eng, created.id)
 
   const url = baseUrl && eng.client_id ? `${baseUrl.replace(/\/$/, '')}/clients/${eng.client_id}?e=${eng.id}` : null
-  const posted = await slackApi(token, 'chat.postMessage', {
-    channel: created.id,
-    text: openingMessage({ clientName, projectType: eng.project_type, url }),
-    unfurl_links: false,
+  // The job card (lib/job-channel-card.ts): the channel's first message,
+  // then pinned. HERE and nowhere else — this branch runs once per channel,
+  // for the caller that made it and won the write above — so a channel never
+  // gets a second card. After the people are in, so nothing about who is in
+  // the channel depends on it. A card that fails to post, or a pin Slack
+  // refuses (no pins:write until the location reconnects), changes nothing:
+  // the channel is made either way.
+  const card = await postJobCard(db, {
+    slackApi, token, channelId: created.id, engagementId: eng.id, locationUuid: eng.location_uuid,
+    clientId: eng.client_id, clientName, projectType: eng.project_type, url,
   })
-  if (!posted.ok) console.warn(`[engagement-bees] opening message engagement=${eng.id} → ${slackErr(posted)}`)
 
-  return { ok: true, already: false, channel: created, problems, owners: { invited: owners.invited, notInSlack: owners.notInSlack }, ownerProblems: owners.missed }
+  return { ok: true, already: false, channel: created, problems, owners: { invited: owners.invited, notInSlack: owners.notInSlack }, ownerProblems: owners.missed, card }
 }
 
 // The location's owners (hub_users role 'owner'), looked up by email in this

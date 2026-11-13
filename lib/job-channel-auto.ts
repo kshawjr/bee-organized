@@ -127,7 +127,7 @@ export type AutoOutcome =
   | { status: 'not_set_up_yet' }
   | { status: 'skipped'; why: 'job_older_than_switch' | 'job_date_unreadable' | 'not_reconnected' | 'no_engagement' | 'closed' | 'has_channel' | 'already_claimed' | 'switch_unreadable' }
   | { status: 'capped'; cap: number }
-  | { status: 'created'; channelId: string; notAdded: number }
+  | { status: 'created'; channelId: string; notAdded: number; card?: 'pinned' | 'not_pinned' | 'not_posted'; cardWhy?: string }
   | { status: 'failed'; reason: string }
 
 const giveBack = async (db: Db, engagementId: string) => {
@@ -193,7 +193,12 @@ export async function autoCreateJobChannel(
   }
   const notAdded = made1.problems.length + (made1.ownerProblems?.length || 0)
   console.log(`[job-channel-auto] made engagement=${engagementId} channel=${made1.channel.id} not_added=${notAdded}`)
-  return { status: 'created', channelId: made1.channel.id, notAdded }
+  // The job card rides on createJobChannel, so the automatic path posts the
+  // same card as the Slack mark. Reported here so the log says when a pin was
+  // refused (nobody is on screen to see it).
+  const c = made1.card
+  const card = !c ? undefined : c.pinned ? 'pinned' as const : c.posted ? 'not_pinned' as const : 'not_posted' as const
+  return { status: 'created', channelId: made1.channel.id, notAdded, ...(card ? { card, cardWhy: c?.pinError || c?.postError } : {}) }
 }
 
 // Never throws: a fault here must not fail the job write it rides on.
@@ -211,7 +216,10 @@ export async function autoCreateJobChannelSafely(db: Db, args: Parameters<typeof
 export function autoNote(o: AutoOutcome): string | null {
   switch (o.status) {
     case 'off': case 'not_set_up_yet': return null
-    case 'created': return `auto channel made${o.notAdded ? `, ${o.notAdded} not added` : ''}`
+    case 'created': {
+      const card = o.card === 'not_pinned' ? `, card not pinned (${o.cardWhy || 'unknown'})` : o.card === 'not_posted' ? `, card NOT posted (${o.cardWhy || 'unknown'})` : ''
+      return `auto channel made${o.notAdded ? `, ${o.notAdded} not added` : ''}${card}`
+    }
     case 'capped': return `auto channel NOT made — daily ceiling of ${o.cap} reached`
     case 'failed': return `auto channel not made — ${o.reason}`
     case 'skipped': return o.why === 'has_channel' || o.why === 'already_claimed' ? null : `auto channel skipped — ${o.why}`

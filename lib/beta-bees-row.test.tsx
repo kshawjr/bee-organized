@@ -609,10 +609,13 @@ describe('slice 1’s mirror is untouched, by fingerprint', () => {
   // (Their behaviour is pinned by lib/beta-jobber-crew-mirror.test.ts and
   // lib/beta-job-channels.test.tsx; this pins that nobody edited them here.)
   // (lib/jobber-webhook-handlers.ts was edited on purpose in slice 3, to call
-  // automatic job channels from JOB_CREATE; its hash here is that version.)
+  // automatic job channels from JOB_CREATE; its hash here is that version.
+  // lib/engagement-bees.ts was edited on purpose for the pinned job card: the
+  // opening message became the card. Who is in a channel is untouched —
+  // lib/beta-job-channel-card.test.ts pins that.)
   const PUSHED: Record<string, string> = {
     'lib/jobber-crew-mirror.ts': 'f3df7822fb40c77cfbb8fe5e2abfc6192fdf28855eaa9a64314f082d417ad0ef',
-    'lib/engagement-bees.ts': '327eea0f0d927f982819d6077ad05b912e6a70bccdc2e006e656f3db587ea0f6',
+    'lib/engagement-bees.ts': '3e44b3965721faa500bb90d5535e517b2f3335bf16f5ffcba880d6d84b619f9a',
     'lib/jobber-webhook-handlers.ts': '4252fc55e6b33424cfb62f03a8a7fbfa9db022d0dc6701114c68eca69e528208',
     'app/api/cron/job-channels/route.ts': 'bec11c38d6fbab16104a897ad4444031534d92bf85db4238f207636e00705b60',
     'lib/location-bees.ts': 'a8870029550a48572bc08ae6a01ada11d60f468f86afffef1aef2d88b26450b7',

@@ -157,7 +157,8 @@ const slackFetch = vi.fn(async (url: string, init: any) => {
     slack.taken.add(body.name)
     return ok({ channel: { id, name: body.name } })
   }
-  if (method === 'chat.postMessage') return ok()
+  if (method === 'chat.postMessage') return ok({ ts: `1700000000.${String(slack.calls.length).padStart(6, '0')}` })
+  if (method === 'pins.add') return ok()
   const ch = slack.channels.get(body.channel)
   if (!ch) return no('channel_not_found')
   if (method === 'conversations.archive') { if (ch.archived) return no('already_archived'); ch.archived = true; ch.members.delete('UBOT'); return ok() }

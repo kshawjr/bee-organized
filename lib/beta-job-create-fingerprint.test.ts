@@ -182,7 +182,8 @@ const slackFetch = async (url: string, init: any) => {
   if (!ch) return no('channel_not_found')
   if (method === 'conversations.invite') { if (ch.members.has(body.users)) return no('already_in_channel'); ch.members.add(body.users); return ok() }
   if (method === 'conversations.kick') { if (!ch.members.has(body.user)) return no('not_in_channel'); ch.members.delete(body.user); return ok() }
-  if (method === 'chat.postMessage') return ok()
+  if (method === 'chat.postMessage') return ok({ ts: `1700000000.${String(slack.calls.length).padStart(6, '0')}` })
+  if (method === 'pins.add') return ok()
   if (method === 'conversations.archive') { ch.archived = true; return ok() }
   if (method === 'conversations.unarchive') { ch.archived = false; return ok() }
   return no('unknown_method')

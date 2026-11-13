@@ -45,8 +45,13 @@ const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 // are public by Kevin's decision, and asking 44 independent owners for write
 // access to their private channels for something never used is a bigger trust
 // ask than it is worth. Private channels later = a second round of reinstalls.
+//
+// pins:write — pin the job card in a job's channel (lib/job-channel-card.ts).
+// It must ALSO be listed under Bot Token Scopes in the Slack app's own
+// settings. A location that connected before this was asked for has no pin
+// permission: its cards are posted and simply not pinned, until it reconnects.
 const SLACK_SCOPES =
-  'chat:write,chat:write.public,channels:read,channels:manage,incoming-webhook,users:read,users:read.email'
+  'chat:write,chat:write.public,channels:read,channels:manage,incoming-webhook,users:read,users:read.email,pins:write'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
