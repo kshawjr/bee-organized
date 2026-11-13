@@ -13,11 +13,13 @@
 // write ("Log voicemail" is one glance; "Log" was a shrug).
 //
 // The OUTCOME row writes touchpoints.status — free text in the schema
-// (no CHECK), whitelisted straight through the route, and ALREADY
-// rendered by Timeline (it underscore-splits the value), so 'no_answer'
-// shows as "Status: no answer" with zero backend work. It stays optional
-// and always visible: hiding it per-method would trade a dead chip for a
-// jumping layout, and "no answer" is meaningful on a text too.
+// (no CHECK), whitelisted straight through the route. The words, and the
+// rule for SHOWING them, live in shared/touchOutcome.js: this comment used
+// to say the outcome was "already rendered by Timeline … with zero backend
+// work", which was true of one place and false of Recent activity, so for
+// four months it was saved and never shown. It stays optional and always
+// visible: hiding it per-method would trade a dead chip for a jumping
+// layout, and "no answer" is meaningful on a text too.
 //
 // THIS COMPONENT DOES NOT WRITE. onSubmit hands the caller the payload
 // and the caller owns the POST — because the three surfaces genuinely
@@ -39,6 +41,10 @@ import useIsMobile from './shared/useIsMobile'
 import { inp, lbl } from './shared/formKit'
 import { T } from './shared/tokens'
 import { IconPhone, IconMessage, IconMail, IconUsers } from '@/components/ui/icons'
+import { OUTCOMES } from './shared/touchOutcome'
+
+// Re-exported: the picker's vocabulary IS the display vocabulary.
+export { OUTCOMES }
 
 // method → the DB value (touchpoints.method CHECK) + the verb the Log
 // button restates. 'sms' is the column value; "Text" is what people say.
@@ -47,14 +53,6 @@ export const METHODS = [
   { value: 'sms', label: 'Text', icon: IconMessage, verb: 'Log text' },
   { value: 'email', label: 'Email', icon: IconMail, verb: 'Log email' },
   { value: 'in_person', label: 'In person', icon: IconUsers, verb: 'Log in person' },
-]
-
-// touchpoints.status values. Free text in the schema; these three are the
-// vocabulary the UI commits to — Timeline renders them by de-underscoring.
-export const OUTCOMES = [
-  { value: 'reached', label: 'Reached' },
-  { value: 'no_answer', label: 'No answer' },
-  { value: 'voicemail', label: 'Left voicemail' },
 ]
 
 const verbFor = (m) => METHODS.find(x => x.value === m)?.verb || 'Log touchpoint'

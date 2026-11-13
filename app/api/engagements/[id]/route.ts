@@ -114,7 +114,7 @@ export async function GET(
     supabaseService.from('lead_notes').select('id, text, user_label, created_at').eq('lead_id', engagement.client_id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
     // THIS engagement's touchpoints — interleaved with notes in the
     // panel's activity stream.
-    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
+    supabaseService.from('touchpoints').select('id, kind, method, label, status, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
     // Location name for the v2 masthead's client line; jobber_access_token
     // presence tells the assignee picker whether to mark unmapped users;
     // reviews_link feeds the Close-Won wizard's Google-review offer.

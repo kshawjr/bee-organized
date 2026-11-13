@@ -38,6 +38,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { formatInboxAge, formatInboxFuture, fmtShort, fmtShortTime, fmtMoney } from './engagementStatus'
 import { isWrittenOff } from './writtenOff'
 import { T } from './tokens'
+import { outcomeLabel, withOutcome } from './touchOutcome'
 import {
   IconMail, IconPhone, IconCalendar, IconClock, IconFileText, IconHammer,
   IconFileInvoice, IconInbox, IconCheck, IconChevronRight,
@@ -106,12 +107,17 @@ export function buildTimelineItems(agg, drips, { engagementId = null, nowMs = Da
         summary: t.label || 'System', detail: { notes: t.notes || null },
       })
     } else {
-      // reach_out / note kinds — human touches
+      // reach_out / note kinds — human touches. The outcome ("No answer")
+      // rides on the ROW, not only inside the opened detail: it used to be
+      // one tap away, which for a list people skim is the same as absent.
+      // A status that is not a call outcome ('done' on a note, 'pending' on
+      // an old Follow-up row) keeps the raw "Status:" line it always had.
       const isEmail = t.method === 'email'
+      const outcome = outcomeLabel(t)
       items.push({
         id: `tp-${t.id}`, ts, type: isEmail ? 'email' : 'call', category: isEmail ? 'email' : 'call',
-        summary: METHOD_LABEL[t.method] || t.label || 'Reach-out',
-        detail: { method: t.method || null, status: t.status || null, notes: t.notes || null },
+        summary: withOutcome(METHOD_LABEL[t.method] || t.label || 'Reach-out', t),
+        detail: { method: t.method || null, outcome, status: outcome ? null : (t.status || null), notes: t.notes || null },
       })
     }
   }
@@ -342,6 +348,7 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
             {d.body && <DetailLine>{d.body}</DetailLine>}
             {d.author && <DetailLine>— {d.author}</DetailLine>}
             {d.method && <DetailLine>Method: {METHOD_LABEL[d.method] || d.method}</DetailLine>}
+            {d.outcome && <DetailLine>Outcome: {d.outcome}</DetailLine>}
             {d.status && <DetailLine>Status: {String(d.status).replace(/_/g, ' ')}</DetailLine>}
             {(d.lines || []).map((l, i) => <DetailLine key={i}>{l}</DetailLine>)}
             {d.reason && <DetailLine>Reason: {String(d.reason).replace(/_/g, ' ')}</DetailLine>}

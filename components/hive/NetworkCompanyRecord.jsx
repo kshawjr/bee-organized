@@ -25,6 +25,7 @@ import useIsMobile from './shared/useIsMobile'
 import InitialsAvatar from './shared/InitialsAvatar'
 import RecordMenu from './shared/RecordMenu'
 import { T } from './shared/tokens'
+import { withOutcome } from './shared/touchOutcome'
 import { deriveNetworkBadges, BadgeChip, StatTile, SectionLabel, InlineText, fmtLastTalk } from './shared/networkKit'
 import { contactRecency, stageFamilyKey } from './shared/networkGroups'
 import { telHref, displayPhone } from '@/lib/phone'
@@ -195,7 +196,7 @@ export default function NetworkCompanyRecord({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {(touch || []).slice(0, 12).map(t => (
               <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', padding: '4px 0' }}>
-                <span style={{ fontSize: '12px', color: T.ink.primary, flexShrink: 0 }}>{METHOD_LABEL[t.method] || t.label || 'Touchpoint'}</span>
+                <span style={{ fontSize: '12px', color: T.ink.primary, flexShrink: 0 }}>{withOutcome(METHOD_LABEL[t.method] || t.label || 'Touchpoint', t)}</span>
                 <span style={{ fontSize: '12px', color: T.accent.deep, flexShrink: 0 }}>with {t.partner_name || '—'}</span>
                 {t.notes && <span title={t.notes} style={{ fontSize: '11px', color: T.ink.muted, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.notes}</span>}
                 <span style={{ fontSize: '11px', color: T.ink.quiet, marginLeft: 'auto', flexShrink: 0 }}>{fmtLastTalk(t.occurred_at, nowMs)}</span>

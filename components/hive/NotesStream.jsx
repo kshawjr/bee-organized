@@ -2,12 +2,13 @@
 // ─────────────────────────────────────────────────────────────
 // The NOTES section idiom: micro label + buttonless composer (Enter
 // posts + clears + keeps focus) over one interleaved stream of typed
-// notes and touchpoints (method icon + 'Call · Kevin · 2 Hours ago').
+// notes and touchpoints (method icon + 'Call · No answer  Kevin · 2 Hours
+// ago' — the outcome, when one was picked, sits right after the method).
 // Extracted from EngagementPanel; ClientProfile's client-wide activity
 // slice renders the identical component. Beta chunk.
 //
 // items: [{ t:'note', id, ts, text, user_label, tag? }
-//         | { t:'touch', id, ts, method, label, notes, user_label, tag? }]
+//         | { t:'touch', id, ts, kind, method, status, label, notes, user_label, tag? }]
 // pre-merged by the host; rendered newest-first by ts here. Optional
 // `tag` renders '· re: <tag>' — the client-wide slice on ClientProfile
 // marks engagement-scoped items with the engagement's title.
@@ -19,6 +20,7 @@ import { relAge } from './shared/engagementStatus'
 import { IconPhone, IconMail } from '@/components/ui/icons'
 import { T } from './shared/tokens'
 import NoteActions, { EditedMark } from './shared/NoteActions'
+import { withOutcome } from './shared/touchOutcome'
 
 export const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
@@ -79,7 +81,7 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
                   trace renders as the generic channel word ('Email'/'System'). */}
               {(a.kind === 'drip' || a.kind === 'system')
                 ? (a.label || METHOD_LABEL[a.method] || 'Reach-out')
-                : (METHOD_LABEL[a.method] || a.label || 'Reach-out')}{a.notes ? ` — ${a.notes}` : ''}
+                : withOutcome(METHOD_LABEL[a.method] || a.label || 'Reach-out', a)}{a.notes ? ` — ${a.notes}` : ''}
               {a.tag && <span style={{ fontSize: '11px', color: T.ink.secondary }}> · re: {a.tag}</span>}
               <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
                 {a.user_label || '—'} · {relAge(new Date(a.ts).getTime(), nowMs)} ago

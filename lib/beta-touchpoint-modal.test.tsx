@@ -246,10 +246,13 @@ describe('TouchpointModal', () => {
     expect(src).not.toContain('/api/touchpoints')
   })
 
-  it('the status vocabulary is the one Timeline already renders (no backend needed)', () => {
+  it('the outcome vocabulary is the three stored values', () => {
     expect(OUTCOMES.map(o => o.value)).toEqual(['reached', 'no_answer', 'voicemail'])
-    // Timeline de-underscores the raw value — 'no_answer' reads "no answer".
-    expect(readFileSync('components/hive/shared/Timeline.jsx', 'utf8')).toMatch(/replace\(\/_\/g, ' '\)/)
+    // This test used to assert the outcome was "already rendered by Timeline
+    // (no backend needed)". It was not shown in Recent activity at all, for
+    // four months. Whether each list SHOWS it is pinned, list by list, in
+    // lib/beta-touch-outcome-shown.test.tsx.
+    expect(readFileSync('components/hive/shared/Timeline.jsx', 'utf8')).toMatch(/withOutcome\(/)
   })
 
   it('method values are the schema’s (touchpoints.method CHECK), not the labels', () => {

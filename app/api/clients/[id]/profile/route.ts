@@ -104,7 +104,7 @@ export async function GET(
   const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes, dripRes, duplicatesRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, closed_note, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
-    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
+    supabaseService.from('touchpoints').select('id, kind, method, label, status, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
     // select('*') rather than a column list, for TWO reasons that both
     // matter: the card needs user_id to decide who may edit or delete a note
     // (the route is still the real guard), and it needs edited_at to show
