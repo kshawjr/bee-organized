@@ -105,7 +105,8 @@ const ALL_SECTIONS = [
   'location', 'team', 'tags',         // Your business (tags: 2026-10-16). Bees is NOT a
                                       // section: it is the lower half of 'team' (2026-11-12).
   'emails', 'texts',                  // Client messages
-  'newleads',                         // Notifications
+                                      // Notifications › New leads retired 2026-11-13
+                                      // (Settings slice 2): its switches are on 'team'.
   'slack', 'jobber', 'mailchimp',     // Connections
 ]
 
@@ -138,10 +139,10 @@ describe('SettingsScreen sections by franchiseRole', () => {
     }
   })
 
-  it('the item is spelled "Team and Seats" — on the nav, and nowhere in the app is it "Team and seats"', async () => {
+  it('the item is spelled "Team and leads" — on the nav, and nowhere in the app is it "Team and Leads"', async () => {
     await sectionKeys('owner')
     const item = container.querySelector('[data-settings-nav="rail"] [data-section="team"]')!
-    expect(item.textContent).toContain('Team and Seats')
+    expect(item.textContent).toContain('Team and leads')
     const { readFileSync, readdirSync, statSync } = await import('node:fs')
     const { join } = await import('node:path')
     const walk = (d: string): string[] => readdirSync(d).flatMap(n => {
@@ -199,7 +200,7 @@ describe('Team & Billing merge', () => {
   it('the merged section shows the roster AND a collapsed billing footer by default', async () => {
     await mount('team')
     expect(currentKey()).toBe('team')
-    expect(container.textContent).toContain('Team Members')
+    expect(container.textContent).toContain('People who sign in')
     expect(container.textContent).toContain('Billing & seat details')
     // Collapsed: the seat pool only renders after the footer is expanded.
     expect(container.textContent).not.toContain('Your seats this year')
@@ -223,16 +224,20 @@ describe('Team and Seats — two halves, two gates', () => {
   // Everything the Seats half says or offers. If any of these reaches a
   // manager's screen, seats followed them through the door.
   const SEATS_ONLY_TEXT = [
-    'Team Members', '+ Invite', 'Billing & seat details', 'Your seats this year', 'Seat roster',
+    'People who sign in', 'Each seat is billed', 'Invite', 'Sync Jobber', 'Billing & seat details', 'Your seats this year', 'Seat roster',
     'Pre-buy seats', 'Subscription active', 'Sponsored by Bee Organized', 'Prepaid by Bee Organized',
-    'Manage billing in Stripe', 'View billing history', 'People who sign in', 'Who can sign in',
+    'Manage billing in Stripe', 'View billing history', 'Who signs in',
+    // New leads folded into the Seats half (Settings slice 2, 2026-11-13): who
+    // is told about a lead is the owner's business too, and the server refuses
+    // a manager the list (notification-recipients is owner-only on every verb).
+    'New lead emails', 'outside email', 'told about new leads', 'who hears about new leads',
   ]
   // Requests that belong to the Seats half. Belt and braces only: on mount
   // that half reads its seats from SeatsContext and asks the server nothing
   // (checked — an owner's mount makes none of these either), so the DOM
   // assertions are what carry the weight. This catches a later change that
   // gives the half a mount-time fetch and forgets the gate.
-  const SEATS_ONLY_REQUEST = /\/api\/(seats|pending_invites|hub_users|billing|locations\/[^/]+\/(billing|convert))/
+  const SEATS_ONLY_REQUEST = /\/api\/(seats|pending_invites|hub_users|billing|locations\/[^/]+\/(billing|convert|notification-recipients|project-type-senders))/
 
   let fetchMock: ReturnType<typeof vi.fn>
   const mount = async (franchiseRole: string, initialSection: string) => {
@@ -269,16 +274,18 @@ describe('Team and Seats — two halves, two gates', () => {
 
   it('an owner sees both halves, Seats first, each saying what makes it different', async () => {
     await mount('owner', 'team')
-    expect(headings()).toEqual(['Seats', BEES_HEADING])
+    expect(headings()).toEqual(['People who sign in', BEES_HEADING])
     const seats = container.querySelector('[data-team-seats]')!
     const bees = container.querySelector('[data-team-bees]')!
     expect(seats.compareDocumentPosition(bees) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(container.querySelector('[data-team-seats-section]')!.textContent).toContain('People who sign in. Each seat is billed.')
+    expect(container.querySelector('[data-team-seats-section]')!.textContent).toContain('Each seat is billed.')
     expect(bees.textContent).toContain('nobody here signs in to Bee Hub and nobody is billed')
     // The Seats half is still the whole old screen: roster, invite, billing footer.
-    for (const t of ['Team Members', '+ Invite', 'Billing & seat details']) expect(seats.textContent).toContain(t)
+    for (const t of ['People who sign in', 'Invite', 'Billing & seat details']) expect(seats.textContent).toContain(t)
+    // …and it now asks who is told about a new lead (the manager test below pins that only an owner's screen does).
+    expect(urls()).toContain(`/api/locations/${LOC_UUID}/notification-recipients`)
     // …and the list SEATS_ONLY_TEXT guards with is real: every always-on line of it is on an owner's screen.
-    for (const t of ['Team Members', '+ Invite', 'Billing & seat details', 'People who sign in', 'Who can sign in']) {
+    for (const t of ['People who sign in', 'Each seat is billed', 'Invite', 'Billing & seat details', 'Who signs in', 'outside email', 'who hears about new leads']) {
       expect(container.textContent, `owner: '${t}'`).toContain(t)
     }
   })
@@ -289,7 +296,8 @@ describe('Team and Seats — two halves, two gates', () => {
     expect(container.textContent).not.toContain("You don't have access to this section")
     expect(headings()).toEqual([BEES_HEADING])
     expect(container.querySelector('[data-team-bees]')).toBeTruthy()
-    expect(container.querySelector('[data-team-lede]')!.textContent).toBe('The people who work your jobs.')
+    // The page's one-line intro drops seats and leads for a manager.
+    expect(container.querySelector('[data-team-screen] header')!.textContent).toBe('Team and leadsThe people who work your jobs.')
     // Their half is live — it asked for this location's roster…
     expect(urls()).toContain(BEES_URL)
     // …and the other half is not there.
@@ -328,15 +336,22 @@ describe('Team and Seats — two halves, two gates', () => {
     }
   })
 
-  it('the eyebrow on this screen is the readable gold (brand.goldText), not the decorative one', async () => {
-    const { T } = await import('@/components/hive/shared/tokens')
+  // This screen's eyebrow used to be brand.goldText, the gold driven dark
+  // enough to read at 11px on white (4.5:1). The rebuilt page takes the
+  // design's eyebrow like every rebuilt card: the shared gold, which is the
+  // design's choice and is NOT 4.5:1. Recorded, not hidden — the figure below
+  // is what Kevin was told (Settings slice 2 report).
+  it('the eyebrows on this screen are the new look’s gold — and its contrast on white is recorded', async () => {
+    const { T } = await import('@/components/design/tokens')
     await mount('owner', 'team')
-    const eyebrow = Array.from(container.querySelectorAll('[data-team-screen] p')).find(p => p.textContent === 'Your business') as HTMLElement
+    const eyebrows = Array.from(container.querySelectorAll('[data-team-screen] [data-ssection] p')).filter(p => ['Seats', 'Bees'].includes(p.textContent || '')) as HTMLElement[]
+    expect(eyebrows.map(e => e.textContent)).toEqual(['Seats', 'Bees'])
     const hex = (c: string) => c.startsWith('rgb') ? '#' + c.match(/\d+/g)!.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('') : c
-    expect(hex(eyebrow.style.color).toLowerCase()).toBe(T.brand.goldText.toLowerCase())
-    // 4.5:1 on white, computed — not trusted from a comment.
+    for (const e of eyebrows) expect(hex(e.style.color).toLowerCase()).toBe(T.gold.toLowerCase())
     const lum = (h: string) => { const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
-    expect(1.05 / (lum(T.brand.goldText) + 0.05)).toBeGreaterThanOrEqual(4.5)
+    const ratio = 1.05 / (lum(T.gold) + 0.05)
+    expect(ratio).toBeGreaterThan(2.5)
+    expect(ratio).toBeLessThan(2.8)   // below 4.5:1 — a known, reported property of the design's eyebrow
   })
 })
 
@@ -361,10 +376,10 @@ describe('groups never render empty (issue 246 step 1)', () => {
     await act(async () => {})
   }
 
-  it('an owner sees all five groups', async () => {
+  it('an owner sees all four groups (Notifications went when New leads folded into Team and leads)', async () => {
     await mountRole('owner')
     const rail = container.querySelector('[data-settings-nav="rail"]')!
-    expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Notifications', 'Connections'])
+    expect(groupTitles(rail)).toEqual(['You', 'Your business', 'Client messages', 'Connections'])
   })
 
   it('a manager sees ONLY the groups that have a visible item', async () => {
@@ -408,7 +423,7 @@ describe('groups never render empty (issue 246 step 1)', () => {
     await act(async () => {
       root.render(
         <CurrentUserContext.Provider value={currentUser}>
-          <SettingsScreen initialSection="newleads" franchiseRole="manager" />
+          <SettingsScreen initialSection="emails" franchiseRole="manager" />
         </CurrentUserContext.Provider>,
       )
     })
@@ -416,7 +431,7 @@ describe('groups never render empty (issue 246 step 1)', () => {
     expect(container.textContent).toContain("You don't have access to this section")
     expect(container.textContent).toContain('🔒')
     // And the section itself did not render behind the panel.
-    expect(container.textContent).not.toContain('Who hears about new leads')
+    expect(container.textContent).not.toContain('Who your emails come from')
   })
 })
 

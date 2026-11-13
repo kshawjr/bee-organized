@@ -398,8 +398,13 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     expect(comp).not.toContain('Main name')
     expect(comp).toContain('What it sends as')
     expect(beehub).toContain('<NewLeadsSection realLocId={realLocId} readOnly={false} only="handlers" />')
-    expect(beehub).toContain('<NewLeadsSection realLocId={realLocId} readOnly={false} only="recipients" />')
-    expect(beehub.split('<NewLeadsSection ').length - 1).toBe(2)
+    // 2026-11-13 (Settings slice 2): New leads retired as a section. Who is
+    // told moved under each person on Team and leads
+    // (components/settings/TeamAndLeads.jsx, useLeadRecipients — the same
+    // calls), so this component is mounted once, for its handlers half.
+    expect(beehub).not.toContain('only="recipients" />')
+    expect(beehub.split('<NewLeadsSection ').length - 1).toBe(1)
+    expect(beehub).toContain('TUI.useLeadRecipients(leadsLocId)')
   })
   it('the tab hosting this component is OWNER-allowlisted (hidden from manager AND lite_user)', () => {
     // The section list is an allowlist on franchiseRole==='owner' — the old
@@ -412,7 +417,13 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     // 240 step 4, and from there to Notifications › New leads in issue 246
     // step 1 (Your team split three ways and stopped existing). The allowlist
     // is what matters here, not the label, so pin the section it lives on now.
-    expect(beehub).toContain("label:'New leads'")
+    // …and from there to Team and leads (Settings slice 2, 2026-11-13), under
+    // each person in the Seats card. That card is owner-only twice over:
+    // canSeeSeats is canManageTeam is franchiseRole === 'owner'.
+    expect(beehub).not.toContain("label:'New leads'")
+    expect(beehub).toContain("const canManageTeam = franchiseRole === 'owner'")
+    expect(beehub).toContain('const canSeeSeats = canManageTeam')
+    expect(beehub).toMatch(/\{canSeeSeats && \(\s*<TeamSection /)
     expect(beehub).toContain("const ownerConfig = franchiseRole === 'owner'")
   })
   it('the placeholder card is gone (no competing notifications UI)', () => {

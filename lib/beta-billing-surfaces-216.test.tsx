@@ -342,7 +342,8 @@ describe('issue 216 C — proration anchors to the real paid_through_date', () =
       />,
       seatsValue(noFreeManager, []),
     ))
-    clickText(view.container, '+ Invite')
+    // The Seats card's Invite button (new look, Settings slice 2).
+    ;(view.container.querySelector('[data-invite-open]') as HTMLButtonElement).click()
     await settle()
     const quotes = ((globalThis as any).fetch as any).mock.calls
       .map((c: any[]) => String(c[0]))

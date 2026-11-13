@@ -69,7 +69,9 @@ describe('sendEmail — a From domain Resend refuses', () => {
     expect(res.error.startsWith(SENDER_DOMAIN_PREFIX)).toBe(true)
     expect(res.error).toContain('kshawjr@gmail.com')
     expect(res.error).toContain('Home or Office Organizing')
-    expect(res.error).toContain('Settings → New leads → Who handles what')
+    expect(res.error).toContain('Settings → Emails, under Who your emails come from')
+    // New leads retired as a section (Settings slice 2); nothing may send an owner there.
+    expect(res.error).not.toContain('New leads')
     expect(res.error).not.toMatch(/client/i)
     expect(res.error).not.toMatch(/contact support/i)
   })

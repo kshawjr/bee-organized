@@ -274,7 +274,7 @@ describe('the sent email is what it was on main, apart from three image heights'
 describe('nothing about what is sent changes because of the preview', () => {
   it('the files that build and send an email are byte for byte main’s — all but the two this change names', () => {
     const files = ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'lib/marketing-unsubscribe.ts', 'lib/booking-link.ts', 'lib/rate-guard.ts', 'lib/email-signature.ts', 'lib/resend.ts', 'app/api/emails/test-send/route.ts', 'app/api/cron/send-drips/route.ts']
-    expect(sha(Object.fromEntries(files.map(f => [f, sha(read(f))])))).toBe('04070b0206a5984a')   // from main 969a658, same script
+    expect(sha(Object.fromEntries(files.map(f => [f, sha(read(f))])))).toBe('45a3bbde79ea16f8')   // was 04070b0206a5984a on main 969a658. ONE sentence changed since, in lib/drip-send.ts (Settings slice 2, 2026-11-13): the held-email reason stopped sending owners to "Settings → New leads", a section that no longer exists. Checked by diff when it was made: that one line is the file's only difference.
   })
   it('lib/marketing-consent.ts gained one list and lost nothing: with it taken out the file is main’s', () => {
     const src = read('lib/marketing-consent.ts')

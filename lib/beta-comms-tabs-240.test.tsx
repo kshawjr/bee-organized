@@ -120,7 +120,8 @@ describe('the sections exist and render', () => {
     expect(await mount('emails')).toContain('Everything about the emails your clients receive, in one place.')   // 2026-10-30 design
     expect(await mount('texts')).toContain('Texts are on their way')
     // The three addresses Your team's contents moved to (issue 246 step 1).
-    expect(await mount('newleads')).toContain('Who handles each kind of job')
+    // New leads retired 2026-11-13 (Settings slice 2): the key lands on Team and leads.
+    expect(await mount('newleads')).toContain('who hears about new leads')
     expect(await mount('slack')).toContain('New leads also post to your Slack channel')
     expect(await mount('jobber')).toContain('the client import that runs from it')
   })
@@ -169,9 +170,14 @@ describe('nothing that worked before is unreachable', () => {
     // What this address can honestly promise without a location is that the
     // section is its own live surface. The real content guarantee — both lists,
     // with fixtures — is lib/beta-new-leads-246b.test.tsx.
+    //
+    // 2026-11-13 (Settings slice 2): the section retired. Its address still
+    // answers — on Team and leads, where the switches went — and without a
+    // location it still says so in the same words.
     const text = await mount('newleads')
     expect(text).not.toContain(NO_ACCESS)
-    expect(text).toContain('Who handles each kind of job')
+    expect(text).toContain('who hears about new leads')
+    expect(text).toContain('People who sign in')
     expect(text).toContain('New-lead settings become available once your location is saved')
   })
 
@@ -239,14 +245,16 @@ describe('deep links to the old sections still resolve', () => {
     expect(await mount('billing')).not.toContain(NO_ACCESS)
   })
 
-  it('?section=yourteam lands on New leads — the larger of the three halves', async () => {
+  it('?section=yourteam lands on Team and leads — where "who hears about a new lead" now is', async () => {
     // issue 246 step 1. Your team split into Emails (sending identity),
     // New leads (routing + recipients) and Slack. A deep link picks one, and
     // it picks where the bulk went AND where the section's stated job went:
     // "who hears about a new lead".
+    // 2026-11-13: New leads folded into Team and leads, so that is where it lands.
     const text = await mount('yourteam')
     expect(text).not.toContain(NO_ACCESS)
-    expect(text).toContain('Who handles each kind of job')
+    expect(text).toContain('who hears about new leads')
+    expect(text).toContain('People who sign in')
   })
 
   it('the step-1 retirements still hit the guard — deleted is not moved', async () => {

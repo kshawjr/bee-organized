@@ -34,11 +34,12 @@
 // SettingsScreen root, so it looks exactly as it did.
 // ─────────────────────────────────────────────────────────────
 import React from 'react'
-import { T, R, FONT, FONT_STYLESHEET_HREF, HONEYCOMB, alpha } from '@/components/design/tokens'
+import { T, R, FONT, SHADOW, FONT_STYLESHEET_HREF, HONEYCOMB, alpha } from '@/components/design/tokens'
 // Reused from Bee Hub's own icon set (Tabler outlines, already inline SVG).
 import {
-  IconUsers, IconMail, IconMessage, IconMapPin, IconBell, IconSend,
+  IconUsers, IconMail, IconMessage, IconMapPin, IconSend,
   IconPencil, IconLogout, IconCheck, IconChevronRight,
+  IconPlus, IconAlertTriangle,
 } from '@/components/ui/icons'
 
 // ── Icons Bee Hub did not have ────────────────────────────────────────────
@@ -62,6 +63,11 @@ export const IconLock = draw(<><rect x="5" y="11" width="14" height="10" rx="2" 
 export const IconKey = draw(<><circle cx="8" cy="15" r="4" /><path d="M11 12l9 -9" /><path d="M17 6l3 3" /><path d="M14 9l2 2" /></>)
 export const IconCircleCheck = draw(<><circle cx="12" cy="12" r="9" /><path d="M8.5 12.5l2.5 2.5l4.5 -5" /></>)
 export const IconChevronLeft = draw(<path d="M15 6l-6 6l6 6" />)
+// Slice 2 (Team and leads).
+export const IconTrash = draw(<><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7V4a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></>)
+export const IconCard = draw(<><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M3 10h18" /><path d="M7 15h.01" /><path d="M11 15h2" /></>)
+export const IconRefresh = draw(<><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></>)
+export { IconPlus, IconAlertTriangle, IconMail, IconPencil, IconChevronRight, IconCheck }
 
 // One outline per section KEY. The key is all the nav is told about a
 // section besides its label, so a section added to SECTION_GROUPS later still
@@ -73,7 +79,6 @@ const SECTION_ICONS = {
   tags: IconTag,
   emails: IconMail,
   texts: IconMessage,
-  newleads: IconBell,
   slack: IconHash,
   jobber: IconLink,
   mailchimp: IconSend,
@@ -106,7 +111,20 @@ export const SETTINGS_CSS = `
 [data-srow-label]{grid-column:span 2;min-width:0}
 [data-sident-pill]{grid-column:span 2}
 [data-semails-link]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:center}
+[data-settings-ui] [data-sbtn]:disabled{opacity:.5;cursor:default}
+[data-settings-ui] [data-sbtn="primary"]:not(:disabled):hover{background-color:${alpha(T.primary, 0.9)}!important}
+[data-settings-ui] [data-sbtn="outline"]:not(:disabled):hover,[data-settings-ui] [data-sbtn="icon"]:not(:disabled):hover{background-color:${T.muted}!important}
+[data-settings-ui] [data-sbtn="danger-icon"]:not(:disabled):hover{background-color:${T.destructiveSoft}!important}
+[data-settings-ui] [data-sbtn="text"]:not(:disabled):hover>span{text-decoration:underline}
+[data-slist]>*+*{border-top:1px solid ${T.border}}
+[data-sactions]{display:flex;flex-wrap:wrap;gap:8px}
+[data-slead]{display:flex;align-items:center;gap:16px;min-width:0}
+[data-snotice]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+[data-sfields]{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 @media (min-width:640px){
+[data-slead]{margin-left:52px}
+[data-snotice]{grid-template-columns:minmax(0,1fr) auto;align-items:center}
+[data-sfields]{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}
 [data-settings-page]{padding:40px 32px}
 [data-ssection]{padding:24px}
 [data-ssection-head]{grid-template-columns:minmax(0,1fr) auto}
@@ -243,13 +261,15 @@ export function PageHeader({ title, intro }) {
 }
 
 // The card: a small uppercase gold eyebrow over a light heading.
-export function Section({ eyebrow, title, intro, right, children }) {
+// `titleId` names the heading so a caller can point aria-labelledby at it;
+// anything else (data-*, aria-*) lands on the <section> itself.
+export function Section({ eyebrow, title, intro, right, children, titleId, ...rest }) {
   return (
-    <section data-ssection style={{ borderRadius:R.xxl, border:`1px solid ${T.border}`, background:T.card, minWidth:0 }}>
+    <section {...rest} data-ssection style={{ borderRadius:R.xxl, border:`1px solid ${T.border}`, background:T.card, minWidth:0 }}>
       <div data-ssection-head style={{ marginBottom:'20px' }}>
         <div style={{ minWidth:0 }}>
           <p style={{ marginBottom:'4px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.14em', color:T.gold, fontFamily:FONT.ui }}>{eyebrow}</p>
-          <h2 style={{ fontSize:'20px', lineHeight:'28px', fontWeight:300, color:T.foreground, fontFamily:FONT.heading }}>{title}</h2>
+          <h2 id={titleId} style={{ fontSize:'20px', lineHeight:'28px', fontWeight:300, color:T.foreground, fontFamily:FONT.heading }}>{title}</h2>
           {intro && <p style={{ marginTop:'4px', maxWidth:'672px', fontFamily:FONT.body, fontSize:'13px', lineHeight:1.625, color:T.mutedFg }}>{intro}</p>}
         </div>
         {right && <div style={{ minWidth:0 }}>{right}</div>}
@@ -264,10 +284,93 @@ const PILL_TONES = {
   shared: { background:T.goldSoft,    color:T.warning },
   ok:     { background:T.successSoft, color:T.success },
   warn:   { background:T.warningSoft, color:T.warning },
+  danger: { background:T.destructiveSoft, color:T.destructive },
+  quiet:  { background:T.muted, color:T.mutedFg },
 }
-export function Pill({ tone = 'own', children }) {
+export function Pill({ tone = 'own', children, ...rest }) {
   return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', whiteSpace:'nowrap', borderRadius:R.full, padding:'2px 8px', fontSize:'11px', lineHeight:'16px', fontWeight:700, fontFamily:FONT.ui, ...(PILL_TONES[tone] || PILL_TONES.own) }}>{children}</span>
+    <span {...rest} style={{ display:'inline-flex', alignItems:'center', gap:'4px', whiteSpace:'nowrap', borderRadius:R.full, padding:'2px 8px', fontSize:'11px', lineHeight:'16px', fontWeight:700, fontFamily:FONT.ui, ...(PILL_TONES[tone] || PILL_TONES.own) }}>{children}</span>
+  )
+}
+
+// ── Buttons, a switch, a face, a notice (slice 2) ─────────────────────────
+// Every button's words sit in a <span> with their own size, because
+// app/globals.css forces 16px onto the <button> itself. That is the whole
+// reason a button here can never read bigger than the 13–14px text beside it.
+// 44px tall at least: a comfortable tap on a phone.
+const BTN = {
+  primary: { background:T.primary, color:T.primaryFg, border:'1px solid transparent', padding:'6px 12px' },
+  outline: { background:T.card, color:T.foreground, border:`1px solid ${T.border}`, padding:'6px 12px' },
+  danger:  { background:T.destructiveSoft, color:T.destructive, border:'1px solid transparent', padding:'6px 12px' },
+  text:    { background:'transparent', color:T.primary, border:'none', padding:'0', justifyContent:'flex-start', textAlign:'left' },
+}
+export function Btn({ variant = 'outline', icon, children, style, type = 'button', ...rest }) {
+  const v = BTN[variant] || BTN.outline
+  return (
+    <button type={type} data-sbtn={variant} {...rest}
+      style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px', minHeight:'44px', borderRadius:R.lg, cursor:'pointer', fontFamily:FONT.ui, transition:'background-color .15s', ...v, ...style }}>
+      {icon}
+      <span style={{ fontSize:'14px', lineHeight:'20px', fontWeight: variant === 'text' ? 700 : 500 }}>{children}</span>
+    </button>
+  )
+}
+// A square 44px button holding one icon. `label` is what a screen reader says.
+export function IconBtn({ label, danger, children, style, ...rest }) {
+  return (
+    <button type="button" aria-label={label} title={rest.title || label} data-sbtn={danger ? 'danger-icon' : 'icon'} {...rest}
+      style={{ display:'grid', placeItems:'center', width:'44px', height:'44px', flexShrink:0, padding:0, borderRadius:R.md, border:'none', background:'transparent', color: danger ? T.destructive : T.mutedFg, cursor:'pointer', transition:'background-color .15s', ...style }}>
+      {children}
+    </button>
+  )
+}
+// On is the dark primary, off is the field-line grey. The tap target is the
+// 44px square around the 44×24 track.
+export function Switch({ on, onClick, disabled, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onClick} data-sbtn="switch"
+      style={{ display:'grid', placeItems:'center', width:'44px', height:'44px', flexShrink:0, padding:0, border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer' }}>
+      <span aria-hidden="true" style={{ position:'relative', display:'block', width:'44px', height:'24px', borderRadius:R.full, background: on ? T.primary : T.input, transition:'background-color .15s' }}>
+        <span style={{ position:'absolute', top:'2px', left: on ? '22px' : '2px', width:'20px', height:'20px', borderRadius:R.full, background:T.card, boxShadow:SHADOW.btn, transition:'left .15s' }} />
+      </span>
+    </button>
+  )
+}
+export const initialsOf = (name) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] || '' : '')).toUpperCase()
+}
+// A 40px round face: initials on soft sage, or whatever is handed in.
+export function Avatar({ name, quiet, dashed, children }) {
+  return (
+    <span aria-hidden="true" style={{ display:'grid', placeItems:'center', width:'40px', height:'40px', flexShrink:0, borderRadius:R.full, background: dashed ? 'transparent' : quiet ? T.muted : T.sageSoft, border: dashed ? `1.5px dashed ${T.input}` : 'none', color: quiet || dashed ? T.mutedFg : T.primary, fontSize:'12px', fontWeight:700, fontFamily:FONT.ui }}>
+      {children || initialsOf(name)}
+    </span>
+  )
+}
+// A soft box that says something and may offer one or two buttons. The
+// buttons sit beside the words from 640px and under them on a phone.
+const NOTICE = {
+  warn:   { background:T.warningSoft, color:T.warning },
+  danger: { background:T.destructiveSoft, color:T.destructive },
+  quiet:  { background:T.muted, color:T.mutedFg },
+}
+export function Notice({ tone = 'warn', children, actions, ...rest }) {
+  return (
+    <div data-snotice {...rest} style={{ borderRadius:R.md, padding:'8px 12px', ...(NOTICE[tone] || NOTICE.warn) }}>
+      <span style={{ minWidth:0, fontSize:'13px', lineHeight:1.5, overflowWrap:'anywhere' }}>{children}</span>
+      {actions && <span data-sactions>{actions}</span>}
+    </div>
+  )
+}
+// A text field with its label above it.
+export function Field({ label, style, ...rest }) {
+  return (
+    <label style={{ display:'block', minWidth:0 }}>
+      <span style={{ display:'block', marginBottom:'4px', fontSize:'13px', lineHeight:'18px', fontWeight:700, color:T.foreground }}>{label}</span>
+      <input data-sinput {...rest}
+        style={{ width:'100%', minWidth:0, minHeight:'44px', boxSizing:'border-box', borderRadius:R.md, border:`1px solid ${T.border}`, background:T.card, padding:'8px 12px', lineHeight:'24px', color:T.foreground, fontFamily:FONT.ui, outline:'none', ...style }} />
+    </label>
   )
 }
 
@@ -382,11 +485,11 @@ export function EmailsLink({ what, onOpen }) {
 
 // The card at the top of Profile: initials on gold, the name, role and
 // location, over the faint honeycomb.
-const initialsOf = name => String(name || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase()
+const identInitials = name => String(name || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 export function IdentityCard({ name, sub, children }) {
   return (
     <div data-sident style={{ display:'grid', gridTemplateColumns:'auto minmax(0,1fr)', alignItems:'center', gap:'16px', borderRadius:R.xxl, border:`1px solid ${T.border}`, backgroundColor:T.card, backgroundImage:HONEYCOMB, padding:'20px' }}>
-      <span aria-hidden="true" style={{ display:'grid', placeItems:'center', flexShrink:0, width:'64px', height:'64px', borderRadius:R.full, background:T.gold, boxShadow:`0 0 0 4px ${T.card}`, fontSize:'20px', fontWeight:700, color:T.foreground, fontFamily:FONT.ui }}>{initialsOf(name) || '·'}</span>
+      <span aria-hidden="true" style={{ display:'grid', placeItems:'center', flexShrink:0, width:'64px', height:'64px', borderRadius:R.full, background:T.gold, boxShadow:`0 0 0 4px ${T.card}`, fontSize:'20px', fontWeight:700, color:T.foreground, fontFamily:FONT.ui }}>{identInitials(name) || '·'}</span>
       <div style={{ minWidth:0 }}>
         <p style={{ fontSize:'18px', lineHeight:'28px', fontWeight:700, color:T.foreground, fontFamily:FONT.ui, overflowWrap:'anywhere' }}>{name || 'Your name'}</p>
         {sub && <p style={{ fontSize:'14px', lineHeight:'20px', color:T.mutedFg, fontFamily:FONT.ui, overflowWrap:'anywhere' }}>{sub}</p>}
@@ -403,5 +506,6 @@ export const IconSignOut = IconLogout
 // here. BeeHub.jsx paints the screen PAGE_BG behind one of these and leaves
 // the old cream behind every other section, so a short rebuilt page has no
 // band of the old colour under it.
-export const REBUILT_SECTIONS = ['profile']
+export const REBUILT_SECTIONS = ['profile', 'team']
 export const PAGE_BG = T.background
+export const MUTED_FG = T.mutedFg

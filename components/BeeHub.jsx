@@ -53,6 +53,7 @@ import {
 // the nav, the page header, the card, and Profile). The pieces; this file
 // still decides who sees what and does every save.
 import * as SUI from "@/components/settings/SettingsShell"
+import * as TUI from "@/components/settings/TeamAndLeads"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -20842,7 +20843,15 @@ function SmsVoiceInfoModal({ onClose }) {
 }
 
 
-export function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{}, dbLocationIdOverride=null, paidThroughOverride=null }) {
+// Rebuilt to the new look in Settings slice 2 (2026-11-13): this is the SEATS
+// card of Settings → Team and leads. Everything it DOES is unchanged — the
+// roster, the invite, remove and restore, the Jobber sync, the open seats.
+// What is new: each person carries their "New lead emails" switch
+// (TUI.useLeadRecipients, the calls the retired New leads section made), the
+// outside addresses sit under the people, and `children` is where
+// SettingsScreen puts the billing row. `leadsLocId` is the location's real id.
+export function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{}, dbLocationIdOverride=null, paidThroughOverride=null, leadsLocId=null, children=null }) {
+  const leads = TUI.useLeadRecipients(leadsLocId)
   // Real hub_users from context when page.tsx populates it; otherwise mock.
   // Initializer reads context once (snapshot at mount) — subsequent invites
   // mutate local state via addUser/removeUser, which is the existing pattern.
@@ -21056,47 +21065,36 @@ export function TeamSection({ locationId='loc1', settings=null, updateLocation=(
 
   return (
     <>
-      {/* Team members header */}
-      <div style={{ margin:'16px 12px 8px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div>
-          <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Team Members</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Tap to manage role</p>
-          {jobberConnected && users.length > 0 && (() => {
-            // Read-only Jobber-mapping report: how many team members carry a
-            // jobber_user_id (assignable to Jobber jobs) vs. not. Corporate
-            // users with no field role are correctly unmapped.
-            const linked = users.filter(u => u.jobberUserId).length
-            const unlinked = users.length - linked
-            return (
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>
-                Jobber: {linked} linked{unlinked ? ` · ${unlinked} not linked` : ''}
-              </p>
-            )
-          })()}
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-          {jobberConnected && dbLocationId && (
-            <button onClick={refreshJobberRoster} disabled={refreshingRoster}
-              title={rosterSyncedAt ? `Last synced ${new Date(rosterSyncedAt).toLocaleString()}` : 'Fetch latest Jobber team'}
-              style={{ padding:'6px 10px', background:'white', border:'1px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:refreshingRoster?'wait':'pointer', opacity:refreshingRoster?0.6:1 }}>
-              {refreshingRoster ? '…' : '↺ Jobber'}
-            </button>
-          )}
-          <button onClick={()=>setShowInvite(true)}
-            style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-            + Invite
-          </button>
-        </div>
-      </div>
-
-      {/* Members list */}
-      <div style={{ margin:'0 12px' }}>
-        {users.length===0&&<p style={{ fontSize:'13px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 0' }}>No team members yet.</p>}
+      <SUI.Section data-team-seats-section data-team-seats eyebrow="Seats" title="People who sign in"
+        titleId="team-seats-title" aria-labelledby="team-seats-title"
+        intro={(() => {
+          // Read-only Jobber-mapping report: how many people carry a
+          // jobber_user_id (assignable to Jobber jobs) and how many do not.
+          const linked = users.filter(u => u.jobberUserId).length
+          const unlinked = users.length - linked
+          return <>
+            Each seat is billed.
+            {jobberConnected && users.length > 0 && <span data-jobber-count> Jobber: {linked} linked{unlinked ? ` · ${unlinked} not linked` : ''}.</span>}
+            {' '}Switch on who gets an email for every new lead — the assigned person is always told.
+          </>
+        })()}
+        right={
+          <div data-sactions>
+            {jobberConnected && dbLocationId && (
+              <SUI.Btn data-jobber-sync onClick={refreshJobberRoster} disabled={refreshingRoster}
+                title={rosterSyncedAt ? `Last synced ${new Date(rosterSyncedAt).toLocaleString()}` : 'Fetch latest Jobber team'}>
+                {refreshingRoster ? 'Syncing…' : 'Sync Jobber'}
+              </SUI.Btn>
+            )}
+            <SUI.Btn variant="primary" data-invite-open icon={<SUI.IconPlus size={16} />} onClick={()=>setShowInvite(true)}>Invite</SUI.Btn>
+          </div>
+        }>
+        <div data-slist data-seat-list>
+        {users.length===0&&<p style={{ padding:'12px 0', fontSize:'14px', lineHeight:'20px', fontStyle:'italic', color:SUI.MUTED_FG }}>No team members yet.</p>}
         {users.map(u=>{
-          const rc2 = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ icon:'👑', label:'Owner', bg:'rgba(212,160,70,0.1)', color:'#d4a046' }
-          // The seat this member occupies — the REAL billable object. The old
-          // pill here rendered mock subData ('✅ Active' for everyone); the
-          // seat chip replaces it so the roster and billing can't disagree.
+          const rc2 = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ label:'Owner' }
+          // The seat this member occupies — the REAL billable object, so the
+          // roster and billing can't disagree.
           const memberSeat = (seatsCtx?.seats || []).find(sr => sr.user_id === u.id && sr.status === 'active') || null
           const seatMeta = memberSeat ? SUBSCRIPTION_TIER_META.find(m=>m.key===memberSeat.tier) : null
           const jLinked = !!u.jobberUserId
@@ -21105,29 +21103,33 @@ export function TeamSection({ locationId='loc1', settings=null, updateLocation=(
           // identity that doesn't exist yet.
           const showJobberBadge = jobberConnected
           return (
-            <div key={u.id} onClick={()=>setSelectedMember(u)}
-              style={{ background:'white', borderRadius:'10px', marginBottom:'6px', border:'1px solid rgba(0,0,0,0.07)', cursor:'pointer', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
-              <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
-                <div style={{ display:'flex', alignItems:'center', gap:'4px', flexWrap:'wrap' }}>
-                  <span style={{ fontSize:'10px', color:rc2.color, background:rc2.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{rc2.icon} {rc2.label}</span>
-                  {u.disabled
-                    ? <span title="Access removed — login is off and their seat has been freed" style={{ fontSize:'10px', color:'#ef4444', background:'rgba(239,68,68,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>🔒 Removed</span>
-                    : seatMeta
-                      ? <span title={memberSeat.scheduled_removal_at ? 'Seat scheduled for removal' : 'The paid seat this member occupies'} style={{ fontSize:'10px', color:memberSeat.scheduled_removal_at?'#d97706':'#4a5e5a', background:memberSeat.scheduled_removal_at?'rgba(217,119,6,0.10)':'rgba(26,46,43,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{memberSeat.scheduled_removal_at?'🕐':'🪑'} {seatMeta.name} seat</span>
-                      : null}
-                  {!u.disabled && showJobberBadge && (
-                    jLinked
-                      ? <span title="Linked to Jobber — can be assigned to Jobber jobs" style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✓ Jobber</span>
-                      : <span title="No Jobber identity yet — hidden from assignment pickers" style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>⚠ No Jobber</span>
-                  )}
-                </div>
-              </div>
-              <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
-            </div>
+            <TUI.SeatRow key={u.id} user={u} onOpen={()=>setSelectedMember(u)}
+              recipient={TUI.recipientFor(leads, u)} leads={leads}
+              chips={<>
+                <SUI.Pill tone="shared">{rc2.label}</SUI.Pill>
+                {u.disabled
+                  ? <SUI.Pill tone="danger" title="Access removed — login is off and their seat has been freed">Removed</SUI.Pill>
+                  : seatMeta
+                    ? <SUI.Pill tone={memberSeat.scheduled_removal_at ? 'warn' : 'quiet'} title={memberSeat.scheduled_removal_at ? 'Seat scheduled for removal' : 'The paid seat this member occupies'}>{seatMeta.name} seat{memberSeat.scheduled_removal_at ? ' · ending' : ''}</SUI.Pill>
+                    : null}
+                {!u.disabled && showJobberBadge && (
+                  jLinked
+                    ? <SUI.Pill tone="ok" title="Linked to Jobber — can be assigned to Jobber jobs">Jobber</SUI.Pill>
+                    : <SUI.Pill tone="warn" title="No Jobber identity yet — hidden from assignment pickers">No Jobber</SUI.Pill>
+                )}
+              </>} />
           )
         })}
+        {/* Anyone on the told list who is not on the roster above still gets
+            their switch — nobody may become impossible to switch off just
+            because the two lists disagree. */}
+        {leads.ready && leads.users
+          .filter(r => !users.some(u => TUI.recipientFor(leads, u) === r))
+          .map(r => (
+            <TUI.SeatRow key={`told:${r.hub_user_id}`} user={{ id:r.hub_user_id, name:r.name, email:r.email }}
+              recipient={r} leads={leads}
+              chips={FRANCHISE_ROLES.find(x=>x.key===r.role) ? <SUI.Pill tone="shared">{FRANCHISE_ROLES.find(x=>x.key===r.role).label}</SUI.Pill> : null} />
+          ))}
         {/* Ghost rows — pooled seats nobody occupies yet. One row per open
             seat so "what am I paying for" is answered on the roster itself.
             Scheduled seats are excluded (they're not invitable — see seat
@@ -21149,57 +21151,31 @@ export function TeamSection({ locationId='loc1', settings=null, updateLocation=(
               // No context (storybook / mock harness) → behave as before.
               const canInvite = invitable ? invitable.has(sr.id) : true
               return (
-                <div key={sr.id}
-                  data-testid={canInvite ? 'open-seat-row' : 'reserved-seat-row'}
-                  style={{ background: canInvite ? 'rgba(26,46,43,0.02)' : 'rgba(245,158,11,0.05)', borderRadius:'10px', marginBottom:'6px', border:`1px dashed ${canInvite ? 'rgba(0,0,0,0.14)' : 'rgba(245,158,11,0.35)'}`, display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
-                  <div style={{ width:'36px', height:'36px', borderRadius:'50%', border:`1.5px dashed ${canInvite ? 'rgba(138,158,154,0.6)' : 'rgba(245,158,11,0.5)'}`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', flexShrink:0 }}>{canInvite ? (meta?.icon || '🪑') : '📬'}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>Open {meta?.name || sr.tier} seat</p>
-                    <p style={{ fontSize:'10.5px', color: canInvite ? '#8a9e9a' : '#92400e' }}>
-                      {canInvite
-                        ? 'Paid for and ready — invite someone to fill it'
-                        : 'Held by an invitation that hasn’t been accepted yet'}
-                    </p>
-                  </div>
-                  {canInvite ? (
-                    <button onClick={()=>{ setInvitePresetTier(sr.tier); setShowInvite(true) }}
-                      style={{ flexShrink:0, padding:'5px 12px', background:'white', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'7px', fontSize:'11px', fontWeight:600, color:'#1a2e2b', cursor:'pointer', fontFamily:'inherit' }}>
-                      Invite →
-                    </button>
-                  ) : (
-                    <span style={{ flexShrink:0, padding:'3px 9px', background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px', fontSize:'10px', fontWeight:700, color:'#92400e', textTransform:'uppercase', letterSpacing:'0.4px' }}>
-                      Invite pending
-                    </span>
-                  )}
-                </div>
+                <TUI.OpenSeatRow key={sr.id} data-testid={canInvite ? 'open-seat-row' : 'reserved-seat-row'}
+                  tierName={meta?.name || sr.tier} canInvite={canInvite}
+                  onInvite={()=>{ setInvitePresetTier(sr.tier); setShowInvite(true) }} />
               )
             })
         })()}
-      </div>
-
-      {/* One-shot follow-through after "Remove access": the seat is free but
-          still billable. Offer the schedule-removal half here so a full
-          offboard no longer requires finding the seat in the billing footer. */}
-      {freedSeat && (
-        <div style={{ margin:'10px 12px 0', padding:'12px 14px', background:'rgba(217,119,6,0.06)', border:'1px solid rgba(217,119,6,0.25)', borderRadius:'10px' }}>
-          <p style={{ fontSize:'12.5px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>
-            🕐 Their {SUBSCRIPTION_TIER_META.find(m=>m.key===freedSeat.tier)?.name || freedSeat.tier} seat is now open — and still billable
-          </p>
-          <p style={{ fontSize:'11.5px', color:'#92400e', lineHeight:1.5, marginBottom:'10px' }}>
-            Keep it to invite a replacement, or schedule it to end at renewal so you stop paying for it.
-          </p>
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setFreedSeat(null)}
-              style={{ flex:1, padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>
-              Keep the seat
-            </button>
-            <button onClick={()=>setSchedulingFreedSeat(true)}
-              style={{ flex:1, padding:'8px', background:'#d97706', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
-              Schedule removal
-            </button>
-          </div>
         </div>
-      )}
+
+        {/* One-shot follow-through after "Remove access": the seat is free but
+            still billable. Offer the schedule-removal half here so a full
+            offboard no longer requires finding the seat in the billing footer. */}
+        {freedSeat && (
+          <SUI.Notice data-freed-seat actions={<>
+            <SUI.Btn onClick={()=>setFreedSeat(null)}>Keep the seat</SUI.Btn>
+            <SUI.Btn variant="primary" onClick={()=>setSchedulingFreedSeat(true)}>Schedule removal</SUI.Btn>
+          </>}>
+            <b>Their {SUBSCRIPTION_TIER_META.find(m=>m.key===freedSeat.tier)?.name || freedSeat.tier} seat is now open — and still billable.</b>{' '}
+            Keep it to invite a replacement, or schedule it to end at renewal so you stop paying for it.
+          </SUI.Notice>
+        )}
+
+        <TUI.OutsideEmails leads={leads} />
+
+        {children}
+      </SUI.Section>
       {schedulingFreedSeat && freedSeat && (
         <ScheduleRemovalModal
           seat={freedSeat}
@@ -21803,10 +21779,12 @@ export function SlackCard({ settings, updateLocation, readOnly = false }) {
               {connected ? 'Slack' : 'Connect Slack'}
             </p>
             {connected ? (
-              <p style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', color:'#5a6e6a', marginTop:'3px', overflow:'hidden' }}>
+              <p style={{ display:'flex', alignItems:'flex-start', gap:'6px', fontSize:'11px', color:'#5a6e6a', marginTop:'3px' }}>
                 {/* Small green status dot. */}
-                <span aria-hidden style={{ width:'7px', height:'7px', borderRadius:'50%', background:'#16a34a', flexShrink:0, boxShadow:'0 0 0 2px rgba(22,163,74,0.18)' }} />
-                <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                <span aria-hidden style={{ width:'7px', height:'7px', borderRadius:'50%', background:'#16a34a', flexShrink:0, marginTop:'4px', boxShadow:'0 0 0 2px rgba(22,163,74,0.18)' }} />
+                {/* Wraps. A long channel or workspace name used to be cut with
+                    "…", which hid the one thing this line is for. */}
+                <span data-slack-connected-line style={{ minWidth:0, overflowWrap:'anywhere' }}>
                   Connected{channelLabel ? ` · ${channelLabel}` : ''}{teamName ? ` · ${teamName}` : ''}
                 </span>
               </p>
@@ -22316,19 +22294,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   //   billing   → team      the Billing section merged into Team & Billing
   //   paths     → emails    the new-lead sequences are the bulk of that tab
   //   templates → emails    the email templates are the bulk of that tab
-  //   yourteam  → newleads  see below
+  //   yourteam  → team      see below
+  //   newleads  → team      see below
   // 'paths' and 'templates' both also fed Your team and Texts & scripts, but
   // a deep link has to pick one destination, so it picks the larger half.
   //
-  // 'yourteam' (issue 246 step 1) split THREE ways and the same rule applies.
-  // It lands on New leads because that is where the larger half went AND where
-  // the section's own stated job went: its subtitle was "Who your emails come
-  // from, and who hears about a new lead", and two of the three things it held
-  // — the routing table that led the screen, and the notification recipients —
-  // are the "who hears" half. The sending identity is three rows on Emails;
-  // Slack is one card. Someone arriving on an old 'yourteam' link is far more
-  // likely to be after routing than after a Reply-To address.
-  const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'newleads' }
+  // 'yourteam' (issue 246 step 1) split three ways, and the largest part — who
+  // hears about a new lead — went to Notifications › New leads. That section
+  // retired in its turn (Settings slice 2, 2026-11-13): its switches now sit
+  // under each person on Team and leads. So BOTH old keys land on 'team',
+  // which is where the thing they were for now is. Neither may point at
+  // 'newleads': that key draws nothing any more.
+  const SETTINGS_RETIRED_SECTIONS = { billing:'team', bees:'team', paths:'emails', templates:'emails', yourteam:'team', newleads:'team' }
   const resolveSettingsSection = key => SETTINGS_RETIRED_SECTIONS[key] || key
   const [activeSection, setActiveSection] = useState(resolveSettingsSection(initialSection || 'profile'))
   // ── Emails › which sequence is on screen (issue 303) ──────────────────────
@@ -23855,12 +23832,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // 'My Location' in the mobile select — the same surface with two names
       // depending on the width of your screen.
       ...(ownerConfig   ? [{ key:'location', label:'Location',       icon:'📍' }] : []),
-      // Team and Seats (2026-11-12): ONE screen, two halves. Seats (logins,
-      // billed) stay owner-only — `canSeeSeats` gates that half INSIDE the
+      // Team and leads (Team and Seats until 2026-11-13, when New leads folded
+      // into it): ONE screen, two halves. Seats (logins, billed, and who is
+      // told about a new lead) stay owner-only — `canSeeSeats` gates that half INSIDE the
       // screen and the seats routes refuse a manager on the server. Bees (a
       // roster: no logins, nobody billed) are owner AND manager, like Tags.
       // So a manager gets this item and sees the Bees half only.
-      ...(canSeeTeamScreen ? [{ key:'team', label:'Team and Seats', icon:'👥' }] : []),
+      ...(canSeeTeamScreen ? [{ key:'team', label:'Team and leads', icon:'👥' }] : []),
       // A location's own tags (2026-10-16): owner AND manager — the same
       // people who may create them. Allowlist, like ownerConfig.
       ...(canManageOwnTags ? [{ key:'tags', label:'Tags', icon:'🏷️' }] : []),
@@ -23868,9 +23846,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     { title:'Client messages', items: ownerConfig ? [
       { key:'emails', label:'Emails',            icon:'📧' },
       { key:'texts',  label:'Texts and scripts', icon:'💬' },
-    ] : []},
-    { title:'Notifications', items: ownerConfig ? [
-      { key:'newleads', label:'New leads', icon:'🔔' },
     ] : []},
     { title:'Connections', items: ownerConfig ? [
       { key:'slack',  label:'Slack',  icon:'#️⃣' },
@@ -24110,7 +24085,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             {/* Not here, and each moved for a different reason:
                   the sending identity → Emails (issue 246 step 1)
-                  who hears about a new lead → Notifications › New leads
+                  who hears about a new lead → Team and leads
                   Jobber → Connections › Jobber; it was the sole occupant of
                     an "Integrations" header on this section, which is the
                     definition of a thing filed under the wrong heading. */}
@@ -24178,82 +24153,52 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // server is still the real gate (the seats routes refuse a manager);
           // this is the screen not offering what the server would refuse.
           return (
-            <div data-team-screen style={{ padding:'20px 16px 0', display:'flex', flexDirection:'column', gap:'28px' }}>
-              <div>
-                {/* Eyebrow in brand.goldText, the gold driven dark enough for
-                    small text on white — not the decorative gold. */}
-                <p style={{ margin:'0 0 4px', fontSize:'11px', fontWeight:700, letterSpacing:'1.2px', textTransform:'uppercase', color:HT.brand.goldText }}>Your business</p>
-                <h1 style={{ margin:0, fontSize:'26px', fontWeight:600, color:HT.ink.primary, letterSpacing:'-0.2px' }}>Team and Seats</h1>
-                <p data-team-lede style={{ margin:'6px 0 0', fontSize:'14px', lineHeight:1.55, color:HT.ink.muted, maxWidth:'620px' }}>
-                  {canSeeSeats
-                    ? 'Who can sign in to Bee Hub, and who works your jobs. Two different lists.'
-                    : 'The people who work your jobs.'}
-                </p>
-              </div>
+            <SUI.SettingsPage>
+              {/* The page lays its blocks out itself (24px apart); this wrapper
+                  only names the screen. */}
+              <div data-team-screen style={{ display:'flex', flexDirection:'column', gap:'24px', minWidth:0 }}>
+              <SUI.PageHeader title="Team and leads"
+                intro={canSeeSeats
+                  ? 'Who signs in, who works your jobs, and who hears about new leads.'
+                  : 'The people who work your jobs.'} />
 
+              {/* Payment status. Owner only, like everything about seats. */}
               {canSeeSeats && (
-              <section data-team-seats-section aria-labelledby="team-seats-title">
-                <div>
-                  <h2 id="team-seats-title" style={{ margin:0, fontSize:'17px', fontWeight:600, color:HT.ink.primary }}>Seats</h2>
-                  <p style={{ margin:'3px 0 0', fontSize:'13px', lineHeight:1.55, color:HT.ink.muted }}>People who sign in. Each seat is billed.</p>
-                </div>
-            <div data-team-seats style={{ margin:'0 -12px' }}>
-              {/* Payment status summary strip */}
-              <div style={{ padding:'16px 12px 0' }}>
-                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', borderLeft:`4px solid ${summaryAccent}`, padding:'14px 16px', marginBottom:'12px' }}>
-                  <p style={{ fontSize:'10px', fontWeight:700, color:summaryAccent, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px' }}>
-                    {summaryTitle}
-                  </p>
-                  <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
-                    {summaryBody}
-                  </p>
-                  {/* issue 161: owners self-manage cards, invoices, and
-                      cancellation on Stripe's hosted portal. Direct-pay only —
-                      corporate/prepaid have nothing to manage here. */}
-                  {canViewBilling && billingPaymentSource !== 'prepaid_corporate' && billingPaymentSource !== 'corporate_sponsored' && (
-                    <button
-                      type="button"
-                      onClick={()=>openStripeBillingPortal(locationId)}
-                      style={{ marginTop:'10px', padding:'8px 14px', background:'transparent', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'9px', fontFamily:'inherit', fontSize:'12px', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}>
-                      Manage billing in Stripe →
-                    </button>
-                  )}
-                  {summaryIsSponsored && (
-                    <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
-                      {/* issue 162: renewal anchors to the location's own
-                          conversion date, not a fleet-wide March 1. */}
-                      <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through the end of your first paid year. Your annual renewal continues on that anniversary thereafter.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Roster hero — TeamSection renders its own header + invite. */}
-              {/* issue 216 — paidThroughOverride rides alongside
-                  dbLocationIdOverride for the same super_admin reason: the
-                  seat modals TeamSection owns price against it. */}
-              <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} dbLocationIdOverride={resolvedBillingLocationId} paidThroughOverride={billingPaidThrough} />
-
-              {/* Billing details footer — collapsed so the roster stays the
-                  hero; a legacy 'billing' deep-link opens it expanded. Gated
-                  on canViewBilling so the money surfaces stay owner-only even
-                  if the team gate ever loosens. */}
-              {canViewBilling && (
-              <div style={{ margin:'20px 12px 0' }}>
-                <button
-                  type="button"
-                  onClick={()=>setShowBillingDetails(v=>!v)}
-                  aria-expanded={showBillingDetails}
-                  style={{ display:'flex', alignItems:'center', gap:'10px', width:'100%', padding:'12px 14px', background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', fontFamily:'inherit', textAlign:'left', cursor:'pointer' }}>
-                  <span style={{ fontSize:'16px' }}>💳</span>
-                  <span style={{ flex:1, fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Billing &amp; seat details</span>
-                  <span style={{ fontSize:'12px', color:'#8a9e9a', transform:showBillingDetails?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s' }}>›</span>
-                </button>
-              </div>
+                <TUI.PaymentBanner
+                  tone={billingPaymentSource === 'prepaid_corporate' ? 'corporate' : 'success'}
+                  title={summaryTitle} body={summaryBody}
+                  /* issue 161: owners self-manage cards, invoices, and
+                     cancellation on Stripe's hosted portal. Direct-pay only —
+                     corporate/prepaid have nothing to manage here. */
+                  action={canViewBilling && billingPaymentSource !== 'prepaid_corporate' && billingPaymentSource !== 'corporate_sponsored'
+                    ? <SUI.Btn data-manage-billing onClick={()=>openStripeBillingPortal(locationId)}>Manage billing in Stripe</SUI.Btn>
+                    : null}
+                  /* issue 162: renewal anchors to the location's own
+                     conversion date, not a fleet-wide March 1. */
+                  warning={summaryIsSponsored
+                    ? <><b>Important:</b> When testing concludes, you'll be responsible for a prorated subscription fee from that date through the end of your first paid year. Your annual renewal continues on that anniversary thereafter.</>
+                    : null} />
               )}
 
-              {canViewBilling && showBillingDetails && (
-                <>
+              {/* SEATS — owner only. TeamSection draws the card: the people,
+                  their New lead emails switches, the open seats and the
+                  outside addresses. It never mounts for a manager, so none
+                  of its seat, invite or recipient fetches fire for one.
+                  issue 216 — paidThroughOverride rides alongside
+                  dbLocationIdOverride for the same super_admin reason: the
+                  seat modals TeamSection owns price against it. */}
+              {canSeeSeats && (
+              <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} dbLocationIdOverride={resolvedBillingLocationId} paidThroughOverride={billingPaidThrough} leadsLocId={realLocId}>
+                {/* Billing details — collapsed so the people stay the hero; a
+                    legacy 'billing' deep-link opens it expanded. Gated on
+                    canViewBilling so the money surfaces stay owner-only even
+                    if the team gate ever loosens. */}
+                {canViewBilling && <TUI.BillingRow open={showBillingDetails} onToggle={()=>setShowBillingDetails(v=>!v)} />}
+                {/* NOT REBUILT: the export draws the row and nothing behind
+                    it. What opens is today's seat pool, seat roster, history
+                    and plan table, unchanged and in the font it had. */}
+                {canViewBilling && showBillingDetails && (
+                <div data-billing-details style={{ margin:'8px -12px 0', fontFamily:'DM Sans,system-ui,sans-serif' }}>
               <SectionHeader title="Subscription" desc="Your plan and seats" />
               <div style={{ padding:'0 12px' }}>
                 {/* Seat breakdown — one row per tier with at least 1 seat,
@@ -24384,46 +24329,22 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               </div>
 
               <TierPlansInline />
-                </>
+                </div>
+                )}
+              </TeamSection>
               )}
-            </div>
-              </section>
-              )}
-
-              {canSeeSeats && canSeeBees && <div aria-hidden style={{ height:'1px', background:HT.hairline.soft }} />}
 
               {canSeeBees && <BeeRosterSettings locationId={realLocId} locationName={settings.location.name || ''} />}
-            </div>
+              </div>
+            </SUI.SettingsPage>
           )
         })()}
 
-        {/* ── Notifications › New leads (issue 246 step 1) ────────────────
-            The larger two thirds of the old Your team tab, moved with the JSX
-            unchanged: the routing table and the notification recipients. What
-            left it went to Emails (sending identity) and Connections (Slack).
-
-            Step 2 (this) REBUILT it. TeamRouting and NewLeadNotifications are
-            gone, replaced by NewLeadsSection: two independent lists — who
-            HANDLES each job type, and who is TOLD about a lead — where there
-            used to be one fused `category` field and two split_* flags. */}
-        {activeSection==='newleads'&&(
-          <div style={{ paddingBottom:'12px' }}>
-
-            <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>New leads</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who handles each kind of job, and who hears about a new lead. Two separate things.</p>
-            </div>
-
-            {/* Who handles each job type and what it sends as moved to
-                Settings → Emails (2026-10-30); New leads keeps who is told. */}
-            <p style={{ margin:'0 12px 10px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-              Who handles each kind of job, and what its emails go out as, is now on{' '}
-              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>.
-            </p>
-            <NewLeadsSection realLocId={realLocId} readOnly={false} only="recipients" />
-
-          </div>
-        )}
+        {/* Notifications › New leads RETIRED (Settings slice 2, 2026-11-13).
+            What it still held — who is told about a new lead — is on Team and
+            leads, under each person who signs in. Who handles each job type
+            had already moved to Emails (2026-10-30). An old 'newleads' or
+            'yourteam' link lands on Team and leads (SETTINGS_RETIRED_SECTIONS). */}
 
         {/* ── Connections › Slack (issue 246 step 1) ──────────────────────
             One card, moved out of Your team with its wrapper intact. Slack is
@@ -24435,10 +24356,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             <div style={{ padding:'18px 16px 2px' }}>
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Slack</h1>
-              {/* Slack notifications — additive to the New leads emails. New
+              {/* Slack notifications — additive to the new lead emails. New
                   leads ALSO post to the location's Slack channel once the app
                   is installed. */}
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the emails on New leads.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the new lead emails you set on Team and leads.</p>
             </div>
 
             {/* Half-width: sits at ~half on the wider settings column (auto-fill

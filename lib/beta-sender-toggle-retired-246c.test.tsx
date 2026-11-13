@@ -230,11 +230,13 @@ describe('the retired sender toggle no longer renders on Emails', () => {
     const sender = container.querySelector('#sender')!
     expect(sender.textContent).toContain('By kind of job')
     expect(sender.querySelector('[data-handler-row]') || /Who handles it|No job types are configured yet/.test(sender.textContent!)).toBeTruthy()
+    // New leads retired 2026-11-13 and its key lands on Team and leads, which
+    // holds who is TOLD and still no second copy of the per-type editor.
     await mount('newleads')
     const txt = bodyText()
+    expect(txt).toContain('Team and leads')
     expect(txt).not.toContain('Who handles it')
     expect(txt).not.toContain('What it sends as')
-    expect(txt).toContain('Settings → Emails')
   })
 })
 

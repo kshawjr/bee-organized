@@ -1,6 +1,6 @@
 // components/hive/BeeRosterSettings.jsx
 // ─────────────────────────────────────────────────────────────
-// The Bees section of Settings › Team and Seats — the people who work a
+// The Bees card of Settings › Team and leads — the people who work a
 // location's jobs, by name and email. A ROSTER, not logins: nobody here signs
 // in to Bee Hub and nobody is billed. It sits BELOW Seats on that screen and
 // says so in its first line, because that difference is the whole point of
@@ -16,12 +16,22 @@
 //     beside it. Checked on add, on a new email, and on that button — never
 //     just by opening this screen. No Slack connected → not a word about
 //     Slack, anywhere.
-// Token-pure (shared/tokens). §8.5: props only; owns its own fetches.
+//
+// REBUILT TO THE NEW LOOK in Settings slice 2 (2026-11-13, the export's Team
+// page): the card, buttons and chips are the Settings shell's
+// (components/settings/SettingsShell.jsx) and the colours are the shared
+// design tokens. What it does is unchanged. Seven faults on the old layout
+// are closed here, each marked FAULT below.
+// §8.5: props only; owns its own fetches.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { T } from './shared/tokens'
+import { T, R, FONT } from '@/components/design/tokens'
+import {
+  Section, Pill, Btn, IconBtn, Avatar, Notice, Field, initialsOf,
+  IconPlus, IconPencil, IconTrash,
+} from '@/components/settings/SettingsShell'
 
 // ── What a bee's Slack state reads as ─────────────────────────
 // chip: the short state on the row. text: the one explanation under the row
@@ -37,57 +47,26 @@ export function beeSlackLine(bee) {
   return { kind: 'unchecked', chip: 'Not checked', text: 'Not checked against your Slack yet.', action: 'Check now' }
 }
 
-const UNAVAILABLE = 'Saved. We couldn’t reach Slack to check this email — tap Check again in a minute.'
+// FAULT (the two buttons disagreed): this line used to say "tap Check again"
+// whatever the bee's own button read — and a bee Slack could not be reached
+// for is "Not checked", whose button says "Check now". The line now names the
+// button that bee is actually showing.
+export const slackUnreachableNote = (bee) =>
+  `Saved. We couldn’t reach Slack to check this email — tap ${beeSlackLine(bee || {}).action || 'Check again'} in a minute.`
 
-export const beeInitials = (name) => {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return '?'
-  return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] || '' : '')).toUpperCase()
-}
+export const beeInitials = initialsOf
 
-const CHIP = {
-  found: T.family.teal,
-  not_found: T.family.amber,
-  unchecked: T.family.quiet,
-}
+const CHIP_TONE = { found: 'ok', not_found: 'warn', unchecked: 'quiet' }
 
-const primaryBtn = (off) => ({
-  minHeight: '44px', padding: '0 18px', borderRadius: T.radius.inset, border: 0,
-  background: off ? T.ink.disabled : T.accent.fg, color: T.accent.onFill,
-  fontSize: '14px', fontWeight: 600, fontFamily: 'inherit', cursor: off ? 'default' : 'pointer', whiteSpace: 'nowrap',
-})
-const quietBtn = (h = '44px') => ({
-  minHeight: h, padding: h === '44px' ? '0 16px' : '0 14px', borderRadius: h === '44px' ? T.radius.inset : T.radius.control,
-  border: T.border.control, background: T.surface.raised, color: T.ink.primary,
-  fontSize: h === '44px' ? '14px' : '13px', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
-})
-const iconBtn = {
-  minHeight: '36px', minWidth: '36px', display: 'grid', placeItems: 'center', borderRadius: T.radius.control,
-  border: 0, background: 'transparent', cursor: 'pointer', padding: '0 6px',
-}
-const field = {
-  width: '100%', boxSizing: 'border-box', minHeight: '44px', padding: '0 12px', borderRadius: T.radius.control,
-  border: T.border.control, fontSize: '14px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised,
-}
-const fieldLabel = { display: 'block', fontSize: '13px', fontWeight: 600, color: T.ink.primary, marginBottom: '5px' }
-const listBox = { border: T.border.card, borderRadius: T.radius.inset, overflow: 'hidden', background: T.surface.raised }
-
-const Icon = ({ stroke, children }) => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
-)
-
-function Avatar({ name, size = '36px', font = '13px', quiet = false }) {
-  return (
-    <span aria-hidden="true" style={{
-      flex: '0 0 auto', width: size, height: size, borderRadius: T.radius.round,
-      background: quiet ? T.family.quiet.bg : T.brand.goldSoft, color: quiet ? T.family.quiet.text : T.brand.goldText,
-      display: 'grid', placeItems: 'center', fontSize: font, fontWeight: 600,
-    }}>{beeInitials(name)}</span>
-  )
-}
+const nameStyle = { display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, overflowWrap: 'anywhere' }
+// FAULT (long emails cut on a phone): an address WRAPS. It used to be one
+// line ending in "…", which on a phone hid the part after the @.
+const emailStyle = { display: 'block', fontSize: '12px', lineHeight: '18px', color: T.mutedFg, overflowWrap: 'anywhere' }
+const quietLine = { fontSize: '13px', lineHeight: '18px', color: T.mutedFg }
 
 export default function BeeRosterSettings({ locationId = null, locationName = '' }) {
   const [bees, setBees] = useState(null)     // null = loading
+  const [loadFailed, setLoadFailed] = useState(false)
   const [slackConnected, setSlackConnected] = useState(false)
   const [serverName, setServerName] = useState('')   // the location's name, as the server knows it
   const [error, setError] = useState(null)
@@ -100,6 +79,7 @@ export default function BeeRosterSettings({ locationId = null, locationName = ''
 
   async function load() {
     if (!locationId) { setBees([]); return }
+    setLoadFailed(false)
     try {
       const res = await fetch(`/api/locations/${encodeURIComponent(locationId)}/bees`)
       const j = await res.json().catch(() => ({}))
@@ -107,15 +87,19 @@ export default function BeeRosterSettings({ locationId = null, locationName = ''
       setBees(j.bees || [])
       setSlackConnected(j.slackConnected === true)
       setServerName(typeof j.locationName === 'string' ? j.locationName : '')
-    } catch (e) {
-      setError(`Couldn't load your bees: ${e.message}`); setBees([])
+    } catch {
+      // FAULT (the load failure said the wrong thing): this used to print the
+      // raw reason ("HTTP 500") and then, under it, "No bees on your list
+      // yet." — which is not known. It now says the list could not be loaded,
+      // offers Try again, and says nothing about how many bees there are.
+      setLoadFailed(true); setBees([])
     }
   }
   useEffect(() => { load() }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function take(j) {
     if (typeof j?.slackConnected === 'boolean') setSlackConnected(j.slackConnected)
-    setNote(j?.slackCheck === 'unavailable' ? UNAVAILABLE : null)
+    setNote(j?.slackCheck === 'unavailable' ? slackUnreachableNote(j.bee) : null)
     const b = j.bee
     setBees(prev => {
       const list = prev || []
@@ -150,165 +134,146 @@ export default function BeeRosterSettings({ locationId = null, locationName = ''
   const emailLabel = slackConnected ? 'Email they use for Slack' : 'Email'
   const draftReady = draft.name.trim() && draft.email.trim()
 
-  const activeRow = (b, i) => {
+  const activeRow = (b) => {
     const slack = slackConnected ? beeSlackLine(b) : null
     const isEditing = editing?.id === b.id
     const isConfirming = confirming?.id === b.id
     return (
-      <div key={b.id} data-bee={b.id} style={{ borderTop: i ? T.border.divider : 'none', background: T.surface.raised }}>
+      <div key={b.id} data-bee={b.id} style={{ padding: '12px 0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {isEditing ? (
           <form data-bee-edit onSubmit={async e => { e.preventDefault(); if (await patch(b, { name: editing.name, email: editing.email })) setEditing(null) }}
-            style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <label style={{ flex: '1 1 200px', minWidth: 0 }}>
-                <span style={fieldLabel}>Name</span>
-                <input aria-label={`Name for ${b.name}`} value={editing.name} style={field}
-                  onChange={e => setEditing({ ...editing, name: e.target.value })} />
-              </label>
-              <label style={{ flex: '1.4 1 260px', minWidth: 0 }}>
-                <span style={fieldLabel}>{emailLabel}</span>
-                <input aria-label={`Email for ${b.name}`} type="email" value={editing.email} style={field}
-                  onChange={e => setEditing({ ...editing, email: e.target.value })} />
-              </label>
+            style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div data-sfields>
+              <Field label="Name" aria-label={`Name for ${b.name}`} value={editing.name}
+                onChange={e => setEditing({ ...editing, name: e.target.value })} />
+              <Field label={emailLabel} aria-label={`Email for ${b.name}`} type="email" value={editing.email}
+                onChange={e => setEditing({ ...editing, email: e.target.value })} />
             </div>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button type="submit" style={primaryBtn(busy === b.id)} disabled={busy === b.id}>Save</button>
-              <button type="button" style={quietBtn()} onClick={() => setEditing(null)}>Cancel</button>
+            <div data-sactions>
+              <Btn variant="primary" type="submit" disabled={busy === b.id}>Save</Btn>
+              <Btn onClick={() => setEditing(null)}>Cancel</Btn>
             </div>
           </form>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px', flexWrap: 'wrap' }}>
+          // FAULT (icons dropped to their own line on a phone): a grid, not a
+          // wrapping row — the face, the words, the pencil and the bin are
+          // four fixed columns at every width; only the words give.
+          <div data-bee-row style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) auto auto', alignItems: 'center', gap: '8px' }}>
             <Avatar name={b.name} />
-            <span style={{ flex: '1 1 160px', minWidth: 0 }}>
-              <span data-bee-name style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: T.ink.primary }}>{b.name}</span>
-              <span data-bee-email style={{ display: 'block', fontSize: '13px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.email}</span>
+            <span style={{ minWidth: 0 }}>
+              <span data-bee-name style={nameStyle}>{b.name}</span>
+              <span data-bee-email style={emailStyle}>{b.email}</span>
             </span>
-            {slack && (
-              <span data-bee-slack={slack.kind} style={{
-                flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', fontSize: '12px', fontWeight: 600,
-                padding: '4px 10px', borderRadius: T.radius.pill, background: CHIP[slack.kind].bg, color: CHIP[slack.kind].text,
-              }}>{slack.chip}</span>
-            )}
-            <span style={{ flex: '0 0 auto', display: 'flex', gap: '4px' }}>
-              <button type="button" aria-label={`Edit ${b.name}`} title="Edit" style={iconBtn} disabled={!!busy}
-                onClick={() => { setError(null); setConfirming(null); setEditing({ id: b.id, name: b.name, email: b.email }) }}>
-                <Icon stroke={T.ink.muted}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Icon>
-              </button>
-              <button type="button" aria-label={`Remove ${b.name}`} title="Remove" style={iconBtn} disabled={!!busy}
-                onClick={() => { setError(null); setConfirming(b) }}>
-                <Icon stroke={T.state.danger.fg}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></Icon>
-              </button>
-            </span>
+            <IconBtn label={`Edit ${b.name}`} title="Edit" disabled={!!busy}
+              onClick={() => { setError(null); setConfirming(null); setEditing({ id: b.id, name: b.name, email: b.email }) }}>
+              <IconPencil size={16} />
+            </IconBtn>
+            <IconBtn danger label={`Remove ${b.name}`} title="Remove" disabled={!!busy}
+              onClick={() => { setError(null); setConfirming(b) }}>
+              <IconTrash size={16} />
+            </IconBtn>
           </div>
+        )}
+
+        {!isEditing && slack && (
+          <div><Pill tone={CHIP_TONE[slack.kind]} data-bee-slack={slack.kind}>{slack.chip}</Pill></div>
         )}
 
         {!isEditing && slack?.text && !isConfirming && (
-          <div style={{ padding: '0 16px 14px 66px' }}>
-            <div data-bee-slack-note={slack.kind} style={{
-              display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', borderRadius: T.radius.control, padding: '9px 12px',
-              background: slack.kind === 'not_found' ? T.state.warning.bg : T.surface.sunken,
-              border: `1px solid ${slack.kind === 'not_found' ? T.state.warning.soft : T.hairline.line}`,
-            }}>
-              <span style={{ fontSize: '13px', lineHeight: 1.5, flex: '1 1 220px', minWidth: 0, color: slack.kind === 'not_found' ? T.state.warning.deep : T.ink.muted }}>{slack.text}</span>
-              <button type="button" data-bee-recheck style={{ ...quietBtn('36px'), fontWeight: 600 }} disabled={!!busy}
-                onClick={() => patch(b, { recheck: true })}>{busy === b.id ? 'Checking…' : slack.action}</button>
-            </div>
-          </div>
+          <Notice tone={slack.kind === 'not_found' ? 'warn' : 'quiet'} data-bee-slack-note={slack.kind}
+            actions={<Btn data-bee-recheck disabled={!!busy} onClick={() => patch(b, { recheck: true })}>{busy === b.id ? 'Checking…' : slack.action}</Btn>}>
+            {slack.text}
+          </Notice>
         )}
 
         {isConfirming && (
-          <div role="dialog" aria-label={`Remove ${b.name}`} style={{ padding: '0 16px 14px 66px' }}>
-            <div style={{ borderRadius: T.radius.control, padding: '12px', background: T.surface.sunken, border: T.border.card }}>
-              <p style={{ fontSize: '14px', lineHeight: 1.5, color: T.ink.primary, margin: '0 0 10px' }}>
-                Remove {b.name} from your bees? You can bring them back any time, exactly as they were.
-              </p>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button type="button" disabled={busy === b.id}
-                  style={{ ...quietBtn('36px'), fontWeight: 600, color: T.state.danger.fg, background: T.state.danger.soft }}
-                  onClick={async () => { if (await patch(b, { active: false })) setConfirming(null) }}>Remove</button>
-                <button type="button" style={quietBtn('36px')} onClick={() => setConfirming(null)}>Keep them</button>
-              </div>
-            </div>
+          <div role="dialog" aria-label={`Remove ${b.name}`}>
+            <Notice tone="quiet" actions={<>
+              <Btn variant="danger" disabled={busy === b.id}
+                onClick={async () => { if (await patch(b, { active: false })) setConfirming(null) }}>Remove</Btn>
+              <Btn onClick={() => setConfirming(null)}>Keep them</Btn>
+            </>}>
+              <span style={{ color: T.foreground }}>Remove {b.name} from your bees? You can bring them back any time, exactly as they were.</span>
+            </Notice>
           </div>
         )}
       </div>
     )
   }
 
+  const title = (locationName || serverName) ? `${locationName || serverName}’s bees` : 'Bees'
   return (
-    <section data-testid="bee-roster-settings" data-team-bees aria-labelledby="team-bees-title" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-          {/* Named for the location: an admin looking at one location's
-              settings must be able to tell whose bees these are. */}
-          <h2 id="team-bees-title" style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: T.ink.primary }}>{(locationName || serverName) ? `${locationName || serverName}’s bees` : 'Bees'}</h2>
-          <p data-bee-intro style={{ margin: '3px 0 0', fontSize: '13px', lineHeight: 1.55, color: T.ink.muted, maxWidth: '560px' }}>
-            The people who work your jobs. <strong style={{ fontWeight: 600, color: T.ink.primary }}>Not seats</strong> — nobody here signs in to Bee Hub and nobody is billed.
-            {slackConnected ? ' Use the email each bee signs in to Slack with, so you can add them to a job’s Slack channel.' : ''}
-          </p>
-        </div>
-        <button type="button" data-bee-add-open style={primaryBtn(false)} aria-expanded={adding}
-          onClick={() => { setError(null); setAdding(v => !v) }}>Add a bee</button>
-      </div>
+    <Section data-settings-ui data-testid="bee-roster-settings" data-team-bees aria-labelledby="team-bees-title" titleId="team-bees-title"
+      eyebrow="Bees"
+      /* Named for the location: an admin looking at one location's settings
+         must be able to tell whose bees these are. */
+      title={title}
+      intro={<span data-bee-intro>
+        The people who work your jobs. <strong style={{ fontWeight: 700, color: T.foreground }}>Not seats</strong> — nobody here signs in to Bee Hub and nobody is billed.
+        {slackConnected ? ' Use the email each bee signs in to Slack with, so you can add them to a job’s Slack channel.' : ''}
+      </span>}
+      /* FAULT ("Add a bee" stayed lit above the open form): the button is
+         not drawn while its form is open. The form has its own Cancel. */
+      right={adding ? null : (
+        <Btn variant="primary" data-bee-add-open icon={<IconPlus size={16} />} aria-expanded={false}
+          onClick={() => { setError(null); setAdding(true) }}>Add a bee</Btn>
+      )}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontFamily: FONT.ui }}>
+        {loadFailed && (
+          <Notice tone="danger" role="alert" data-bee-load-failed
+            actions={<Btn data-bee-retry onClick={() => { setBees(null); load() }}>Try again</Btn>}>
+            We couldn’t load your bees just now. Nothing has been changed.
+          </Notice>
+        )}
+        {error && <Notice tone="danger" role="alert">{error}</Notice>}
+        {note && <Notice tone="warn" data-bee-note>{note}</Notice>}
 
-      {error && (
-        <p role="alert" style={{ fontSize: '13px', lineHeight: 1.5, color: T.state.danger.fg, background: T.state.danger.soft, padding: '9px 12px', borderRadius: T.radius.control, margin: 0 }}>{error}</p>
-      )}
-      {note && (
-        <p data-bee-note style={{ fontSize: '13px', lineHeight: 1.5, color: T.state.warning.deep, background: T.state.warning.bg, padding: '9px 12px', borderRadius: T.radius.control, margin: 0 }}>{note}</p>
-      )}
-
-      {adding && (
-        <form data-bee-add onSubmit={e => { e.preventDefault(); if (draftReady) add() }}
-          style={{ border: `1px solid ${T.accent.fg}`, borderRadius: T.radius.inset, padding: '16px', background: T.accent.faint, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <label style={{ flex: '1 1 200px', minWidth: 0 }}>
-              <span style={fieldLabel}>Name</span>
-              <input aria-label="Bee name" autoFocus value={draft.name} style={field}
+        {adding && (
+          <form data-bee-add onSubmit={e => { e.preventDefault(); if (draftReady) add() }}
+            style={{ borderRadius: R.xl, background: T.muted, padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div data-sfields>
+              <Field label="Name" aria-label="Bee name" autoFocus value={draft.name}
                 onChange={e => setDraft({ ...draft, name: e.target.value })} />
-            </label>
-            <label style={{ flex: '1.4 1 260px', minWidth: 0 }}>
-              <span style={fieldLabel}>{emailLabel}</span>
-              <input aria-label="Bee email" type="email" value={draft.email} style={field}
+              <Field label={emailLabel} aria-label="Bee email" type="email" value={draft.email}
                 onChange={e => setDraft({ ...draft, email: e.target.value })} />
-            </label>
-          </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <button type="submit" style={primaryBtn(busy === 'add' || !draftReady)} disabled={busy === 'add' || !draftReady}>
-              {busy === 'add' ? 'Adding…' : 'Add bee'}
-            </button>
-            <button type="button" style={quietBtn()} onClick={() => { setAdding(false); setDraft({ name: '', email: '' }); setError(null) }}>Cancel</button>
-          </div>
-        </form>
-      )}
+            </div>
+            <div data-sactions>
+              <Btn variant="primary" type="submit" disabled={busy === 'add' || !draftReady}>
+                {busy === 'add' ? 'Adding…' : 'Add bee'}
+              </Btn>
+              <Btn onClick={() => { setAdding(false); setDraft({ name: '', email: '' }); setError(null) }}>Cancel</Btn>
+            </div>
+          </form>
+        )}
 
-      {bees == null && <p style={{ fontSize: '13px', color: T.ink.quiet, margin: 0 }}>Loading…</p>}
-      {bees != null && active.length === 0 && (
-        <p data-bee-empty style={{ fontSize: '13px', color: T.ink.quiet, margin: 0 }}>
-          {removed.length ? 'No bees on your list right now.' : 'No bees on your list yet.'}
-        </p>
-      )}
-      {active.length > 0 && <div style={listBox}>{active.map(activeRow)}</div>}
+        {bees == null && <p style={quietLine}>Loading…</p>}
+        {bees != null && !loadFailed && active.length === 0 && (
+          <p data-bee-empty style={quietLine}>
+            {removed.length ? 'No bees on your list right now.' : 'No bees on your list yet.'}
+          </p>
+        )}
+        {active.length > 0 && <div data-slist data-bee-list>{active.map(activeRow)}</div>}
 
-      {removed.length > 0 && (
-        <details data-bee-removed style={{ border: T.border.card, borderRadius: T.radius.inset, background: T.surface.sunken }}>
-          <summary style={{ cursor: 'pointer', padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: T.ink.muted }}>
-            Removed bees ({removed.length})
-          </summary>
-          <div style={{ padding: '0 16px 6px' }}>
-            {removed.map(b => (
-              <div key={b.id} data-bee={b.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '10px 0', flexWrap: 'wrap' }}>
-                <Avatar name={b.name} size="32px" font="12px" quiet />
-                <span style={{ flex: '1 1 160px', minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: T.ink.muted }}>{b.name}</span>
-                  <span style={{ display: 'block', fontSize: '12px', color: T.ink.quiet, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.email}</span>
-                </span>
-                <button type="button" style={quietBtn('36px')} disabled={!!busy} onClick={() => patch(b, { active: true })}>Bring back</button>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </section>
+        {removed.length > 0 && (
+          <details data-bee-removed style={{ borderRadius: R.xl, background: T.muted }}>
+            <summary style={{ cursor: 'pointer', padding: '12px 16px', fontSize: '13px', lineHeight: '20px', fontWeight: 700, color: T.mutedFg }}>
+              Removed bees ({removed.length})
+            </summary>
+            <div data-slist style={{ padding: '0 16px 4px' }}>
+              {removed.map(b => (
+                <div key={b.id} data-bee={b.id} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) auto', alignItems: 'center', gap: '12px', padding: '8px 0' }}>
+                  <Avatar name={b.name} quiet />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ ...nameStyle, color: T.mutedFg }}>{b.name}</span>
+                    <span style={emailStyle}>{b.email}</span>
+                  </span>
+                  <Btn disabled={!!busy} onClick={() => patch(b, { active: true })}>Bring back</Btn>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    </Section>
   )
 }

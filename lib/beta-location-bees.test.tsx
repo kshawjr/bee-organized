@@ -375,16 +375,24 @@ describe('Settings › Bees', () => {
     act(() => root.unmount())
   })
 
-  it('a row reads as a person: initials, the name at 15px, the email at 13px, and labelled Edit and Remove icon buttons', async () => {
+  it('a row reads as a person: initials, the name at 14px bold, the email at 12px and never cut, and labelled 44px Edit and Remove icon buttons', async () => {
     const { host, root } = await mount({ slackConnected: false, bees: [bee({ name: 'Maria Santos', email: 'maria@bee.com' })] })
     const row = host.querySelector('[data-bee="b1"]') as HTMLElement
     expect(row.querySelector('[aria-hidden="true"]')!.textContent).toBe('MS')
-    expect((row.querySelector('[data-bee-name]') as HTMLElement).style.fontSize).toBe('15px')
-    expect((row.querySelector('[data-bee-email]') as HTMLElement).style.fontSize).toBe('13px')
+    // The new look's sizes (Settings slice 2, 2026-11-13).
+    expect((row.querySelector('[data-bee-name]') as HTMLElement).style.fontSize).toBe('14px')
+    const email = row.querySelector('[data-bee-email]') as HTMLElement
+    expect(email.style.fontSize).toBe('12px')
+    // A long address wraps; it is never cut with an ellipsis.
+    expect(email.style.overflowWrap).toBe('anywhere')
+    expect(email.style.textOverflow).toBe('')
+    expect(email.style.whiteSpace).toBe('')
     const edit = row.querySelector('button[aria-label="Edit Maria Santos"]') as HTMLElement
     const remove = row.querySelector('button[aria-label="Remove Maria Santos"]') as HTMLElement
     expect(edit && remove).toBeTruthy()
-    for (const b of [edit, remove]) { expect(b.style.minHeight).toBe('36px'); expect(b.style.minWidth).toBe('36px'); expect(b.textContent).toBe('') }
+    for (const b of [edit, remove]) { expect(b.style.height).toBe('44px'); expect(b.style.width).toBe('44px'); expect(b.textContent).toBe('') }
+    // One grid row of four fixed columns: the icons cannot drop to a line of their own.
+    expect((row.querySelector('[data-bee-row]') as HTMLElement).style.gridTemplateColumns).toBe('auto minmax(0,1fr) auto auto')
     act(() => root.unmount())
   })
 
@@ -396,7 +404,9 @@ describe('Settings › Bees', () => {
     expect(open.textContent).toBe('Add a bee')
     expect(open.getAttribute('aria-expanded')).toBe('false')
     await act(async () => { open.click() })
-    expect(open.getAttribute('aria-expanded')).toBe('true')
+    // The button is not drawn while its form is open (it used to stay lit
+    // above the form); the form's own Cancel closes it and brings it back.
+    expect(host.querySelector('[data-bee-add-open]')).toBeNull()
     const labels = Array.from(host.querySelectorAll('[data-bee-add] label')).map(l => l.querySelector('span')!.textContent)
     expect(labels).toEqual(['Name', 'Email they use for Slack'])
     expect(Array.from(host.querySelectorAll('[data-bee-add] label input')).length).toBe(2)

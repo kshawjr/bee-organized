@@ -92,7 +92,7 @@ async function write(req: NextRequest, id: string, action: 'add' | 'remove', bee
     return NextResponse.json({ error: 'bee_wrong_location', message: 'That bee isn’t on this location’s list.' }, { status: 400 })
   }
   if (action === 'add' && bee.is_active === false) {
-    return NextResponse.json({ error: 'bee_removed', message: `${bee.name} was removed from your bees — bring them back in Settings › Team and Seats first.` }, { status: 400 })
+    return NextResponse.json({ error: 'bee_removed', message: `${bee.name} was removed from your bees — bring them back in Settings › Team and leads first.` }, { status: 400 })
   }
 
   const done = action === 'add'

@@ -490,7 +490,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     const senderDomainMessage = senderDomainBroken
       ? ((result.error ?? '').startsWith(SENDER_DOMAIN_PREFIX)
           ? result.error!
-          : `${SENDER_DOMAIN_PREFIX} this location’s sender address — Bee Organized can’t send from its domain. Check Settings → Emails and Settings → New leads → Who handles what. Emails resume on their own once it’s fixed.`)
+          : `${SENDER_DOMAIN_PREFIX} this location’s sender address — Bee Organized can’t send from its domain. Check Settings → Emails, under Who your emails come from. Emails resume on their own once it’s fixed.`)
       : null
     await recordDripSendStatus(row.lead_id, {
       status: senderConfigMissing ? 'no_email' : 'failed',

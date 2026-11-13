@@ -15,7 +15,7 @@
 //
 // Two places a sending address comes from, and the owner message names which:
 //   · the location's Send From Email (Settings → Emails)
-//   · a job type's sender (Settings → New leads → Who handles what) — either
+//   · a job type's sender (Settings → Emails → Who your emails come from) — either
 //     the handler's own sign-in address ("person" mode) or a typed shared
 //     mailbox.
 //
@@ -121,7 +121,7 @@ export function locationSenderDomainMessage(address: string): string {
 }
 
 export function projectTypeSenderDomainMessage(projectType: string, address: string): string {
-  return `${SENDER_DOMAIN_PREFIX} ${address} — Bee Organized can’t send from ${domainOf(address) || 'that'} addresses, and ${projectType} emails are set to send as it. Change who sends ${projectType} in Settings → New leads → Who handles what. Emails resume on their own once it’s fixed.`
+  return `${SENDER_DOMAIN_PREFIX} ${address} — Bee Organized can’t send from ${domainOf(address) || 'that'} addresses, and ${projectType} emails are set to send as it. Change who sends ${projectType} in Settings → Emails, under Who your emails come from. Emails resume on their own once it’s fixed.`
 }
 
 // The sender-config-missing message drip-send records (kept here so the card

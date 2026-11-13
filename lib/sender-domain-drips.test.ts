@@ -142,7 +142,8 @@ describe('a send refused on the SENDER’s domain', () => {
     const recorded = h.payloads('leads', 'update')[0].drip_last_send_error
     expect(recorded).toBe(TEST_MSG)
     expect(recorded).toContain('kshawjr@gmail.com')
-    expect(recorded).toContain('Settings → New leads → Who handles what')
+    expect(recorded).toContain('Settings → Emails, under Who your emails come from')
+    expect(recorded).not.toContain('New leads')
     const labels = touchpointLabels()
     expect(labels).toEqual([`Drip paused — ${TEST_MSG}`])
   })

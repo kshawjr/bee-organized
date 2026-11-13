@@ -842,8 +842,8 @@ describe('the two small wording fixes', () => {
     expect(note.text).not.toMatch(/or job|crew/)
   })
 
-  it('a bee Slack does not know points at the screen that exists: Settings › Team and Seats, not "Settings › Bees"', () => {
-    expect(beeSlackNote({ status: 'not_in_slack', bee: 'Nora', email: 'n@x.com' })!.text).toContain('Check their email in Settings › Team and Seats.')
+  it('a bee Slack does not know points at the screen that exists: Settings › Team and leads, not "Settings › Bees"', () => {
+    expect(beeSlackNote({ status: 'not_in_slack', bee: 'Nora', email: 'n@x.com' })!.text).toContain('Check their email in Settings › Team and leads.')
     for (const f of ['components/hive/shared/BeeSlackStatus.jsx', 'app/api/engagements/[id]/bees/route.ts']) {
       expect(code(f), f).not.toMatch(/Settings › Bees/)
     }
