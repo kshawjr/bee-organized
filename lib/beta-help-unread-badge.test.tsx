@@ -247,8 +247,16 @@ describe('BeeHub carries the badge on Help', () => {
     expect(src).toContain("{ key:'help',     icon:'❓', label:'Help', badge: helpUnread }")
     expect(src).toContain('const helpUnread = useUnreadReplyCount(!viewAsUser)')
   })
-  it('both nav renderers draw it — the phone drawer and the desktop sidebar', () => {
-    expect(src.match(/<NavCountBadge count=\{item\.badge\} \/>/g) || []).toHaveLength(2)
+  // 2026-11-13: the menu is one component now (components/design/AppRail.jsx)
+  // that draws the desktop column AND the phone drawer from the same rows, so
+  // the badge is handed in once and drawn by the one row both navs share.
+  it('both navs draw it — the phone drawer and the desktop menu are the same rows', () => {
+    const rail = read('components/design/AppRail.jsx')
+    expect(src).toContain('Badge={NavCountBadge}')
+    expect(rail.match(/<Badge count=\{item\.badge\} \/>/g) || []).toHaveLength(1)
+    expect(rail.split('<RailBody ').length - 1).toBe(2)   // the column and the drawer
+    // On the 80px icon strip there is no room for a number: a dot rides the icon.
+    expect(rail).toContain('{compact && item.badge > 0 && <span data-rail-dot')
   })
   it('tapping Help with replies waiting lands on My requests', () => {
     expect(src).toMatch(/function nav\(key\) \{\s*\n\s*\/\/[^\n]*\n\s*if \(key === 'help' && helpUnread > 0\) setHelpIntent\('requests'\)/)

@@ -519,7 +519,9 @@ describe("Home's Everyone tile", () => {
     return host
   }
   const tile = (host: HTMLElement) => host.querySelector('[data-testid="home-everyone"]') as HTMLElement
-  const tileValue = (host: HTMLElement) => tile(host).querySelector('p')!.textContent
+  // The tile is a button now (it opens the client list), so its number is a
+  // marked span, not the first paragraph.
+  const tileValue = (host: HTMLElement) => tile(host).querySelector('[data-tile-value]')!.textContent
   // The Client List's own total for the same data: its band headers, added up.
   async function listTotal(props: any) {
     const host = document.createElement('div'); document.body.appendChild(host)
@@ -535,7 +537,8 @@ describe("Home's Everyone tile", () => {
     const cutoff = { loadedBackTo: CUT, notListed: 18907 }
     const host = await mountHome(appProps({ initialLeadsTruncated: true, initialClientsCutoff: cutoff, initialScopedOverview: overview() }))
     expect(tileValue(host)).toBe('18,931')                 // 24 in hand + 18,907 counted on the server
-    expect(tile(host).textContent).toContain('Everyone')
+    expect(tile(host).textContent).toContain('Clients')          // renamed from "Everyone" 2026-11-13
+    expect(tile(host).textContent).not.toContain('Everyone')
     expect(await listTotal({ leadsTruncated: true, clientsCutoff: cutoff })).toBe(18931)
     // it sits right after Active clients
     expect(tile(host).previousElementSibling!.textContent).toContain('Active clients')

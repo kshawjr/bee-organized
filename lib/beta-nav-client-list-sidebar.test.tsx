@@ -162,91 +162,48 @@ describe('Client List has left the top tab row', () => {
 // ═══════════════════════════════════════════════════════════
 // …and is in the sidebar, under Clients.
 // ═══════════════════════════════════════════════════════════
-describe('Client List is nested under Clients in the sidebar', () => {
+// ── "Everyone" LEFT THE MENU on 2026-11-13 (the menu rebuild; Kevin's ruling:
+// nurturing moves into the Network & Nurture work). It had been nested under
+// Clients since 2026-09-10. The client list itself is untouched — the lens,
+// its key and the way in from Home are all still here — it just has no menu
+// row. These replace the seven tests that pinned the nested row.
+describe('Client List is no longer a row in the menu', () => {
   const navBlock = BEEHUB.slice(BEEHUB.indexOf('const navItems = ['), BEEHUB.indexOf('const navItems = [') + 2500)
+  const RAIL = readFileSync('components/design/AppRail.jsx', 'utf8')
 
-  it('reads "Everyone", and "Client List" is no longer a nav label anywhere', () => {
-    expect(navBlock).toContain("label:'Everyone'")
-    expect(navBlock).not.toContain("label:'Client List'")
-    // Not a label anywhere else in the app either — the rename is a display
-    // string, so this is the one place it can hide.
+  it('there is no "Everyone" or "Client List" nav item, and Clients has no children', () => {
+    const items = navBlock.slice(0, navBlock.indexOf('\n  ]\n'))
+    expect(items).not.toMatch(/label:'Everyone'/)
+    expect(items).not.toMatch(/label: ?'Client List'/)
+    expect(items).not.toContain('children:[')
+    expect(items).not.toContain("key:'hive-clients'")
+    expect(items).toContain("{ key:'hive',     icon:'🐝', label:'Clients' },")
     expect(BEEHUB).not.toMatch(/label: ?'Client List'/)
     expect(SHELL).not.toMatch(/label: ?'Client List'/)
   })
 
-  it('the rename is DISPLAY ONLY — the lens key, the child key and the wiring are untouched', () => {
-    expect(navBlock).toContain("lens:'clients'")
-    expect(navBlock).toContain("key:'hive-clients'")
+  it('the menu draws no nested rows at all', () => {
+    expect(BEEHUB).not.toContain('(item.children||[]).map(')
+    expect(RAIL).not.toMatch(/item\.children|child\.|onPick\(child/)
+    expect(BEEHUB).not.toContain('const childActive')
+  })
+
+  it('the client list is still THERE: the lens key, its storage key and the way in are untouched', () => {
     expect(BEEHUB).toContain("setHiveIntent({ tab: 'clients' })")
+    expect(BEEHUB).toContain('const openClientListLens = () => {')
     expect(SHELL).toContain("const LENS_LS_KEY = 'bee_hive_beta_lens'")
   })
 
-  it('is declared as a child of the Clients nav item, and is not a sibling section', () => {
-    expect(navBlock).toContain("key:'hive'")
-    expect(navBlock).toContain('children:[')
-    // It must hang off Clients, not become a seventh top-level section. That
-    // adjacency is load-bearing for the LABEL too: "Everyone" only means
-    // something with "Clients" directly above it.
-    const hiveAt = navBlock.indexOf("key:'hive'")
-    const childAt = navBlock.indexOf("label:'Everyone'")
-    const nextTopLevel = navBlock.indexOf("key:'partners'")
-    expect(childAt).toBeGreaterThan(hiveAt)
-    expect(childAt).toBeLessThan(nextTopLevel)
-  })
-
-  it('BOTH navs keep the parent immediately above the child — the label depends on it', () => {
-    // In each render the children map sits directly after the parent button,
-    // inside the same fragment, so "Clients" is the row above "Everyone" on
-    // desktop AND in the mobile drawer. If the mobile drawer ever rendered a
-    // flat list, "Everyone" would sit between Network and Reports meaning
-    // nothing — this is the assertion that would catch it.
-    const sites = [...BEEHUB.matchAll(/\(item\.children\|\|\[\]\)\.map\(child=>\{/g)]
-    expect(sites, 'desktop sidebar + mobile drawer').toHaveLength(2)
-    for (const site of sites) {
-      const before = BEEHUB.slice(0, site.index!)
-      // The row immediately preceding each children map is the PARENT row —
-      // the last thing rendered before it is the parent's own label, with no
-      // other nav row opened in between.
-      const parentLabelAt = before.lastIndexOf('{item.label}')
-      const buttonAt = before.lastIndexOf('<button')
-      expect(parentLabelAt).toBeGreaterThan(-1)
-      expect(parentLabelAt).toBeGreaterThan(buttonAt)   // same button, still open
-    }
-  })
-
-  it('BOTH navs render children — the desktop sidebar and the mobile drawer', () => {
-    expect(BEEHUB.match(/\(item\.children\|\|\[\]\)\.map\(child=>\{/g) || []).toHaveLength(2)
-  })
-
-  it('a child lights up only when its section is active AND the shell reports its lens', () => {
-    expect(BEEHUB).toContain('const childActive = isActive && hiveLens===child.lens')
-    // Clients itself still reads as the active section while a child is on.
-    expect(BEEHUB).toContain("background:isActive?'rgba(168,201,196,0.12)':'transparent'")
-  })
-
-  it('the nested row borrows the sidebar rows it sits with, not the tab row it replaced', () => {
-    const MARK = 'const childActive = isActive && hiveLens===child.lens'
-    // The mobile drawer is declared BEFORE the desktop sidebar in this file,
-    // so first/last is how each block is addressed.
-    const mobile = BEEHUB.slice(BEEHUB.indexOf(MARK), BEEHUB.indexOf(MARK) + 1200)
-    const desktop = BEEHUB.slice(BEEHUB.lastIndexOf(MARK), BEEHUB.lastIndexOf(MARK) + 1200)
-
-    for (const child of [mobile, desktop]) {
-      expect(child).toContain("borderRadius:'10px'")        // same shell as its siblings
-      expect(child).toContain("background:childActive?")    // the siblings' active fill
-      // The size sits on the SPAN, never the button — globals.css
-      // `button{font-size:16px!important}` discards an inline size on a button,
-      // which is exactly how every sibling row in this sidebar is written.
-      expect(child).toMatch(/<span style=\{\{ fontSize:'1[23]px'/)
-      expect(child).not.toMatch(/<button[^>]*fontSize/)
-    }
-    // Each indents to sit under ITS OWN parent's label: desktop is a 14px
-    // inset + 18px icon + 12px gap; the drawer is 14px + 20px + 14px.
-    expect(desktop).toContain("padding:'7px 14px 7px 44px'")
-    expect(desktop).toContain("width:'4px', height:'4px'")   // desktop's dot
-    expect(mobile).toContain("padding:'10px 14px 10px 48px'")
-    expect(mobile).toContain("minHeight:'48px'")             // the drawer's touch target
-    expect(mobile).toContain("width:'5px', height:'5px'")    // the drawer's larger dot
+  // With the row gone, Home's tile is the way in (2026-11-13). It was a number
+  // with no link, labelled "Everyone"; Kevin renamed it "Clients" and it now
+  // calls the very function the menu row called. Clicked through per role in
+  // lib/home-clients-tile.test.tsx.
+  it('Home’s "Clients" tile is the way in, by the same function the menu row called', () => {
+    expect(BEEHUB).not.toContain('<HomeMetricTile label="Everyone"')
+    const at = BEEHUB.indexOf('<HomeMetricTile label="Clients" testId="home-everyone"')
+    expect(at).toBeGreaterThan(0)
+    expect(BEEHUB.slice(at, at + 400)).toContain('onOpen={onOpenClientList}')
+    expect(BEEHUB).toContain('onOpenClientList={openClientListLens}')
   })
 
   it('the sidebar reaches the lens the SAME way Home’s deep links already do', () => {

@@ -112,13 +112,20 @@ const ROLES = [
   { label: 'corporate',   props: { initialRole: 'corporate',   initialFranchiseRole: 'owner', currentUser: { id: 'c', email: 'c@x.com', name: 'C', role: 'corporate',   locationId: null } } },
 ]
 
-describe('Reports route — identical Coming Soon for every role (issue 139)', () => {
+// 2026-11-13 (the menu rebuild; Kevin's ruling): Reports is greyed in the menu
+// and CLOSED for every role. Still one behaviour for everyone — issue 139's
+// point — but it is the closed line now, and the Coming Soon screen behind it
+// no longer mounts.
+describe('Reports route — identical for every role, and closed (issue 139 → 2026-11-13)', () => {
   for (const { label, props } of ROLES) {
-    it(`${label} clicking Reports gets the Coming Soon state, no report content`, async () => {
+    it(`${label} arriving on Reports gets the closed line, no report content`, async () => {
       const host = await render(React.createElement(App as any, baseProps(props)))
       const txt = host.textContent || ''
-      // the Coming Soon copy is present…
-      expect(txt).toContain('Reports are coming soon')
+      expect(txt).toContain('Reports are on their way.')
+      expect(txt).not.toContain('Reports are coming soon')
+      const item = host.querySelector('aside.bee-sidebar [data-nav="reports"]') as HTMLElement
+      expect(item.tagName).toBe('DIV')
+      expect(item.getAttribute('aria-disabled')).toBe('true')
       // …and NO Gen 1 report section renders for this role
       for (const gone of ['Revenue Trend', 'My Pipeline', 'Conversion Funnel', 'Partner Referrals', 'Service Types']) {
         expect(txt, `${label} must not see "${gone}"`).not.toContain(gone)

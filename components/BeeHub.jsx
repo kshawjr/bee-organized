@@ -56,6 +56,7 @@ import * as SUI from "@/components/settings/SettingsShell"
 import * as TUI from "@/components/settings/TeamAndLeads"
 import * as LUI from "@/components/settings/LocationRows"
 import * as CUI from "@/components/settings/ConnectionsPage"
+import { AppRail, ClosedSection, RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY } from "@/components/design/AppRail"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -10897,7 +10898,25 @@ function HomeAllClearCard() {
 }
 
 // A quiet metric tile (surface-1, no heavy border) — context, not hero.
-function HomeMetricTile({ label, value, sub, testId }) {
+// `onOpen` makes a tile a WAY IN, and makes it look like one (2026-11-13,
+// Home's "Everyone"): the whole tile is a button, an arrow sits in its
+// corner, and its line underneath says what opening it does, in the link
+// colour. A tile without `onOpen` is the plain number it always was — drawn
+// by the same lines below, untouched.
+function HomeMetricTile({ label, value, sub, testId, onOpen = null, openLabel = null }) {
+  const [hover, setHover] = useState(false)
+  if (onOpen) return (
+    <button type="button" data-testid={testId} data-tile-opens="" onClick={onOpen}
+      aria-label={`${label}: ${value}. ${openLabel || 'Open'}`}
+      onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      style={{ flex:'1 1 130px', minWidth:0, position:'relative', display:'block', textAlign:'left', fontFamily:'inherit', lineHeight:'inherit', cursor:'pointer', background: hover ? HT.accent.faint : HT.surface.sunken, border:`1px solid ${hover ? HT.accent.fg : 'transparent'}`, borderRadius:HT.radius.inset, padding:'11px 12px', transition:'background 0.15s, border-color 0.15s' }}>
+      <span aria-hidden="true" data-tile-arrow style={{ position:'absolute', top:'10px', right:'12px', fontSize:'16px', lineHeight:1, color:HT.accent.fg }}>→</span>
+      <span data-tile-value style={{ display:'block', fontSize:'20px', fontWeight:600, color:HT.ink.primary, fontVariantNumeric:HT.type.tabular, letterSpacing:HT.type.trackNum, marginBottom:'3px' }}>{value}</span>
+      <span style={{ display:'block', fontSize:'11px', fontWeight:500, color:HT.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label}</span>
+      {sub && <span style={{ display:'block', fontSize:'10px', color:HT.ink.quiet, marginTop:'1px' }}>{sub}</span>}
+      <span data-tile-open-label style={{ display:'block', fontSize:'11px', fontWeight:600, color:HT.accent.fg, marginTop:'4px', textDecoration: hover ? 'underline' : 'none' }}>{openLabel || 'Open'}</span>
+    </button>
+  )
   return (
     <div data-testid={testId} style={{ flex:'1 1 130px', minWidth:0, background:HT.surface.sunken, borderRadius:HT.radius.inset, padding:'12px 13px' }}>
       <p style={{ fontSize:'20px', fontWeight:600, color:HT.ink.primary, fontVariantNumeric:HT.type.tabular, letterSpacing:HT.type.trackNum, marginBottom:'3px' }}>{value}</p>
@@ -25133,7 +25152,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, clientsCutoff=null, scopedOverview=null, scopedOverviewLocId=null, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
+function DashboardScreen({ onOpenClientList = null, onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, clientsCutoff=null, scopedOverview=null, scopedOverviewLocId=null, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{}, onOpenReminder=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -25830,12 +25849,21 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
           <HomeMetricTile label="Open engagements" value={openEngagementsCount} />
           <HomeMetricTile label="Active clients" value={activeClientsCount} />
-          {/* Everyone — right after Active clients, so the two read as a pair:
-              who is being worked, out of how many. Same word as the sidebar's
-              Clients › Everyone. */}
-          <HomeMetricTile label="Everyone" testId="home-everyone"
+          {/* Clients — right after Active clients, so the two read as a pair:
+              who is being worked, out of how many.
+              THE WAY IN to the full client list (2026-11-13). "Everyone" left
+              the menu with the menu rebuild, on Kevin's ruling, and this tile
+              (then labelled "Everyone") was a number with no link — so
+              nothing an owner could click reached that list. Kevin renamed it
+              "Clients" and it opens the list now, by the SAME function the
+              menu row called (App's openClientListLens, handed down as
+              onOpenClientList) — same list, same way. And it looks like it
+              opens: see HomeMetricTile. Every role is shown this tile, and
+              every role had the menu row. The test id keeps its old name. */}
+          <HomeMetricTile label="Clients" testId="home-everyone"
             value={everyoneCount == null ? '—' : everyoneCount.toLocaleString()}
-            sub={everyoneCount == null ? "Couldn't be counted just now" : 'all your clients and contacts'} />
+            sub={everyoneCount == null ? "Couldn't be counted just now" : 'all your clients and contacts'}
+            onOpen={onOpenClientList} openLabel="Open the full list" />
           <HomeMetricTile label="New this week" value={newThisWeekCount} />
           {canSeeFinancials && <HomeMetricTile label="Outstanding" value={fmt(outstandingTotal)} />}
         </div>
@@ -38012,6 +38040,17 @@ if (Array.isArray(initialPeople)) return
   // from the DOM entirely.
   const [windowWidth, setWindowWidth]       = useState(0)
   const [showMobileNav, setShowMobileNav]   = useState(false)
+  // The desktop menu folded down to its icon strip. REMEMBERED across reloads
+  // (this browser only): read after the first paint, because the server
+  // cannot know it and guessing would make the two renders disagree.
+  const [railCollapsed, setRailCollapsed] = useState(false)
+  useEffect(() => {
+    try { if (window.localStorage.getItem(RAIL_COLLAPSED_KEY) === '1') setRailCollapsed(true) } catch (e) { /* private mode: not remembered */ }
+  }, [])
+  const toggleRail = () => setRailCollapsed(v => {
+    try { window.localStorage.setItem(RAIL_COLLAPSED_KEY, v ? '0' : '1') } catch (e) { /* private mode */ }
+    return !v
+  })
   const [showMobileProfile, setShowMobileProfile] = useState(false)
   useEffect(() => {
     function check() { setWindowWidth(window.innerWidth) }
@@ -38274,14 +38313,16 @@ if (Array.isArray(initialPeople)) return
     // item (2026-09-10). `children` is new to this nav — the only nesting in
     // the sidebar — and both the desktop and mobile renders below understand
     // it. `lens` is what the child lights up on, matched against hiveLens.
-    { key:'hive',     icon:'🐝', label:'Clients', children:[
-      // "Everyone" (Kevin, seen live 2026-09-11): "Clients › Client List" read
-      // redundant with the word doing double duty. DISPLAY STRING ONLY — the
-      // lens key, the route, the component and every variable here still say
-      // clients, because that is what it is.
-      { key:'hive-clients', label:'Everyone', lens:'clients', onPick:()=>openClientListLens() },
-    ] },
-    { key:'partners', icon:'👥', label:'Network'},
+    // "Everyone" WAS nested here (Clients › Everyone, 2026-09-10). REMOVED from
+    // the menu on 2026-11-13 with the menu rebuild, on Kevin's ruling:
+    // nurturing moves into the Network & Nurture work. The client list itself
+    // (the 'clients' lens in HiveShell) is untouched, and its way in is now
+    // Home's "Clients" tile (was "Everyone"), which calls openClientListLens —
+    // the same function the menu row called (see DashboardScreen). The Clients
+    // tabs are only Inbox and Engagements.
+    { key:'hive',     icon:'🐝', label:'Clients' },
+    // CLOSED_NAV (below): greyed in the menu, and cannot be opened.
+    { key:'partners', icon:'👥', label:'Network & Nurture' },
     { key:'reports',  icon:'📊', label:'Reports' },
     // issue 140: Back Office sits alongside Reports/Settings and is shown to
     // EVERY role on purpose (build anticipation, don't hide). The render split
@@ -38299,6 +38340,35 @@ if (Array.isArray(initialPeople)) return
     // their threads live under Help › My requests, for every role. Elevated
     // users still reach the triage console via the Admin screen's Feedback tab.
   ]
+
+  // ── CLOSED SECTIONS (the menu rebuild, 2026-11-13; Kevin's ruling) ─────────
+  // Greyed in the menu and not openable — for EVERY role, super admin
+  // included. The menu draws each as a plain <div> (the treatment Settings
+  // gives Tags), so there is nothing to click or tab to; and anyone who
+  // arrives anyway — a typed /network, /contacts, /partners, /reports or
+  // /backoffice, an old bookmark, the back button, or a link from elsewhere in
+  // the app (a reminder about a Network person, a Network person picked in
+  // Search, a tag count on Admin › Tags) — gets the short line below from
+  // screen(), never the old screen. The screens' own code is untouched and
+  // simply never mounts, so none of their requests fire.
+  const CLOSED_NAV = {
+    partners:   { note:'Under redesign', title:'Network & Nurture', head:'Network & Nurture is being redesigned.', body:'This page is closed while it is rebuilt. Your Network contacts are safe: nothing has been changed or deleted.' },
+    reports:    { title:'Reports', head:'Reports are on their way.', body:'There is nothing to open here yet.' },
+    backoffice: { title:'Back Office', head:'Back Office is on its way.', body:'There is nothing to open here yet.' },
+  }
+  // The menu's two lists, from navItems as it stands for this viewer: what
+  // exists and for whom is decided above, here it is only split and marked.
+  // Help and Admin sit under the line, as in the design. `locked` is the
+  // onboarding lock exactly as it was (issues 139, 140): a franchise still
+  // setting up may open only Home, Back Office and Help.
+  const railRow = item => ({
+    key: item.key, label: item.label, badge: item.badge,
+    soon: !!CLOSED_NAV[item.key], note: CLOSED_NAV[item.key]?.note,
+    locked: effectiveCrmStatus==='onboarding' && !isElevated && !['home','backoffice','help'].includes(item.key),
+  })
+  const RAIL_LOWER_KEYS = ['help', 'admin']
+  const railItems = navItems.filter(i => !RAIL_LOWER_KEYS.includes(i.key)).map(railRow)
+  const railLower = navItems.filter(i => RAIL_LOWER_KEYS.includes(i.key)).map(railRow)
 
   // Heights — the old top demo/super-admin strip is GONE (its identity,
   // View-as, and badge moved into the sidebar-bottom IdentityScopeControl);
@@ -38347,7 +38417,7 @@ if (Array.isArray(initialPeople)) return
       if (activeNav === 'home') return 'Home'
       if (activeNav === 'reminders') return 'Reminders'
       if (activeNav === 'hive') return 'Clients'
-      if (activeNav === 'partners') return 'Network'
+      if (activeNav === 'partners') return 'Network & Nurture'
       if (activeNav === 'reports') return 'Reports'
       if (activeNav === 'backoffice') return 'Back Office' // issue 140
       if (activeNav === 'settings') return 'Settings'
@@ -38390,12 +38460,12 @@ if (Array.isArray(initialPeople)) return
     )
   }
 
-  // ── Hamburger drawer (mobile only) ─────────────────────────────────────────
-  // Slide-in from left, ~280px wide, full-height. Backdrop tap closes.
-  // Reuses the same navItems gating logic as the desktop sidebar.
-  const MobileNavDrawer = () => {
-    if (!showMobileNav) return null
-    const isOnboardingState = effectiveCrmStatus === 'onboarding'
+  // ── Phone drawer ───────────────────────────────────────────────────────────
+  // The menu itself is components/design/AppRail.jsx now (2026-11-13) — the
+  // same component draws the desktop column and this drawer, from the same
+  // two lists. What is left here is how the drawer ENDS: who you are, and
+  // the sign-out link, exactly what the old drawer ended with.
+  const mobileDrawerFooter = (() => {
     const sidebarName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
     const sidebarInitials = viewAsUser?.initials || (sidebarName ? getInitials(sidebarName) : 'KS')
     const sidebarRoleLabel = viewAsUser
@@ -38407,93 +38477,25 @@ if (Array.isArray(initialPeople)) return
       : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
       : ''
     return (
-      <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex' }}>
-        <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)' }} />
-        <div style={{ position:'relative', width:'280px', maxWidth:'85vw', background:'#1a2e2b', height:'100%', display:'flex', flexDirection:'column', boxShadow:'4px 0 24px rgba(0,0,0,0.3)', overflowY:'auto', borderRight:'1px solid rgba(168,201,196,0.1)' }}>
-          {/* Header */}
-          <div style={{ padding:'18px 18px 14px', borderBottom:'1px solid rgba(168,201,196,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-              <span style={{ fontSize:'22px' }}>🐝</span>
-              <div>
-                <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
-                <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
-              </div>
-            </div>
-            <button onClick={()=>setShowMobileNav(false)} aria-label="Close menu" style={{ width:'44px', height:'44px', background:'none', border:'none', color:'rgba(168,201,196,0.85)', fontSize:'22px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+      <div data-rail-mobile-account>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+          <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'#a2c7c1', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'#1a302c', flexShrink:0 }}>
+            {sidebarInitials}
           </div>
-          {/* Nav items */}
-          <div style={{ flex:1, padding:'10px 10px 16px', display:'flex', flexDirection:'column', gap:'4px' }}>
-            {navItems.map(item=>{
-              // issue 139: Reports has NO role lock — every role that sees the
-              // tab gets the identical Coming Soon screen (one behavior, no
-              // branch). Settings nav is likewise open to EVERY role —
-              // SettingsScreen itself allowlists the sections (owner:
-              // everything; manager and lite_user: Profile only, a self-edit).
-              // Don't reintroduce a nav-level role denylist for either.
-              // issue 140: Back Office is exempt from the onboarding lock too —
-              // it's meant to build anticipation, so it stays clickable (never
-              // dimmed) for every role, even mid-setup.
-              // Help is exempt from the onboarding lock too — mid-setup is
-              // exactly when someone needs it.
-              const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
-              const isActive = activeNav===item.key
-              return (
-                <React.Fragment key={item.key}>
-                <button
-                  onClick={()=>{
-                    if (isLocked) return
-                    if (item.action==='openManual') { setShowManual(true); setShowMobileNav(false); return }
-                    nav(item.key)
-                    setShowMobileNav(false)
-                  }}
-                  style={{ width:'100%', minHeight:'48px', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left', background:isActive?'rgba(168,201,196,0.14)':'transparent', opacity:isLocked?0.3:1 }}>
-                  <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
-                  <span style={{ fontSize:'14px', fontWeight:isActive?600:500, color:isActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{item.label}</span>
-                  <NavCountBadge count={item.badge} />
-                  {isActive&&<div style={{ marginLeft:item.badge>0?'8px':'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
-                </button>
-                {/* Same nesting as the desktop sidebar, at this drawer's own
-                    scale: its rows are 20px icon + 14px gap off a 14px inset,
-                    so the child indents to 48px to sit under the parent label,
-                    and keeps the 48px minHeight every row here has for touch. */}
-                {(item.children||[]).map(child=>{
-                  const childActive = isActive && hiveLens===child.lens
-                  return (
-                    <button
-                      key={child.key}
-                      onClick={()=>{ if (isLocked) return; child.onPick(); setShowMobileNav(false) }}
-                      style={{ width:'100%', minHeight:'48px', padding:'10px 14px 10px 48px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left', background:childActive?'rgba(168,201,196,0.14)':'transparent', opacity:isLocked?0.3:1 }}>
-                      <span style={{ fontSize:'13px', fontWeight:childActive?600:500, color:childActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{child.label}</span>
-                      {childActive&&<div style={{ marginLeft:'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
-                    </button>
-                  )
-                })}
-                </React.Fragment>
-              )
-            })}
-          </div>
-          {/* User card */}
-          <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-              <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
-                {sidebarInitials}
-              </div>
-              <div style={{ minWidth:0, flex:1 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarName}</p>
-                {sidebarRoleLabel && (
-                  <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.55)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarRoleLabel}</p>
-                )}
-              </div>
-            </div>
-            <a href="/api/auth/signout"
-              style={{ display:'block', marginTop:'12px', minHeight:'44px', padding:'11px 12px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.18)', borderRadius:'10px', textAlign:'center', fontSize:'13px', fontWeight:600, color:'rgba(168,201,196,0.9)', textDecoration:'none', fontFamily:'inherit' }}>
-              Sign Out
-            </a>
+          <div style={{ minWidth:0, flex:1 }}>
+            <p style={{ fontSize:'14px', fontWeight:700, color:'#edf0e8', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarName}</p>
+            {sidebarRoleLabel && (
+              <p style={{ fontSize:'12px', color:'#94a29a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarRoleLabel}</p>
+            )}
           </div>
         </div>
+        <a href="/api/auth/signout"
+          style={{ display:'block', marginTop:'12px', minHeight:'44px', boxSizing:'border-box', padding:'11px 12px', background:'rgba(237,240,232,0.05)', border:'1px solid rgba(237,240,232,0.15)', borderRadius:'8px', textAlign:'center', fontSize:'13px', fontWeight:700, color:'#edf0e8', textDecoration:'none', fontFamily:'inherit' }}>
+          Sign Out
+        </a>
       </div>
     )
-  }
+  })()
 
   // ── Mobile profile menu (top-right popover) ────────────────────────────────
   const MobileProfileMenu = () => {
@@ -38623,6 +38625,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
   }, [])
 
   const screen = () => {
+    // A closed section shows its one line and nothing of the screen behind it
+    // (CLOSED_NAV, above). First, so no other branch can reach it.
+    if (CLOSED_NAV[activeNav]) {
+      const c = CLOSED_NAV[activeNav]
+      return <div style={{ paddingTop:`${TOTAL_TOP}px` }}><ClosedSection title={c.title} head={c.head} body={c.body} onHome={()=>nav('home')} /></div>
+    }
     // Elevated users (super_admin / corporate) get the unified SuperAdminLayout
     // for the Admin nav destination. /settings continues to show the franchise-style
     // SettingsScreen for all roles so elevated users retain access to Profile /
@@ -38755,6 +38763,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             getFirstName here — that blanked invited users' last names
             on the onboarding profile step. */}
         <DashboardScreen
+          onOpenClientList={openClientListLens}
           startNav='home'
           onReportProblem={openRecordReport}
           onOpenReminder={openReminderRecord}
@@ -38856,10 +38865,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     <SeatsContext.Provider value={seatsValue}>
     <PartnersContext.Provider value={partnersCtxValue}>
     <CompaniesContext.Provider value={companiesCtxValue}>
-    <div>
+    <div style={{ '--bee-rail-w': `${railCollapsed ? RAIL_W_COLLAPSED : RAIL_W}px` }}>
       <LocBanner />
       <MobileTopBar />
-      <MobileNavDrawer />
       <MobileProfileMenu />
       {/* First-time discovery hint pointing at the Ask Bee Hub pill. One fixed
           popover, positioned under whichever top-bar icon is visible (mobile
@@ -38870,7 +38878,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           background:'white', borderRadius:'12px', boxShadow:'0 12px 40px rgba(26,46,43,0.28)', padding:'14px',
           ...(isMobile
             ? { top:`${TOTAL_TOP + 48 + 6}px`, right:'10px', width:'min(260px, calc(100vw - 20px))' }
-            : { top:`${TOTAL_TOP + 62}px`, left:'12px', width:'196px' }),
+            : { top:`${TOTAL_TOP + 124}px`, left:'12px', width: railCollapsed ? '196px' : '168px' }),
         }}>
           {/* up-arrow toward the icon */}
           {/* Arrow offsets account for the wider "? Help" pill (vs the old circle). */}
@@ -38941,98 +38949,37 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       )}
       <LocPickerDropdown />
 
-      {/* Sidebar nav - desktop only. The column itself no longer scrolls —
-          the NAV LIST is the scroll region (flex:1 + overflowY:auto below),
-          so everything after it (search + identity/scope control) is a
-          PINNED footer that stays visible however tall the board gets, and
-          the identity popover isn't clipped by a scrolling ancestor. */}
-      <div className="bee-sidebar" style={{ position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)' }}>
-        {/* Logo + Ask Bee Hub — stacked so the 220px sidebar gives the logo
-            lockup full width (title never wraps) and the Ask button sits on
-            its own clean row below, no crowding. */}
-        <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
-            <span style={{ fontSize:'22px', flexShrink:0 }}>🐝</span>
-            <div style={{ flex:1, minWidth:0 }}>
-              <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1, whiteSpace:'nowrap' }}>Bee Hub</p>
-              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px', whiteSpace:'nowrap' }}>Bee Organized</p>
-            </div>
-          </div>
-          <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} />
-        </div>
-        {/* Nav items — THE scroll region; footer below stays pinned */}
-        <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'12px 10px', display:'flex', flexDirection:'column', gap:'2px' }}>
-          {navItems.map(item=>{
-            const isOnboardingState = effectiveCrmStatus==='onboarding'
-            // Franchise sub-role gating
-            // issue 139: Reports has NO role lock — every role that sees the tab
-            // gets the identical Coming Soon screen (one behavior, no branch).
-            // Settings nav is likewise open to EVERY role — SettingsScreen itself
-            // allowlists the sections (owner: everything; manager and lite_user:
-            // Profile only, a self-edit). Don't reintroduce a nav-level role
-            // denylist for either. Onboarding lockdown only applies to franchise
-            // users mid-setup — super_admin / corporate are always elevated and
-            // never "onboarding."
-            // issue 140: Back Office is exempt from the onboarding lock (see the
-            // sidebar block above) — always clickable for every role.
-            const isLocked = (isOnboardingState && !isElevated && !['home','backoffice','help'].includes(item.key))
-            const isActive = activeNav===item.key
-            return (
-              <React.Fragment key={item.key}>
-              <button onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
-                <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
-                <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
-                <NavCountBadge count={item.badge} />
-                {isActive&&<div style={{ marginLeft:item.badge>0?'8px':'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
-              </button>
-              {/* Nested items — the sidebar's FIRST nesting, so the language is
-                  borrowed from the rows above rather than from the tab row it
-                  replaces: same button shell, same radius, same active fill,
-                  same 4px dot. Three differences carry the hierarchy and
-                  nothing else does:
-                    · NO icon. The emoji here are section marks; giving a child
-                      one would make it read as a fourth section.
-                    · paddingLeft 44px = the parent's 14px inset + its 18px icon
-                      + the 12px gap, so the child's label starts exactly under
-                      the parent's label rather than at an invented indent.
-                    · 12px type against the parent's 13px, and the parent's own
-                      muted stop when idle.
-                  The fontSize sits on the SPAN, not the button — same as every
-                  row above — because globals.css `button{font-size:16px!important}`
-                  discards an inline size on the button itself. That is also why
-                  .bee-small-action is not used here: it releases to 12px, but
-                  the sibling rows do not use it, and matching them matters more
-                  than the class.
-                  A child lights up only when its section is active AND the shell
-                  reports its lens, so landing on the client list shows Clients
-                  as the active section with "Everyone" marked inside it. */}
-              {(item.children||[]).map(child=>{
-                const childActive = isActive && hiveLens===child.lens
-                return (
-                  <button key={child.key} onClick={()=>{ if (isLocked) return; child.onPick() }} style={{ width:'100%', padding:'7px 14px 7px 44px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', textAlign:'left', background:childActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
-                    <span style={{ fontSize:'12px', fontWeight:childActive?600:400, color:childActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{child.label}</span>
-                    {childActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
-                  </button>
-                )
-              })}
-              </React.Fragment>
-            )
-          })}
-        </div>
-        {/* Search button in sidebar (pinned footer starts here) */}
-        <div style={{ padding:'8px 10px', borderTop:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
-          <button onClick={()=>setShowGlobalSearch(true)} style={{ width:'100%', padding:'9px 12px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', color:'rgba(168,201,196,0.6)', fontSize:'12px' }}>
-            <span style={{ fontSize:'14px' }}>🔍</span>
-            <span style={{ flex:1, textAlign:'left' }}>Search…</span>
-            <span style={{ fontSize:'10px', background:'rgba(168,201,196,0.12)', padding:'1px 5px', borderRadius:'4px', color:'rgba(168,201,196,0.4)' }}>⌘K</span>
-          </button>
-        </div>
-        {/* Identity + scope control — PINNED sidebar footer. The merge of
-            the old top super-admin strip (View as / name / badge), the
-            footer location switcher, and the footer avatar/sign-out block.
-            All props passed DOWN (§8.5); the handlers are the SAME code
-            paths those three controls called — relocated, not forked. */}
-        {(() => {
+      {/* THE MENU — desktop column and phone drawer, one component
+          (components/design/AppRail.jsx, rebuilt 2026-11-13). It draws what
+          it is handed: railItems / railLower come from navItems above, so
+          who sees Admin, and the onboarding lock, are decided where they
+          always were. The nav LIST is its scroll region; search and the
+          identity control below it stay pinned, and the identity popover is
+          not clipped by a scrolling ancestor. */}
+      <AppRail
+        items={railItems}
+        lower={railLower}
+        active={activeNav}
+        onPick={key=>nav(key)}
+        collapsed={railCollapsed}
+        onToggle={toggleRail}
+        mobileOpen={showMobileNav}
+        onCloseMobile={()=>setShowMobileNav(false)}
+        Badge={NavCountBadge}
+        /* The Bee Organized logo goes here. The export holds only a pointer
+           to a file Lovable hosts, so until Kevin supplies the file the bee
+           that was there stays. */
+        brandMark={<span style={{ fontSize:'24px', lineHeight:1 }}>🐝</span>}
+        ask={compact => <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} compact={compact} />}
+        onSearch={()=>setShowGlobalSearch(true)}
+        mobileFooter={mobileDrawerFooter}
+        account={{ name: currentUser?.name || 'Kevin Shaw', initials: getInitials(currentUser?.name || 'Kevin Shaw') }}
+        /* Identity + scope control — PINNED footer. The merge of the old top
+           super-admin strip (View as / name / badge), the footer location
+           switcher, and the footer avatar/sign-out block. All props passed
+           DOWN (§8.5); the handlers are the SAME code paths those three
+           controls called — relocated, not forked. */
+        footer={(() => {
           const isRealSuperAdmin = (initialRole ?? 'super_admin') === 'super_admin'
           const realName = currentUser?.name || 'Kevin Shaw'
           const realRoleLabel = isRealSuperAdmin ? 'Super Admin'
@@ -39047,7 +38994,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             : selectedLoc ? `${selectedLoc.name}, ${selectedLoc.state}`
             : currentLocation?.name || 'Your location'
           return (
-            <div style={{ padding:'10px', borderTop:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
+            <div data-rail-identity>
               <IdentityScopeControl
                 name={realName}
                 email={currentUser?.email || ''}
@@ -39070,7 +39017,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             </div>
           )
         })()}
-      </div>
+      />
 
       {/* Scope-switch feedback (immediate, no delay gate).
           BeeLoader's 350ms threshold is right for a SECTION load, where the

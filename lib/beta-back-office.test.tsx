@@ -87,54 +87,47 @@ const PLACEHOLDER_BODY = 'building a new Back Office' // BackOfficeComingSoon on
 const WIP_HEADING      = 'Back Office build zone'     // BackOfficeScreen only
 const WIP_BADGE        = 'Work in progress'           // BackOfficeScreen only
 
-describe('Back Office tab is present in the nav for every role (issue 140)', () => {
+// ── CLOSED 2026-11-13 (the menu rebuild; Kevin's ruling) ───────────────────
+// Back Office is greyed in the menu and cannot be opened by ANY role, super
+// admin included. Neither of the two screens above mounts: whoever arrives —
+// here, straight on /backoffice — gets one short line. The full set of roads
+// in is pinned in lib/app-rail.test.tsx.
+const CLOSED_LINE = 'Back Office is on its way.'
+
+describe('Back Office is still in the menu for every role, greyed (issue 140 → 2026-11-13)', () => {
   for (const { label, props } of ROLES) {
-    it(`${label} sees the Back Office nav entry`, async () => {
-      // Mount on the Reports route (known-mountable, issue 139) so any
-      // "Back Office" text can ONLY come from the nav entry — the Reports
-      // screen never says "Back Office".
-      const host = await render(React.createElement(App as any, baseProps({ ...props, initialRoute: 'reports' })))
-      expect(host.textContent || '').toContain('Back Office')
-      // and no pre-existing tab was dropped
-      for (const tab of ['Home', 'Clients', 'Network', 'Reports', 'Settings']) {
-        expect(host.textContent, `${label} nav must still show "${tab}"`).toContain(tab)
+    it(`${label} sees Back Office in the menu, as a greyed item that is not a button`, async () => {
+      const host = await render(React.createElement(App as any, baseProps({ ...props, initialRoute: 'home' })))
+      const item = host.querySelector('aside.bee-sidebar [data-nav="backoffice"]') as HTMLElement
+      expect(item, 'the Back Office item').toBeTruthy()
+      expect(item.textContent).toBe('Back Office')
+      expect(item.tagName).toBe('DIV')
+      expect(item.getAttribute('aria-disabled')).toBe('true')
+      // and no other item was dropped
+      for (const key of ['home', 'reminders', 'hive', 'partners', 'reports', 'settings', 'help']) {
+        expect(host.querySelector(`aside.bee-sidebar [data-nav="${key}"]`), `${label} menu must still show ${key}`).toBeTruthy()
       }
     })
   }
 })
 
-describe('Back Office render split — super_admin vs everyone else (issue 140)', () => {
-  for (const { label, props, superAdmin } of ROLES) {
-    it(`${label} lands on the ${superAdmin ? 'WIP build-out surface' : 'shared Coming Soon'}, not the other`, async () => {
+describe('Back Office cannot be opened by anyone — neither screen behind it mounts', () => {
+  for (const { label, props } of ROLES) {
+    it(`${label} on /backoffice gets the closed line, not the build zone and not the old placeholder`, async () => {
       const host = await render(React.createElement(App as any, baseProps(props)))
       const txt = host.textContent || ''
-      if (superAdmin) {
-        // super_admin → the real BackOfficeScreen stub…
-        expect(txt).toContain(WIP_HEADING)
-        expect(txt).toContain(WIP_BADGE)
-        // …and NOT the placeholder (the anti-#136 guarantee)
-        expect(txt, 'super_admin must NOT render the Coming Soon placeholder').not.toContain(PLACEHOLDER_BODY)
-      } else {
-        // everyone else → the shared ComingSoonPlaceholder…
-        expect(txt).toContain(PLACEHOLDER_BODY)
-        // …and NOT the super-admin build-out surface
-        expect(txt, `${label} must NOT render the super-admin build-out surface`).not.toContain(WIP_HEADING)
-        expect(txt, `${label} must NOT render the WIP badge`).not.toContain(WIP_BADGE)
-      }
+      expect(txt).toContain(CLOSED_LINE)
+      expect(txt, `${label} must NOT render the super-admin build-out surface`).not.toContain(WIP_HEADING)
+      expect(txt, `${label} must NOT render the WIP badge`).not.toContain(WIP_BADGE)
+      expect(txt, `${label} must NOT render the old Coming Soon placeholder`).not.toContain(PLACEHOLDER_BODY)
     })
   }
 })
 
-describe('Back Office did not disturb the rest of the nav (issue 140)', () => {
-  it('Back Office sits between Reports and Settings; existing order preserved', async () => {
-    const host = await render(React.createElement(App as any, baseProps({ initialRoute: 'reports' })))
-    // Pull the nav label sequence straight off the rendered nav buttons so the
-    // screen body can't pollute the ordering.
-    const KNOWN = ['Home', 'Clients', 'Network', 'Reports', 'Back Office', 'Settings']
-    const seq = Array.from(host.querySelectorAll('button'))
-      .map(b => (b.textContent || '').trim())
-      .map(t => KNOWN.find(k => t === k || t.endsWith(k)))
-      .filter((v, i, a): v is string => !!v && a.indexOf(v) === i) // first occurrence, in DOM order
-    expect(seq).toEqual(KNOWN)
+describe('the menu order (issue 140, updated 2026-11-13)', () => {
+  it('Back Office sits between Reports and Settings; Help and Admin under the line', async () => {
+    const host = await render(React.createElement(App as any, baseProps({ initialRoute: 'home' })))
+    const seq = Array.from(host.querySelectorAll('aside.bee-sidebar [data-nav]')).map(e => (e as HTMLElement).dataset.nav)
+    expect(seq).toEqual(['home', 'reminders', 'hive', 'partners', 'reports', 'backoffice', 'settings', 'help', 'admin'])
   })
 })

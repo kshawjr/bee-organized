@@ -560,7 +560,9 @@ describe('Lato and Arvo cannot leak', () => {
 
   it('the font request is made by the Settings screen itself, once, and the shell is the only file that makes it', async () => {
     const users = [...walk('components'), ...walk('app')].filter(p => readFileSync(p, 'utf8').includes('FONT_STYLESHEET_HREF')).sort()
-    expect(users).toEqual(['components/design/tokens.js', 'components/settings/SettingsShell.jsx'])
+    // 2026-11-13: the left menu was rebuilt too, and asks for the same fonts,
+    // at the same address, for itself only (its [data-app-rail]).
+    expect(users).toEqual(['components/design/AppRail.jsx', 'components/design/tokens.js', 'components/settings/SettingsShell.jsx'])
     await mount({ franchiseRole: 'owner' })
     const links = Array.from(container.querySelectorAll('link[rel="stylesheet"]')).map(l => l.getAttribute('href'))
     expect(links).toEqual([FONT_STYLESHEET_HREF])
@@ -665,7 +667,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
     // ONE colour from the tokens, the gold of its "Change this territory"
     // label. It names no font: see the Lato test above.
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })
