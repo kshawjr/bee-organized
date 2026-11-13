@@ -23,6 +23,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { updateLead } from '@/lib/dual-write'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { clientFileObjectPaths, removeClientFileObjects } from '@/lib/client-files-server'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
@@ -815,12 +816,22 @@ export async function DELETE(
   // All FKs to leads(id) declare ON DELETE CASCADE (lead_notes, touchpoints,
   // lead_contacts, lead_tags, lead_drip_progress, etc.) — single DELETE here
   // wipes children atomically.
+  //
+  // Their files (photos and PDFs, lib/client-files.ts) are the one child that
+  // also lives OUTSIDE the database, in Storage. The paths are read first,
+  // because the delete takes the rows that name them; the objects are removed
+  // only AFTER the client is really gone, so a delete that is refused never
+  // costs a surviving client their files.
+  const filePaths = await clientFileObjectPaths(id)
+
   const { error: delError } = await supabaseService.from('leads').delete().eq('id', id)
 
   if (delError) {
     console.error('DELETE /api/leads/[id] failed:', delError)
     return NextResponse.json({ error: 'delete_failed', detail: delError.message }, { status: 500 })
   }
+
+  await removeClientFileObjects(filePaths, `client ${id} permanently deleted`)
 
   return NextResponse.json({ ok: true, id }, { status: 200 })
 }

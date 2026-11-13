@@ -1,6 +1,7 @@
 alert_runs:id,ran_at,watermark,alerted,posted,skipped
 assessments:id,lead_id,location_id,scheduled_at,duration_minutes,assigned_to,notes,status,completed_at,completion_notes,jobber_request_id,pushed_to_jobber_at,zoho_activity_id,created_at,updated_at,jobber_synced_at,service_request_id,source,jobber_assessment_id,phone,engagement_id,assessment_type
 billing_invoices:id,location_id,amount_cents,currency,paid_at,period_start,period_end,source,payment_method,reference_number,memo,recorded_by,stripe_invoice_id,stripe_payment_intent_id,stripe_charge_id,created_at,updated_at
+client_files:id,lead_id,engagement_id,path,thumb_path,name,mime_type,size_bytes,uploaded_by,uploaded_by_label,created_at
 companies:id,location_id,name,addresses,members,notes,activity,deleted_at,created_at,updated_at,created_by,industry,phone,email,website
 digest_runs:id,ran_at,window_label,suppressed,posted,skipped,all_clear,leads_landed,leads_failed,jobber_landed,jobber_didnt_land,self_heals,loc_other_leads,import_failed,import_stalled,import_origin_gated,rate_missing,booking_link_missing,message_text
 drip_path_steps:id,drip_path_id,step_order,delay_days,channel,subject,body,is_active,created_at,updated_at,master_template_id,origin,is_paused,delay_unit,button_text,button_link,button_align

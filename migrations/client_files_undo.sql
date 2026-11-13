@@ -1,0 +1,21 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- migrations/client_files_undo.sql — undo migrations/client_files.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+-- STATUS: WRITTEN, NOT RUN.
+--
+-- READ THIS FIRST. Dropping the table forgets every file: who added it, which
+-- client it is on, and where it is in Storage. The files themselves stay in
+-- the client-files bucket, unreachable from Bee Hub and listed nowhere.
+--
+-- So, in this order:
+--   1. Empty the bucket in the Supabase dashboard (Storage › client-files ›
+--      select all › delete). Supabase refuses to delete a bucket that still
+--      has objects, and deleting rows from storage.objects in SQL leaves the
+--      real files behind.
+--   2. Delete the bucket in the dashboard.
+--   3. Run the statement below.
+--
+-- After it runs, the Files tab goes back to "Files isn't switched on yet".
+-- ═══════════════════════════════════════════════════════════════════════════
+
+DROP TABLE IF EXISTS public.client_files;

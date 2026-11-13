@@ -63,9 +63,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import useIsMobile from './shared/useIsMobile'
+import FilesTab, { useClientFiles } from './shared/FilesTab'
 import { isTerminal, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage, IconCash } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconMessage, IconCash } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
 import { makeNoteActionsFor } from './shared/noteActionsRule'
 import { replaceInList, removeFromList } from './shared/noteStream'
@@ -323,6 +324,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const eng = data?.engagement ?? seed
   const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [], touchpoints: [] }
   const client = data?.client ?? null
+  const jobFiles = useClientFiles({ leadId: client?.id || null, engagementId })
   // Local mirror so an add / retire from the engagement updates in place,
   // exactly as it does on the client card.
   const [engOtherAddresses, setEngOtherAddresses] = useState([])
@@ -1050,13 +1052,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     </div>
   )
 
-  const filesTab = (
-    <div style={{ padding: '18px 12px', border: T.border.dashed, borderRadius: T.radius.inset, textAlign: 'center' }}>
-      <p style={{ fontSize: '12px', color: T.ink.quiet, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-        <IconPaperclip size={14} /> No files yet — quotes, photos, and attachments will land here
-      </p>
-    </div>
-  )
+  // The real Files tab (shared/FilesTab.jsx): this job's files. Anything added
+  // here is pinned to this job and also shows on the client's own Files tab.
+  const filesTab = <FilesTab state={jobFiles} readOnly={readOnly} onJob />
 
   const stageFam = eng ? (CHIP_STYLES[eng.stage] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
@@ -1412,7 +1410,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         tabs={[
           { key: 'overview', label: 'Overview' },
           { key: 'timeline', label: 'Timeline', count: (children.notes || []).length + (children.touchpoints || []).length },
-          { key: 'files', label: 'Files' },
+          { key: 'files', label: 'Files', count: jobFiles.count },
         ]}
         active={tab}
         onChange={setTab}

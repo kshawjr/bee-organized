@@ -396,6 +396,10 @@ describe('"Put this job in Slack" is Slack’s mark in the corner, with a small 
       `GET /api/reminders?engagement_id=${ENG} null`,
       `GET /api/engagements/${ENG}/bees null`,
       `GET /api/engagements/${ENG} null`,
+      // 13 Nov 2026: the Files tab became real, and its count is the real
+      // number, so the open job reads its file list once. A read, before the
+      // click, and nothing about making the channel moved.
+      `GET /api/client-files?lead_id=lead-1&engagement_id=${ENG} null`,
       `POST /api/engagements/${ENG}/slack-channel null`,
     ])
     expect(host.querySelector('[data-bee-channel]')!.textContent).toBe('Slack channel #sarah-mcallister-pantry')

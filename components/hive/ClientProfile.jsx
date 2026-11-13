@@ -51,7 +51,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPaperclip, IconMapPin, IconCash, IconPencil,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconMapPin, IconCash, IconPencil,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -78,6 +78,7 @@ import InitialsAvatar from './shared/InitialsAvatar'
 import NotesStream from './NotesStream'
 import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn, rowActionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
+import FilesTab, { useClientFiles } from './shared/FilesTab'
 import BeeLoader from './shared/BeeLoader'
 import { upsertNote, replaceNote, removeNote } from './shared/noteStream'
 import { makeNoteActionsFor } from './shared/noteActionsRule'
@@ -199,6 +200,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
   const touches = data?.touchpoints ?? []
   const jobNotes = data?.job_notes ?? []
   const engTitleById = Object.fromEntries(engagements.map(e => [e.id, displayTitle(e)]))
+  const clientFiles = useClientFiles({ leadId: c?.id || null })
 
   // Won roll-up from the profile's own (complete, current) engagement set —
   // same shape the hub-page sweep ships as person.wonEngagements.
@@ -1006,13 +1008,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
     </div>
   )
 
-  const filesTab = (
-    <div style={{ padding: '18px 12px', border: T.border.dashed, borderRadius: T.radius.control, textAlign: 'center' }}>
-      <p style={{ fontSize: '12px', color: T.ink.quiet, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-        <IconPaperclip size={14} /> No files yet — quotes, photos, and attachments will land here
-      </p>
-    </div>
-  )
+  // The real Files tab (shared/FilesTab.jsx). The list is held up here so the
+  // number on the tab is the length of the very list the tab shows.
+  const filesTab = <FilesTab state={clientFiles} readOnly={readOnly} jobTitles={engTitleById} />
 
   // Quick-glance timeline volume from data already in hand (touches +
   // job notes) — the Timeline tab's own fetch stays lazy.
@@ -1289,7 +1287,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         tabs={[
           { key: 'overview', label: 'Overview' },
           { key: 'timeline', label: 'Timeline', count: timelineCount },
-          { key: 'files', label: 'Files', count: 0 },
+          { key: 'files', label: 'Files', count: clientFiles.count },
         ]}
         active={tab}
         onChange={setTab}

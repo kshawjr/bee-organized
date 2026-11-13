@@ -1,0 +1,35 @@
+{
+  "_about": "Recorded from commit 57331f8 (Files still a placeholder) by lib/card-files-fingerprint.test.harness.tsx. rendered = sha256 of each card's HTML with the Files tab's own number left out. source = sha256 of each whole file at that commit.",
+  "commit": "57331f8",
+  "rendered": {
+    "writable": {
+      "profileOverview": "6b50a16c1c5dc0cb0071e0d643ed668a1d0e1cd280bd5c4229b543e360c0a113",
+      "profileTimeline": "55e9700b8a13caa3aa27f2343817eb543b5358b5ed14c1782515e3970012b093",
+      "panelOverview": "ae5e780f6c88a0fa3b8f0db5c6bd168eb913c67549aff107bf030b15d7d86917",
+      "panelTimeline": "b95b4f68a99356e9bf72d9cc03083867124ea508818b131481a8b0315d6aa19d",
+      "sizes": [
+        25936,
+        12834,
+        21477,
+        11907
+      ]
+    },
+    "readOnly": {
+      "profileOverview": "a79c064d2aede517507d4a4663e89af1327fc5b257b45879aeb52af2f8dcd3a3",
+      "profileTimeline": "e7b754c59f09dde84c8c06213762c4fdaa2343929b8581f6ea983de082e9e488",
+      "panelOverview": "fee23b87b7e7b68cc3a11298ec6d1e726b34d03e4b4124de49f6b65622d25d98",
+      "panelTimeline": "42aed459b73723832856ab959fe2e572d5176489c8ade7e9f45b0531c9b86c5f",
+      "sizes": [
+        21074,
+        11259,
+        18842,
+        10560
+      ]
+    }
+  },
+  "source": {
+    "components/hive/ClientProfile.jsx": "e42ffc65ebd44a01d1d8072ac211c4a7bae45dfe8423cf11e3478a5659cf8911",
+    "components/hive/EngagementPanel.jsx": "cea4fd485294f8ecd857fe032911a1a9e313be61955213f71965ef629652377b",
+    "app/api/leads/[id]/route.ts": "8e3e1c6a5a4e520ac9c45b8d497542575e31f750c15ac99a5e8ec3ba1a191483"
+  }
+}

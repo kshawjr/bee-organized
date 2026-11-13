@@ -253,8 +253,11 @@ describe('EngagementPanel — Also on this client', () => {
     // Nor does the Bees cell (Slack job channels slice 3, 2026-11-04): one
     // GET per open card for the job's bees, never per row.
     const urls = fetchMock.mock.calls.map((a: any[]) => String(a[0]))
-    const perCard = (u: string) => u.startsWith('/api/reminders?') || u === '/api/engagements/e-1/bees'
+    // Nor does the Files tab (13 Nov 2026): one GET per open card for the
+    // job's file list, so the tab's count is the real number; never per row.
+    const perCard = (u: string) => u.startsWith('/api/reminders?') || u === '/api/engagements/e-1/bees' || u.startsWith('/api/client-files?')
     expect(urls.filter(u => !perCard(u))).toEqual(['/api/engagements/e-1'])
+    expect(urls.filter(u => u.startsWith('/api/client-files?'))).toHaveLength(1)
     expect(urls.filter(u => u.startsWith('/api/reminders?'))).toEqual(['/api/reminders?engagement_id=e-1'])
     expect(urls.filter(u => u.endsWith('/bees'))).toEqual(['/api/engagements/e-1/bees'])
   })
