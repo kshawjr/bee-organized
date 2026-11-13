@@ -49,6 +49,10 @@ import {
   goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
   buttonProblem, buttonForSave, EditorPreview,
 } from "@/components/settings/EmailsScreen"
+// Settings, rebuilt to the new look one section at a time (slice 1, 2026-11-13:
+// the nav, the page header, the card, and Profile). The pieces; this file
+// still decides who sees what and does every save.
+import * as SUI from "@/components/settings/SettingsShell"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
@@ -22064,7 +22068,7 @@ const CONTROL_W = {
 // 303's rule still holds there: every kind of job is listed with who it goes
 // out as, whatever the Organizing / Moving view shows.
 
-export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
+export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, appRole='franchise', onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation/currentUser from context
   // (populated by App from page.tsx's Supabase fetch). These are the
   // highest-priority source: signed-in franchise user → use their real DB row.
@@ -23421,7 +23425,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   async function persistProfileField(stateKey, column, v, noun) {
     if (!currentUserCtx?.id) {
       alert(`You're viewing this profile, not signed in as this person — open your own account to change the ${noun}.`)
-      return
+      return false
     }
     try {
       const res = await fetch('/api/hub_users/me', {
@@ -23435,9 +23439,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         throw new Error(j?.error || `HTTP ${res.status}`)
       }
       updateProfile(stateKey, v)
+      // true / false = did the write land. The Profile row says "Saved" on
+      // true only (components/settings/SettingsShell.jsx EditRow).
+      return true
     } catch (e) {
       console.error(`[settings] ${column} save failed`, e)
       alert(`Could not save your ${noun}: ` + (e?.message || e))
+      return false
     }
   }
 
@@ -23460,9 +23468,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         const j = await res.json().catch(()=>({}))
         throw new Error(j?.error || `HTTP ${res.status}`)
       }
+      return true
     } catch (e) {
       console.error('[settings] booking_link save failed', e)
       alert('Could not save your booking link: ' + (e?.message || e))
+      return false
     }
   }
 
@@ -23594,6 +23604,30 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // unknown or future franchiseRole now fails CLOSED to Profile-only.
   const ownerConfig = franchiseRole === 'owner'
   const canManageOwnTags = franchiseRole === 'owner' || franchiseRole === 'manager'
+  // The role Profile shows, on the card and on the Role row. It is READ FROM
+  // FRANCHISE_ROLES, the table the Team screen draws its role names from, so
+  // Profile can never say something Team does not (it used to say "Franchise
+  // Owner" to everyone, managers included: a fixed string in DEFAULT_SETTINGS).
+  //   · the role's own row if it has one: owner, manager, light, readonly
+  //   · 'viewer' is what a real read-only sign-in arrives as (mapRole); it has
+  //     no row of its own, so it reads the table's read-only row, the same
+  //     answer the sidebar gives that person
+  //   · super admin and corporate are not in that table, and both arrive here
+  //     as franchiseRole='owner' without being a Zee Bee. They read the words
+  //     Bee Hub already uses for them: 'Super Admin' from ROLES, and
+  //     'Corporate Admin', the word the corporate Profile screen
+  //     (SuperAdminProfile's Role line) shows a corporate person. appRole is
+  //     the app's CURRENT role, so a super admin viewing AS a corporate
+  //     person reads 'Corporate Admin' too, not 'Zee Bee'.
+  //   · a role with no label anywhere (an unknown or future one) shows NO
+  //     role: the Role row is dropped and the card keeps just the location.
+  const profileRoleLabel = isSuperAdmin
+    ? (ROLES.find(r => r.key === 'super_admin')?.label || '')
+    : appRole === 'corporate'
+    ? 'Corporate Admin'
+    : (FRANCHISE_ROLES.find(r => r.key === franchiseRole)
+        || (isReadOnlyFranchiseRole(franchiseRole) ? FRANCHISE_ROLES.find(r => r.key === 'readonly') : null)
+      )?.label || ''
   // Team and Seats is one screen with two halves and two gates. ALLOWLISTS,
   // like everything above: an unknown role sees neither half and no nav item.
   //   · canSeeSeats — the Seats half (roster of logins, invites, billing).
@@ -23853,77 +23887,35 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const sectionAllowed = sections.some(s => s.key === activeSection)
 
   return (
-    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem', width:'100%', position:'relative' }}>
+    // The font here is still DM Sans ON PURPOSE: it is what every section that
+    // has not been rebuilt inherits. The new fonts are set only on the pieces
+    // from SettingsShell.jsx (they carry data-settings-ui). The page colour
+    // follows the section on screen, so a short rebuilt page has no band of
+    // the old cream under it and an old section keeps the cream it was drawn on.
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:(sectionAllowed && SUI.REBUILT_SECTIONS.includes(activeSection)) ? SUI.PAGE_BG : '#f7f5f0', minHeight:'100vh', width:'100%', position:'relative' }}>
+      <SUI.SettingsFonts />
 
-      {/* Header */}
-      <div style={{ background:'#1a2e2b', padding:'1.25rem' }}>
-        <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', margin:0 }}>Settings ⚙️</h1>
-      </div>
+      {/* The dark "Settings" band is gone (slice 1): the title now sits at the
+          top of the nav, as in the design. */}
 
-      <div style={{ display:'flex', alignItems:'flex-start' }}>
+      {/* minHeight + the 5rem foot on the CONTENT column (it was on the root):
+          the nav is a white column now, and with the foot on the root it
+          stopped 5rem short of the bottom of the page — and shorter still
+          beside a short section. Sections get the same foot they had. */}
+      <div style={{ display:'flex', alignItems:'flex-start', minHeight:'100vh' }}>
 
         {/* ── The rail (≥768px) ──────────────────────────────────────────
-            Fixed width and sitting left, like every other control since 240
-            step 4 — it does not stretch with the viewport. */}
-        <nav
-          className="bee-settings-rail"
-          data-settings-nav="rail"
-          aria-label="Settings sections"
-          style={{ flex:`0 0 ${CONTROL_W.rail}`, width:CONTROL_W.rail, padding:'18px 8px 32px 12px', borderRight:'1px solid rgba(26,46,43,0.08)', alignSelf:'stretch' }}>
-          {SECTION_GROUPS.map(group=>(
-            <div key={group.title} style={{ marginBottom:'15px' }}>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.7px', padding:'0 8px 5px' }}>{group.title}</p>
-              {group.items.map(sec=>{
-                const isActive = activeSection===sec.key
-                return (
-                  <button
-                    key={sec.key}
-                    type="button"
-                    data-section={sec.key}
-                    aria-current={isActive ? 'page' : undefined}
-                    onClick={()=>openSection(sec.key, { push:false })}
-                    style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'7px 8px', marginBottom:'1px', borderRadius:'8px', border:'none', background:isActive?'#1a2e2b':'transparent', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
-                    <span aria-hidden="true" style={{ fontSize:'13px', flexShrink:0, opacity:sec.muted?0.5:1 }}>{sec.icon}</span>
-                    <span style={{ fontSize:'12.5px', fontWeight:isActive?600:500, color:isActive?'white':(sec.muted?'#a9b8b5':'#4a5e5a') }}>{sec.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
+            Drawn by SettingsShell.jsx from SECTION_GROUPS exactly as built
+            above — the gating is not repeated or re-decided there. */}
+        <SUI.SettingsRail groups={SECTION_GROUPS} active={activeSection} onOpen={openSection} />
 
-        <div style={{ flex:'1 1 auto', minWidth:0 }}>
+        <div style={{ flex:'1 1 auto', minWidth:0, paddingBottom:'5rem' }}>
 
         {/* ── The drill-down list (<768px) ────────────────────────────────
-            Replaces the native <select>, which worked, so this has to clear
-            the same bar rather than merely look newer: same grouping, 16px
-            labels, and rows at least as tall as the select's tap target.
-            Tapping a row is a pushState — see openSection. */}
-        <nav
-          className={`bee-settings-drill${mobileDrilled ? ' bee-settings-hide-mobile' : ''}`}
-          data-settings-nav="drill"
-          aria-label="Settings sections"
-          style={{ padding:'14px 12px 24px' }}>
-          {SECTION_GROUPS.map(group=>(
-            <div key={group.title} style={{ marginBottom:'16px' }}>
-              <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.7px', margin:'0 4px 7px' }}>{group.title}</p>
-              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-                {group.items.map((sec,i)=>(
-                  <button
-                    key={sec.key}
-                    type="button"
-                    data-section={sec.key}
-                    onClick={()=>openSection(sec.key, { push:true })}
-                    style={{ display:'flex', alignItems:'center', gap:'11px', width:'100%', minHeight:'52px', padding:'14px 16px', background:'white', border:'none', borderBottom: i<group.items.length-1 ? '1px solid rgba(0,0,0,0.05)' : 'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
-                    <span aria-hidden="true" style={{ fontSize:'18px', flexShrink:0, opacity:sec.muted?0.5:1 }}>{sec.icon}</span>
-                    <span style={{ fontSize:'16px', fontWeight:500, color:sec.muted?'#a9b8b5':'#1a2e2b' }}>{sec.label}</span>
-                    <span aria-hidden="true" style={{ marginLeft:'auto', fontSize:'16px', color:'#c8d8d4' }}>›</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
+            Same groups, same order. Tapping a row is a pushState — see
+            openSection. The <nav> it renders must stay the element directly
+            before the section pane below. */}
+        <SUI.SettingsDrill groups={SECTION_GROUPS} hidden={mobileDrilled} onOpen={openSection} />
 
         <div className={mobileDrilled ? undefined : 'bee-settings-hide-mobile'}>
 
@@ -23932,14 +23924,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             and returns to the list rather than out of Settings. Display is
             owned by the media queries (none at ≥768px, where the rail is
             already on screen), so no `display` here. */}
-        <button
-          type="button"
-          className="bee-settings-back"
-          onClick={backToSectionList}
-          style={{ alignItems:'center', gap:'5px', width:'100%', minHeight:'48px', padding:'13px 16px', background:'transparent', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', WebkitTapHighlightColor:'transparent' }}>
-          <span aria-hidden="true" style={{ fontSize:'17px', color:'#1a2e2b' }}>‹</span>
-          <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>All settings</span>
-        </button>
+        <SUI.SettingsBack onBack={backToSectionList} />
 
       {/* minmax(0, 1fr), not the implicit `auto` track (2026-10-30): a grid
           item's min-width is auto, so the one column grew to the widest thing
@@ -23957,13 +23942,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           </div>
         ) : (<>
 
-        {/* ── Profile ── */}
+        {/* ── Profile ── rebuilt to the new look (slice 1, 2026-11-13).
+            The pieces are components/settings/SettingsShell.jsx. Every save
+            is the same call it was: persistProfileField / persistBookingLink. */}
         {activeSection==='profile'&&(
-          <>
-            <SectionHeader title="Your Profile" desc="How you appear in the system" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="First Name" value={settings.profile.firstName} onSave={v=>persistProfileField('firstName','first_name',v,'first name')} />
-              <SettingsEditRow label="Last Name"  value={settings.profile.lastName}  onSave={v=>persistProfileField('lastName','last_name',v,'last name')} />
+          <SUI.SettingsPage>
+            <SUI.PageHeader title="Profile" intro="How you appear across Bee Hub and in your clients' inboxes." />
+            <SUI.IdentityCard
+              name={[settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(' ')}
+              sub={[profileRoleLabel, settings.location.name].filter(Boolean).join(' · ')}>
+              {/* True of everyone who can be looking at this: sign-in is Google
+                  OAuth and nothing else (see Change password below). */}
+              <SUI.Pill tone="ok"><SUI.IconCircleCheck size={12} />Signed in with Google</SUI.Pill>
+            </SUI.IdentityCard>
+
+            <SUI.Section eyebrow="Your profile" title="Personal details" intro="How you appear in the system.">
+              <SUI.EditRow label="First name" value={settings.profile.firstName} onSave={v=>persistProfileField('firstName','first_name',v,'first name')} />
+              <SUI.EditRow label="Last name"  value={settings.profile.lastName}  onSave={v=>persistProfileField('lastName','last_name',v,'last name')} />
               {/* Read-only by design, not by omission. Sign-in is Google OAuth
                   (signInWithOAuth provider:'google') and the authoritative
                   address lives in Supabase Auth; hub_users.email is a copy
@@ -23973,59 +23968,51 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   address and still have to sign in with the old one, with
                   notifications now pointed at an address auth doesn't know.
                   PATCH /api/hub_users/me deliberately does not accept email. */}
-              <SettingsEditRow label="Email"      value={settings.profile.email}     readOnly hint="You sign in with Google — this is your Google account address. Changing it here wouldn't change your sign-in." />
-              <SettingsEditRow label="Phone"      value={settings.profile.phone}     onSave={v=>persistProfileField('phone','phone',v,'phone number')} type="tel" />
-              <SettingsEditRow label="Role"       value={settings.profile.role}      readOnly hint="Contact your franchisor to change your role" />
-            </div>
-
-            <SectionHeader title="Scheduling" desc="Your own calendar — used when a lead is assigned to you" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Booking Link" value={settings.profile.bookingLink||''} onSave={persistBookingLink}
-                hint={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
-            </div>
+              <SUI.EditRow label="Email"      value={settings.profile.email}     readOnly hint="You sign in with Google — changing it here wouldn't change your sign-in." />
+              <SUI.EditRow label="Phone"      value={settings.profile.phone}     onSave={v=>persistProfileField('phone','phone',v,'phone number')} type="tel" placeholder="(555) 555-5555" />
+              {profileRoleLabel && <SUI.EditRow label="Role"       value={profileRoleLabel}           readOnly hint="Contact your franchisor to change your role." />}
+              {/* The design folds the old "Scheduling" card into this one. Its
+                  short line is the hint; the note under the value keeps what
+                  that line dropped — this goes to CLIENTS, and a send with no
+                  link at all is held. */}
+              <SUI.EditRow label="Booking link" value={settings.profile.bookingLink||''} onSave={persistBookingLink} placeholder="https://calendly.com/you"
+                hint="Your own calendar, used when a lead is assigned to you."
+                note={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
+            </SUI.Section>
 
             {/* MOVED 2026-10-30 — the signature (headshot, title, and the
-                location's links) is one section on Settings → Emails now. */}
-            <SectionHeader title="Email Signature" />
-            <p style={{ margin:'0 12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-              Your email signature is now on{' '}
-              <button type="button" onClick={() => openSection('emails', { push:false })} style={{ background:'none', border:'none', padding:0, font:'inherit', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer' }}>Settings → Emails</button>, with everything else your emails use.
-            </p>
-
-            {isPastDue && (
-              <>
-                <SectionHeader title="⚠️ Action Required" />
-                <PastDuePaymentCard locationId={locationId} graceDaysLeft={graceDaysLeft} onResolved={onPaymentResolved} />
-              </>
+                location's links) is one section on Settings → Emails now.
+                Shown only to someone who has an Emails section to open: the
+                same test the nav applies, so this is never a button onto the
+                no-access notice. */}
+            {sections.some(s => s.key === 'emails') && (
+              <SUI.EmailsLink what="Your email signature" onOpen={() => openSection('emails', { push:false })} />
             )}
 
-            <SectionHeader title="Account" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              {[
-                // There is no Bee Organized password to change: sign-in is
-                // Google OAuth only (app/auth/login/page.tsx calls
-                // signInWithOAuth provider:'google'; nothing in the app calls
-                // signInWithPassword or resetPasswordForEmail). Saying so is
-                // the honest row — a real password change would mean adding an
-                // email/password identity to Supabase Auth and a reset flow,
-                // which is a new auth surface, not a button.
-                { label:'Change Password',  icon:'🔑', color:'#1a2e2b',
-                  onClick:()=>alert("You sign in with Google, so there's no separate Bee Organized password. To change how you sign in, update your Google Account security settings.") },
-                // The route the sidebar's IdentityScopeControl already links
-                // to: it calls supabase.auth.signOut() server-side and 303s to
-                // /auth/login. A full navigation (not fetch) so the cleared
-                // auth cookies land and no stale client state survives.
-                { label:'Sign Out',         icon:'🚪', color:'#ef4444',
-                  onClick:()=>{ window.location.href = '/api/auth/signout' } },
-              ].map(item=>(
-                <button key={item.label} onClick={item.onClick} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
-                  <span style={{ fontSize:'18px' }}>{item.icon}</span>
-                  <span style={{ fontSize:'14px', fontWeight:500, color:item.color }}>{item.label}</span>
-                  <span style={{ marginLeft:'auto', color:'#c8d8d4' }}>›</span>
-                </button>
-              ))}
-            </div>
-          </>
+            {isPastDue && (
+              <SUI.Section eyebrow="Action required" title="Payment">
+                <PastDuePaymentCard locationId={locationId} graceDaysLeft={graceDaysLeft} onResolved={onPaymentResolved} />
+              </SUI.Section>
+            )}
+
+            <SUI.Section eyebrow="Account" title="Security">
+              {/* There is no Bee Organized password to change: sign-in is
+                  Google OAuth only (app/auth/login/page.tsx calls
+                  signInWithOAuth provider:'google'; nothing in the app calls
+                  signInWithPassword or resetPasswordForEmail). Saying so is
+                  the honest row — a real password change would mean adding an
+                  email/password identity to Supabase Auth and a reset flow,
+                  which is a new auth surface, not a button. */}
+              <SUI.ActionRow icon={<SUI.IconKey size={16} />} label="Change password"
+                onClick={()=>alert("You sign in with Google, so there's no separate Bee Organized password. To change how you sign in, update your Google Account security settings.")} />
+              {/* The route the sidebar's IdentityScopeControl already links
+                  to: it calls supabase.auth.signOut() server-side and 303s to
+                  /auth/login. A full navigation (not fetch) so the cleared
+                  auth cookies land and no stale client state survives. */}
+              <SUI.ActionRow icon={<SUI.IconSignOut size={16} />} label="Sign out" danger
+                onClick={()=>{ window.location.href = '/api/auth/signout' }} />
+            </SUI.Section>
+          </SUI.SettingsPage>
         )}
 
         {/* ── My Location ── */}
@@ -38713,7 +38700,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             the literal is gone; on 'all' this is null and SettingsScreen falls
             through to its own context/selectedLoc resolution rather than
             silently showing Kansas City's team to whoever is looking. */}
-        <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />
+        <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} appRole={role} onOpenManual={()=>setShowManual(true)} />
       </div>
     )
     if (activeNav==='hive') return (

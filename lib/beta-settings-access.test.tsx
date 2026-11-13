@@ -169,9 +169,9 @@ describe('SettingsScreen sections by franchiseRole', () => {
     expect(await sectionKeys('some-future-role-nobody-produces')).toEqual(['profile'])
   })
 
-  it("lite_user's Profile is genuinely useful: the Booking Link self-edit field renders (1bc9fa5)", async () => {
+  it("lite_user's Profile is genuinely useful: the Booking link self-edit field renders (1bc9fa5)", async () => {
     await sectionKeys('viewer')
-    expect(container.textContent).toContain('Booking Link')
+    expect(container.querySelector('[data-settings-row="Booking link"] button[aria-label="Edit Booking link"]')).toBeTruthy()
   })
 })
 

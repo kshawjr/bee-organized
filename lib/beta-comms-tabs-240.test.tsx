@@ -264,8 +264,11 @@ describe('controls do not stretch', () => {
     // issue 246 step 1 — the pill row became a rail; the cap moved with it
     // (CONTROL_W.tab → CONTROL_W.rail) and does the same job.
     await mount('emails')
-    const rail = container.querySelector('[data-settings-nav="rail"]') as HTMLElement
+    // Settings slice 1 (2026-11-13): the rail's box is the <aside> around the
+    // <nav> (the "Settings" title sits in it, above the nav). Same job.
+    const rail = container.querySelector('[data-settings-nav="rail"]')?.closest('aside') as HTMLElement
     expect(rail, 'the settings rail').toBeTruthy()
+    expect(rail.style.width).toMatch(/^\d+px$/)
     expect(rail.style.width, 'the rail carries an explicit width').toBeTruthy()
     expect(rail.style.flexGrow, 'the rail does not grow with the container').not.toBe('1')
   })

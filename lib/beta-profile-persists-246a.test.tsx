@@ -84,24 +84,25 @@ const mount = async (user: any = currentUser) => {
   await act(async () => {})   // flush mount-time fetches
 }
 
-// A SettingsEditRow is: row > flex > [ col(label <p>, value <p>|input), buttons ].
-// Find the label <p>, then walk up three levels to the row container.
+// Profile was rebuilt to the new look on 2026-11-13 (settings slice 1). A row
+// is components/settings/SettingsShell.jsx EditRow now: it names itself with
+// data-settings-row, shows its value in [data-row-value], and is edited with
+// the pencil ("Edit <label>") and saved with Enter or by leaving the field —
+// there is no Save button any more. What these tests are ABOUT did not move:
+// the PATCH, the column, paint-after-write, and the refusals.
 const rowFor = (label: string): HTMLElement => {
-  const p = Array.from(container.querySelectorAll('p'))
-    .find(el => (el.textContent ?? '').trim() === label)
-  if (!p) throw new Error(`no settings row labelled "${label}"`)
-  return p.parentElement!.parentElement!.parentElement! as HTMLElement
+  const row = container.querySelector(`[data-settings-row="${label}"]`)
+  if (!row) throw new Error(`no settings row labelled "${label}"`)
+  return row as HTMLElement
 }
 
-const buttonIn = (row: HTMLElement, text: string): HTMLButtonElement | undefined =>
+// The pencil. Absent on a read-only row.
+const editButton = (row: HTMLElement): HTMLButtonElement | undefined =>
   Array.from(row.querySelectorAll('button'))
-    .find(b => (b.textContent ?? '').trim() === text) as HTMLButtonElement | undefined
+    .find(b => (b.getAttribute('aria-label') ?? '').startsWith('Edit ')) as HTMLButtonElement | undefined
 
-// The displayed value <p> is the second <p> in the row (first is the label).
-const shownValue = (label: string): string => {
-  const ps = rowFor(label).querySelectorAll('p')
-  return (ps[1]?.textContent ?? '').trim()
-}
+const shownValue = (label: string): string =>
+  (rowFor(label).querySelector('[data-row-value]')?.textContent ?? '').trim()
 
 // React tracks input value on the node; a bare .value assignment is ignored.
 const typeInto = async (input: HTMLInputElement, value: string) => {
@@ -112,12 +113,12 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   })
 }
 
-// Click Edit, type, click Save. Returns after the save promise settles.
+// Click the pencil, type, press Enter. Returns after the save promise settles.
 const editRow = async (label: string, value: string) => {
-  await act(async () => { buttonIn(rowFor(label), 'Edit')!.click() })
+  await act(async () => { editButton(rowFor(label))!.click() })
   const input = rowFor(label).querySelector('input') as HTMLInputElement
   await typeInto(input, value)
-  await act(async () => { buttonIn(rowFor(label), 'Save')!.click() })
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
   await act(async () => {})   // flush the fetch + post-write paint
 }
 
@@ -128,15 +129,15 @@ const profilePatches = () =>
 
 // ── 1) the three editable rows reach the DB ───────────────────────────
 describe('First / Last / Phone persist through PATCH /api/hub_users/me', () => {
-  it('First Name writes first_name', async () => {
+  it('First name writes first_name', async () => {
     await mount()
-    await editRow('First Name', 'Alex')
+    await editRow('First name', 'Alex')
     expect(profilePatches()).toEqual([{ first_name: 'Alex' }])
   })
 
-  it('Last Name writes last_name', async () => {
+  it('Last name writes last_name', async () => {
     await mount()
-    await editRow('Last Name', 'Nguyen')
+    await editRow('Last name', 'Nguyen')
     expect(profilePatches()).toEqual([{ last_name: 'Nguyen' }])
   })
 
@@ -148,8 +149,8 @@ describe('First / Last / Phone persist through PATCH /api/hub_users/me', () => {
 
   it('a landed write paints the new value', async () => {
     await mount()
-    await editRow('First Name', 'Alex')
-    expect(shownValue('First Name')).toBe('Alex')
+    await editRow('First name', 'Alex')
+    expect(shownValue('First name')).toBe('Alex')
   })
 
   it('none of the four rows is local-only any more — updateProfile is not their onSave', () => {
@@ -171,13 +172,13 @@ describe('a failed write surfaces an error and does not paint a false success', 
 
   it('the row keeps its OLD value when the server rejects', async () => {
     await mount()
-    await editRow('First Name', 'Alex')
-    expect(shownValue('First Name')).toBe('Riley')
+    await editRow('First name', 'Alex')
+    expect(shownValue('First name')).toBe('Riley')
   })
 
   it('the owner is told, in the server\'s own words', async () => {
     await mount()
-    await editRow('First Name', 'Alex')
+    await editRow('First name', 'Alex')
     expect(alerts.join('\n')).toContain('Failed to update profile')
   })
 
@@ -205,9 +206,9 @@ describe('a failed write surfaces an error and does not paint a false success', 
     // @beehub.io addresses, and the route writes the CALLER's own row — so a
     // save from that state would stamp a placeholder onto a real account.
     await mount(null)
-    const row = rowFor('First Name')
-    if (buttonIn(row, 'Edit')) {
-      await editRow('First Name', 'Alex')
+    const row = rowFor('First name')
+    if (editButton(row)) {
+      await editRow('First name', 'Alex')
       expect(profilePatches()).toEqual([])
       expect(alerts.join('\n')).toMatch(/not signed in as this person/)
     }
@@ -231,8 +232,8 @@ describe('the saved value survives a reload', () => {
   it('a remount on the saved row shows the saved value', async () => {
     // stands in for the reload: the row re-reads from hub_users, not state
     await mount({ ...currentUser, first_name: 'Alex', last_name: 'Nguyen', phone: '(312) 555-0177' })
-    expect(shownValue('First Name')).toBe('Alex')
-    expect(shownValue('Last Name')).toBe('Nguyen')
+    expect(shownValue('First name')).toBe('Alex')
+    expect(shownValue('Last name')).toBe('Nguyen')
     expect(shownValue('Phone')).toBe('(312) 555-0177')
   })
 
@@ -251,8 +252,10 @@ describe('the saved value survives a reload', () => {
 describe('Email is read-only because it is the Google sign-in identity', () => {
   it('the row offers no Edit affordance', async () => {
     await mount()
-    expect(buttonIn(rowFor('Email'), 'Edit')).toBeUndefined()
-    expect(rowFor('Email').textContent).toContain('Read-only')
+    expect(editButton(rowFor('Email'))).toBeUndefined()
+    // The lock mark says so to a screen reader; there is no pencil and no field.
+    expect(rowFor('Email').querySelector('[aria-label="Read-only"]')).toBeTruthy()
+    expect(rowFor('Email').querySelector('input')).toBeNull()
   })
 
   it('it still SHOWS the address — read-only, not removed', async () => {
@@ -295,7 +298,7 @@ describe('Sign Out', () => {
       value: { get href() { return '' }, set href(v: string) { navigations.push(v) } },
     })
     try {
-      await act(async () => { findAccountButton('Sign Out').click() })
+      await act(async () => { findAccountButton('Sign out').click() })
     } finally {
       Object.defineProperty(window, 'location', { configurable: true, writable: true, value: real })
     }
@@ -311,7 +314,7 @@ describe('Sign Out', () => {
 
   it('it is no longer an alert', async () => {
     await mount()
-    await act(async () => { findAccountButton('Sign Out').click() })
+    await act(async () => { findAccountButton('Sign out').click() })
     expect(alerts.join('\n')).not.toMatch(/coming soon/i)
   })
 })
@@ -321,7 +324,7 @@ describe('Change Password', () => {
   it('does not claim to be coming soon', async () => {
     await mount()
     const b = Array.from(container.querySelectorAll('button'))
-      .find(el => (el.textContent ?? '').includes('Change Password')) as HTMLButtonElement
+      .find(el => (el.textContent ?? '').includes('Change password')) as HTMLButtonElement
     await act(async () => { b.click() })
     expect(alerts.join('\n')).not.toMatch(/coming soon/i)
     expect(alerts.join('\n')).toMatch(/Google/)
@@ -337,11 +340,13 @@ describe('Change Password', () => {
 describe('the read-only rows are unchanged', () => {
   it('Role still reads read-only with its franchisor hint', async () => {
     await mount()
-    expect(buttonIn(rowFor('Role'), 'Edit')).toBeUndefined()
+    expect(editButton(rowFor('Role'))).toBeUndefined()
     expect(rowFor('Role').textContent).toContain('Contact your franchisor to change your role')
     expect(HUB).toContain(
-      '<SettingsEditRow label="Role"       value={settings.profile.role}      readOnly hint="Contact your franchisor to change your role" />',
+      '<SUI.EditRow label="Role"       value={profileRoleLabel}           readOnly hint="Contact your franchisor to change your role." />',
     )
+    // The value is the Team screen's name for the role (lib/settings-shell.test.tsx 3b).
+    expect(rowFor('Role').textContent).toContain('Zee Bee')
   })
 
   it('Location ID is untouched on the Location tab', () => {

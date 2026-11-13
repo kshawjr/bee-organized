@@ -63,12 +63,14 @@ const mount = async (user: any) => {
   await act(async () => {})   // flush mount-time fetches
 }
 
+// Rebuilt to the new look 2026-11-13 (settings slice 1): the row is
+// SettingsShell.jsx EditRow — pencil to edit, Enter (or leaving the field)
+// to save — and it sits in "Personal details"; the separate Scheduling card
+// is gone. The PATCH and the helper text's three facts are what is pinned.
 const linkRow = () => {
-  const label = Array.from(container.querySelectorAll('p')).find(
-    p => p.textContent?.trim() === 'Booking Link',
-  )
-  expect(label, 'the Booking Link row').toBeTruthy()
-  return label!.parentElement!.parentElement as HTMLElement
+  const row = container.querySelector('[data-settings-row="Booking link"]')
+  expect(row, 'the Booking link row').toBeTruthy()
+  return row as HTMLElement
 }
 
 const setNativeValue = (el: HTMLInputElement, value: string) => {
@@ -79,14 +81,13 @@ const setNativeValue = (el: HTMLInputElement, value: string) => {
 
 const editSave = async (row: HTMLElement, value: string) => {
   await act(async () => {
-    (Array.from(row.querySelectorAll('button')).find(b => b.textContent === 'Edit') as HTMLElement).click()
+    (row.querySelector('button[aria-label="Edit Booking link"]') as HTMLElement).click()
   })
   const input = row.querySelector('input') as HTMLInputElement
   expect(input).toBeTruthy()
   await act(async () => { setNativeValue(input, value) })
-  await act(async () => {
-    (Array.from(row.querySelectorAll('button')).find(b => b.textContent === 'Save') as HTMLElement).click()
-  })
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  await act(async () => {})
 }
 
 const patchCall = () =>
@@ -95,9 +96,10 @@ const patchCall = () =>
   )
 
 describe('Settings → Profile — Booking Link field', () => {
-  it('renders under a Scheduling section with consequence-forward helper text', async () => {
+  it('renders in Personal details with consequence-forward helper text', async () => {
     await mount(currentUser())
-    expect(container.textContent).toContain('Scheduling')
+    expect(linkRow().closest('section')!.textContent).toContain('Personal details')
+    expect(container.textContent).not.toContain('Scheduling')
     const row = linkRow()
     // The helper must make the consequence obvious: this goes to clients.
     expect(row.textContent).toContain('CLIENT emails')

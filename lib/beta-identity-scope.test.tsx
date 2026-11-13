@@ -199,7 +199,8 @@ describe('the old chrome is gone (BeeHub source)', () => {
     // The old footer blocks are gone (switcher comment + user-info block)
     expect(src).not.toContain('Location picker — elevated roles only')
     expect(src).not.toContain('User info at bottom')
-    expect(src.match(/Sign Out/g) || []).toHaveLength(4) // mobile drawer + mobile menu + 2 non-chrome usages — the desktop footer's is gone
+    expect(src.match(/Sign Out/g) || []).toHaveLength(3) // mobile drawer + mobile menu + 1 non-chrome usage — the desktop footer's is gone, and Settings › Profile's row became "Sign out" in the new look (2026-11-13)
+    expect(src.match(/label="Sign out"/g) || []).toHaveLength(1)
   })
 })
 
