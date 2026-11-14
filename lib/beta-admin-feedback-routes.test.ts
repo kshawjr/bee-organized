@@ -132,36 +132,36 @@ describe('claiming and releasing', () => {
 
 // ─── the tick ───────────────────────────────────────────────────────
 
-describe('looks_shipped', () => {
-  it('ticking persists true, and the row comes back ticked', async () => {
-    const { status, body } = await patch({ looks_shipped: true })
-    expect(status).toBe(200)
-    expect(stored()).toEqual([{ looks_shipped: true }])
-    expect(body.looks_shipped).toBe(true)
+// REMOVED 2026-11-13 (Kevin): ticked on 0 of 127 reports and it misled twice.
+// The column is still in the database; the route no longer sets or returns it.
+describe('looks_shipped is no longer accepted', () => {
+  it.each([[true], [false], ['true']])('a request that sends %j is refused and nothing is stored', async (value) => {
+    const { status, body } = await patch({ looks_shipped: value })
+    expect(status).toBe(400)
+    expect(body.error).toBe('looks_shipped_removed')
+    expect(stored()).toEqual([])
+    expect(direct.fn).not.toHaveBeenCalled()
   })
 
-  it('unticking persists false', async () => {
-    h.state.rows.feedback_items = { ...ITEM, looks_shipped: true }
-    await patch({ looks_shipped: false })
-    expect(stored()).toEqual([{ looks_shipped: false }])
-  })
-
-  it('only a real boolean — the string "true" is a bug upstream', async () => {
-    const { status } = await patch({ looks_shipped: 'true' })
+  it('riding along with a real change, it still refuses the whole request', async () => {
+    const { status } = await patch({ assigned_to: 'admin-1', looks_shipped: true })
     expect(status).toBe(400)
     expect(stored()).toEqual([])
   })
 
-  it('owners cannot tick it', async () => {
+  it('owners are refused too', async () => {
     authUser.current = { id: 'owner-9' }
     h.state.rows.hub_users = { ...OWNER }
     const { status } = await patch({ looks_shipped: true })
-    expect(status).toBe(403)
+    expect(status).toBe(400)
+    expect(stored()).toEqual([])
   })
 
-  it('ticking sends nothing', async () => {
-    await patch({ looks_shipped: true })
-    expect(direct.fn).not.toHaveBeenCalled()
+  it('a saved row comes back without it, even when the stored column is true', async () => {
+    h.state.rows.feedback_items = { ...ITEM, looks_shipped: true }
+    const { status, body } = await patch({ assigned_to: 'admin-1' })
+    expect(status).toBe(200)
+    expect('looks_shipped' in body).toBe(false)
   })
 })
 
@@ -218,14 +218,14 @@ describe('the list names who has it for the team, and hides both fields from own
     return { status: res.status, body: await res.json() }
   }
 
-  it('elevated: assigned_to, its name, and looks_shipped ride on each row', async () => {
+  it('elevated: assigned_to and its name ride on each row; the removed tick does not', async () => {
     h.state.listRows = ROWS
     const { status, body } = await get()
     expect(status).toBe(200)
     const a = body.items.find((i: any) => i.id === 'a')
     expect(a.assigned_to).toBe('admin-2')
     expect(a.assigned_to_name).toBe('Leslie Mullins')
-    expect(a.looks_shipped).toBe(true)
+    for (const it of body.items) expect('looks_shipped' in it).toBe(false)
     expect(body.items.find((i: any) => i.id === 'b').assigned_to_name).toBeNull()
   })
 

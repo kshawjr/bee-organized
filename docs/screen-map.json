@@ -462,7 +462,7 @@
       "note": "The current Clients surface. HiveScreen in BeeHub.jsx is the older board that still renders for roles without beta access — check components/hive/shared/betaGate.js before assuming which one a reporter is looking at.",
       "lines": [
         148,
-        1172
+        1173
       ]
     },
     {
@@ -936,8 +936,8 @@
         "the invoice section"
       ],
       "lines": [
-        267,
-        1498
+        268,
+        1535
       ]
     },
     {
@@ -2321,8 +2321,8 @@
         "logging an internal issue"
       ],
       "lines": [
-        1495,
-        2029
+        1486,
+        2015
       ],
       "note": "Two groups of tiles from lib/feedback-admin-tiles.ts — Waiting to hear from us (Bugs / Questions / Ideas, raised) and Heard from us, still waiting (We said yes / We said maybe, recessed); Stuck is a red strip shown only when not zero. The same lib also gives the nav badge its number: unanswered bugs + unanswered questions, not the open count. Claim circle (assigned_to) and the looks-built tick (looks_shipped) PATCH the [id] route. Also where an internal item is filed (POST). Internal items are excluded from every owner-facing read — see lib/feedback-internal.ts and lib/feedback-types.ts."
     },

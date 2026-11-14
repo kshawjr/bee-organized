@@ -363,7 +363,7 @@ describe('nothing outside the Files tab changed, by fingerprint', () => {
     expect(sha(back)).toBe((BEFORE as any).source[p])
   })
 
-  it('source — the job panel: five named changes, nothing else', () => {
+  it('source — the job panel: five named changes (and the two-open-cards flag), nothing else', () => {
     const p = 'components/hive/EngagementPanel.jsx'
     const back = undo(readFileSync(p, 'utf8'), [
       ["import FilesTab, { useClientFiles } from './shared/FilesTab'\n", ''],
@@ -374,6 +374,53 @@ describe('nothing outside the Files tab changed, by fingerprint', () => {
   const filesTab = <FilesTab state={jobFiles} readOnly={readOnly} onJob />
 `, OLD_BOX('inset')],
       ["{ key: 'files', label: 'Files', count: jobFiles.count },", "{ key: 'files', label: 'Files' },"],
+      // 2026-11-13 — the two-open-cards flag (shared/TwinCardFlag.jsx), on
+      // purpose: one import, one prop, one piece of state, one line in Reopen,
+      // and the flag itself above the closed summary. Still nothing else.
+      [`import TwinCardFlag from './shared/TwinCardFlag'
+`, ``],
+      [`, readOnly = false, onReportProblem = () => {}, onOpenEngagement = null }) {`, `, readOnly = false, onReportProblem = () => {} }) {`],
+      [`  // Two open cards for one client (shared/twinCards.js). The flag itself
+  // rides the card's own payload (data.twin). This holds only what the card
+  // says straight after "Close as duplicate" was tapped: the line, and the
+  // way to the card that has the work.
+  const [closedAsDuplicate, setClosedAsDuplicate] = useState(null)
+`, ``],
+      [`      // Reopened a card that was closed as a duplicate a moment ago: drop
+      // the "closed as a duplicate" line and re-read the card, so the
+      // two-open-cards flag comes back from the server's own answer.
+      if (closedAsDuplicate) { setClosedAsDuplicate(null); refetchAfterBooking() }
+`, ``],
+      [`      {/* TWO OPEN CARDS FOR ONE CLIENT — says so on both cards, names the
+          one with the work, and links to the other. "Close as duplicate" is
+          drawn only on the empty one of a pair whose other card has a quote,
+          job or invoice, and never for a read-only viewer; the server checks
+          all of it again. After the tap the card stays open on what it just
+          did, with the link to the card that has the work. */}
+      {eng && (closedAsDuplicate
+        ? isTerminal(eng.stage) && !reopening
+        : !isTerminal(eng.stage) && data?.twin) && (
+        <TwinCardFlag
+          twin={closedAsDuplicate ? null : data.twin}
+          closedLine={closedAsDuplicate?.line || null}
+          closedOther={closedAsDuplicate?.other || null}
+          firstName={client?.first_name || ''}
+          engagementId={engagementId}
+          readOnly={readOnly}
+          onOpenOther={onOpenEngagement ? (other) => onOpenEngagement({ ...other, client_id: other.client_id || client?.id || eng.client_id }) : null}
+          setToast={setToast}
+          onClosed={(j) => {
+            setClosedAsDuplicate({ line: j.closed_note, other: j.other || data?.twin?.other || null })
+            setData(d => d ? { ...d, twin: null, engagement: { ...d.engagement, ...closedFieldsFrom(j) } } : d)
+            onChanged(engagementId, closedFieldsFrom(j))
+            setToast({ kind: 'success', msg: 'Closed as a duplicate' })
+          }}
+        />
+      )}
+
+      {eng && !reopening && !closedAsDuplicate && <ClosedSummary engagement={eng} />}
+`, `      {eng && !reopening && <ClosedSummary engagement={eng} />}
+`],
     ])
     expect(sha(back)).toBe((BEFORE as any).source[p])
   })

@@ -1,6 +1,6 @@
 // app/api/admin/feedback/[id]/route.ts
 //
-// PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response?, type?, assigned_to?, looks_shipped? }.
+// PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response?, type?, assigned_to? }.
 //   A non-empty admin_response on a 'submitted' item stores 'answered' unless
 //   the body names a different status (THE REPLY FLOOR, below).
 //   - super_admin / admin: can patch any feedback item.
@@ -85,16 +85,20 @@
 //     the CHECK policing it.
 // A type change sends NO email — it is a filing correction, not news.
 //
-// ─── WHO HAS IT, AND "LOOKS ALREADY BUILT" (the admin redesign) ───────
-// Two team-only fields, both ELEVATED callers only (403 naming the field for
+// ─── WHO HAS IT (the admin redesign) ──────────────────────────────────
+// One team-only field, ELEVATED callers only (403 naming the field for
 // anyone else — never a silent drop):
 //   · assigned_to — a claim. The only legal values are the caller's own id
 //     (claim it) and null (release it). Nobody assigns work to somebody else
 //     from here; the circle on the row means "I have this".
-//   · looks_shipped — a boolean, a human judgement that the thing probably
-//     already shipped and nobody told the person. Never derived.
-// Neither one is news: a save that touches only these sends no email, seeds no
-// release note and moves no status. (It does bump updated_at through the
+// It is not news: a save that touches only this sends no email, seeds no
+// release note and moves no status.
+//
+// THE "LOOKS ALREADY BUILT" TICK IS GONE (2026-11-13, Kevin): ticked on 0 of
+// 127 reports and it misled twice. looks_shipped is no longer accepted — a
+// request that sends it is refused, 400 looks_shipped_removed, so nothing can
+// set it quietly — and it is never returned to anyone. The column itself is
+// left in the database, untouched. (It does bump updated_at through the
 // trigger — the stale clock in lib/feedback-queues reads that.)
 //
 // ─── STUCK IS NOT A STATUS ────────────────────────────────────────────
@@ -199,7 +203,7 @@ export async function PATCH(
 
   let body: {
     status?: string; admin_response?: string | null; type?: string
-    assigned_to?: string | null; looks_shipped?: unknown
+    assigned_to?: string | null; looks_shipped?: unknown // refused: see header
   }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
@@ -241,15 +245,9 @@ export async function PATCH(
     patch.assigned_to = body.assigned_to
   }
 
-  // The tick. A real boolean only — "true" the string is a bug upstream.
+  // The removed tick. Refused out loud for everyone, before any write.
   if (body.looks_shipped !== undefined) {
-    if (!isElevatedCaller) {
-      return NextResponse.json({ error: 'looks_shipped_requires_admin' }, { status: 403 })
-    }
-    if (typeof body.looks_shipped !== 'boolean') {
-      return NextResponse.json({ error: 'looks_shipped_must_be_boolean' }, { status: 400 })
-    }
-    patch.looks_shipped = body.looks_shipped
+    return NextResponse.json({ error: 'looks_shipped_removed' }, { status: 400 })
   }
 
   // The reply as it will be stored, and whether it is genuinely new. Both are
@@ -446,8 +444,9 @@ export async function PATCH(
     }
   } else {
     delete out.assigned_to
-    delete out.looks_shipped
   }
+  // The removed tick: returned to nobody (the column still exists).
+  delete out.looks_shipped
 
   // reply_email is ADDITIVE — the row shape callers already merge into their
   // list is unchanged, so a client that ignores this key behaves exactly as

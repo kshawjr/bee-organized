@@ -1126,12 +1126,21 @@ export async function handleRequestDestroy(ctx: HandlerCtx): Promise<HandlerResu
 //     service_request_id) is real history — left intact, engagement
 //     untouched. This also keeps the delete FK-safe: we never delete a row
 //     other rows point at.
-//   • Only a request-founded engagement left with nothing is closed, and it
-//     is SOFT-closed (Closed Lost / closed_reason='request_destroyed'),
-//     never deleted — the engagement's assignee join is ON DELETE CASCADE, so
-//     a delete would erase the crew (the #66 trap). Manual containers
-//     (founded_by='manual') and engagements still holding other children are
-//     left exactly as-is, stage untouched.
+//   • Only an engagement left with nothing is closed, and it is SOFT-closed
+//     (Closed Lost / closed_reason='request_destroyed'), never deleted — the
+//     engagement's assignee join is ON DELETE CASCADE, so a delete would
+//     erase the crew (the #66 trap). Engagements still holding other children
+//     are left exactly as-is, stage untouched.
+//   • A HAND-MADE card (founded_by='manual') closes the same way since
+//     2026-11-13, but on a stricter test: it must hold NOTHING — no other
+//     request, no quote, job or invoice, and no assessment. Until then it was
+//     always left open, which is how an owner at New Braunfels deleted the
+//     spare request in Jobber on 14 Oct 2026 (the right repair) and still had
+//     an empty card on her board: her card had begun life hand-made and
+//     adopted the request (#67). Notes and logged calls do not hold a card
+//     open — hers had a logged reach-out — and they stay on the closed card,
+//     which Reopen brings back. Quote- and job-founded engagements keep their
+//     own meaning and are still left.
 async function cleanupDestroyedRequest(ctx: HandlerCtx): Promise<string | null> {
   const numeric = extractJobberId(ctx.itemId) || ctx.itemId
 
@@ -1187,10 +1196,11 @@ async function cleanupDestroyedRequest(ctx: HandlerCtx): Promise<string | null> 
   if (eErr) throw new Error(`engagement read: ${eErr.message}`)
   if (!eng) return `REQUEST_DESTROY: deleted stale SR ${sr.id}`
 
-  // Only an engagement this request FOUNDED is a candidate to close. A manual
-  // container (or a quote/job-founded engagement) keeps its own meaning even
-  // with this SR gone.
-  if (eng.founded_by !== 'request') {
+  // Only an engagement this request FOUNDED, or a hand-made card that had
+  // adopted it, is a candidate to close. A quote/job-founded engagement keeps
+  // its own meaning even with this SR gone.
+  const handMade = eng.founded_by === 'manual'
+  if (eng.founded_by !== 'request' && !handMade) {
     return `REQUEST_DESTROY: deleted stale SR ${sr.id}; engagement ${engId} left (founded_by=${eng.founded_by})`
   }
 
@@ -1201,7 +1211,11 @@ async function cleanupDestroyedRequest(ctx: HandlerCtx): Promise<string | null> 
     (await anyRows('service_requests', 'engagement_id', engId)) ||
     (await anyRows('quotes', 'engagement_id', engId)) ||
     (await anyRows('jobs', 'engagement_id', engId)) ||
-    (await anyRows('invoices', 'engagement_id', engId))
+    (await anyRows('invoices', 'engagement_id', engId)) ||
+    // A hand-made card is closed only when it holds nothing at all, so an
+    // assessment still on it (booked on the card, not on this request) keeps
+    // it open. Request-founded cards are judged exactly as before.
+    (handMade && (await anyRows('assessments', 'engagement_id', engId)))
   if (stillHasChildren) {
     return `REQUEST_DESTROY: deleted stale SR ${sr.id}; engagement ${engId} left (other children remain)`
   }
@@ -1221,14 +1235,18 @@ async function cleanupDestroyedRequest(ctx: HandlerCtx): Promise<string | null> 
       stage: 'Closed Lost',
       closed_reason: 'request_destroyed',
       closed_at: nowIso,
-      closed_note: 'Founding Jobber request was deleted; no other work on this engagement.',
+      closed_note: handMade
+        ? 'The Jobber request on this card was deleted, and nothing else was on it.'
+        : 'Founding Jobber request was deleted; no other work on this engagement.',
       stage_entered_at: nowIso,
       updated_at: nowIso,
     })
     .eq('id', engId)
   if (uErr) throw new Error(`engagement close: ${uErr.message}`)
 
-  return `REQUEST_DESTROY: deleted stale SR ${sr.id}; closed empty engagement ${engId} (request_destroyed)`
+  return handMade
+    ? `REQUEST_DESTROY: deleted stale SR ${sr.id}; closed empty hand-made engagement ${engId} (request_destroyed)`
+    : `REQUEST_DESTROY: deleted stale SR ${sr.id}; closed empty engagement ${engId} (request_destroyed)`
 }
 
 // Fail-soft wrapper: the SR-mirror + engagement tidy must NEVER fail the

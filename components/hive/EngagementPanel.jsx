@@ -84,6 +84,7 @@ import { useJobBees, BeeCorner, BeeSlackLines, BeeSlackButton } from './BeesOnJo
 import BookAssessment from './BookAssessment'
 import { canBookAssessment } from './shared/bookAssessmentGate'
 import { describeJoinedRequests } from './shared/joinedRequests'
+import TwinCardFlag from './shared/TwinCardFlag'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn, rowActionBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
@@ -264,7 +265,7 @@ function ClientEngagementRow({ row, current }) {
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], currentUserId = null, currentUserRole = null, onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false, onReportProblem = () => {} }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], currentUserId = null, currentUserRole = null, onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false, onReportProblem = () => {}, onOpenEngagement = null }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -290,6 +291,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // AssigneeCorner toggle. Drives the inline status line under the picker;
   // null = nothing to say (silent).
   const [assignSync, setAssignSync] = useState(null)
+  // Two open cards for one client (shared/twinCards.js). The flag itself
+  // rides the card's own payload (data.twin). This holds only what the card
+  // says straight after "Close as duplicate" was tapped: the line, and the
+  // way to the card that has the work.
+  const [closedAsDuplicate, setClosedAsDuplicate] = useState(null)
   const nowMs = Date.now()
 
   const reducedMotion = useReducedMotion()
@@ -592,6 +598,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         service_requests: children.service_requests, quotes: children.quotes,
         jobs: children.jobs, invoices: children.invoices, assessments: children.assessments,
       })
+      // Reopened a card that was closed as a duplicate a moment ago: drop
+      // the "closed as a duplicate" line and re-read the card, so the
+      // two-open-cards flag comes back from the server's own answer.
+      if (closedAsDuplicate) { setClosedAsDuplicate(null); refetchAfterBooking() }
       setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
     } catch (e) {
       // ROLLBACK: the write never landed — stay closed, tell the truth.
@@ -1384,7 +1394,34 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {/* Closed outcome — reason + note where an open engagement's drip
           banner would sit (shared component; see beta-stage-control's
           write-path source pin). */}
-      {eng && !reopening && <ClosedSummary engagement={eng} />}
+      {/* TWO OPEN CARDS FOR ONE CLIENT — says so on both cards, names the
+          one with the work, and links to the other. "Close as duplicate" is
+          drawn only on the empty one of a pair whose other card has a quote,
+          job or invoice, and never for a read-only viewer; the server checks
+          all of it again. After the tap the card stays open on what it just
+          did, with the link to the card that has the work. */}
+      {eng && (closedAsDuplicate
+        ? isTerminal(eng.stage) && !reopening
+        : !isTerminal(eng.stage) && data?.twin) && (
+        <TwinCardFlag
+          twin={closedAsDuplicate ? null : data.twin}
+          closedLine={closedAsDuplicate?.line || null}
+          closedOther={closedAsDuplicate?.other || null}
+          firstName={client?.first_name || ''}
+          engagementId={engagementId}
+          readOnly={readOnly}
+          onOpenOther={onOpenEngagement ? (other) => onOpenEngagement({ ...other, client_id: other.client_id || client?.id || eng.client_id }) : null}
+          setToast={setToast}
+          onClosed={(j) => {
+            setClosedAsDuplicate({ line: j.closed_note, other: j.other || data?.twin?.other || null })
+            setData(d => d ? { ...d, twin: null, engagement: { ...d.engagement, ...closedFieldsFrom(j) } } : d)
+            onChanged(engagementId, closedFieldsFrom(j))
+            setToast({ kind: 'success', msg: 'Closed as a duplicate' })
+          }}
+        />
+      )}
+
+      {eng && !reopening && !closedAsDuplicate && <ClosedSummary engagement={eng} />}
 
       {/* Drip banner — ONLY while the lead's drip is LIVE (or paused);
           stopped/completed/absent renders NOTHING (Kevin's rule: gone

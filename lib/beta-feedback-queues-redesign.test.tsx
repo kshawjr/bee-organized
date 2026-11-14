@@ -531,14 +531,15 @@ describe('no pills, no shadowed globals', () => {
 
   // The tiles redesign brought ONE pill back on purpose: status needed shape
   // in the replied group ("plain grey text inside a run of six facts"). The
-  // pill radius appears on that chip and the looks-built flag, nowhere else.
-  it('the old badge and internal pill stay gone; the pill shape is only the status chip and the looks-built flag', () => {
+  // pill radius appears on that chip, nowhere else. (It was also on the
+  // looks-built flag until 2026-11-13, when the tick and its flag were removed.)
+  it('the old badge and internal pill stay gone; the pill shape is only the status chip', () => {
     expect(src).not.toContain('FeedbackStatusBadge')
     expect(src).not.toContain('InternalPill')
     expect(src).not.toContain('QueueCard')
-    expect(src.match(/T\.radius\.pill/g)).toHaveLength(2)
+    expect(src.match(/T\.radius\.pill/g)).toHaveLength(1)
     expect(src).toMatch(/function StatusChip[\s\S]{0,600}T\.radius\.pill/)
-    expect(src).toMatch(/data-looks-shipped-flag[^>]*T\.radius\.pill/)
+    expect(src).not.toContain('looks-shipped')
   })
 
   it('nothing in the file is named `top` — it is a window global', () => {

@@ -104,6 +104,10 @@ const CLOSED_REASON_LABELS = {
   // as 'won' and 'stale_on_import' already do. Without this line the
   // underscore fallback renders it as "won balance owing".
   won_balance_owing: 'Won · balance still showing',
+  // "Close as duplicate" (shared/twinCards.js): an empty card closed because
+  // the client's other open card holds the work. Same rule as above — the
+  // literal repeats here, display only.
+  duplicate_card: 'Duplicate card',
 }
 export function closedReasonLabel(reason) {
   if (!reason) return null

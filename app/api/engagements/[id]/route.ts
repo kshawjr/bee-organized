@@ -3,7 +3,9 @@
 // GET   /api/engagements/:id — engagement + full children (chronological)
 //   + client summary (name, lifetime paid across ALL engagements, prior
 //   count, other-open count, and the client's full engagement list for
-//   the panel's "Also on this client" block — all from ONE sibling query). Fetched by EngagementPanel on open so the
+//   the panel's "Also on this client" block — all from ONE sibling query),
+//   + `twin`: the two-open-cards flag (lib/engagement-twins.ts), null on
+//   almost every card. Fetched by EngagementPanel on open so the
 //   board rows stay lightweight. Panel open also DRIFT-RECOVERS linked
 //   engagements (recoverEngagementStageDrift): forward-only, silent
 //   re-derive from the children fetched here — self-heals a stale stage
@@ -37,6 +39,7 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, WON_OVER_BALANCE, type EngagementStage } from '@/lib/engagements'
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
 import { WRITTEN_OFF, writtenOffAmountFromInvoices } from '@/components/hive/shared/writtenOff'
+import { loadTwinForEngagement } from '@/lib/engagement-twins'
 
 // Close-out vocabulary (doc §4). A WON close is always reason 'won'. LOST
 // reasons are admin-configured (lookups category 'closed_lost_reasons') and
@@ -235,6 +238,20 @@ export async function GET(
   const otherOpen = siblings.filter(e => e.id !== id && isOpen(e.stage)).length
   const priorCount = Math.max(0, siblings.length - 1)
 
+  // TWO OPEN CARDS FOR ONE CLIENT (components/hive/shared/twinCards.js). Only
+  // asked when this card is open and the client has another open card — the
+  // sibling query above already knows — so an ordinary card costs nothing
+  // extra. Display only and fail-soft: a failed read shows no flag rather
+  // than taking the card down. Nothing here writes.
+  let twin: Awaited<ReturnType<typeof loadTwinForEngagement>> = null
+  if (otherOpen > 0 && isOpen(engagementOut.stage)) {
+    try {
+      twin = await loadTwinForEngagement({ id, client_id: engagement.client_id, stage: engagementOut.stage })
+    } catch (err) {
+      console.error('[engagements GET] twin-card read failed (card still served)', { id, err })
+    }
+  }
+
   return NextResponse.json({
     engagement: engagementOut,
     assignees,
@@ -248,6 +265,7 @@ export async function GET(
       touchpoints,
     },
     drip,
+    twin,
     client: {
       id: engagement.client_id,
       location_name: locRes.data?.name ?? null,

@@ -1091,6 +1091,7 @@ export default function HiveShell({
           readOnly={readOnly}
           onClose={() => { setOverlay(null); onCloseRecord() }}
           onOpenClient={openClient}
+          onOpenEngagement={openEngagement}
           onChanged={applyEngagementPatch}
           onCallLogged={applyTouchpoint}
           onReopened={(row) => {

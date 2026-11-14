@@ -38,8 +38,10 @@
 //   a "who has it" filter beside the location filter, and the same in the
 //   modal. assigned_to, self-or-nobody, through the PATCH route.
 //
-//   LOOKS ALREADY BUILT — a tick in the modal (looks_shipped), a flag on the
-//   row. A human judgement, never computed.
+//   THE "LOOKS ALREADY BUILT" TICK WAS REMOVED (2026-11-13, Kevin). It sat
+//   unticked on every report, where its wording read as a label on the
+//   report itself; it was ticked on 0 of 127 and misled twice. The modal has
+//   no such box and a row no such flag. The database column is left alone.
 //
 //   CLOSED ITEMS ARE REACHED THROUGH THE FILTERS (Open / Closed / Everything),
 //   not a grey link at the bottom.
@@ -54,7 +56,7 @@
 // status rule (ee2cc9e), the release-note seeding, the thread builder, the
 // verdict bar and its one-PATCH-per-item write, the cluster bars, the
 // internal composer, the type and status vocabularies. The PATCH body gained
-// two optional team-only fields (assigned_to, looks_shipped) and one refusal
+// one optional team-only field (assigned_to) and one refusal
 // (stuck_is_not_settable); nothing it already accepted changed.
 //
 // TOKENIZATION. This file carries NO colour literal of its own — every value
@@ -73,7 +75,7 @@ import BeeLoader from '@/components/hive/shared/BeeLoader'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import {
   IconBug, IconBulb, IconPlus, IconPaperclip, IconExternalLink,
-  IconAlertTriangle, IconSelector, IconMessage, IconCheck,
+  IconAlertTriangle, IconSelector, IconMessage,
 } from '@/components/ui/icons'
 // The type vocabulary (issue 247 step 2). Labels and the known-value
 // predicate only — the write validators live in their routes.
@@ -725,7 +727,7 @@ function AdminFeedbackDetailModal({
   // The claim and the tick save ON THEIR OWN, immediately — neither is news,
   // neither emails anyone, and neither should wait behind (or ride along with)
   // a Save that might.
-  const [sideBusy, setSideBusy]   = useState(null)  // 'claim' | 'looks' | null
+  const [sideBusy, setSideBusy]   = useState(null)  // 'claim' | null
   const [sideError, setSideError] = useState(null)
   const bodyRef = useRef(null)
 
@@ -1024,17 +1026,6 @@ function AdminFeedbackDetailModal({
                     : <span style={{ color: T.ink.muted }}>Nobody has this yet</span>}
                 </span>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', minHeight: '44px', cursor: 'pointer', fontSize: '13.5px', color: T.ink.primary }}>
-                <input
-                  type="checkbox"
-                  data-looks-shipped-box
-                  checked={!!item.looks_shipped}
-                  disabled={sideBusy === 'looks'}
-                  onChange={e => sideWrite('looks', { looks_shipped: e.target.checked })}
-                  style={{ width: '18px', height: '18px', margin: 0, cursor: 'pointer' }}
-                />
-                <span>Looks already built — the owner may not know</span>
-              </label>
               {sideError && <p style={{ fontSize: '12.5px', color: T.state.danger.strong, margin: 0 }}>{sideError}</p>}
             </div>
           )}
@@ -1801,11 +1792,6 @@ export default function AdminFeedbackScreen({
                 {it.title}
               </span>
               {showChip && <StatusChip item={it} />}
-              {it.looks_shipped && (
-                <span data-looks-shipped-flag style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '1px 8px', borderRadius: T.radius.pill, fontSize: '11.5px', fontWeight: 600, lineHeight: 1.6, border: `1px solid ${T.family.green.text}`, color: T.family.green.text, whiteSpace: 'nowrap' }}>
-                  <IconCheck size={11} /> Looks built
-                </span>
-              )}
             </span>
             {/* Two lines of the description — titles alone made two
                 unrelated reports read as duplicates. */}

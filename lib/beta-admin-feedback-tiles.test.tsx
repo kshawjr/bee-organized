@@ -389,22 +389,24 @@ describe('who has it', () => {
 
 // ─── 6. looks already built ────────────────────────────────────────
 
-describe('the looks-built tick', () => {
-  it('ticking it in the modal PATCHes looks_shipped and the row grows a flag', async () => {
+// REMOVED 2026-11-13 (Kevin): the tick box sat unticked on every report and
+// its wording read as a label on the report. Ticked on 0 of 127; misled twice.
+describe('the looks-built tick is gone', () => {
+  it('the modal has no such box and no such words, and opening it writes nothing', async () => {
     const { host, srv, unmount } = await mount([DECIDE_IDEA])
-    expect(host.querySelector('[data-row="decide-idea"] [data-looks-shipped-flag]')).toBeNull()
     await click([...host.querySelectorAll('[data-row="decide-idea"] button')].pop())
-    await click(host.querySelector('[data-looks-shipped-box]'))
-    expect(srv.patches()).toEqual([{ url: '/api/admin/feedback/decide-idea', body: { looks_shipped: true } }])
-    expect(srv.store[0].looks_shipped).toBe(true)
-    expect(host.querySelector('[data-row="decide-idea"] [data-looks-shipped-flag]')?.textContent).toContain('Looks built')
+    expect(host.querySelector('[data-modal-assignee]')).not.toBeNull() // the modal IS open
+    expect(host.querySelector('[data-looks-shipped-box]')).toBeNull()
+    expect(host.textContent).not.toMatch(/looks already built|looks built|owner may not know/i)
+    expect(srv.patches()).toEqual([])
     await unmount()
   })
 
-  it('it is never computed: a tick-less item never shows the flag, whatever its status', async () => {
-    const { host, unmount } = await mount(ALL)
+  it('a row never shows the flag — even for a report whose stored column is still true', async () => {
+    const { host, unmount } = await mount([{ ...DECIDE_IDEA, looks_shipped: true }, ...ALL.filter((i: any) => i.id !== DECIDE_IDEA.id)])
     await choose(select(host, 'Open or closed'), 'all')
     expect(host.querySelector('[data-looks-shipped-flag]')).toBeNull()
+    expect(host.textContent).not.toMatch(/looks built/i)
     await unmount()
   })
 })

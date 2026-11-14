@@ -155,7 +155,11 @@ describe('#66 engagement handling', () => {
     expect(res.note).toContain('other children remain')
   })
 
-  it('manual container (founded_by=manual) → SR removed, engagement never closed', async () => {
+  // Was "manual container → never closed" until 2026-11-13. A hand-made card
+  // left holding nothing now closes itself (lib/beta-twin-cards.test.tsx pins
+  // that, against real rows). What this test always guarded still holds for
+  // every OTHER founder: a quote- or job-founded card is never closed here.
+  it.each(['quote', 'job'])('a %s-founded card → SR removed, engagement never closed', async (founder) => {
     enqueueLead(null)
     h.enqueue('service_requests', { id: 'sr-1', lead_id: 'lead-1', engagement_id: 'eng-9' })
     h.enqueue('quotes', [])
@@ -163,12 +167,12 @@ describe('#66 engagement handling', () => {
     h.enqueue('invoices', [])
     h.enqueue('assessments', null)
     h.enqueue('service_requests', null) // delete
-    h.enqueue('engagements', { id: 'eng-9', stage: 'Request', founded_by: 'manual' })
+    h.enqueue('engagements', { id: 'eng-9', stage: 'Request', founded_by: founder })
 
     const res = await handleRequestDestroy(ctx())
 
     expect(opsOn('engagements')).not.toContain('update')
-    expect(res.note).toContain('founded_by=manual')
+    expect(res.note).toContain(`founded_by=${founder}`)
   })
 })
 

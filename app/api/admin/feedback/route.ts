@@ -257,12 +257,13 @@ export async function GET(req: NextRequest) {
     if (isElevatedCaller) {
       item.assigned_to_name = r.assigned_to ? assigneeNameById.get(r.assigned_to) || null : null
     } else {
-      // ASSIGNMENT AND THE "LOOKS ALREADY BUILT" TICK ARE THE TEAM'S. An owner
-      // reading their own location's list gets neither — who on our side has
-      // it, and our private guess that it shipped, are not owner-facing facts.
+      // ASSIGNMENT IS THE TEAM'S. An owner reading their own location's list
+      // does not get it — who on our side has it is not an owner-facing fact.
       delete item.assigned_to
-      delete item.looks_shipped
     }
+    // The "Looks already built" tick was removed (2026-11-13): the column is
+    // still in the database but is returned to nobody.
+    delete item.looks_shipped
     return item
   })
 

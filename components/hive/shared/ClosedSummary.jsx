@@ -46,7 +46,9 @@ export default function ClosedSummary({ engagement }) {
       ? writtenOffAmountText(e)
       : (e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason))
   const verdict = writtenOff ? WRITTEN_OFF_LABEL : `Closed ${won ? 'won' : 'lost'}`
-  const fullNote = overBalance || writtenOff
+  // A card closed as a duplicate (shared/twinCards.js): its note is the
+  // whole account of where the work went, so it reads in full too.
+  const fullNote = overBalance || writtenOff || e.closed_reason === 'duplicate_card'
   const note = (e.closed_note || '').trim()
   return (
     <div style={{ padding: '10px 14px', background: T.surface.sunken, borderRadius: T.radius.inset, display: 'flex', flexDirection: 'column', gap: '3px' }}>

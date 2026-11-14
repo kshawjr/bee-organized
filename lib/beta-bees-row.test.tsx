@@ -825,10 +825,14 @@ describe('slice 1’s mirror is untouched, by fingerprint', () => {
   // lib/jobber-crew-mirror.ts stopped retrying them from the crew sweep, and
   // the cron route runs the paced retry. Who ends up in a channel is pinned
   // unchanged by lib/beta-job-channel-members-fingerprint.test.ts.)
+  // (2026-11-13, lib/jobber-webhook-handlers.ts edited on purpose, in
+  // cleanupDestroyedRequest only: a hand-made card left holding nothing after
+  // its Jobber request is deleted now closes itself. No crew, channel or job
+  // code moved — lib/beta-twin-cards.test.tsx pins the new rule.)
   const PUSHED: Record<string, string> = {
     'lib/jobber-crew-mirror.ts': 'fc524b1969d6a21f0e6bd7745a9a51991b533049c244b16cc23b28e3d4639001',
     'lib/engagement-bees.ts': '5c63fb00bd63592f1b2845c5e2b1f4c22308abd5bf70b018216a14b62ca422ef',
-    'lib/jobber-webhook-handlers.ts': '4252fc55e6b33424cfb62f03a8a7fbfa9db022d0dc6701114c68eca69e528208',
+    'lib/jobber-webhook-handlers.ts': 'ba938c5ab91b097450d61ed0cc49b0b3a0855ad1bed31f171771edd9379814a5',
     'app/api/cron/job-channels/route.ts': 'ba2649969b1c9abbbbe6a3a5dedcb2e3e58b1240f003873dd470e3f6e9728254',
     'lib/location-bees.ts': 'a8870029550a48572bc08ae6a01ada11d60f468f86afffef1aef2d88b26450b7',
   }
