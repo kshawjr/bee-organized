@@ -36,7 +36,7 @@
 import { escHtml, escAttr } from './email-escape'
 import { displayPhone } from './phone'
 import { htmlWithSignature, textWithSignature, buildSignatureHtml, safeHttpUrl, SIGNATURE_MARKER, type EmailSignature } from './email-signature'
-import { parseEmailHtml, blocksToText, sendableHref, type Block, type Inline, type BodyFormat } from './email-body-html'
+import { parseEmailHtml, blocksToText, sendableHref, LARGE_PX, type Block, type Inline, type BodyFormat } from './email-body-html'
 export { escHtml, escAttr }
 
 // The gold bee mark — the SAME transparent PNG the brand site uses, but
@@ -276,6 +276,8 @@ function htmlInlines(kids: Inline[], inLink = false): string {
     if (k.t === 'br') return '<br />'
     // Bold says its weight: the body is set light (300), and a bare <strong>
     // there comes out at regular weight, which does not read as bold.
+    // Large text (the editor's size choice): 20px on the body's 17, with room.
+    if (k.t === 'mark' && k.tag === 'large') return `<span style="font-size:${LARGE_PX}px;line-height:30px;">${htmlInlines(k.kids, inLink)}</span>`
     if (k.t === 'mark') return `<${k.tag}${k.tag === 'strong' ? ' style="font-weight:700;"' : ''}>${htmlInlines(k.kids, inLink)}</${k.tag}>`
     const href = sendableHref(k.href)
     // A link whose address did not come out as a real http(s) one (a saved

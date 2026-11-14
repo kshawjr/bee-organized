@@ -48,7 +48,9 @@ import {
   EmailSignatureSection, EmailFrame, SendTestBar, useSignature, signatureFromData, previewEmailHtml, rowNeeds,
   goToField, NEED_LABEL as EMAIL_NEED_LABEL, FIELD_ID as EMAIL_FIELD_ID, ButtonFields, MergeTagPicker, useTagInsert,
   buttonProblem, buttonForSave, EditorPreview, linkUsage, AddButtonDialog, startButtonDraft, StartButtonNote,
+  RichMessage, useBodyDraft,
 } from "@/components/settings/EmailsScreen"
+import { bodyAsPlainText } from "@/lib/email-body-html"
 // Settings, rebuilt to the new look one section at a time (slice 1, 2026-11-13:
 // the nav, the page header, the card, and Profile). The pieces; this file
 // still decides who sees what and does every save.
@@ -16556,6 +16558,8 @@ function masterStepsToUi(master) {
         delay_days: s.delay_days ?? 0,
         subject: s.subject ?? null,
         body: s.body ?? null,
+        // The body's shape (lib/email-body-html.ts). Absent column → plain.
+        bodyFormat: s.body_format === 'html' ? 'html' : 'plain',
         fromMaster: true,
         origin: 'master',
         // 2026-10-30 — the master's button and timing unit, and its row id
@@ -16720,7 +16724,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
                         <p style={{ fontSize:'12px', fontWeight:tmpl?600:400, color:tmpl?'#6366f1':'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                           {tmpl ? tmpl.name : 'Tap to pick a template'}
                         </p>
-                        {tmpl&&<p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.type==='email'&&tmpl.subject?tmpl.subject:tmpl.body.slice(0,45)+'...'}</p>}
+                        {tmpl&&<p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.type==='email'&&tmpl.subject?tmpl.subject:bodyAsPlainText(tmpl.body, tmpl.bodyFormat).slice(0,45)+'...'}</p>}
                       </div>
                       <span style={{ fontSize:'11px', color:'#c8d8d4', flexShrink:0 }}>›</span>
                     </button>
@@ -16762,7 +16766,11 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
   const [name, setName]       = useState(template?.name || defaultName || '')
   const [type, setType]       = useState(template?.type || defaultType || 'email')
   const [subject, setSubject] = useState(template?.subject||'')
-  const [body, setBody]       = useState(template?.body||'')
+  // This older popup only knows plain text. A body written in the rich-text
+  // editor (Settings › Emails) opens here as its words; saving here stores
+  // plain text again, and the note under the box says so.
+  const wasRich = template?.bodyFormat === 'html'
+  const [body, setBody]       = useState(bodyAsPlainText(template?.body, template?.bodyFormat))
   const [tab, setTab]         = useState('edit') // 'edit' | 'preview'
   const textareaRef = useRef(null)
 
@@ -16875,6 +16883,7 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
                   style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', height:type==='sms'?'100px':'200px', resize:'vertical', lineHeight:1.6 }}
                 />
                 <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'4px' }}>{body.length} chars{type==='sms'&&body.length>160?<span style={{ color:'#f59e0b' }}> · exceeds 1 SMS</span>:''}</p>
+                {wasRich && <p data-rich-note style={{ fontSize:'11px', color:'#A0600B', marginTop:'4px', lineHeight:1.5 }}>This email has formatting (bold, lists, links on words). Saving here keeps the words and drops the formatting. To keep it, edit this email in Settings › Emails.</p>}
               </div>
             </>
           )}
@@ -17001,7 +17010,7 @@ function TemplateQuickPeekModal({ template, settings=null, showSelectButton=fals
         </div>
         <div style={{ padding:'16px', overflowY:'auto', flex:1, background:'#f3f4f6' }}>
           <div style={{ background:'white', borderRadius:'12px', overflow:'hidden', boxShadow:'0 2px 12px rgba(0,0,0,0.08)' }}>
-            <RenderedTemplatePreview type={template.type} subject={template.subject} body={template.body} settings={settings} />
+            <RenderedTemplatePreview type={template.type} subject={template.subject} body={bodyAsPlainText(template.body, template.bodyFormat)} settings={settings} />
           </div>
         </div>
         <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end', flexShrink:0 }}>
@@ -17063,7 +17072,7 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
           </div>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', marginLeft:'22px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-          {t.type==='email'&&t.subject?t.subject:(t.body||'').slice(0,60)+'...'}
+          {t.type==='email'&&t.subject?t.subject:bodyAsPlainText(t.body, t.bodyFormat).slice(0,60)+'...'}
         </p>
       </div>
     )
@@ -18334,7 +18343,8 @@ function templateRow(templates, legacyId, days, when) {
     forkDbId: fork ? fork.dbId : null,
     subject: use.subject || '',
     body: use.body || '',
-    firstLine: firstMeaningfulLine(use.body),
+    bodyFormat: use.bodyFormat === 'html' ? 'html' : 'plain',
+    firstLine: firstMeaningfulLine(bodyAsPlainText(use.body, use.bodyFormat)),
     wording: fork ? 'yours' : 'master',
     // 2026-10-30 — the optional button; the test send names the template.
     buttonText: use.buttonText || '',
@@ -18366,6 +18376,13 @@ export function stepEditorContent(step, templates) {
   }
 }
 
+// The shape of that body (lib/email-body-html.ts) — a fact about whichever
+// row the body came from, the step or its linked template. Same order.
+export function stepEditorFormat(step, templates) {
+  const linked = linkedTemplateForStep(step, templates)
+  return (step?.body != null ? step?.bodyFormat : linked?.bodyFormat) === 'html' ? 'html' : 'plain'
+}
+
 // Apply a DripPathStepEditor save to a step. If the owner saved without
 // changing the wording of a template-backed step, the step KEEPS its template
 // link and carries no text of its own — only the delay moves. Otherwise the
@@ -18389,6 +18406,9 @@ export function applyStepContentEdit(step, patch, templates) {
     ...timing,
     subject: patch.subject,
     body: patch.body,
+    // The wording is now the step's own, in the shape the editor saved it
+    // (named only when it is html; absent reads as plain everywhere).
+    ...(patch.body_format === 'html' ? { bodyFormat: 'html' } : step.bodyFormat === 'html' ? { bodyFormat: 'plain' } : {}),
     name: patch.subject || step.name,
     templateId: null,
     masterTemplateId: null,
@@ -18409,6 +18429,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
         // Mirrors lib/drip-send.ts: the step's own text wins, the linked
         // template is the fallback. Deliberately does NOT filter on isActive.
         const { subject, body } = stepEditorContent(s, templates)
+        const bodyFormat = stepEditorFormat(s, templates)
         return {
           key: `step-${key}-${s.dbId ?? s.order}`,
           rail: 'drip',
@@ -18422,8 +18443,8 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
             ? timingLabel(s.delay_days ?? 0, s.delayUnit)
             : whenLabelForDays(s.delay_days ?? 0),
           timingIsData: true,
-          subject, body,
-          firstLine: firstMeaningfulLine(body),
+          subject, body, bodyFormat,
+          firstLine: firstMeaningfulLine(bodyAsPlainText(body, bodyFormat)),
           // NOT "does the step carry inline text" — master steps carry inline
           // text too, so that test marks everything as edited. The honest signal
           // is which map the row came from: masterStepsToUi stamps fromMaster,
@@ -18549,9 +18570,12 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
 // Subject + body only, matching what reset restores and what
 // mergeForkOverMaster overrides at send time. The owner never sees
 // "duplicate", "master" or "custom template"; the fork is plumbing.
-export function EmailTemplateEditor({ row, onCancel, onSave, links = null, alignReady = false, preview = null, startButton = null }) {
+export function EmailTemplateEditor({ row, onCancel, onSave, links = null, alignReady = false, bodyReady = false, preview = null, startButton = null }) {
   const [subject, setSubject] = React.useState(row.subject || '')
-  const [body, setBody] = React.useState(row.body || '')
+  // The message: the rich-text editor once its migration has run, the plain
+  // text box until then (useBodyDraft). `body` is what a save stores.
+  const draft = useBodyDraft(row.body, row.bodyFormat, bodyReady)
+  const body = draft.body, setBody = draft.setPlain
   // startButton: opened from "Which email?" — a DRAFT button, saved only by Save.
   const start = React.useMemo(() => startButtonDraft(row.buttonText, row.buttonLink, startButton), [])
   const [buttonText, setButtonText] = React.useState(start.text)
@@ -18563,7 +18587,7 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
   const tags = useTagInsert()
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState('')
-  const changed = subject !== (row.subject || '') || body !== (row.body || '') ||
+  const changed = subject !== (row.subject || '') || draft.touched ||
     buttonText !== (row.buttonText || '') || buttonLink !== (row.buttonLink || '') || (buttonAlign || null) !== (row.buttonAlign || null)
   const save = async () => {
     setErr('')
@@ -18571,12 +18595,14 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
     // body/subject would commit, then hold at send time
     // (no_body_source / missing_subject) — refuse here where the
     // owner can see why. This rail is email-only.
-    if (!body || !body.trim()) { setErr('The email body can’t be empty.'); return }
+    if (!draft.text.trim()) { setErr('The email body can’t be empty.'); return }
     if (!subject || !subject.trim()) { setErr('The email subject can’t be empty.'); return }
     const bp = buttonProblem(buttonText, buttonLink)
     if (bp) { setErr(bp); setPreviewing(false); return }
     setBusy(true)
-    try { await onSave(subject, body, buttonForSave(buttonText, buttonLink, buttonAlign)) }
+    // The shape goes with the body — only from the rich editor; the plain box
+    // calls onSave exactly as it always did.
+    try { await (draft.rich ? onSave(subject, body, buttonForSave(buttonText, buttonLink, buttonAlign), draft.format) : onSave(subject, body, buttonForSave(buttonText, buttonLink, buttonAlign))) }
     catch (e) { setErr(String(e?.message || e)); setBusy(false) }
   }
   return (
@@ -18587,10 +18613,13 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
         <EBtn variant="primary" onClick={save} disabled={busy || !changed}>{busy ? 'Saving…' : 'Save'}</EBtn>
       </>}>
       {previewing ? (
-        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign), templateKey: row.templateKey }} />
+        <EditorPreview preview={preview} draft={{ subject, body, bodyFormat: draft.format, ...buttonDraft(buttonText, buttonLink, buttonAlign), templateKey: row.templateKey }} />
       ) : <>
       <label style={eLabelStyle}>Subject</label>
       <input value={subject} onChange={e => setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={{ ...eInputStyle, marginBottom:'12px' }} />
+      {draft.rich ? (
+        <RichMessage {...draft.editor} links={links} onFocus={tags.clear} onInsertTag={t => tags.insert(t)} />
+      ) : <>
       <label style={eLabelStyle}>Message</label>
       {/* The body is CONTENT — it may use the width. */}
       <textarea value={body} onChange={e => setBody(e.target.value)} {...tags.bind(() => body, setBody)}
@@ -18599,6 +18628,7 @@ export function EmailTemplateEditor({ row, onCancel, onSave, links = null, align
       <div style={{ marginTop:'12px' }}>
         <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
       </div>
+      </>}
       <div style={{ marginTop:'16px' }}>
         <StartButtonNote startButton={startButton} picked={start.picked} hadButton={!!(row.buttonLink || '').trim()} />
         <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
@@ -19197,9 +19227,10 @@ export function newEmailStep(steps, template, draft = null, now = Date.now()) {
   const subject = typeof draft?.subject === 'string' ? draft.subject.trim() : ''
   const body = typeof draft?.body === 'string' ? draft.body : ''
   if (!subject) throw new Error('The email subject can’t be empty.')
-  if (!body.trim()) throw new Error('The email body can’t be empty.')
+  if (!bodyAsPlainText(body, draft?.body_format).trim()) throw new Error('The email body can’t be empty.')
   return {
     ...base, templateId: null, masterTemplateId: null, subject, body, name: subject,
+    ...(draft.body_format === 'html' ? { bodyFormat: 'html' } : {}),
     ...(draft.button_text ? { buttonText: draft.button_text, buttonLink: draft.button_link || '', buttonAlign: draft.button_align ?? null } : {}),
   }
 }
@@ -22004,10 +22035,10 @@ function TemplatePreviewModal({ template, settings, onClose }) {
             device-width container. */}
         <div style={{ overflowY:'auto', flex:1, background:'#f3f4f6', padding:'16px' }}>
           {isSMS || isCall || viewMode==='text' ? (
-            <RenderedTemplatePreview type={template.type} subject={template.subject} body={template.body} settings={settings} viewMode={viewMode} />
+            <RenderedTemplatePreview type={template.type} subject={template.subject} body={bodyAsPlainText(template.body, template.bodyFormat)} settings={settings} viewMode={viewMode} />
           ) : (
             <div style={{ maxWidth: viewMode==='mobile'?'375px':'100%', margin:'0 auto', background:'white', borderRadius:'12px', overflow:'hidden', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
-              <RenderedTemplatePreview type="email" subject={template.subject} body={template.body} settings={settings} viewMode="desktop" />
+              <RenderedTemplatePreview type="email" subject={template.subject} body={bodyAsPlainText(template.body, template.bodyFormat)} settings={settings} viewMode="desktop" />
             </div>
           )}
         </div>
@@ -22486,6 +22517,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       buttonText: r.button_text || '',
       buttonLink: r.button_link || '',
       buttonAlign: r.button_align || null,
+      // The body's shape (migrations/email_body_format.sql). Absent → plain.
+      bodyFormat: r.body_format === 'html' ? 'html' : 'plain',
       usedIn: [],
     })))
     setTemplatesError(null)
@@ -22595,6 +22628,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           buttonText: s.button_text ?? null,
           buttonLink: s.button_link ?? null,
           buttonAlign: s.button_align ?? null,
+          // Same reason: lost here, an html body would be written back as plain.
+          bodyFormat: s.body_format === 'html' ? 'html' : 'plain',
         }))
       }
       setDbPaths(newDbPaths)
@@ -22728,6 +22763,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           button_link: s.buttonLink || null,
           // Centre is null; null needs no column (migrations/button_align.sql).
           button_align: s.buttonAlign === 'left' || s.buttonAlign === 'right' ? s.buttonAlign : null,
+          // Named only for an html body: a plain one is the column's default,
+          // and needs no column (migrations/email_body_format.sql).
+          ...(s.bodyFormat === 'html' && s.body != null ? { body_format: 'html' } : {}),
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -23109,6 +23147,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       preview: { style: es.style, values: emailsPreviewValues(), signature: signatureFromData(emailSig.data), postalAddress: emailSettings.postalAddress || null },
       links: { discovery: es.discoveryBookingLink, inHome: settings.location.bookingLink, video: es.virtualBookingLink },
       alignReady: emailSettings.ready.align === true,
+      // The rich-text Message editor, once migrations/email_body_format.sql has run.
+      bodyReady: emailSettings.ready.bodyFormat === true,
     }
   }
 
@@ -23184,7 +23224,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
   // Create-or-reuse the location's fork of a master template, then patch it.
   // Shaped exactly as POST /api/templates/:id/duplicate shapes a fork.
-  async function emailsSaveTemplateEdit(row, subject, body, button = null) {
+  async function emailsSaveTemplateEdit(row, subject, body, button = null, bodyFormat = 'plain') {
     let forkId = row.forkDbId
     if (!forkId) {
       const dup = await fetch(`/api/templates/${row.masterDbId}/duplicate`, { method:'POST' })
@@ -23198,7 +23238,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // The button only when it changed — before migrations/email_buttons.sql
       // runs, an untouched button must not turn every wording save into a
       // "not set up yet" refusal.
-      body: JSON.stringify({ subject, body, ...(button && ((button.button_text || '') !== (row.buttonText || '') || (button.button_link || '') !== (row.buttonLink || '') || (button.button_align || null) !== (row.buttonAlign || null)) ? button : {}) }),
+      body: JSON.stringify({ subject, body, ...(bodyFormat === 'html' ? { body_format: 'html' } : {}), ...(button && ((button.button_text || '') !== (row.buttonText || '') || (button.button_link || '') !== (row.buttonLink || '') || (button.button_align || null) !== (row.buttonAlign || null)) ? button : {}) }),
     })
     if (res.status === 409) throw new Error('Buttons aren’t switched on yet — save without one for now.')
     if (!res.ok) throw new Error('could not save your wording')
@@ -24610,8 +24650,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           row={emailTemplateEditor.row}
           startButton={emailTemplateEditor.startButton || null}
           onCancel={() => setEmailTemplateEditor(null)}
-          onSave={async (subject, body, button) => {
-            await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body, button)
+          onSave={async (subject, body, button, bodyFormat) => {
+            await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body, button, bodyFormat)
             setEmailTemplateEditor(null)
           }}
         />
@@ -24635,6 +24675,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             // The step's own text, else its linked template's — a step whose
             // wording lives on a template used to open blank here.
             ...stepEditorContent(stepContentEditor.step, templates),
+            body_format: stepEditorFormat(stepContentEditor.step, templates),
             delay_days: stepContentEditor.step.delay_days ?? delayToDays(stepContentEditor.step.delay),
             button_text: stepContentEditor.step.buttonText || '',
             button_link: stepContentEditor.step.buttonLink || '',
@@ -32937,7 +32978,7 @@ function MasterDripPathsEditor() {
                         </div>
                         {step.subject && <p style={{ fontSize:'12px', fontWeight:600, color:'#6366f1', marginBottom:'4px' }}>Subject: {step.subject}</p>}
                         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5, whiteSpace:'pre-wrap', maxHeight:'80px', overflow:'hidden' }}>
-                          {(step.body || '').slice(0, 240)}{(step.body || '').length > 240 ? '…' : ''}
+                          {bodyAsPlainText(step.body, step.body_format).slice(0, 240)}{bodyAsPlainText(step.body, step.body_format).length > 240 ? '…' : ''}
                         </p>
                       </div>
                     ))}
@@ -32956,6 +32997,8 @@ function MasterDripPathsEditor() {
           // details. The rows come from '*', so the column's presence is the
           // migration's.
           alignReady={'button_align' in editing.step}
+          // The rich-text editor, once the masters' rows carry body_format.
+          bodyReady={'body_format' in editing.step}
           onSave={(patch) => saveStep(editing.step, patch)}
           onClose={() => setEditing(null)}
         />
@@ -33002,9 +33045,12 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // yet (+ Add an email here → A blank email). Same two refusals — no subject,
 // no message — so the step is only ever created whole. Its day is fixed by
 // where it lands (appendedStepPosition), so the delay field is not offered.
-export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, preview = null, isNew = false, startButton = null }) {
+export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, bodyReady = false, preview = null, isNew = false, startButton = null }) {
   const [subject, setSubject] = useState(step.subject || '')
-  const [body, setBody] = useState(step.body || '')
+  // The message: the rich-text editor once its migration has run, the plain
+  // text box until then (useBodyDraft). `body` is what a save stores.
+  const draft = useBodyDraft(step.body, step.body_format, bodyReady)
+  const body = draft.body, setBody = draft.setPlain
   // 2026-10-30 — the optional button (drip_path_steps.button_text / _link).
   // startButton: opened from "Which email?" — a DRAFT button, saved only by Save.
   const start = React.useMemo(() => startButtonDraft(step.button_text, step.button_link, startButton), [])
@@ -33025,7 +33071,7 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
       setLocalErr('Delay must be a non-negative number of days.')
       return
     }
-    if (!body || !body.trim()) {
+    if (!draft.text.trim()) {
       // An empty body would commit, then hold at send time (no_body_source) —
       // refuse here where the owner can see why.
       setLocalErr('The email body can’t be empty.')
@@ -33045,6 +33091,9 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
       await onSave({
         subject: subject.trim() || null,
         body,
+        // The shape goes with the body — only from the rich editor; the plain
+        // box sends what it always sent.
+        ...(draft.rich ? { body_format: draft.format } : {}),
         delay_days: Number(delayDays),
         // Only when changed: an untouched button never trips "not set up yet"
         // before migrations/email_buttons.sql has run.
@@ -33069,22 +33118,26 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
         <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? (isNew ? 'Adding…' : 'Saving…') : (isNew ? 'Add this email' : 'Save')}</EBtn>
       </>}>
       {previewing ? <>
-        <EditorPreview preview={preview} draft={{ subject, body, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
+        <EditorPreview preview={preview} draft={{ subject, body, bodyFormat: draft.format, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
         {localErr && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </> : <>
       {isNew && <p data-new-email-note style={{ ...eHintStyle, margin:'0 0 8px' }}>It’s added to the end of your emails when you press “Add this email” — it needs a subject and a message first. Cancel and nothing is added.</p>}
-      <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. Pick one from the list under the message.</p>
+      <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. {draft.rich ? 'Pick one from Merge tags, above the message.' : 'Pick one from the list under the message.'}</p>
       <div style={{ display:'grid', gap:'12px' }}>
         <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Subject</span>
           <input type="text" value={subject} onChange={e=>setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={eInputStyle} />
         </label>
+        {draft.rich ? (
+          <RichMessage {...draft.editor} links={links} onFocus={tags.clear} onInsertTag={t => tags.insert(t)} />
+        ) : <>
         <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Message</span>
           <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14} {...tags.bind(() => body, setBody)}
             style={{ ...eTextareaStyle, fontFamily:EF.body, color:ET.ink }} />
         </label>
         <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
+        </>}
         {!isNew && <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Delay (days after the lead comes in)</span>
           <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />

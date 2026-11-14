@@ -89,6 +89,22 @@ async function alignReady(): Promise<boolean> {
   }
 }
 
+// The same question for migrations/email_body_format.sql: both tables have
+// body_format, so the rich-text editor can save. Until then the editors keep
+// the plain text box, which saves exactly as it always did.
+async function bodyFormatReady(): Promise<boolean> {
+  try {
+    const [steps, templates] = await Promise.all([
+      supabaseService.from('drip_path_steps').select('*').limit(1),
+      supabaseService.from('templates').select('*').limit(1),
+    ])
+    const has = (r: { data: unknown }) => Array.isArray(r.data) && !!r.data[0] && 'body_format' in (r.data[0] as Record<string, unknown>)
+    return has(steps) && has(templates)
+  } catch {
+    return false
+  }
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const denied = await authorise(params.id, false)
   if (denied) return denied
@@ -96,7 +112,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!row) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   return NextResponse.json({
     settings: locationEmailOptionsFromRow(row),
-    ready: { ...readiness(row), align: await alignReady() },
+    ready: { ...readiness(row), align: await alignReady(), bodyFormat: await bodyFormatReady() },
     // The postal address printed at the foot of every commercial email
     // (CAN-SPAM; MARKETING_POSTAL_ADDRESS, read by lib/marketing-unsubscribe.ts
     // at send time). Read-only here, so the Emails screen's preview can show

@@ -201,8 +201,11 @@ describe('wiring in components/BeeHub.jsx', () => {
   })
 
   it('saving an empty body is still refused', () => {
-    const editor = src.slice(src.indexOf('function DripPathStepEditor'), src.indexOf('function DripPathStepEditor') + 2000)
-    expect(editor).toContain("if (!body || !body.trim())")
+    const editor = src.slice(src.indexOf('function DripPathStepEditor'), src.indexOf('function DripPathStepEditor') + 2600)
+    // 2026-11-13 (rich-text editor): the check is on the body's WORDS — draft.text
+    // is the plain box's text, or the editor's html read back as text — so an
+    // html body that is only empty paragraphs is refused too. Was: if (!body || !body.trim())
+    expect(editor).toContain("if (!draft.text.trim())")
     expect(editor).toContain('The email body can’t be empty.')
   })
 })

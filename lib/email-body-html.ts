@@ -16,7 +16,9 @@
 // WHAT HTML IS ALLOWED. A whitelist, rebuilt from scratch on every pass:
 //
 //   blocks   p, h2, h3 (optional text-align: center | right), ul, ol > li
-//   inline   strong, em, u, br, a[href]
+//   inline   strong, em, u, br, a[href], and Large text: a span whose style is
+//            exactly font-size:20px (Kevin, 2026-11-13: Normal 17px, Large
+//            20px, no Small, headings off in the editor). No other span.
 //
 // Nothing is "stripped out" of the input. The input is read into the small
 // tree below and the output is written from that tree, so a tag, attribute,
@@ -51,12 +53,15 @@ export type Align = 'center' | 'right' | null
 export type Inline =
   | { t: 'text'; v: string }
   | { t: 'br' }
-  | { t: 'mark'; tag: 'strong' | 'em' | 'u'; kids: Inline[] }
+  | { t: 'mark'; tag: 'strong' | 'em' | 'u' | 'large'; kids: Inline[] }
   | { t: 'a'; href: string; kids: Inline[] }
 export type Block =
   | { type: 'p' | 'h2' | 'h3'; align: Align; kids: Inline[] }
   | { type: 'ul' | 'ol'; items: Inline[][] }
 
+// Large text, and only this size: the sent email sets it at 20px.
+export const LARGE_PX = 20
+const LARGE_STYLE = /^\s*font-size\s*:\s*20px\s*;?\s*$/i
 const MERGE_TAG_HREF = /^\{\{\w+\}\}$/
 const HTTP_HREF = /^https?:\/\/[^\s"'<>]+$/i
 
@@ -117,8 +122,9 @@ export function parseEmailHtml(html: string | null | undefined, opts: { anyHref?
   let list = null as Extract<Block, { items: Inline[][] }> | null
   let item = null as Inline[] | null
   // The open inline containers, innermost last. [0] is the block's (or the
-  // list item's) own kids. `kind` null = a link we refused: transparent.
-  let stack: { kind: string | null; kids: Inline[] }[] = []
+  // list item's) own kids. A link we refused, or a span that means nothing,
+  // points its kids at its parent's: see-through.
+  let stack: { kind: string; kids: Inline[] }[] = []
   let skip = 0
 
   const closeBlock = () => { block = null; if (!item) stack = [] }
@@ -184,16 +190,24 @@ export function parseEmailHtml(html: string | null | undefined, opts: { anyHref?
     if (name === 'br') { if (!closing) target().push({ t: 'br' }); continue }
 
     const mark = MARK_OF[name] as 'strong' | 'em' | 'u' | undefined
-    if (mark || name === 'a') {
-      const kind: string = mark || 'a'
+    if (mark || name === 'a' || name === 'span') {
+      const kind: string = mark || name
       if (closing) {
         for (let i = stack.length - 1; i > 0; i--) {
-          if (stack[i].kind === kind || (kind === 'a' && stack[i].kind === null)) { stack.length = i; break }
+          if (stack[i].kind === kind) { stack.length = i; break }
         }
         continue
       }
       const into = target()
-      if (mark) {
+      if (name === 'span') {
+        // The one span that means something: Large text. Every other span
+        // (Word's, a merge tag's wrapper in the editor) is see-through.
+        if (LARGE_STYLE.test(attr(attrs, 'style') || '')) {
+          const node: Inline = { t: 'mark', tag: 'large', kids: [] }
+          into.push(node)
+          stack.push({ kind, kids: node.kids })
+        } else stack.push({ kind, kids: into })
+      } else if (mark) {
         const node: Inline = { t: 'mark', tag: mark, kids: [] }
         into.push(node)
         stack.push({ kind, kids: node.kids })
@@ -205,7 +219,7 @@ export function parseEmailHtml(html: string | null | undefined, opts: { anyHref?
           into.push(node)
           stack.push({ kind, kids: node.kids })
         } else {
-          stack.push({ kind: null, kids: into }) // the words stay, the link goes
+          stack.push({ kind, kids: into }) // the words stay, the link goes
         }
       }
       continue
@@ -234,22 +248,44 @@ function tidyBlock(b: Block): Block {
   return 'items' in b ? { ...b, items: b.items.map(tidyInlines) } : { ...b, kids: tidyInlines(b.kids) }
 }
 
-function inlinesToHtml(kids: Inline[]): string {
+// tagWrap: how a {{merge_tag}} in text is written. A save writes it as it
+// is; the editor asks for it wrapped, so it can treat a tag as one thing.
+function inlinesToHtml(kids: Inline[], tagWrap?: (name: string) => string): string {
   return kids.map((k) => {
-    if (k.t === 'text') return escHtml(k.v)
+    if (k.t === 'text') return tagWrap ? k.v.split(/(\{\{\w+\}\})/).map((part, i) => (i % 2 ? tagWrap(part.slice(2, -2)) : escHtml(part))).join('') : escHtml(k.v)
     if (k.t === 'br') return '<br>'
-    if (k.t === 'mark') return `<${k.tag}>${inlinesToHtml(k.kids)}</${k.tag}>`
-    return `<a href="${escAttr(k.href)}">${inlinesToHtml(k.kids)}</a>`
+    if (k.t === 'mark') return k.tag === 'large'
+      ? `<span style="font-size:${LARGE_PX}px">${inlinesToHtml(k.kids, tagWrap)}</span>`
+      : `<${k.tag}>${inlinesToHtml(k.kids, tagWrap)}</${k.tag}>`
+    return `<a href="${escAttr(k.href)}">${inlinesToHtml(k.kids, tagWrap)}</a>`
   }).join('')
 }
 
 // The tree, written the one way a body is stored.
-export function blocksToHtml(blocks: Block[]): string {
+export function blocksToHtml(blocks: Block[], tagWrap?: (name: string) => string): string {
   return blocks.map((b) => {
-    if ('items' in b) return `<${b.type}>${b.items.map((it) => `<li>${inlinesToHtml(it)}</li>`).join('')}</${b.type}>`
+    if ('items' in b) return `<${b.type}>${b.items.map((it) => `<li>${inlinesToHtml(it, tagWrap)}</li>`).join('')}</${b.type}>`
     const style = b.align ? ` style="text-align:${b.align}"` : ''
-    return `<${b.type}${style}>${inlinesToHtml(b.kids)}</${b.type}>`
+    return `<${b.type}${style}>${inlinesToHtml(b.kids, tagWrap)}</${b.type}>`
   }).join('')
+}
+
+// WHAT THE EDITOR OPENS. The body in either shape, as whitelisted html with
+// every {{merge_tag}} in the text wrapped in <span data-merge-tag="name">, so
+// the editor can hold a tag as one thing (one backspace takes all of it or
+// none). A tag used as a link's address is left alone: it is an address, not
+// text. Saving passes the editor's html back through sanitizeEmailHtml, where
+// that wrapper span is see-through and the tag is the same characters again.
+export const mergeTagSpan = (name: string) => `<span data-merge-tag="${name}">{{${name}}}</span>`
+export function bodyForEditor(body: string | null | undefined, format: BodyFormat | null | undefined): string {
+  const blocks = format === 'html' ? parseEmailHtml(body) : plainBodyToBlocks(body)
+  return blocksToHtml(blocks, mergeTagSpan)
+}
+
+// A body as words, whichever shape it is in: for a list's one-line summary,
+// an old screen that only knows text, a search.
+export function bodyAsPlainText(body: string | null | undefined, format: BodyFormat | null | undefined): string {
+  return format === 'html' ? htmlBodyToText(body) : String(body ?? '')
 }
 
 // WHAT A SAVE STORES. Whatever came in, only the whitelist comes out.

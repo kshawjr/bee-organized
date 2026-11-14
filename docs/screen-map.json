@@ -73,8 +73,8 @@
       ],
       "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
       "lines": [
-        36625,
-        37766
+        36678,
+        37819
       ]
     },
     {
@@ -96,8 +96,8 @@
       ],
       "note": "Role gating for which nav items appear is inline here. Help appears for every role (an owner's own reports live under Help › My requests — \"What you've told us\" is retired); Admin only for elevated users.",
       "lines": [
-        37526,
-        37766
+        37579,
+        37819
       ]
     },
     {
@@ -124,8 +124,8 @@
         "search doesn't find anyone"
       ],
       "lines": [
-        30163,
-        30351
+        30204,
+        30392
       ]
     },
     {
@@ -166,8 +166,8 @@
         "seeing someone else's account"
       ],
       "lines": [
-        30352,
-        30459
+        30393,
+        30500
       ]
     },
     {
@@ -186,8 +186,8 @@
         "the banner won't go away"
       ],
       "lines": [
-        14662,
-        14691
+        14664,
+        14693
       ]
     },
     {
@@ -210,8 +210,8 @@
         "the payment button does nothing"
       ],
       "lines": [
-        14715,
-        14822
+        14717,
+        14824
       ]
     },
     {
@@ -229,8 +229,8 @@
         "it won't let me do anything"
       ],
       "lines": [
-        14692,
-        14714
+        14694,
+        14716
       ]
     },
     {
@@ -254,8 +254,8 @@
         "the front page"
       ],
       "lines": [
-        24958,
-        25806
+        24999,
+        25847
       ]
     },
     {
@@ -275,8 +275,8 @@
       ],
       "note": "The counts are computed in DashboardScreen (or server-side in lib/hub-all-overview.ts on 'All locations'); this component only paints them. Wrong NUMBER is upstream of here.",
       "lines": [
-        10855,
-        10879
+        10857,
+        10881
       ]
     },
     {
@@ -295,8 +295,8 @@
         "the count is off"
       ],
       "lines": [
-        10899,
-        10925
+        10901,
+        10927
       ]
     },
     {
@@ -342,8 +342,8 @@
         "follow ups (classic)"
       ],
       "lines": [
-        24753,
-        24815
+        24794,
+        24856
       ],
       "note": "DEAD: defined but never rendered, and its list lived only in the browser. Owners saying 'my reminders' mean Reminders — see reminders.page / home.reminders / reminders.record."
     },
@@ -1209,8 +1209,8 @@
         "the yellow bar on clients"
       ],
       "lines": [
-        13075,
-        13151
+        13077,
+        13153
       ]
     },
     {
@@ -1234,8 +1234,8 @@
       ],
       "note": "Which of HiveScreen / HiveShell a user sees is decided by canSeeBetaBoard in components/hive/shared/betaGate.js. Confirm the reporter's role before reading either.",
       "lines": [
-        9807,
-        10815
+        9809,
+        10817
       ]
     },
     {
@@ -1256,8 +1256,8 @@
       ],
       "note": "4,400 lines — the single largest region in the file. Only reached via HiveScreen (legacy board). If the reporter is on the beta board, clients.record is the right entry instead.",
       "lines": [
-        4722,
-        9152
+        4724,
+        9154
       ]
     },
     {
@@ -1286,8 +1286,8 @@
         "it says the drip is running but nothing sent"
       ],
       "lines": [
-        4314,
-        4459
+        4316,
+        4461
       ]
     },
     {
@@ -1313,8 +1313,8 @@
         "the outreach tab"
       ],
       "lines": [
-        4460,
-        4721
+        4462,
+        4723
       ]
     },
     {
@@ -1477,8 +1477,8 @@
         "the old contacts page"
       ],
       "lines": [
-        16402,
-        16532
+        16404,
+        16534
       ]
     },
     {
@@ -1500,8 +1500,8 @@
         "next steps on a partner"
       ],
       "lines": [
-        15736,
-        16401
+        15738,
+        16403
       ]
     },
     {
@@ -1528,8 +1528,8 @@
       ],
       "note": "2,300+ lines. The sub-entries below anchor on each section's render branch — start from those, not from the top of the component. Retired section keys (billing, bees, paths, templates, yourteam, newleads) still resolve via SETTINGS_RETIRED_SECTIONS.",
       "lines": [
-        22065,
-        24684
+        22096,
+        24725
       ]
     },
     {
@@ -1554,8 +1554,8 @@
         "my calendar link"
       ],
       "lines": [
-        23808,
-        23903
+        23848,
+        23943
       ]
     },
     {
@@ -1581,8 +1581,8 @@
         "the review link"
       ],
       "lines": [
-        23904,
-        23981
+        23944,
+        24021
       ]
     },
     {
@@ -1629,8 +1629,8 @@
       ],
       "note": "Team and Billing merged in 2026-07; New leads folded in on 2026-11-13 (Settings slice 2). 'billing', 'bees', 'yourteam' and 'newleads' all survive as deep-link aliases into this section. The Seats card is TeamSection (BeeHub.jsx); the new-lead switches and outside emails are components/settings/TeamAndLeads.jsx; the Bees card is components/hive/BeeRosterSettings.jsx.",
       "lines": [
-        23982,
-        24246
+        24022,
+        24286
       ]
     },
     {
@@ -1673,8 +1673,8 @@
         "which name is on these emails"
       ],
       "lines": [
-        24307,
-        24684
+        24347,
+        24725
       ]
     },
     {
@@ -1732,8 +1732,8 @@
         "disconnect slack"
       ],
       "lines": [
-        24247,
-        24270
+        24287,
+        24310
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1763,8 +1763,8 @@
         "sync with jobber"
       ],
       "lines": [
-        24271,
-        24289
+        24311,
+        24329
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1797,8 +1797,8 @@
         "sync now"
       ],
       "lines": [
-        24290,
-        24306
+        24330,
+        24346
       ],
       "note": "Since 2026-11-13 this is reached from the card on Settings → Connections (components/settings/ConnectionsPage.jsx); it is no longer its own nav item, and old ?section links still land here."
     },
@@ -1822,8 +1822,8 @@
         "it says connected but nothing syncs"
       ],
       "lines": [
-        17379,
-        17622
+        17388,
+        17631
       ]
     },
     {
@@ -1855,8 +1855,8 @@
         "the progress bar"
       ],
       "lines": [
-        17623,
-        18292
+        17632,
+        18301
       ]
     },
     {
@@ -1878,8 +1878,8 @@
         "the days between emails"
       ],
       "lines": [
-        19325,
-        19538
+        19356,
+        19569
       ]
     },
     {
@@ -1920,8 +1920,8 @@
         "where replies to a job type go"
       ],
       "lines": [
-        19963,
-        20468
+        19994,
+        20499
       ]
     },
     {
@@ -1946,8 +1946,8 @@
         "the person is still showing"
       ],
       "lines": [
-        20869,
-        21266
+        20900,
+        21297
       ]
     },
     {
@@ -1970,8 +1970,8 @@
         "the slack button"
       ],
       "lines": [
-        21644,
-        21954
+        21675,
+        21985
       ]
     },
     {
@@ -1995,8 +1995,8 @@
         "billing history"
       ],
       "lines": [
-        20491,
-        20599
+        20522,
+        20630
       ]
     },
     {
@@ -2025,8 +2025,8 @@
         "the charge for adding a person"
       ],
       "lines": [
-        36159,
-        36624
+        36212,
+        36677
       ]
     },
     {
@@ -2050,8 +2050,8 @@
         "the price it quoted was wrong"
       ],
       "lines": [
-        35906,
-        36158
+        35959,
+        36211
       ]
     },
     {
@@ -2071,8 +2071,8 @@
       ],
       "note": "Currently a coming-soon surface. A report of \"reports don't work\" is expected behaviour, not a bug.",
       "lines": [
-        35164,
-        35191
+        35217,
+        35244
       ]
     },
     {
@@ -2089,8 +2089,8 @@
         "the back office tab"
       ],
       "lines": [
-        35216,
-        35291
+        35269,
+        35344
       ]
     },
     {
@@ -2107,8 +2107,8 @@
         "back office says coming soon"
       ],
       "lines": [
-        35192,
-        35215
+        35245,
+        35268
       ]
     },
     {
@@ -2129,8 +2129,8 @@
         "an admin section is missing"
       ],
       "lines": [
-        34270,
-        34801
+        34323,
+        34854
       ]
     },
     {
@@ -2155,8 +2155,8 @@
         "the overview at the top of admin"
       ],
       "lines": [
-        33903,
-        34110
+        33956,
+        34163
       ]
     },
     {
@@ -2179,8 +2179,8 @@
       ],
       "note": "GET /api/admin/locations does not exist — the list arrives server-rendered via app/_hub-page.tsx. The route only exports POST (create), which AddLocationModal uses.",
       "lines": [
-        27134,
-        27389
+        27175,
+        27430
       ]
     },
     {
@@ -2209,8 +2209,8 @@
         "their subscription"
       ],
       "lines": [
-        27958,
-        28853
+        27999,
+        28894
       ]
     },
     {
@@ -2230,8 +2230,8 @@
         "everyone's accounts"
       ],
       "lines": [
-        29375,
-        29476
+        29416,
+        29517
       ]
     },
     {
@@ -2257,8 +2257,8 @@
         "the seat list"
       ],
       "lines": [
-        27396,
-        27659
+        27437,
+        27700
       ]
     },
     {
@@ -2372,8 +2372,8 @@
         "changing pricing"
       ],
       "lines": [
-        31566,
-        31926
+        31607,
+        31967
       ]
     },
     {
@@ -2398,8 +2398,8 @@
         "the close reasons"
       ],
       "lines": [
-        31263,
-        31412
+        31304,
+        31453
       ]
     },
     {
@@ -2425,8 +2425,8 @@
         "I deleted an option and it's still there"
       ],
       "lines": [
-        31066,
-        31262
+        31107,
+        31303
       ]
     },
     {
@@ -2448,8 +2448,8 @@
         "the incoming events"
       ],
       "lines": [
-        33415,
-        33667
+        33468,
+        33720
       ]
     },
     {
@@ -2472,8 +2472,8 @@
         "expired tokens"
       ],
       "lines": [
-        34157,
-        34269
+        34210,
+        34322
       ]
     },
     {
@@ -2498,8 +2498,8 @@
         "restore a lead"
       ],
       "lines": [
-        31927,
-        32083
+        31968,
+        32124
       ]
     },
     {
@@ -2528,8 +2528,8 @@
         "the template library"
       ],
       "lines": [
-        32420,
-        32845
+        32461,
+        32886
       ]
     },
     {
@@ -2554,8 +2554,8 @@
         "the timing for everyone"
       ],
       "lines": [
-        32846,
-        32972
+        32887,
+        33015
       ]
     },
     {
@@ -2574,8 +2574,8 @@
         "the content page in admin"
       ],
       "lines": [
-        32358,
-        32419
+        32399,
+        32460
       ]
     },
     {
@@ -2600,8 +2600,8 @@
         "the owner never got their invite"
       ],
       "lines": [
-        29728,
-        29963
+        29769,
+        30004
       ]
     },
     {
@@ -2625,8 +2625,8 @@
         "grant access"
       ],
       "lines": [
-        31413,
-        31565
+        31454,
+        31606
       ]
     },
     {
@@ -2651,8 +2651,8 @@
         "the removal didn't happen"
       ],
       "lines": [
-        33150,
-        33393
+        33203,
+        33446
       ]
     },
     {
@@ -2676,8 +2676,8 @@
         "mark them as paid"
       ],
       "lines": [
-        29194,
-        29374
+        29235,
+        29415
       ]
     },
     {
@@ -2701,8 +2701,8 @@
         "convert their billing"
       ],
       "lines": [
-        29025,
-        29193
+        29066,
+        29234
       ]
     },
     {
@@ -2728,8 +2728,8 @@
         "the pay link doesn't work"
       ],
       "lines": [
-        28854,
-        29024
+        28895,
+        29065
       ]
     },
     {
@@ -2752,8 +2752,8 @@
         "set up a new office"
       ],
       "lines": [
-        33688,
-        33902
+        33741,
+        33955
       ]
     },
     {
@@ -2785,8 +2785,8 @@
       ],
       "note": "Step ids: welcome, pay, profile, location, jobber, import, paths, slack, invite (owner flow) and welcome_employee, profile (employee flow).",
       "lines": [
-        11045,
-        12514
+        11047,
+        12516
       ]
     },
     {
@@ -2804,8 +2804,8 @@
         "the fields in onboarding"
       ],
       "lines": [
-        13152,
-        13404
+        13154,
+        13406
       ]
     },
     {
@@ -2832,8 +2832,8 @@
         "activate my subscription"
       ],
       "lines": [
-        35495,
-        35674
+        35548,
+        35727
       ]
     },
     {
@@ -2853,8 +2853,8 @@
         "it bounced me back without connecting"
       ],
       "lines": [
-        12540,
-        12628
+        12542,
+        12630
       ]
     },
     {
@@ -2884,8 +2884,8 @@
         "the import step is stuck"
       ],
       "lines": [
-        12685,
-        13074
+        12687,
+        13076
       ]
     },
     {
@@ -2912,8 +2912,8 @@
         "it picked the wrong emails"
       ],
       "lines": [
-        13641,
-        13952
+        13643,
+        13954
       ]
     },
     {
@@ -2933,8 +2933,8 @@
         "getting leads in slack"
       ],
       "lines": [
-        13994,
-        14367
+        13996,
+        14369
       ]
     },
     {
@@ -2959,8 +2959,8 @@
         "the invites didn't send"
       ],
       "lines": [
-        14368,
-        14646
+        14370,
+        14648
       ]
     },
     {
@@ -2984,8 +2984,8 @@
         "the co-owner's checklist"
       ],
       "lines": [
-        24816,
-        24933
+        24857,
+        24974
       ]
     },
     {

@@ -62,7 +62,9 @@ export async function GET(
 
   const { data: steps, error } = await supabaseService
     .from('drip_path_steps')
-    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active, templates:master_template_id(name, legacy_id)')
+    // '*' so body_format (migrations/email_body_format.sql) comes along once it
+    // exists and is simply absent before; a named column would fail the read.
+    .select('*, templates:master_template_id(name, legacy_id)')
     .eq('drip_path_id', params.id)
     .order('step_order', { ascending: true })
 
@@ -88,6 +90,8 @@ export async function GET(
         template_name: tpl?.name ?? null,
         template_legacy_id: tpl?.legacy_id ?? null,
         is_active: s.is_active,
+        // The body's shape. Absent column → plain.
+        body_format: (s as any).body_format === 'html' ? 'html' : 'plain',
       }
     }),
   })

@@ -13,6 +13,11 @@
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
+    "@tiptap/extension-text-align": "3.34.0",
+    "@tiptap/extension-text-style": "3.34.0",
+    "@tiptap/pm": "3.34.0",
+    "@tiptap/react": "3.34.0",
+    "@tiptap/starter-kit": "3.34.0",
     "@vercel/functions": "^3.7.5",
     "date-fns": "^4.3.0",
     "date-fns-tz": "^3.2.0",

@@ -14,6 +14,8 @@
 // ─────────────────────────────────────────────────────────────
 import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
+import { escHtml } from '@/lib/email-escape'
+import { htmlBodyToText, bodyAsPlainText } from '@/lib/email-body-html'
 import { SIGNATURE_MARKER, SIGNATURE_ICON_PATHS, safeHttpUrl, linkedinFor, signatureInitials } from '@/lib/email-signature'
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
@@ -756,13 +758,16 @@ export function previewCardFooter(row, postalAddress = null) {
 }
 export function previewEmailHtml({ row, style, values, signature = null, postalAddress = null }) {
   const sw = { subject: row?.subject ?? '', body: row?.body ?? '', buttonLink: row?.buttonLink || '' }
-  const fill = (text, marker) => String(text || '').replace(/\{\{(\w+)\}\}/g, (m, k) => {
+  // An html body (the rich editor's) has its values escaped as they go in,
+  // exactly as the send does (lib/resend.ts), and the layout is told its shape.
+  const html = row?.bodyFormat === 'html'
+  const fill = (text, marker, escape = false) => String(text || '').replace(/\{\{(\w+)\}\}/g, (m, k) => {
     if (k === 'signature') return marker ? SIGNATURE_MARKER : ''
     const v = values[k]
-    return v == null ? '' : String(v)
+    return v == null ? '' : escape ? escHtml(String(v)) : String(v)
   })
   const subject = fill(sw.subject, false)
-  const body = fill(sw.body, true)
+  const body = fill(sw.body, true, html)
   const buttonLink = fill(sw.buttonLink, false)
   return buildBrandedDripHtml(body, {
     location_name: values.location_name,
@@ -772,6 +777,7 @@ export function previewEmailHtml({ row, style, values, signature = null, postalA
     style,
     heading: subject,
     button: row?.buttonText && buttonLink ? { label: fill(row.buttonText, false), href: buttonLink, align: row.buttonAlign } : null,
+    ...(html ? { bodyFormat: 'html' } : null),
   }, previewCardFooter(row, postalAddress))
 }
 
@@ -1597,7 +1603,53 @@ export function useTagInsert() {
     setTimeout(() => { try { t.el.focus(); t.el.setSelectionRange(caret, caret) } catch { /* detached */ } }, 0)
     return true
   }
-  return { bind, insert, hasTarget: () => !!last.current }
+  // clear: the message editor took the cursor, so a tag belongs there now.
+  return { bind, insert, hasTarget: () => !!last.current, clear: () => { last.current = null } }
+}
+
+// ── The Message editor in an email dialog (2026-11-13, slice 2b) ──────────
+// The editor (./EmailBodyEditor.jsx, TipTap) is loaded on its own the first
+// time an email is opened, so nobody else downloads it.
+const LazyBodyEditor = React.lazy(() => import('./EmailBodyEditor'))
+export function RichMessage(props) {
+  return (
+    <React.Suspense fallback={<div data-editor-loading style={{ ...eTextareaStyle, minHeight:'200px', color:ET.mutedFg }}>Opening the editor…</div>}>
+      <LazyBodyEditor {...props} />
+    </React.Suspense>
+  )
+}
+
+// The draft of a body, for both email dialogs.
+//
+//   rich   the editor is offered once migrations/email_body_format.sql has
+//          run (bodyReady), and always for a body that is already html. Until
+//          then the dialogs keep the plain text box, which saves as it always
+//          did.
+//   body + format   what a save should store. A BODY NOBODY TOUCHED IS SAVED
+//          AS IT WAS, in the shape it was: opening a plain email and changing
+//          only its subject does not turn its body into html. Touched, it is
+//          the editor's html.
+//   text   the words, for the "can't be empty" check.
+//
+// The editor is unmounted while Preview shows the email; `editor` hands it the
+// draft again on the way back, and the first mount's html stays the baseline
+// that "touched" is measured against.
+export function useBodyDraft(initialBody, initialFormat, bodyReady) {
+  const was = initialFormat === 'html' ? 'html' : 'plain'
+  const rich = bodyReady === true || was === 'html'
+  const [plain, setPlain] = React.useState(initialBody || '')
+  const [html, setHtml] = React.useState(null)
+  const baseline = React.useRef(null)
+  const onReady = React.useCallback((h) => { if (baseline.current == null) baseline.current = h; setHtml(c => (c == null ? h : c)) }, [])
+  if (!rich) return { rich, body: plain, format: 'plain', touched: plain !== (initialBody || ''), text: plain, plain, setPlain, editor: null }
+  const touched = html != null && baseline.current != null && html !== baseline.current
+  return {
+    rich, touched, plain, setPlain,
+    body: touched ? html : (initialBody || ''),
+    format: touched ? 'html' : was,
+    text: html != null ? htmlBodyToText(html) : bodyAsPlainText(initialBody, was),
+    editor: { initialBody: html != null ? html : (initialBody || ''), initialFormat: html != null ? 'html' : was, onReady, onChange: setHtml },
+  }
 }
 
 export function MergeTagPicker({ onInsert, tags = OWNER_MERGE_TAGS }) {

@@ -286,7 +286,7 @@ describe('nothing about what is sent changes because of the preview', () => {
     const src = read('lib/drip-email-layout.ts')
     const a = src.indexOf('// IMAGE HEIGHTS, AS ATTRIBUTES'), b = src.indexOf('export const resolveHoneycombUrl')
     const back = (src.slice(0, a) + src.slice(b)).replace(/ height="\$\{EMAIL_HONEYCOMB_HEIGHT\}"/g, '').replace(' height="${DRIP_LOGO_HEIGHT}"', '')
-    expect(sha(back)).toBe('99cf207362394013')   // was a082bf9c1e160398 (main 969a658) until 2026-11-13 (email body format, slice 2a): the layout gained the html-body path — bodyFormat on the context, the block renderer, and one branch ahead of the plain builder. Nothing in the plain path was edited; lib/beta-email-body-format.test.ts holds a plain body's output against itself with and without the new field, and the rendered-output fingerprints above still pass untouched
+    expect(sha(back)).toBe('1e8a938613e4cdc5')   // was 99cf207362394013 until 2026-11-13 (rich-text editor, slice 2b): the html-body path learned Large text (a 20px span, sent with its own line height) — one line in the html branch and one import; the plain path is untouched. Before that: was a082bf9c1e160398 (main 969a658) until 2026-11-13 (email body format, slice 2a): the layout gained the html-body path — bodyFormat on the context, the block renderer, and one branch ahead of the plain builder. Nothing in the plain path was edited; lib/beta-email-body-format.test.ts holds a plain body's output against itself with and without the new field, and the rendered-output fingerprints above still pass untouched
   })
 })
 
