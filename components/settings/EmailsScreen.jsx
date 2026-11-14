@@ -1353,10 +1353,23 @@ export const BUTTON_LINKS = [
   { id:'inHome',    label:'In-home',   tag:'{{book_assessment_link}}',   name:'in-home assessment link', alsoTags:['{{booking_link}}'] },
   { id:'video',     label:'Video',     tag:'{{virtual_booking_link}}',   name:'video assessment link' },
 ]
+// The words a card suggests. Changed 2026-11-13 to the email editor design's
+// sentence case (were 'Book a Discovery Call' / 'Book Your Assessment' /
+// 'Book a Video Assessment'). No email in production had a button, so no
+// stored words changed. Video stays "assessment": that is what the box in
+// Your details is called.
 export const BUTTON_DEFAULT_TEXT = {
-  discovery: 'Book a Discovery Call',
-  inHome: 'Book Your Assessment',
-  video: 'Book a Video Assessment',
+  discovery: 'Book a discovery call',
+  inHome: 'Book an in-home assessment',
+  video: 'Book a video assessment',
+}
+// What a card's link is called in a sentence ("Your button links to your …").
+export const BUTTON_LINK_WHAT = { discovery: 'discovery call', inHome: 'in-home assessment', video: 'video assessment' }
+// The line under the cards.
+export function buttonCaption(choice) {
+  if (choice === 'none') return 'No button will be added to this email.'
+  if (choice === 'custom') return 'Your button will use the words and link you enter below.'
+  return `A button to book your ${BUTTON_LINK_WHAT[choice]} will be added to this email.`
 }
 // What a stored button_link reads as: '' → none, a link tag → its pill,
 // anything else → custom.
@@ -1395,6 +1408,26 @@ const ALIGN_OPTIONS = [
   { id:'right', label:'Right', lines:[[3, 13], [7, 13], [3, 13]] },
 ]
 
+// The card icons, drawn here (the design's came from an icon package we do
+// not carry). 24-unit grid, stroke only.
+const BUTTON_ICON = {
+  none: <><circle cx="12" cy="12" r="9" /><line x1="5.6" y1="5.6" x2="18.4" y2="18.4" /></>,
+  discovery: <><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" /><line x1="3.5" y1="10" x2="20.5" y2="10" /><line x1="8" y1="14" x2="8.01" y2="14" /><line x1="12" y1="14" x2="12.01" y2="14" /><line x1="16" y1="14" x2="16.01" y2="14" /><line x1="8" y1="17.5" x2="8.01" y2="17.5" /><line x1="12" y1="17.5" x2="12.01" y2="17.5" /></>,
+  inHome: <><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z" /><path d="M9.5 20.5v-6h5v6" /></>,
+  video: <><rect x="3" y="7" width="12.5" height="10" rx="2" /><path d="m15.5 11 5.5-3v8l-5.5-3" /></>,
+  custom: <><path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5z" /><line x1="14.5" y1="6" x2="17.5" y2="9" /></>,
+}
+const ButtonIcon = ({ id, size = 18 }) => (
+  <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{BUTTON_ICON[id]}</svg>
+)
+
+// "Email button" — the Lovable email editor's second card (2026-11-13).
+// Five cards: None (the default), the three booking links, Custom. What is
+// STORED is unchanged: a booking card stores its merge tag in button_link,
+// never the address, so the link follows the location and is guarded at send.
+// Kept from before, on purpose (the design drew none of them): the words stay
+// the owner's to change for every card; the left / centre / right position;
+// the amber "not set up" card and the held warning; and the no-links state.
 export function ButtonFields({ text, link, align = null, onText, onLink, onAlign = null, alignReady = false, links = null, labelStyle = null, inputStyle = null }) {
   const lab = labelStyle || eLabelStyle
   const inp = inputStyle || eInputStyle
@@ -1404,6 +1437,7 @@ export function ButtonFields({ text, link, align = null, onText, onLink, onAlign
   const saved = (id) => !links || !blank(links[id])
   const noLinks = !!links && BUTTON_LINKS.every(l => blank(links[l.id]))
   const shown = BUTTON_LINKS.filter(l => !noLinks || l.id === choice)
+  const ids = ['none', ...shown.map(l => l.id), 'custom']
   const pick = (id) => {
     setTouched(false)
     if (id === 'none') { onLink(''); onText(''); return }
@@ -1412,51 +1446,87 @@ export function ButtonFields({ text, link, align = null, onText, onLink, onAlign
     onLink(l.tag)
     if (isSuggestion(text)) onText(BUTTON_DEFAULT_TEXT[id])
   }
-  const pill = (id, label, unsaved = false) => {
+  // One radio group: arrows move the choice, like the design.
+  const onKeys = (e) => {
+    if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) return
+    e.preventDefault()
+    const i = Math.max(0, ids.indexOf(choice))
+    const next = ids[(i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : ids.length - 1)) % ids.length]
+    pick(next)
+    const el = e.currentTarget.querySelector(`[data-button-pill="${next}"]`)
+    if (el) el.focus()
+  }
+  const card = (id, label, unsaved = false) => {
     const on = choice === id
     return (
-      <button key={id} type="button" role="radio" aria-checked={on} data-button-pill={id} data-unsaved={unsaved ? 'true' : undefined}
+      <button key={id} type="button" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} data-button-pill={id} data-unsaved={unsaved ? 'true' : undefined}
         onClick={() => pick(id)} data-ehover={on ? undefined : 'muted'}
-        style={{ flex:'1 1 64px', minHeight:'44px', boxSizing:'border-box', borderRadius:ER.lg, padding:'8px 10px',
-          border:`1px solid ${on ? (unsaved ? ET.warning : ET.primary) : unsaved ? alpha(ET.warning, 0.5) : ET.border}`,
-          background: unsaved ? ET.warningSoft : on ? ET.sageSoft : ET.card,
-          fontSize:'14px', fontWeight: on ? 600 : 400, color: unsaved ? ET.warning : ET.foreground, fontFamily:EF.ui, cursor:'pointer' }}>
-        {label}
+        style={{ position:'relative', minWidth:0, minHeight:'76px', boxSizing:'border-box', borderRadius:ER.lg, padding:'10px 6px',
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'6px',
+          border:`1px ${unsaved ? 'dashed' : 'solid'} ${unsaved ? ET.warning : on ? ET.gold : ET.border}`,
+          background: on ? ET.goldSoft : ET.card, color: on ? ET.foreground : ET.mutedFg,
+          fontSize:'14px', fontWeight: on ? 600 : 400, fontFamily:EF.ui, cursor:'pointer', lineHeight:1.2 }}>
+        <ButtonIcon id={id} />
+        <span>{label}</span>
+        {unsaved && <span data-not-set-up style={{ fontSize:'11px', fontWeight:500, color:ET.warning }}>Not set up</span>}
+        {on && (
+          <svg data-chosen-tick aria-hidden width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={ET.warning} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+            style={{ position:'absolute', top:'6px', right:'7px' }}><path d="M4.5 12.5 10 18 19.5 7" /></svg>
+        )}
       </button>
     )
   }
   const chosenLink = BUTTON_LINKS.find(l => l.id === choice)
+  const chosenUnsaved = !!chosenLink && !saved(chosenLink.id)
+  const address = chosenLink && links && !chosenUnsaved ? String(links[chosenLink.id]).trim() : ''
   const customProblem = choice === 'custom' && touched && !safeHttpUrl(String(link).trim()) ? CUSTOM_LINK_PROBLEM : null
+  const wordsBox = (
+    <label style={{ display:'block', minWidth:0 }}>
+      <span style={lab}>Button text</span>
+      <input type="text" value={text} maxLength={60} placeholder={BUTTON_DEFAULT_TEXT[choice] || 'e.g. Let’s chat'} onChange={e => onText(e.target.value)} style={inp} />
+    </label>
+  )
   return (
     <div data-button-fields style={{ display:'grid', gap:'12px', fontFamily:EF.ui }}>
       <div>
-        <span id={`${uid}-link`} style={lab}>Button <span style={{ fontWeight:400, color:ET.mutedFg }}>· optional</span></span>
-        <div role="radiogroup" aria-labelledby={`${uid}-link`} style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-          {pill('none', 'None')}
-          {shown.map(l => pill(l.id, l.label, !saved(l.id)))}
-          {pill('custom', 'Custom')}
+        <span id={`${uid}-link`} style={lab}>Email button <span style={{ fontWeight:400, color:ET.mutedFg }}>· Choose one</span></span>
+        <div role="radiogroup" aria-labelledby={`${uid}-link`} onKeyDown={onKeys}
+          style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(96px, 30%), 1fr))', gap:'8px' }}>
+          {card('none', 'None')}
+          {shown.map(l => card(l.id, l.label, !saved(l.id)))}
+          {card('custom', 'Custom')}
         </div>
+        <p data-button-caption aria-live="polite" style={{ ...eHintStyle, margin:'8px 0 0' }}>{buttonCaption(choice)}</p>
         {noLinks && (
           <p data-no-links style={{ ...eHintStyle, margin:'6px 0 0' }}>You haven’t saved any booking links yet. Add them in Your details, or use Custom for any web address.</p>
         )}
-        {chosenLink && !saved(chosenLink.id) && (
-          <p role="status" data-held-warning style={{ margin:'6px 0 0', fontSize:'12px', color:ET.warning }}>⚠ You haven’t saved a {chosenLink.name} yet, so this email will be held until you add it in Your details.</p>
-        )}
       </div>
+      {chosenLink && !chosenUnsaved && (
+        <div data-button-note style={{ display:'flex', gap:'10px', alignItems:'flex-start', borderRadius:ER.lg, background:ET.goldSoft, padding:'12px 14px', fontSize:'14px', color:ET.foreground, lineHeight:1.5 }}>
+          <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={ET.warning} strokeWidth="1.8" strokeLinecap="round" style={{ flex:'none', marginTop:'3px' }}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16.5" /><line x1="12" y1="7.6" x2="12.01" y2="7.6" /></svg>
+          <div style={{ minWidth:0 }}>
+            Your button links to your <strong>{BUTTON_LINK_WHAT[chosenLink.id]}</strong>.
+            <span data-button-address style={{ display:'block', fontSize:'12px', color:ET.mutedFg, overflowWrap:'anywhere' }}>
+              {address || 'Each location’s own link is filled in when the email is sent.'}
+            </span>
+          </div>
+        </div>
+      )}
+      {chosenUnsaved && (
+        <p role="status" data-held-warning style={{ margin:0, borderRadius:ER.lg, background:ET.warningSoft, padding:'10px 14px', fontSize:'13px', color:ET.warning, lineHeight:1.5 }}>⚠ You haven’t saved a {chosenLink.name} yet, so this email will be held until you add it in Your details.</p>
+      )}
       {choice === 'custom' && (
-        <label style={{ display:'block' }}>
-          <span style={lab}>Web address</span>
-          <input type="url" value={link} placeholder="https://calendly.com/you" onChange={e => onLink(e.target.value)} onBlur={() => setTouched(true)}
-            aria-invalid={customProblem ? 'true' : undefined} style={{ ...inp, ...(customProblem ? { borderColor:ET.destructive } : null) }} />
-          {customProblem && <span role="alert" style={{ marginTop:'4px', display:'block', fontSize:'12px', color:ET.destructive }}>⚠ {customProblem}</span>}
-        </label>
+        <div data-custom-fields style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap:'12px', alignItems:'start' }}>
+          {wordsBox}
+          <label style={{ display:'block', minWidth:0 }}>
+            <span style={lab}>Button link</span>
+            <input type="url" value={link} placeholder="https://" onChange={e => onLink(e.target.value)} onBlur={() => setTouched(true)}
+              aria-invalid={customProblem ? 'true' : undefined} style={{ ...inp, ...(customProblem ? { borderColor:ET.destructive } : null) }} />
+            {customProblem && <span role="alert" style={{ marginTop:'4px', display:'block', fontSize:'12px', color:ET.destructive }}>⚠ {customProblem}</span>}
+          </label>
+        </div>
       )}
-      {choice !== 'none' && (
-        <label style={{ display:'block' }}>
-          <span style={lab}>Button text</span>
-          <input type="text" value={text} maxLength={60} placeholder={BUTTON_DEFAULT_TEXT[choice] || 'Book a time'} onChange={e => onText(e.target.value)} style={inp} />
-        </label>
-      )}
+      {chosenLink && wordsBox}
       {choice !== 'none' && alignReady && onAlign && (
         <div>
           <span id={`${uid}-align`} style={lab}>Button position</span>

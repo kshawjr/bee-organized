@@ -219,9 +219,9 @@ describe('None saves no words', () => {
 
 describe('choosing a pill stores the matching tag', () => {
   for (const [id, tag, words] of [
-    ['discovery', '{{discovery_booking_link}}', 'Book a Discovery Call'],
-    ['inHome', '{{book_assessment_link}}', 'Book Your Assessment'],
-    ['video', '{{virtual_booking_link}}', 'Book a Video Assessment'],
+    ['discovery', '{{discovery_booking_link}}', 'Book a discovery call'],
+    ['inHome', '{{book_assessment_link}}', 'Book an in-home assessment'],
+    ['video', '{{virtual_booking_link}}', 'Book a video assessment'],
   ]) {
     it(`${id} → ${tag}, words pre-filled`, async () => {
       const onSave = await mountStep()
@@ -235,7 +235,7 @@ describe('choosing a pill stores the matching tag', () => {
     await mountStep()
     await click(pill('discovery'))
     await click(pill('video'))
-    expect(inputLabelled('Button text').value).toBe('Book a Video Assessment')
+    expect(inputLabelled('Button text').value).toBe('Book a video assessment')
     await type(inputLabelled('Button text'), 'Pick a time that suits you')
     await click(pill('inHome'))
     expect(inputLabelled('Button text').value).toBe('Pick a time that suits you')
@@ -245,7 +245,7 @@ describe('choosing a pill stores the matching tag', () => {
     await act(async () => { root.render(<EmailTemplateEditor row={{ when: 'Next day', subject: 'Welcome', body: 'B' }} onCancel={() => {}} onSave={onSave} links={SAVED} />) })
     await click(pill('video'))
     await save()
-    expect((onSave.mock.calls[0] as any[])[2]).toEqual({ button_text: 'Book a Video Assessment', button_link: '{{virtual_booking_link}}', button_align: null })
+    expect((onSave.mock.calls[0] as any[])[2]).toEqual({ button_text: 'Book a video assessment', button_link: '{{virtual_booking_link}}', button_align: null })
   })
 })
 
@@ -286,7 +286,7 @@ describe('Custom', () => {
     it(`"${bad}" is refused, plainly, and nothing saves`, async () => {
       const onSave = await mountStep()
       await click(pill('custom'))
-      await type(inputLabelled('Web address'), bad)
+      await type(inputLabelled('Button link'), bad)
       await save()
       expect(onSave).not.toHaveBeenCalled()
       expect(container.textContent).toContain(CUSTOM_LINK_PROBLEM)
@@ -295,7 +295,7 @@ describe('Custom', () => {
   it('a bare address is saved the way the send reads it — with https://', async () => {
     const onSave = await mountStep()
     await click(pill('custom'))
-    await type(inputLabelled('Web address'), 'calendly.com/kc')
+    await type(inputLabelled('Button link'), 'calendly.com/kc')
     await type(inputLabelled('Button text'), 'Book with me')
     await save()
     expect((onSave.mock.calls[0] as any[])[0]).toMatchObject({ button_link: 'https://calendly.com/kc' })
@@ -303,7 +303,7 @@ describe('Custom', () => {
   it('a real https address saves', async () => {
     const onSave = await mountStep()
     await click(pill('custom'))
-    await type(inputLabelled('Web address'), 'https://calendly.com/kc')
+    await type(inputLabelled('Button link'), 'https://calendly.com/kc')
     await type(inputLabelled('Button text'), 'Book with me')
     await save()
     expect((onSave.mock.calls[0] as any[])[0]).toMatchObject({ button_link: 'https://calendly.com/kc', button_text: 'Book with me' })
@@ -386,7 +386,7 @@ describe('Preview', () => {
     const html = (container.querySelector('[data-editor-preview] iframe') as HTMLIFrameElement).getAttribute('srcdoc')!
     const expected = buildBrandedDripHtml(`Hello Jordan\n\nThank you,\n${SIGNATURE_MARKER}`, {
       location_name: 'Kansas City', location_phone: undefined, reviews_link: undefined, signature: SIG, style: 'bold', heading: 'A new subject',
-      button: { label: 'Book a Video Assessment', href: 'https://cal.example.com/video', align: 'right' },
+      button: { label: 'Book a video assessment', href: 'https://cal.example.com/video', align: 'right' },
     })
     expect(html).toBe(expected)
     expect(html).toContain('Lynette Ewy</td>')

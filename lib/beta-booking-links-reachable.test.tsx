@@ -217,8 +217,8 @@ describe('How your emails look', () => {
 // ── the editors, opened from "Which email?" ───────────────────────────────
 describe('the draft button an editor opens with', () => {
   it('an email with no button gets the link picked and its usual words', () => {
-    expect(startButtonDraft('', '', 'discovery')).toEqual({ text: 'Book a Discovery Call', link: '{{discovery_booking_link}}', picked: true })
-    expect(startButtonDraft('', '', 'video')).toEqual({ text: 'Book a Video Assessment', link: '{{virtual_booking_link}}', picked: true })
+    expect(startButtonDraft('', '', 'discovery')).toEqual({ text: 'Book a discovery call', link: '{{discovery_booking_link}}', picked: true })
+    expect(startButtonDraft('', '', 'video')).toEqual({ text: 'Book a video assessment', link: '{{virtual_booking_link}}', picked: true })
   })
   it('an email that already has a button keeps it', () => {
     expect(startButtonDraft('Book Your Assessment', '{{book_assessment_link}}', 'discovery'))
@@ -251,7 +251,7 @@ describe('the draft button an editor opens with', () => {
     expect(q('[data-start-button-note]')!.textContent).toContain('We’ve set the button to your discovery call link.')
     expect(onSave).not.toHaveBeenCalled()
     await click(button('Save'))
-    expect(onSave.mock.calls).toEqual([['We hope', 'Hello', { button_text: 'Book a Discovery Call', button_link: '{{discovery_booking_link}}', button_align: null }]])
+    expect(onSave.mock.calls).toEqual([['We hope', 'Hello', { button_text: 'Book a discovery call', button_link: '{{discovery_booking_link}}', button_align: null }]])
   })
 })
 
@@ -352,7 +352,7 @@ describe('from the unused link to a saved button, on the Emails screen', () => {
     const ed = await pickFirst(d)
     expect(ed).toBeTruthy()
     expect(pillOn(ed)).toBe('discovery')
-    expect((Array.from(ed.querySelectorAll('input[type="text"]')).pop() as HTMLInputElement).value).toBe('Book a Discovery Call')
+    expect((Array.from(ed.querySelectorAll('input[type="text"]')).pop() as HTMLInputElement).value).toBe('Book a discovery call')
     expect(ed.querySelector('[data-start-button-note]')!.textContent).toContain('We’ve set the button to your discovery call link.')
     expect(writes()).toEqual([])
     await click(button('Cancel', ed))
@@ -371,7 +371,7 @@ describe('from the unused link to a saved button, on the Emails screen', () => {
     expect(writes()).toEqual(['PATCH /api/drip-paths/path-organizing-d/steps'])
     const org = server.paths.find(p => p.path_key === 'organizing-d').steps
     expect(org.map((s: any) => [s.button_text ?? null, s.button_link ?? null])).toEqual([
-      ['Book a Discovery Call', '{{discovery_booking_link}}'], [null, null], [null, null],
+      ['Book a discovery call', '{{discovery_booking_link}}'], [null, null], [null, null],
     ])
     expect(server.paths.flatMap(p => p.steps.map((s: any) => [s.subject, s.body]))).toEqual(bodiesBefore)
     for (let i = 0; i < 4; i++) await act(async () => {})
