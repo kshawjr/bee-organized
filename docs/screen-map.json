@@ -73,8 +73,8 @@
       ],
       "note": "~1,600 lines of state + routing for a 37,000-line file. Route slug to screen mapping lives in components/hive/shared/hubUrl.js.",
       "lines": [
-        36678,
-        37819
+        36676,
+        37817
       ]
     },
     {
@@ -96,8 +96,8 @@
       ],
       "note": "Role gating for which nav items appear is inline here. Help appears for every role (an owner's own reports live under Help › My requests — \"What you've told us\" is retired); Admin only for elevated users.",
       "lines": [
-        37579,
-        37819
+        37577,
+        37817
       ]
     },
     {
@@ -2025,8 +2025,8 @@
         "the charge for adding a person"
       ],
       "lines": [
-        36212,
-        36677
+        36210,
+        36675
       ]
     },
     {
@@ -2050,8 +2050,8 @@
         "the price it quoted was wrong"
       ],
       "lines": [
-        35959,
-        36211
+        35957,
+        36209
       ]
     },
     {
@@ -2071,8 +2071,8 @@
       ],
       "note": "Currently a coming-soon surface. A report of \"reports don't work\" is expected behaviour, not a bug.",
       "lines": [
-        35217,
-        35244
+        35215,
+        35242
       ]
     },
     {
@@ -2089,8 +2089,8 @@
         "the back office tab"
       ],
       "lines": [
-        35269,
-        35344
+        35267,
+        35342
       ]
     },
     {
@@ -2107,8 +2107,8 @@
         "back office says coming soon"
       ],
       "lines": [
-        35245,
-        35268
+        35243,
+        35266
       ]
     },
     {
@@ -2129,8 +2129,8 @@
         "an admin section is missing"
       ],
       "lines": [
-        34323,
-        34854
+        34321,
+        34852
       ]
     },
     {
@@ -2155,8 +2155,8 @@
         "the overview at the top of admin"
       ],
       "lines": [
-        33956,
-        34163
+        33954,
+        34161
       ]
     },
     {
@@ -2448,8 +2448,8 @@
         "the incoming events"
       ],
       "lines": [
-        33468,
-        33720
+        33466,
+        33718
       ]
     },
     {
@@ -2472,8 +2472,8 @@
         "expired tokens"
       ],
       "lines": [
-        34210,
-        34322
+        34208,
+        34320
       ]
     },
     {
@@ -2555,7 +2555,7 @@
       ],
       "lines": [
         32887,
-        33015
+        33013
       ]
     },
     {
@@ -2651,8 +2651,8 @@
         "the removal didn't happen"
       ],
       "lines": [
-        33203,
-        33446
+        33201,
+        33444
       ]
     },
     {
@@ -2752,8 +2752,8 @@
         "set up a new office"
       ],
       "lines": [
-        33741,
-        33955
+        33739,
+        33953
       ]
     },
     {
@@ -2832,8 +2832,8 @@
         "activate my subscription"
       ],
       "lines": [
-        35548,
-        35727
+        35546,
+        35725
       ]
     },
     {

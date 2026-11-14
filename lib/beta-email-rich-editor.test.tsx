@@ -239,8 +239,20 @@ describe('the Message card', () => {
     expect(panel()!.parentElement).toBe(document.body)
     expect(container.querySelector('[data-editor-panel]')).toBeNull()
     expect(EDITOR_SRC).toContain("const q = '(max-width: 639px)'")
-    expect(EDITOR_SRC).toMatch(/phone\s*\n?\s*\? \{ position: 'fixed', zIndex: 91, left: 0, right: 0, bottom: 0/)
+    expect(EDITOR_SRC).toMatch(/phone\s*\n?\s*\? \{ outline: 'none', position: 'fixed', zIndex: 91, left: 0, right: 0, bottom: 0/)
     expect(EDITOR_SRC).toContain('createPortal(body, document.body)')
+  })
+  it('the overlay behind a panel closes nothing: only ✕ or Escape does', async () => {
+    await mount()
+    await click(container.querySelector('[data-tool="link"]'))
+    const overlay = panel()!.querySelector('[aria-hidden]') as HTMLElement
+    await act(async () => { overlay.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); overlay.click() })
+    expect(panel()).toBeTruthy()
+    await act(async () => { panel()!.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(panel()).toBeNull()
+    await click(container.querySelector('[data-tool="link"]'))
+    await click(panel()!.querySelector('button[aria-label="Close add a link"]'))
+    expect(panel()).toBeNull()
   })
   it('Merge tags lists every tag an owner is offered and puts the picked one in the message', async () => {
     const got = await mount()
@@ -382,7 +394,9 @@ describe('the format travels with the body through the screen', () => {
     expect(HUB).toContain("bodyFormat: s.body_format === 'html' ? 'html' : 'plain',")
     expect(HUB).toContain("bodyFormat: r.body_format === 'html' ? 'html' : 'plain',")
     expect(HUB).toContain("bodyReady: emailSettings.ready.bodyFormat === true,")
-    expect(HUB).toContain("bodyReady={'body_format' in editing.step}")
+    // Corporate's master editor (Admin › Content) is pinned to the code it was
+    // at 722aaa0 (lib/guides-retired.test.tsx), so it keeps the plain text box.
+    expect(HUB).not.toContain("bodyReady={'body_format' in editing.step}")
   })
   it('the server tells the screen when the editor may be offered, and every read that feeds it carries the format', () => {
     const settings = read('app/api/locations/[id]/email-settings/route.ts')

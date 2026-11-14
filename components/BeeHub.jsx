@@ -32978,7 +32978,7 @@ function MasterDripPathsEditor() {
                         </div>
                         {step.subject && <p style={{ fontSize:'12px', fontWeight:600, color:'#6366f1', marginBottom:'4px' }}>Subject: {step.subject}</p>}
                         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5, whiteSpace:'pre-wrap', maxHeight:'80px', overflow:'hidden' }}>
-                          {bodyAsPlainText(step.body, step.body_format).slice(0, 240)}{bodyAsPlainText(step.body, step.body_format).length > 240 ? '…' : ''}
+                          {(step.body || '').slice(0, 240)}{(step.body || '').length > 240 ? '…' : ''}
                         </p>
                       </div>
                     ))}
@@ -32997,8 +32997,6 @@ function MasterDripPathsEditor() {
           // details. The rows come from '*', so the column's presence is the
           // migration's.
           alignReady={'button_align' in editing.step}
-          // The rich-text editor, once the masters' rows carry body_format.
-          bodyReady={'body_format' in editing.step}
           onSave={(patch) => saveStep(editing.step, patch)}
           onClose={() => setEditing(null)}
         />

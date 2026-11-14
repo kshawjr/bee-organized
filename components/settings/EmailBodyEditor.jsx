@@ -181,6 +181,9 @@ function usePhone() {
 // is transformed, which would otherwise trap a fixed box inside it.
 function Panel({ label, title, anchor, under = null, phone, onClose, children, name }) {
   const [box, setBox] = React.useState(null)
+  // Focus comes into the panel, so Escape reaches it wherever the cursor was.
+  const boxRef = React.useRef(null)
+  React.useEffect(() => { try { boxRef.current?.focus({ preventScroll: true }) } catch { /* not focusable yet */ } }, [])
   React.useLayoutEffect(() => {
     if (phone || !anchor?.current) { setBox(null); return }
     // Right edge on the writing area's, top just under the toolbar.
@@ -194,11 +197,13 @@ function Panel({ label, title, anchor, under = null, phone, onClose, children, n
   const body = (
     <div data-emails-ui data-editor-panel={name} data-sheet={phone ? 'true' : undefined} style={{ fontFamily: EF.ui, color: ET.foreground }}
       onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); e.nativeEvent?.stopImmediatePropagation?.(); onClose() } }}>
-      <div aria-hidden onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 90, background: phone ? alpha(ET.foreground, 0.4) : 'transparent' }} />
-      <div role="dialog" aria-modal="true" aria-label={label}
+      {/* The overlay closes nothing (Kevin, 2026-09-30): ✕ or Escape. It only
+          keeps a stray tap off the email underneath. */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 90, background: phone ? alpha(ET.foreground, 0.4) : 'transparent' }} />
+      <div ref={boxRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label}
         style={phone
-          ? { position: 'fixed', zIndex: 91, left: 0, right: 0, bottom: 0, maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', background: ET.card, borderRadius: `${ER.xxl} ${ER.xxl} 0 0`, padding: '18px 16px calc(18px + env(safe-area-inset-bottom))', boxShadow: ESHADOW.dialog }
-          : { position: 'fixed', zIndex: 91, boxSizing: 'border-box', overflowY: 'auto', background: ET.card, border: `1px solid ${ET.border}`, borderRadius: ER.xl, padding: '18px', boxShadow: ESHADOW.dialog, ...(box || { left: -9999, top: 0, width: 360 }) }}>
+          ? { outline: 'none', position: 'fixed', zIndex: 91, left: 0, right: 0, bottom: 0, maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', background: ET.card, borderRadius: `${ER.xxl} ${ER.xxl} 0 0`, padding: '18px 16px calc(18px + env(safe-area-inset-bottom))', boxShadow: ESHADOW.dialog }
+          : { outline: 'none', position: 'fixed', zIndex: 91, boxSizing: 'border-box', overflowY: 'auto', background: ET.card, border: `1px solid ${ET.border}`, borderRadius: ER.xl, padding: '18px', boxShadow: ESHADOW.dialog, ...(box || { left: -9999, top: 0, width: 360 }) }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '8px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, fontFamily: EF.heading }}>{title}</h3>
           <button type="button" aria-label={`Close ${label.toLowerCase()}`} onClick={onClose} data-ehover="muted"
