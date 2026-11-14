@@ -1,0 +1,408 @@
+{
+ "recordedOn": "09cb317",
+ "hashes": {
+  "job_with_date": "bf8a419a672beeb2",
+  "job_no_date": "0255afc961aef083",
+  "request_only": "a751eb82a47ef437",
+  "request_with_assessment": "8e510829a81f6bcd"
+ },
+ "detail": {
+  "job_with_date": {
+   "status": 200,
+   "reply": {
+    "success": true,
+    "match_status": "matched_existing",
+    "jobber_client_id": "136289662",
+    "jobber_property_id": "880011",
+    "jobber_request_id": null,
+    "jobber_assessment_id": null,
+    "jobber_job_id": "160366153",
+    "contact_writeback": {
+     "phone": "unchanged",
+     "email": "unchanged"
+    }
+   },
+   "jobber": [
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientById($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      firstName\n      lastName\n      companyName\n      emails { id address primary }\n      phones { id number primary }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientProperties($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      clientProperties(first: 50) {\n        nodes {\n          id\n          address { street1 street2 city province postalCode country }\n        }\n      }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation ClientEdit($clientId: EncodedId!, $input: ClientEditInput!) {\n    clientEdit(clientId: $clientId, input: $input) {\n      client { id firstName lastName }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+      "input": {
+       "firstName": "Michelle",
+       "lastName": "Durpetti"
+      }
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation JobCreate($input: JobCreateAttributes!) {\n    jobCreate(input: $input) {\n      job {\n        id createdAt jobberWebUri title jobStatus startAt completedAt total\n        client { id }\n        property { id }\n      }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "input": {
+       "propertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5Lzg4MDAxMQ==",
+       "title": "Michelle Durpetti",
+       "invoicing": {
+        "invoicingType": "FIXED_PRICE",
+        "invoicingSchedule": "ON_COMPLETION"
+       },
+       "lineItems": [
+        {
+         "name": "Garage",
+         "unitPrice": 450,
+         "quantity": 1,
+         "saveToProductsAndServices": false
+        }
+       ],
+       "timeframe": {
+        "startAt": "2026-10-23"
+       }
+      }
+     }
+    }
+   ],
+   "jobberOrder": 4,
+   "dbWrites": [
+    {
+     "table": "leads",
+     "op": "update",
+     "payload": {
+      "jobber_client_id": "136289662",
+      "jobber_property_id": "880011",
+      "jobber_request_id": null,
+      "jobber_assessment_id": null,
+      "jobber_job_id": "160366153",
+      "jobber_match_status": "matched_existing",
+      "jobber_sync_status": "Success: Job — <now>",
+      "jobber_synced_at": "<now>",
+      "updated_at": "<now>",
+      "scheduled_at": "2026-10-23T04:00:00.000Z"
+     }
+    }
+   ],
+   "syncLog": [
+    {
+     "location_id": "loc_palmbeach",
+     "entity_id": "lead-1",
+     "entity_type": "job",
+     "direction": "outbound",
+     "jobber_record_id": "160366153",
+     "status": "success",
+     "message": "Send-to-Jobber (Job); match=matched_existing; client=136289662; job=160366153; assignment=none; contact=phone:unchanged,email:unchanged"
+    }
+   ]
+  },
+  "job_no_date": {
+   "status": 200,
+   "reply": {
+    "success": true,
+    "match_status": "matched_existing",
+    "jobber_client_id": "136289662",
+    "jobber_property_id": "880011",
+    "jobber_request_id": null,
+    "jobber_assessment_id": null,
+    "jobber_job_id": "160366153",
+    "contact_writeback": {
+     "phone": "unchanged",
+     "email": "unchanged"
+    }
+   },
+   "jobber": [
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientById($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      firstName\n      lastName\n      companyName\n      emails { id address primary }\n      phones { id number primary }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientProperties($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      clientProperties(first: 50) {\n        nodes {\n          id\n          address { street1 street2 city province postalCode country }\n        }\n      }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation ClientEdit($clientId: EncodedId!, $input: ClientEditInput!) {\n    clientEdit(clientId: $clientId, input: $input) {\n      client { id firstName lastName }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+      "input": {
+       "firstName": "Michelle",
+       "lastName": "Durpetti"
+      }
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation JobCreate($input: JobCreateAttributes!) {\n    jobCreate(input: $input) {\n      job {\n        id createdAt jobberWebUri title jobStatus startAt completedAt total\n        client { id }\n        property { id }\n      }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "input": {
+       "propertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5Lzg4MDAxMQ==",
+       "title": "Michelle Durpetti",
+       "invoicing": {
+        "invoicingType": "FIXED_PRICE",
+        "invoicingSchedule": "ON_COMPLETION"
+       },
+       "lineItems": [
+        {
+         "name": "Garage",
+         "unitPrice": 450,
+         "quantity": 1,
+         "saveToProductsAndServices": false
+        }
+       ]
+      }
+     }
+    }
+   ],
+   "jobberOrder": 4,
+   "dbWrites": [
+    {
+     "table": "leads",
+     "op": "update",
+     "payload": {
+      "jobber_client_id": "136289662",
+      "jobber_property_id": "880011",
+      "jobber_request_id": null,
+      "jobber_assessment_id": null,
+      "jobber_job_id": "160366153",
+      "jobber_match_status": "matched_existing",
+      "jobber_sync_status": "Success: Job — <now>",
+      "jobber_synced_at": "<now>",
+      "updated_at": "<now>",
+      "scheduled_at": null
+     }
+    }
+   ],
+   "syncLog": [
+    {
+     "location_id": "loc_palmbeach",
+     "entity_id": "lead-1",
+     "entity_type": "job",
+     "direction": "outbound",
+     "jobber_record_id": "160366153",
+     "status": "success",
+     "message": "Send-to-Jobber (Job); match=matched_existing; client=136289662; job=160366153; assignment=none; contact=phone:unchanged,email:unchanged"
+    }
+   ]
+  },
+  "request_only": {
+   "status": 200,
+   "reply": {
+    "success": true,
+    "match_status": "matched_existing",
+    "jobber_client_id": "136289662",
+    "jobber_property_id": "880011",
+    "jobber_request_id": "77",
+    "jobber_assessment_id": null,
+    "jobber_job_id": null,
+    "contact_writeback": {
+     "phone": "unchanged",
+     "email": "unchanged"
+    }
+   },
+   "jobber": [
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientById($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      firstName\n      lastName\n      companyName\n      emails { id address primary }\n      phones { id number primary }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientProperties($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      clientProperties(first: 50) {\n        nodes {\n          id\n          address { street1 street2 city province postalCode country }\n        }\n      }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation ClientEdit($clientId: EncodedId!, $input: ClientEditInput!) {\n    clientEdit(clientId: $clientId, input: $input) {\n      client { id firstName lastName }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+      "input": {
+       "firstName": "Michelle",
+       "lastName": "Durpetti"
+      }
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation RequestCreate($input: RequestCreateInput!) {\n    requestCreate(input: $input) {\n      request { id title createdAt jobberWebUri client { id } property { id } }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "input": {
+       "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+       "title": "Michelle Durpetti",
+       "propertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5Lzg4MDAxMQ=="
+      }
+     }
+    }
+   ],
+   "jobberOrder": 4,
+   "dbWrites": [
+    {
+     "table": "leads",
+     "op": "update",
+     "payload": {
+      "jobber_client_id": "136289662",
+      "jobber_property_id": "880011",
+      "jobber_request_id": "77",
+      "jobber_assessment_id": null,
+      "jobber_job_id": null,
+      "jobber_match_status": "matched_existing",
+      "jobber_sync_status": "Success: Request — <now>",
+      "jobber_synced_at": "<now>",
+      "updated_at": "<now>"
+     }
+    }
+   ],
+   "syncLog": [
+    {
+     "location_id": "loc_palmbeach",
+     "entity_id": "lead-1",
+     "entity_type": "request",
+     "direction": "outbound",
+     "jobber_record_id": "77",
+     "status": "success",
+     "message": "Send-to-Jobber (Request); match=matched_existing; client=136289662; request=77; assignment=none; contact=phone:unchanged,email:unchanged"
+    }
+   ]
+  },
+  "request_with_assessment": {
+   "status": 200,
+   "reply": {
+    "success": true,
+    "match_status": "matched_existing",
+    "jobber_client_id": "136289662",
+    "jobber_property_id": "880011",
+    "jobber_request_id": "77",
+    "jobber_assessment_id": "88",
+    "jobber_job_id": null,
+    "contact_writeback": {
+     "phone": "unchanged",
+     "email": "unchanged"
+    }
+   },
+   "jobber": [
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientById($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      firstName\n      lastName\n      companyName\n      emails { id address primary }\n      phones { id number primary }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "query",
+     "loc": "loc_palmbeach",
+     "doc": "\n  query GetClientProperties($clientId: EncodedId!) {\n    client(id: $clientId) {\n      id\n      clientProperties(first: 50) {\n        nodes {\n          id\n          address { street1 street2 city province postalCode country }\n        }\n      }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation ClientEdit($clientId: EncodedId!, $input: ClientEditInput!) {\n    clientEdit(clientId: $clientId, input: $input) {\n      client { id firstName lastName }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+      "input": {
+       "firstName": "Michelle",
+       "lastName": "Durpetti"
+      }
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation RequestCreate($input: RequestCreateInput!) {\n    requestCreate(input: $input) {\n      request { id title createdAt jobberWebUri client { id } property { id } }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "input": {
+       "clientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI=",
+       "title": "Michelle Durpetti",
+       "propertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5Lzg4MDAxMQ=="
+      }
+     }
+    },
+    {
+     "kind": "mutation",
+     "loc": "loc_palmbeach",
+     "doc": "\n  mutation AssessmentCreate(\n    $requestId: EncodedId!,\n    $input: AssessmentCreateInput!\n  ) {\n    assessmentCreate(requestId: $requestId, input: $input) {\n      assessment {\n        id\n        assignedUsers { nodes { id } }\n      }\n      userErrors { message path }\n    }\n  }\n",
+     "vars": {
+      "requestId": "Z2lkOi8vSm9iYmVyL1JlcXVlc3QvNzc=",
+      "input": {
+       "schedule": {
+        "startAt": {
+         "date": "2026-10-23",
+         "time": "10:00:00",
+         "timezone": "America/New_York"
+        },
+        "endAt": {
+         "date": "2026-10-23",
+         "time": "11:00:00",
+         "timezone": "America/New_York"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "jobberOrder": 5,
+   "dbWrites": [
+    {
+     "table": "leads",
+     "op": "update",
+     "payload": {
+      "jobber_client_id": "136289662",
+      "jobber_property_id": "880011",
+      "jobber_request_id": "77",
+      "jobber_assessment_id": "88",
+      "jobber_job_id": null,
+      "jobber_match_status": "matched_existing",
+      "jobber_sync_status": "Success: Request + Assessment — <now>",
+      "jobber_synced_at": "<now>",
+      "updated_at": "<now>"
+     }
+    }
+   ],
+   "syncLog": [
+    {
+     "location_id": "loc_palmbeach",
+     "entity_id": "lead-1",
+     "entity_type": "request",
+     "direction": "outbound",
+     "jobber_record_id": "77",
+     "status": "success",
+     "message": "Send-to-Jobber (Request + Assessment); match=matched_existing; client=136289662; request=77; assessment=88; assignment=none; contact=phone:unchanged,email:unchanged"
+    }
+   ]
+  }
+ }
+}

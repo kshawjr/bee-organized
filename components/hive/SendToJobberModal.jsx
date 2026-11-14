@@ -70,6 +70,47 @@ const ACTIONS = [
   { key: 'job',     Icon: IconHammer,   title: 'Create a Job',     desc: 'Skip the request and estimate — book the work directly. For work already sold.' },
 ]
 
+// A job visit's clock: 15-minute steps, 6:00 AM to 9:00 PM. The value is the
+// location's own wall-clock "HH:mm" — the server books it in the location's
+// time zone (lib/jobber-job-visit.ts), never the browser's.
+export const JOB_TIME_OPTIONS = (() => {
+  const out = []
+  for (let h = 6; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 21 && m > 0) break
+      const h12 = h % 12 === 0 ? 12 : h % 12
+      out.push({ value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, label: `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` })
+    }
+  }
+  return out
+})()
+// "2026-11-20" → "November 20, 2026", read as the calendar day it is. (new
+// Date("2026-11-20") is midnight UTC, which is the 19th in every US browser.)
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+export const jobDateLabel = (d) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || '')
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}` : (d || '')
+}
+// The time boxes are dropdowns; globals.css strips the native arrow from every
+// select, so these two draw a small one so an owner can see they open.
+const selectInp = {
+  ...inp,
+  paddingRight: '30px',
+  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b6b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 12px center',
+}
+const jobTimeLabel = (v) => (JOB_TIME_OPTIONS.find(o => o.value === v) || {}).label || v
+
+// What the owner reads under the date and times. Exactly one line, and the
+// "won't show on your calendar" note can only come back when no time is set.
+export function jobScheduleNote(date, start, end) {
+  if (!date) return { kind: 'note', text: "No date yet, so this job won't show on your Jobber calendar. You can schedule it in Jobber whenever you're ready." }
+  if (!start) return { kind: 'note', text: "Without a time, this job won't show on your Jobber calendar. You can add the time later by opening the job in Jobber." }
+  const when = end ? `${jobTimeLabel(start)} to ${jobTimeLabel(end)}` : `at ${jobTimeLabel(start)} for Jobber's usual visit length`
+  return { kind: 'booked', text: `Goes on your Jobber calendar ${jobDateLabel(date)}, ${when} (your location's time). To change it later, move the visit in Jobber; Bee Hub picks up the new date.` }
+}
+
 const ASSESSMENT_TYPES = [
   { value: 'in-person', Icon: IconMapPin, label: 'In-Person' },
   { value: 'virtual', Icon: IconMessage, label: 'Virtual' },
@@ -193,6 +234,12 @@ export default function SendToJobberModal({ person, engagementId = null, address
   const [jobWork, setJobWork] = useState('')
   const [jobPrice, setJobPrice] = useState('')
   const [jobDate, setJobDate] = useState('')
+  // Optional visit time. Empty start = the date-only send, exactly as before.
+  const [jobStart, setJobStart] = useState('')
+  const [jobEnd, setJobEnd] = useState('')
+  // A send whose job landed but whose visit Jobber refused: the modal stays
+  // open to say so, and closes (with the usual patch) on Done.
+  const [visitRefused, setVisitRefused] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
 
@@ -306,6 +353,10 @@ export default function SendToJobberModal({ person, engagementId = null, address
         line_items: [{ name: jobWork.trim(), unitPrice: jobPriceNum, quantity: 1 }],
       }
       if (jobDate) body.scheduled_at = jobDate
+      if (jobDate && jobStart) {
+        body.visit_start = jobStart
+        if (jobEnd) body.visit_end = jobEnd
+      }
     } else {
       const creationType = hasAssessment ? 'request_with_assessment' : 'request_only'
       body = { creation_type: creationType }
@@ -399,6 +450,11 @@ export default function SendToJobberModal({ person, engagementId = null, address
     if (json.jobber_job_id) {
       entries.push({ id: `o${stamp + 1}`, type: 'system', method: 'system', label: `Job created in Jobber — JOB-${json.jobber_job_id}`, ts: 'Just now', status: 'done' })
     }
+    if (json.visit) {
+      entries.push(json.visit.booked
+        ? { id: `o${stamp + 3}`, type: 'system', method: 'system', label: `Visit booked in Jobber — ${jobDate}, ${jobTimeLabel(json.visit.start)}${json.visit.end ? `–${jobTimeLabel(json.visit.end)}` : ''}`, ts: 'Just now', status: 'done' }
+        : { id: `o${stamp + 3}`, type: 'system', method: 'system', label: 'Visit time not booked — add it in Jobber', ts: 'Just now', status: 'done' })
+    }
     if (json.jobber_assessment_id && hasAssessment) {
       entries.push({ id: `o${stamp + 2}`, type: 'system', method: 'system', label: `${assessmentType === 'virtual' ? 'Virtual' : 'In-person'} assessment — ${date} at ${time}`, ts: 'Just now', status: 'done' })
     }
@@ -413,7 +469,7 @@ export default function SendToJobberModal({ person, engagementId = null, address
     // (a) the person-shape patch the caller has always merged, PLUS
     // (b) the raw Jobber ids so a server-loaded surface (panel/profile) can
     // flip its Send button to "Open in Jobber" live, without a refetch.
-    onDone(
+    const doneArgs = [
       {
         stage: newStage,
         jobberRef: ref,
@@ -431,7 +487,14 @@ export default function SendToJobberModal({ person, engagementId = null, address
         jobber_assessment_id: json.jobber_assessment_id || null,
         match_status: json.match_status || null,
       },
-    )
+    ]
+    // The job is in Jobber but the visit time did not book: say so before
+    // closing. Every other send closes exactly as it always did.
+    if (json.visit && json.visit.booked === false) {
+      setVisitRefused({ error: json.visit.error || '', jobRef: json.jobber_job_id ? `JOB-${json.jobber_job_id}` : null, doneArgs })
+      return
+    }
+    onDone(...doneArgs)
   }
 
   // Linear step path (for the progress bar). history is present only when the
@@ -660,24 +723,60 @@ export default function SendToJobberModal({ person, engagementId = null, address
               )}
             </div>
 
-            {/* Optional scheduling — a START DATE (mirrors the assessment date
-                picker). Empty = unscheduled; the owner slots the visit in
-                Jobber. Time-of-day isn't collected: a job's start is a date,
-                and the precise visit time is set in Jobber. */}
+            {/* Optional scheduling. A date alone sets the job's date in Jobber
+                but books no visit, so it is not on the calendar — the note says
+                so. A start time (only offered once there is a date) books a
+                real visit in the location's own time zone. */}
             <div>
-              <label style={lbl}>Schedule (optional)</label>
+              <label style={lbl}>Date (optional)</label>
               <input
                 type="date"
                 value={jobDate}
-                onChange={e => setJobDate(e.target.value)}
+                onChange={e => { setJobDate(e.target.value); if (!e.target.value) { setJobStart(''); setJobEnd('') } }}
                 min={new Date().toISOString().split('T')[0]}
                 style={inp}
                 aria-label="Job start date"
               />
-              <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '6px' }}>
-                {jobDate ? `Starts ${jobDate}` : 'Leave empty to create the job unscheduled.'}
-              </p>
             </div>
+
+            {jobDate && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={lbl}>Start time (optional)</label>
+                  <select
+                    value={jobStart}
+                    onChange={e => { const v = e.target.value; setJobStart(v); if (!v || (jobEnd && jobEnd <= v)) setJobEnd('') }}
+                    style={selectInp}
+                    aria-label="Visit start time"
+                  >
+                    <option value="">No time</option>
+                    {JOB_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={lbl}>End time (optional)</label>
+                  <select
+                    value={jobEnd}
+                    onChange={e => setJobEnd(e.target.value)}
+                    disabled={!jobStart}
+                    style={{ ...selectInp, opacity: jobStart ? 1 : 0.55 }}
+                    aria-label="Visit end time"
+                  >
+                    <option value="">{jobStart ? "Jobber's usual" : '—'}</option>
+                    {JOB_TIME_OPTIONS.filter(o => jobStart && o.value > jobStart).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {(() => {
+              const n = jobScheduleNote(jobDate, jobStart, jobEnd)
+              return (
+                <p data-job-schedule-note={n.kind} style={{ fontSize: '12px', color: n.kind === 'note' ? T.state.warning.deep : T.ink.muted, marginTop: '-6px', lineHeight: 1.4 }}>
+                  {n.text}
+                </p>
+              )
+            })()}
 
             {needsAddress && (
               <p data-address-hint="1" style={{ fontSize: '12px', color: T.ink.muted }}>
@@ -694,7 +793,30 @@ export default function SendToJobberModal({ person, engagementId = null, address
           </>
         )}
 
-        {step === 'confirm' && (
+        {visitRefused && (
+          <div data-visit-refused="1" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ padding: '10px 12px', background: T.state.success.soft, border: `1px solid ${T.state.success.ringSoft}`, borderRadius: T.radius.control }}>
+              <p style={{ fontSize: '13px', fontWeight: 600, color: T.state.success.fg }}>The job is in Jobber{visitRefused.jobRef ? ` · ${visitRefused.jobRef}` : ''}</p>
+            </div>
+            <div style={{ display: 'flex', gap: '9px', padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
+              <IconAlertTriangle size={15} style={{ color: T.state.warning.fg, flexShrink: 0, marginTop: '1px' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg }}>The visit time didn&apos;t book</p>
+                <p style={{ fontSize: '12px', color: T.state.warning.deep, lineHeight: 1.4 }}>
+                  Jobber took the job but not the time, so it won&apos;t show on your calendar yet. Open the job in Jobber and add the visit there.
+                </p>
+                {visitRefused.error && (
+                  <p style={{ fontSize: '11px', color: T.ink.muted, wordBreak: 'break-word' }}>Jobber said: {visitRefused.error}</p>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => { const a = visitRefused.doneArgs; setVisitRefused(null); onDone(...a) }} style={primaryBtn(true)}>Done</button>
+            </div>
+          </div>
+        )}
+
+        {step === 'confirm' && !visitRefused && (
           <>
             {/* Variant 2 — itemize the REAL records this send will create,
                 reflecting the actual payload (existing vs new client, and the
@@ -723,9 +845,19 @@ export default function SendToJobberModal({ person, engagementId = null, address
                       detail={`${jobWork.trim() || 'Work'} · $${(jobPriceValid ? jobPriceNum : 0).toFixed(2)} — moves this deal to Job in Progress`}
                       Glyph={IconHammer}
                     />
-                    {jobDate && (
-                      <CreateRow title="Scheduled start" detail={jobDate} Glyph={IconCalendar} />
-                    )}
+                    {jobDate && (jobStart ? (
+                      <CreateRow
+                        title="Visit on your Jobber calendar"
+                        detail={`${jobDateLabel(jobDate)} · ${jobTimeLabel(jobStart)}${jobEnd ? ` – ${jobTimeLabel(jobEnd)}` : " · Jobber's usual length"}`}
+                        Glyph={IconCalendar}
+                      />
+                    ) : (
+                      <CreateRow
+                        title="Job date"
+                        detail={`${jobDateLabel(jobDate)} · no time, so not on your calendar yet`}
+                        Glyph={IconCalendar}
+                      />
+                    ))}
                   </>
                 ) : (
                   <>

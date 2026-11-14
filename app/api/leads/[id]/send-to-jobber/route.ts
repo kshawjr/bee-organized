@@ -65,6 +65,7 @@ import {
 import { formatPhone } from '@/lib/phone'
 import { missingVisitAddressParts, describeMissing, pickPrimaryAddress } from '@/lib/visit-address'
 import { recordSentAssessmentType } from '@/lib/assessment-type-record'
+import { parseVisitTimes, visitTimezone, bookJobVisit, type VisitTimes, type BookVisitResult } from '@/lib/jobber-job-visit'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -313,9 +314,15 @@ export async function POST(
   // shipping a zero/placeholder someone must fix in Jobber. scheduled_at
   // (optional, YYYY-MM-DD) sets the job's target start date via
   // TimeframeAttributes.startAt; empty leaves the job unscheduled.
+  // visit_start / visit_end (optional, "HH:mm", the location's own clock)
+  // add a visit so the job lands on Jobber's calendar.
   type JobLineItem = { name: string; unitPrice: number; quantity: number }
   let jobLineItems: JobLineItem[] = []
   let jobScheduledDate: string | null = null
+  // Optional visit time (lib/jobber-job-visit.ts). null = no time asked —
+  // the date-only send, exactly as before.
+  let jobVisitTimes: VisitTimes | null = null
+  let jobVisit: BookVisitResult | null = null
   if (creation_type === 'job_direct') {
     const raw = Array.isArray(body.line_items) ? body.line_items : []
     if (raw.length === 0) {
@@ -344,6 +351,9 @@ export async function POST(
       }
       jobScheduledDate = d
     }
+    const vt = parseVisitTimes(jobScheduledDate, body.visit_start, body.visit_end)
+    if (!vt.ok) return fail('validation', vt.error, 400)
+    jobVisitTimes = vt.times
   }
 
   // Optional founded-engagement link (decoupled founding). Validated
@@ -1106,17 +1116,25 @@ export async function POST(
       // would error; a placeholder note is junk). The owner adds these in
       // Jobber if wanted.
     }
-    // Optional scheduling — target START DATE only (TimeframeAttributes.
-    // startAt, a typed ISO8601Date the import already reads into
-    // jobs.scheduled_start). Full visit-on-calendar scheduling needs
-    // Jobber's opaque ICalendarRule scalar, which we will not hand-forge;
-    // the owner slots the visit time in Jobber. Empty = unscheduled.
+    // Optional scheduling — target START DATE (TimeframeAttributes.startAt,
+    // a typed ISO8601Date the import already reads into jobs.scheduled_start).
+    // A date alone creates NO visit, so the job is not on Jobber's calendar
+    // (proven 2026-11-14). When the owner also picked a time, the visit is
+    // added after the create — see lib/jobber-job-visit.ts. Empty = unscheduled.
     if (jobScheduledDate) {
       jobInput.timeframe = { startAt: jobScheduledDate }
     }
     // Owner assignment at creation — mirror the request path's salespersonId
     // (non-fatal: retry once WITHOUT it if Jobber rejects a stale roster id).
     if (salesPersonJobberId) jobInput.salespersonId = salesPersonJobberId
+    // A time needs the location's zone. Checked BEFORE the job is created, so
+    // a location with no zone set is told so and nothing is half-sent.
+    let visitTz: string | null = null
+    if (jobVisitTimes) {
+      const z = visitTimezone((location as any).timezone)
+      if (!z.ok) return fail('validation', z.error, 400)
+      visitTz = z.tz
+    }
     let jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
       input: jobInput,
     })
@@ -1151,6 +1169,18 @@ export async function POST(
     jobberJobGlobalId = jobRec?.id || null
     if (!jobberJobGlobalId) {
       return fail('job_create', 'job_create_returned_no_id')
+    }
+
+    // The visit — only when the owner picked a time. The job exists by now;
+    // a refused visit is reported, never turned into a failed send.
+    if (jobVisitTimes && visitTz && jobScheduledDate) {
+      jobVisit = await bookJobVisit({
+        locationSlug,
+        jobGlobalId: jobberJobGlobalId,
+        date: jobScheduledDate,
+        times: jobVisitTimes,
+        tz: visitTz,
+      })
     }
 
     // Founded-engagement pre-link (mirrors the request path). When the send
@@ -1312,13 +1342,20 @@ export async function POST(
     landed:    { salesperson: salespersonLanded, teamVerified: teamVerifiedCount },
   })
 
+  // Only a send that asked for a time says anything about a visit; a refused
+  // visit makes the row 'partial' — the job landed, the time did not.
+  const visitSegment = !jobVisit
+    ? ''
+    : jobVisit.booked
+      ? `; visit=booked ${jobVisitTimes!.start}-${jobVisitTimes!.end ?? 'jobber-default'}`
+      : `; visit=NOT booked (${jobVisit.error})`
   await writeSyncLog({
     location_id:      locationSlug,
     entity_id:        leadId,
     entity_type:      creation_type === 'job_direct' ? 'job' : 'request',
     direction:        'outbound',
     jobber_record_id: (creation_type === 'job_direct' ? jobberJobId : jobberRequestId) || jobberClientId || '',
-    status:           assignmentOutcome.status,
+    status:           jobVisit && !jobVisit.booked ? 'partial' : assignmentOutcome.status,
     message:
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
@@ -1330,6 +1367,7 @@ export async function POST(
       (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
       (jobberJobId        ? `; job=${jobberJobId}`            : '') +
       (engagementId       ? `; engagement=${engagementId}`    : '') +
+      visitSegment +
       `; ${assignmentOutcome.segment}` +
       `; contact=phone:${contactWriteback.phone},email:${contactWriteback.email}`,
   })
@@ -1343,5 +1381,12 @@ export async function POST(
     jobber_assessment_id: jobberAssessmentId,
     jobber_job_id:        jobberJobId,
     contact_writeback:    contactWriteback,
+    // Present ONLY when a time was asked for, so a date-only send's reply is
+    // exactly what it always was.
+    ...(jobVisit
+      ? { visit: jobVisit.booked
+          ? { booked: true, date: jobScheduledDate, start: jobVisitTimes!.start, end: jobVisitTimes!.end }
+          : { booked: false, error: jobVisit.error } }
+      : {}),
   })
 }

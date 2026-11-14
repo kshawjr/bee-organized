@@ -211,7 +211,9 @@ describe('send-to-jobber terminal-row wiring (issue 145)', () => {
 
   it('PIN: the terminal sync_log row status is the summarized outcome, not a literal', () => {
     // The specific lie we killed: a hard-coded success on the terminal row.
-    expect(route).toContain('status:           assignmentOutcome.status')
+    // (2026-11-14: a refused job visit also makes the row 'partial' — the job
+    // landed, the time did not. Otherwise it is the summarized outcome.)
+    expect(route).toContain("status:           jobVisit && !jobVisit.booked ? 'partial' : assignmentOutcome.status")
     expect(route).toContain('const assignmentOutcome = summarizeAssignmentOutcome({')
     // and the assignment outcome rides the terminal message
     expect(route).toContain('`; ${assignmentOutcome.segment}`')
