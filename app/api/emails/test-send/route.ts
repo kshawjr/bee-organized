@@ -44,6 +44,7 @@ import { renderTemplate, sendEmail, type RenderContext } from '@/lib/resend'
 import { blockedOnMissingRate } from '@/lib/rate-guard'
 import { blockedOnMissingBookingLink, resolveOwnerBookingLink } from '@/lib/booking-link'
 import { extrasFromRow, locationEmailOptionsFromRow } from '@/lib/email-send-options'
+import { bodyFormatOf, type BodyFormat } from '@/lib/email-body-html'
 import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from '@/lib/drip-email-layout'
 import { hasSignatureTag } from '@/lib/email-signature'
 import { resolveEmailSignature } from '@/lib/email-signature-resolve'
@@ -64,6 +65,8 @@ type Source = {
   buttonText: string | null
   buttonLink: string | null
   buttonAlign: 'left' | 'center' | 'right' | null
+  // The shape of `body`, from the row it came from (lib/email-body-html.ts).
+  bodyFormat: BodyFormat
   render: 'drip' | 'welcome' | 'stage'
   templateKey: string | null
 }
@@ -107,7 +110,7 @@ export async function POST(req: NextRequest) {
   if (typeof body.stepId === 'string' && body.stepId) {
     const { data: step } = await supabaseService
       .from('drip_path_steps')
-      .select('*, templates:master_template_id ( subject, body ), drip_paths!inner ( id, location_uuid, is_master )')
+      .select('*, templates:master_template_id ( * ), drip_paths!inner ( id, location_uuid, is_master )')
       .eq('id', body.stepId)
       .maybeSingle()
     const path = step ? (Array.isArray((step as any).drip_paths) ? (step as any).drip_paths[0] : (step as any).drip_paths) : null
@@ -123,6 +126,7 @@ export async function POST(req: NextRequest) {
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
       buttonAlign: extras.buttonAlign,
+      bodyFormat: bodyFormatOf(((step as any).body != null ? step : tpl) as Record<string, unknown> | null),
       render: 'drip',
       templateKey: null,
     }
@@ -143,6 +147,7 @@ export async function POST(req: NextRequest) {
       buttonText: extras.buttonText,
       buttonLink: extras.buttonLink,
       buttonAlign: extras.buttonAlign,
+      bodyFormat: bodyFormatOf((fork?.body != null ? fork : master) as Record<string, unknown>),
       render: key === 'welcome' ? 'welcome' : 'stage',
       templateKey: key,
     }
@@ -194,7 +199,7 @@ export async function POST(req: NextRequest) {
     virtual_booking_link: options.virtualBookingLink,
   }
 
-  const rendered = renderTemplate({ subject: switched.subject, body: switched.body }, ctx, { signatureMarker: true })
+  const rendered = renderTemplate({ subject: switched.subject, body: switched.body }, ctx, { signatureMarker: true, bodyFormat: source.bodyFormat })
   if (!rendered.subject.trim()) {
     return refuse('held', 'This email has no subject, so no client gets it yet. Add one with Edit.')
   }
@@ -213,6 +218,7 @@ export async function POST(req: NextRequest) {
     style: options.style,
     heading: rendered.subject,
     button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: source.buttonAlign } : null,
+    bodyFormat: source.bodyFormat,
   }
 
   let html: string

@@ -20,6 +20,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { bodyFormatOf } from '@/lib/email-body-html'
+import { bodyForSave, bodyFormatIn } from '@/lib/email-body-save'
 
 async function authForLocation(locId: string) {
   const supabase = await createServerSupabaseClient()
@@ -126,6 +128,8 @@ export async function GET(
           button_text: (s as any).button_text ?? null,
           button_link: (s as any).button_link ?? null,
           button_align: (s as any).button_align ?? null,
+          // 2026-11-13 — the body's shape. Absent column → plain.
+          body_format: bodyFormatOf(s as Record<string, unknown>),
         }
       }),
   }))
@@ -217,7 +221,11 @@ export async function POST(
       channel: typeof s.channel === 'string' && (s.channel === 'sms' || s.channel === 'email') ? s.channel : 'email',
       master_template_id: typeof s.master_template_id === 'string' ? s.master_template_id : null,
       subject: typeof s.subject === 'string' ? s.subject : null,
-      body: typeof s.body === 'string' ? s.body : null,
+      // An html seed is rebuilt from the whitelist and marked; a plain one
+      // leaves the column to its default (lib/email-body-save.ts).
+      ...(typeof s.body === 'string' && bodyFormatIn(s.body_format) === 'html'
+        ? bodyForSave(s.body, 'html')
+        : { body: typeof s.body === 'string' ? s.body : null }),
       is_active: true,
     }))
     const { error: stepsErr } = await supabaseService.from('drip_path_steps').insert(stepRows)

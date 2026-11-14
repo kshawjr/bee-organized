@@ -4,7 +4,7 @@ billing_invoices:id,location_id,amount_cents,currency,paid_at,period_start,perio
 client_files:id,lead_id,engagement_id,path,thumb_path,name,mime_type,size_bytes,uploaded_by,uploaded_by_label,created_at
 companies:id,location_id,name,addresses,members,notes,activity,deleted_at,created_at,updated_at,created_by,industry,phone,email,website
 digest_runs:id,ran_at,window_label,suppressed,posted,skipped,all_clear,leads_landed,leads_failed,jobber_landed,jobber_didnt_land,self_heals,loc_other_leads,import_failed,import_stalled,import_origin_gated,rate_missing,booking_link_missing,message_text
-drip_path_steps:id,drip_path_id,step_order,delay_days,channel,subject,body,is_active,created_at,updated_at,master_template_id,origin,is_paused,delay_unit,button_text,button_link,button_align
+drip_path_steps:id,drip_path_id,step_order,delay_days,channel,subject,body,is_active,created_at,updated_at,master_template_id,origin,is_paused,delay_unit,button_text,button_link,button_align,body_format
 drip_paths:id,location_uuid,path_key,name,is_active,is_default,created_at,updated_at,is_master,cloned_from_id
 email_accounts:id,email_address,location_id,hub_user_id,sync_enabled,last_history_id,last_synced_at,last_error,error_count,created_at,updated_at
 email_attachments:id,message_id,gmail_attachment_id,filename,mime_type,size_bytes,created_at
@@ -66,7 +66,7 @@ tag_merge_log:partner_id,tag_lookup_id,specialty_key,position,copied_at
 tag_promotion_copies:promotion_id,tag_id,was_active
 tag_promotion_links:promotion_id,kind,record_id,from_tag_id,to_tag_id
 tag_promotions:id,created_at,created_by,note,corporate_tag_id,corporate_tag_created,target_was_active,undone_at
-templates:id,legacy_id,name,type,tag,subject,body,is_active,created_at,updated_at,location_uuid,cloned_from_id,created_by,button_text,button_link,button_align
+templates:id,legacy_id,name,type,tag,subject,body,is_active,created_at,updated_at,location_uuid,cloned_from_id,created_by,button_text,button_link,button_align,body_format
 tier_prices:id,display_name,price_annual,description,sort_order,updated_at,updated_by,payment_link_url,stripe_price_id
 touchpoints:id,lead_id,location_uuid,kind,method,label,status,drip_id,notes,user_id,occurred_at,created_at,engagement_id,partner_id
 zip_coords:zip,lat,lng,state,states,source,loaded_at

@@ -8,6 +8,7 @@
 //   button_text  migrations/email_buttons.sql
 //   button_link  migrations/email_buttons.sql
 //   button_align migrations/button_align.sql (left | right; null = centre)
+//   body_format  migrations/email_body_format.sql (plain | html; lib/email-body-html.ts)
 //
 // WHY THIS IS CAREFUL. The step save is DELETE-then-INSERT. If the insert named
 // a column whose migration hasn't run, it would fail after the delete and the
@@ -17,7 +18,7 @@
 
 import { supabaseService } from './supabase-service'
 
-export const STEP_EXTRA_COLUMNS = ['is_paused', 'delay_unit', 'button_text', 'button_link', 'button_align'] as const
+export const STEP_EXTRA_COLUMNS = ['is_paused', 'delay_unit', 'button_text', 'button_link', 'button_align', 'body_format'] as const
 export type StepExtraColumn = (typeof STEP_EXTRA_COLUMNS)[number]
 
 export type DelayUnit = 'days' | 'months' | 'years'
@@ -32,6 +33,8 @@ export type StepExtrasIn = {
   // null = centre, the default; centre is stored as null so an untouched
   // email and a centred one are the same row.
   button_align?: 'left' | 'right' | null
+  // The shape of the step's body. undefined = the caller didn't say.
+  body_format?: 'plain' | 'html'
 }
 
 function textOrNull(v: unknown): string | null | undefined {
@@ -55,6 +58,7 @@ export function parseStepExtras(raw: Record<string, unknown>): StepExtrasIn {
   const bl = textOrNull(raw.button_link)
   if (bl !== undefined) out.button_link = bl
   if (raw.button_align !== undefined) out.button_align = buttonAlignIn(raw.button_align)
+  if (raw.body_format === 'html' || raw.body_format === 'plain') out.body_format = raw.body_format
   return out
 }
 
@@ -87,6 +91,8 @@ export function extrasNeedingMissingColumns(steps: StepExtrasIn[], cols: Set<Ste
     if (s.button_text && !cols.has('button_text')) need.add('button_text')
     if (s.button_link && !cols.has('button_link')) need.add('button_link')
     if (s.button_align && !cols.has('button_align')) need.add('button_align')
+    // An html body in a table that cannot mark it would be sent as raw tags.
+    if (s.body_format === 'html' && !cols.has('body_format')) need.add('body_format')
   }
   return Array.from(need)
 }
@@ -100,6 +106,7 @@ export function stepExtrasForInsert(s: StepExtrasIn, cols: Set<StepExtraColumn>)
   if (cols.has('button_text')) out.button_text = s.button_text ?? null
   if (cols.has('button_link')) out.button_link = s.button_link ?? null
   if (cols.has('button_align')) out.button_align = s.button_align ?? null
+  if (cols.has('body_format')) out.body_format = s.body_format === 'html' ? 'html' : 'plain'
   return out
 }
 

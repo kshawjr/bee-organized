@@ -14,6 +14,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { buttonAlignIn } from '@/lib/drip-step-extras'
+import { bodyForSave, isMissingBodyFormatColumn, BODY_FORMAT_MIGRATION } from '@/lib/email-body-save'
 
 export async function PATCH(
   req: NextRequest,
@@ -77,7 +78,10 @@ export async function PATCH(
     patch.subject = typeof body.subject === 'string' ? body.subject : null
   }
   if ('body' in body) {
-    patch.body = typeof body.body === 'string' ? body.body : null
+    // A body and its shape are written together (lib/email-body-save.ts): an
+    // html body is rebuilt from the whitelist here, whatever the screen did.
+    if (typeof body.body === 'string') Object.assign(patch, bodyForSave(body.body, body.body_format))
+    else { patch.body = null; patch.body_format = 'plain' }
   }
   if ('delay_days' in body) {
     const n = Number(body.delay_days)
@@ -140,6 +144,15 @@ export async function PATCH(
     .single()
   let { data, error } = await runUpdate()
 
+  // The body's shape (migrations/email_body_format.sql). Before that migration
+  // runs, a plain save goes without the mark; an html one is refused.
+  if (error && isMissingBodyFormatColumn(error)) {
+    if (patch.body_format === 'html') {
+      return NextResponse.json({ error: 'not_set_up_yet', detail: `${BODY_FORMAT_MIGRATION} has not been run` }, { status: 409 })
+    }
+    delete patch.body_format
+    ;({ data, error } = await runUpdate())
+  }
   if (error && /button_align/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
     if (patch.button_align) {
       return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/button_align.sql has not been run' }, { status: 409 })

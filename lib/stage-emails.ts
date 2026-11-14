@@ -34,6 +34,7 @@ import { hasSignatureTag } from './email-signature'
 import { resolveEmailSignature } from './email-signature-resolve'
 import { buildCanSpamFooter } from './marketing-unsubscribe'
 import { extrasFromRow, locationEmailOptionsFromRow } from './email-send-options'
+import { bodyFormatOf } from './email-body-html'
 import { resolveLocationTemplateFork } from './template-fork'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -350,6 +351,8 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     body: fork?.body ?? master.body,
     name: master.name,
   }
+  // The body's shape comes from the row the body came from (body_format).
+  const bodyFormat = bodyFormatOf((fork?.body != null ? fork : master) as Record<string, unknown>)
   const buttonLinkSource = tplExtras.buttonLink
   const guardTpl = { subject: tpl.subject, body: buttonLinkSource ? `${tpl.body}\n${buttonLinkSource}` : tpl.body }
 
@@ -431,7 +434,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     return { sent: false, error: 'missing_booking_link' }
   }
 
-  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true })
+  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx, { signatureMarker: true, bodyFormat })
   const renderedButton = tplExtras.buttonText && buttonLinkSource
     ? renderTemplate({ subject: tplExtras.buttonText, body: buttonLinkSource }, ctx)
     : null
@@ -497,6 +500,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
       style: emailOptions.style,
       heading: rendered.subject,
       button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: tplExtras.buttonAlign } : null,
+      bodyFormat,
     },
     canSpamFooter,
   )

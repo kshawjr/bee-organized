@@ -35,7 +35,8 @@
 // can share them without a circular import) and are re-exported here.
 import { escHtml, escAttr } from './email-escape'
 import { displayPhone } from './phone'
-import { htmlWithSignature, textWithSignature, safeHttpUrl, SIGNATURE_MARKER, type EmailSignature } from './email-signature'
+import { htmlWithSignature, textWithSignature, buildSignatureHtml, safeHttpUrl, SIGNATURE_MARKER, type EmailSignature } from './email-signature'
+import { parseEmailHtml, blocksToText, sendableHref, type Block, type Inline, type BodyFormat } from './email-body-html'
 export { escHtml, escAttr }
 
 // The gold bee mark — the SAME transparent PNG the brand site uses, but
@@ -184,6 +185,12 @@ export type BrandedEmailContext = {
   // is no button. align (drip_path_steps / templates .button_align) is where
   // it sits; absent or unknown → centre, as every button was before it existed.
   button?: { label?: string | null; href?: string | null; align?: string | null } | null
+  // What shape renderedBody is in (the row's body_format, lib/email-body-html.ts).
+  // Absent or 'plain' → text, exactly as every email before 2026-11-13. 'html'
+  // → the editor's whitelisted tags, rendered with its merge values ESCAPED
+  // (renderTemplate's bodyFormat option) and styled here, never run through
+  // the plain-text paragraph builder.
+  bodyFormat?: BodyFormat | null
 }
 
 export type ButtonAlign = 'left' | 'center' | 'right'
@@ -243,6 +250,175 @@ function bodyParagraphsHtml(body: string): string {
       return `<p class="dm-text" style="margin:0 0 20px 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};">${inner}</p>`
     })
     .join('\n')
+}
+
+// ── An html body (the rich editor's) → email HTML ───────────────────────
+// The body is read into the whitelist tree (so nothing outside it can reach
+// an inbox, whatever the row holds) and written with the SAME inline styles
+// a plain body gets. A body that is only paragraphs, line breaks and links —
+// every plain body, once opened and saved in the editor — comes out byte for
+// byte what the plain path makes of it; lib/beta-email-body-format.test.ts
+// holds the two paths against each other.
+const P_STYLE = `margin:0 0 20px 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};`
+const H_STYLE: Record<'h2' | 'h3', string> = {
+  h2: `margin:0 0 12px 0;font-family:${EMAIL_SANS};font-size:22px;line-height:30px;font-weight:500;color:${EMAIL_TEXT};`,
+  h3: `margin:0 0 12px 0;font-family:${EMAIL_SANS};font-size:19px;line-height:28px;font-weight:500;color:${EMAIL_TEXT};`,
+}
+const LIST_STYLE = 'margin:0 0 20px 0;padding:0 0 0 24px;'
+const LI_STYLE = `margin:0 0 6px 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};`
+
+function htmlInlines(kids: Inline[], inLink = false): string {
+  return kids.map((k) => {
+    // Text is linkified like a plain line, so a pasted address — or a merge
+    // tag that renders to one — is still a link. Not inside a link: its words
+    // are already one, and an address there must not become a link in a link.
+    if (k.t === 'text') return inLink ? escHtml(k.v).replace(/\n/g, '<br />') : k.v.split('\n').map((line) => linkifyLine(line)).join('<br />')
+    if (k.t === 'br') return '<br />'
+    // Bold says its weight: the body is set light (300), and a bare <strong>
+    // there comes out at regular weight, which does not read as bold.
+    if (k.t === 'mark') return `<${k.tag}${k.tag === 'strong' ? ' style="font-weight:700;"' : ''}>${htmlInlines(k.kids, inLink)}</${k.tag}>`
+    const href = sendableHref(k.href)
+    // A link whose address did not come out as a real http(s) one (a saved
+    // link with no https://) reads "words (address)" — what the plain path
+    // shows for the same thing — rather than a dead link. An address with
+    // some other scheme (javascript:, mailto:) is not shown at all: only the
+    // words.
+    if (!href) return /^[a-z][a-z0-9+.-]*:/i.test(k.href.trim()) ? htmlInlines(k.kids, true) : `${htmlInlines(k.kids, true)}${escHtml(` (${k.href})`)}`
+    return `<a href="${escAttr(href)}" style="${LINK_STYLE}">${htmlInlines(k.kids, true)}</a>`
+  }).join('')
+}
+function htmlBlock(b: Block): string {
+  if ('items' in b) {
+    return `<${b.type} style="${LIST_STYLE}">${b.items.map((it) => `<li class="dm-text" style="${LI_STYLE}">${htmlInlines(it)}</li>`).join('')}</${b.type}>`
+  }
+  const align = b.align ? `text-align:${b.align};` : ''
+  if (b.type === 'p') return `<p class="dm-text" style="${P_STYLE}${align}">${htmlInlines(b.kids)}</p>`
+  return `<${b.type} class="dm-text" style="${H_STYLE[b.type]}${align}">${htmlInlines(b.kids)}</${b.type}>`
+}
+
+const hasMarker = (kids: Inline[]): boolean =>
+  kids.some((k) => (k.t === 'text' ? k.v.includes(SIGNATURE_MARKER) : k.t === 'br' ? false : hasMarker(k.kids)))
+// The marker, lifted to the top level of its block: out of any bold / link it
+// was typed inside, and out of a list item into a paragraph of its own.
+function liftMarker(kids: Inline[]): Inline[] {
+  const out: Inline[] = []
+  for (const k of kids) {
+    if ((k.t === 'mark' || k.t === 'a') && hasMarker(k.kids)) {
+      const strip = (xs: Inline[]): Inline[] => xs.map((x) => x.t === 'text' ? { ...x, v: x.v.split(SIGNATURE_MARKER).join('') } : x.t === 'br' ? x : { ...x, kids: strip(x.kids) })
+      out.push({ ...k, kids: strip(k.kids) }, { t: 'text', v: SIGNATURE_MARKER })
+    } else out.push(k)
+  }
+  return out
+}
+function normaliseMarkers(blocks: Block[]): Block[] {
+  const out: Block[] = []
+  for (const b of blocks) {
+    if ('items' in b) {
+      const marked = b.items.some(hasMarker)
+      const strip = (xs: Inline[]): Inline[] => xs.map((x) => x.t === 'text' ? { ...x, v: x.v.split(SIGNATURE_MARKER).join('') } : x.t === 'br' ? x : { ...x, kids: strip(x.kids) })
+      out.push(marked ? { ...b, items: b.items.map(strip) } : b)
+      if (marked) out.push({ type: 'p', align: null, kids: [{ t: 'text', v: SIGNATURE_MARKER }] })
+    } else out.push(hasMarker(b.kids) ? { ...b, kids: liftMarker(b.kids) } : b)
+  }
+  return out
+}
+// AFTER THE VALUES ARE IN. A merge tag that fills in as nothing ("{{owner_name}}"
+// with no owner on file) leaves a hole: a paragraph with nothing in it, a
+// paragraph that starts or ends on a line break, or two line breaks in a row.
+// The plain path never shows those — a blank line there is just a paragraph
+// break — so an html body is settled the same way: empty paragraphs go, edge
+// line breaks go, and a run of line breaks splits the paragraph in two.
+const isBlankInline = (k: Inline): boolean => k.t === 'br' || (k.t === 'text' && k.v.replace(/\n/g, '') === '')
+function settleParagraphs(blocks: Block[]): Block[] {
+  const out: Block[] = []
+  for (const b of blocks) {
+    if ('items' in b || b.type !== 'p' || isMarkerBlock(b)) { out.push(b); continue }
+    let cur: Inline[] = []
+    const flush = () => {
+      while (cur.length && isBlankInline(cur[0])) cur.shift()
+      while (cur.length && isBlankInline(cur[cur.length - 1])) cur.pop()
+      if (cur.length) out.push({ ...b, kids: cur })
+      cur = []
+    }
+    b.kids.forEach((k, i) => {
+      const next = b.kids[i + 1]
+      if (k.t === 'br' && next && next.t === 'br') { flush(); return }
+      cur.push(k)
+    })
+    flush()
+  }
+  return out
+}
+
+const isMarkerBlock = (b: Block): boolean => !('items' in b) && b.kids.some((k) => k.t === 'text' && k.v.includes(SIGNATURE_MARKER))
+
+// One marker block → the pieces around each marker (edge line breaks trimmed,
+// as the plain path trims edge newlines) with a signature slot between them.
+const SIG = Symbol('signature')
+function markerBlockPieces(b: Extract<Block, { kids: Inline[] }>): (Block | typeof SIG)[] {
+  const segs: Inline[][] = [[]]
+  for (const k of b.kids) {
+    if (k.t === 'text' && k.v.includes(SIGNATURE_MARKER)) {
+      k.v.split(SIGNATURE_MARKER).forEach((part, i) => {
+        if (i) segs.push([])
+        if (part) segs[segs.length - 1].push({ t: 'text', v: part })
+      })
+    } else segs[segs.length - 1].push(k)
+  }
+  const edge = (k: Inline | undefined) => !!k && (k.t === 'br' || (k.t === 'text' && !k.v.replace(/\n/g, '')))
+  const trim = (seg: Inline[]): Inline[] => {
+    const x = seg.map((k) => (k.t === 'text' ? { ...k } : k))
+    while (edge(x[0])) x.shift()
+    while (edge(x[x.length - 1])) x.pop()
+    const f = x[0], l = x[x.length - 1]
+    if (f && f.t === 'text') f.v = f.v.replace(/^\n+/, '')
+    if (l && l.t === 'text') l.v = l.v.replace(/\n+$/, '')
+    return x
+  }
+  const out: (Block | typeof SIG)[] = []
+  segs.forEach((seg, i) => {
+    if (i) out.push(SIG)
+    const kids = trim(seg)
+    if (kids.length) out.push({ ...b, kids })
+  })
+  return out
+}
+
+// Blocks → html. Paragraphs are separated by a newline, as the plain path
+// separates them; the signature sits flush against its neighbours.
+function htmlBlocksWithSignature(blocks: Block[], signature: EmailSignature | null | undefined): string {
+  const parts: (string | typeof SIG)[] = []
+  for (const b of blocks) {
+    if (isMarkerBlock(b)) for (const piece of markerBlockPieces(b as Extract<Block, { kids: Inline[] }>)) parts.push(piece === SIG ? SIG : htmlBlock(piece))
+    else parts.push(htmlBlock(b))
+  }
+  const sigHtml = signature ? buildSignatureHtml(signature) : ''
+  let out = ''
+  parts.forEach((part, i) => {
+    if (part === SIG) { out += sigHtml; return }
+    if (i && parts[i - 1] !== SIG) out += '\n'
+    out += part
+  })
+  return out
+}
+
+// splitForButton, for blocks: the block holding the signature — and the
+// "Thank you," before it when the signature has a paragraph to itself — and
+// everything after follow the button; the rest is the message.
+function splitBlocksForButton(blocks: Block[]): [Block[], Block[]] {
+  const m = blocks.findIndex(isMarkerBlock)
+  if (m === -1) return [blocks, []]
+  const b = blocks[m] as Extract<Block, { kids: Inline[] }>
+  const first = b.kids[0]
+  const ownParagraph = !!first && first.t === 'text' && first.v.replace(/^\n+/, '').startsWith(SIGNATURE_MARKER)
+  const cut = Math.max(0, ownParagraph ? m - 1 : m)
+  return [blocks.slice(0, cut), blocks.slice(cut)]
+}
+const blocksHaveText = (blocks: Block[]): boolean => blocksToText(blocks).trim() !== ''
+
+// What the body reads as in plain text, whichever shape it is in.
+function bodyAsText(renderedBody: string, ctx: BrandedEmailContext): string {
+  return ctx.bodyFormat === 'html' ? blocksToText(parseEmailHtml(renderedBody, { anyHref: true })) : renderedBody
 }
 
 // Does the rendered body already contain the reviews link? If so the wrapper
@@ -427,7 +603,7 @@ export function buildBrandedDripHtml(
   cardFooter?: CardFooter | null,
 ): string {
   const reviewsLink = ctx.reviews_link?.trim() || null
-  const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
+  const addReviewsLine = reviewsLink && !bodyHasReviewsLink(bodyAsText(renderedBody, ctx), reviewsLink)
 
   const reviewsHtml = addReviewsLine
     ? `<p class="dm-text" style="margin:20px 0 0;font-family:${EMAIL_SANS};font-size:17px;line-height:28px;font-weight:300;color:${EMAIL_TEXT};"><a href="${escAttr(
@@ -446,7 +622,21 @@ export function buildBrandedDripHtml(
   // layout is joined in between (lib/email-signature.ts header).
   const button = resolveButton(ctx.button)
   let contentHtml: string
-  if (button) {
+  if (ctx.bodyFormat === 'html') {
+    // An html body never goes through the plain-text paragraph builder below:
+    // that would escape its tags and show them to the client as text.
+    const blocks = settleParagraphs(normaliseMarkers(parseEmailHtml(renderedBody, { anyHref: true })))
+    if (button) {
+      const [message, rest] = splitBlocksForButton(blocks)
+      contentHtml = [
+        blocksHaveText(message) ? htmlBlocksWithSignature(message, ctx.signature) : '',
+        buildButtonHtml(ctx.style, button),
+        blocksHaveText(rest) ? htmlBlocksWithSignature(rest, ctx.signature) : '',
+      ].filter(Boolean).join('\n              ')
+    } else {
+      contentHtml = htmlBlocksWithSignature(blocks, ctx.signature)
+    }
+  } else if (button) {
     const [message, rest] = splitForButton(renderedBody)
     contentHtml = [
       message.trim() ? htmlWithSignature(message, bodyParagraphsHtml, ctx.signature) : '',
@@ -470,6 +660,9 @@ export function buildBrandedDripText(
   ctx: BrandedEmailContext,
   cardFooter?: CardFooter | null,
 ): string {
+  // An html body is read back as text first; from there on the text half is
+  // built exactly as a plain body's is.
+  renderedBody = bodyAsText(renderedBody, ctx)
   const reviewsLink = ctx.reviews_link?.trim() || null
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
 

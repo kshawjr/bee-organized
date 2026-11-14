@@ -31,6 +31,7 @@ import { isReturningPathKey } from '@/components/hive/shared/returningVariant'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
+import { bodyFormatOf } from './email-body-html'
 import { resolveEmailSignature } from './email-signature-resolve'
 import {
   FOLLOWUPS_OFF_REASON,
@@ -150,7 +151,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     .select(
       `
       *,
-      templates:master_template_id ( subject, body )
+      templates:master_template_id ( * )
       `,
     )
     .eq('drip_path_id', path.id)
@@ -313,6 +314,11 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   const subjectSource = step.subject ?? linkedTpl?.subject ?? null
   const bodySource = step.body ?? linkedTpl?.body ?? null
+  // The shape of the body is a fact about the ROW IT CAME FROM (body_format,
+  // lib/email-body-html.ts): the step's own wording, or the linked template's.
+  // The join reads the template with '*' so the column rides along once its
+  // migration has run and is simply absent — plain — before.
+  const bodyFormat = bodyFormatOf((step.body != null ? step : linkedTpl) as Record<string, unknown> | null)
 
   if (!bodySource) {
     return { sent: false, error: 'no_body_source' }
@@ -396,7 +402,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     virtual_booking_link: emailOptions.virtualBookingLink,
   }
 
-  const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx, { signatureMarker: true })
+  const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx, { signatureMarker: true, bodyFormat })
   // The button's text and link, through the same tags as the wording.
   const renderedButton = stepExtras.buttonText && buttonLinkSource
     ? renderTemplate({ subject: stepExtras.buttonText, body: buttonLinkSource }, ctx)
@@ -445,8 +451,8 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     heading: rendered.subject,
     button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: stepExtras.buttonAlign } : null,
   }
-  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look })
-  const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look })
+  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look, bodyFormat })
+  const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look, bodyFormat })
 
   // Per-project-type SENDER routing. If the location split senders by project
   // type, this drip sends AS the sender assigned to the lead's project_type;

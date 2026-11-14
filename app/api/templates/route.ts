@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { bodyForSave, bodyFormatIn, isMissingBodyFormatColumn, BODY_FORMAT_MIGRATION } from '@/lib/email-body-save'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
 // '*' so button_text / button_link (migrations/email_buttons.sql) come back
@@ -166,7 +167,15 @@ export async function POST(req: NextRequest) {
   const type = typeof body.type === 'string' ? body.type.trim() : ''
   const tag = typeof body.tag === 'string' ? body.tag.trim() || null : null
   const subject = typeof body.subject === 'string' ? body.subject : null
-  const tplBody = typeof body.body === 'string' ? body.body : ''
+  const rawBody = typeof body.body === 'string' ? body.body : ''
+  // Only an email can be html; an html body is rebuilt from the whitelist
+  // here (lib/email-body-save.ts). A plain one is stored as typed and the
+  // column is left to its default, so this works before the migration too.
+  const wantsHtml = bodyFormatIn(body.body_format) === 'html'
+  if (wantsHtml && type !== 'email') {
+    return NextResponse.json({ error: 'html_only_for_email' }, { status: 400 })
+  }
+  const tplBody = wantsHtml ? bodyForSave(rawBody, 'html').body : rawBody
 
   if (!name) return NextResponse.json({ error: 'name_required' }, { status: 400 })
   if (!VALID_TYPES.has(type)) {
@@ -206,6 +215,7 @@ export async function POST(req: NextRequest) {
       tag,
       subject: type === 'email' ? subject : null,
       body: tplBody,
+      ...(wantsHtml ? { body_format: 'html' } : {}),
       is_active: true,
       location_uuid,
       created_by: hubUser.id,
@@ -213,6 +223,9 @@ export async function POST(req: NextRequest) {
     .select(SELECT_COLS)
     .single()
 
+  if (error && isMissingBodyFormatColumn(error)) {
+    return NextResponse.json({ error: 'not_set_up_yet', detail: `${BODY_FORMAT_MIGRATION} has not been run` }, { status: 409 })
+  }
   if (error) {
     console.error('[/api/templates POST] error:', error.message)
     return NextResponse.json({ error: 'create_failed', detail: error.message }, { status: 500 })

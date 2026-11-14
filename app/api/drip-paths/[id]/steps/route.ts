@@ -33,6 +33,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { sanitizeEmailHtml } from '@/lib/email-body-html'
 import { renumberSteps } from '@/lib/drip-step-order'
 import { firstStepRemovalError } from '@/lib/drip-followups'
 import {
@@ -209,6 +210,26 @@ export async function PATCH(
   // email, a months timing, a button) is refused untouched; a save that
   // doesn't simply leaves those keys out.
   const extraCols = await existingStepExtraColumns()
+
+  // THE BODY'S SHAPE (lib/email-body-html.ts). This save deletes every step
+  // and writes them again, so a step's body_format has to be carried across
+  // or an html body would come back marked plain and reach clients as raw
+  // tags. A step that says its format is taken at its word (and an html body
+  // is rebuilt from the whitelist here). A step that does not say — a screen
+  // that predates the column — keeps html only when it is the same stored
+  // step with the same body, untouched; otherwise it is plain, as typed.
+  if (extraCols.has('body_format')) {
+    const { data: prior } = await supabaseService.from('drip_path_steps').select('*').eq('drip_path_id', pathId)
+    const priorById = new Map((prior ?? []).map((r: any) => [r.id as string, r]))
+    for (const s of stepsIn) {
+      if (s.body_format !== undefined) continue
+      const was = s.id ? priorById.get(s.id) : null
+      if (was && was.body_format === 'html' && was.body === s.body) s.body_format = 'html'
+    }
+  }
+  for (const s of stepsIn) {
+    if (s.body_format === 'html' && typeof s.body === 'string') s.body = sanitizeEmailHtml(s.body)
+  }
   const notReady = extrasNeedingMissingColumns(stepsIn, extraCols)
   if (notReady.length) {
     return NextResponse.json({ error: 'not_set_up_yet', columns: notReady }, { status: 409 })

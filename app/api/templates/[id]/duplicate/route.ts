@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { bodyFormatOf } from '@/lib/email-body-html'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SELECT_COLS =
@@ -66,7 +67,9 @@ export async function POST(
 
   const { data: src, error: srcErr } = await supabaseService
     .from('templates')
-    .select(SELECT_COLS)
+    // '*', not SELECT_COLS: body_format rides along once its migration has
+    // run and is simply absent before. A named column would fail the read.
+    .select('*')
     .eq(matchColumn(params.id), params.id)
     .maybeSingle()
 
@@ -107,6 +110,12 @@ export async function POST(
 
   const copyName = `${src.name} (Copy)`
 
+  // The copy must be the same SHAPE as the body it copies (body_format,
+  // lib/email-body-html.ts): an html body copied into a row marked plain
+  // would reach a client as raw tags. The source is read with '*' (above), so
+  // before migrations/email_body_format.sql has run there is nothing to carry.
+  const copyFormat = bodyFormatOf(src as Record<string, unknown>)
+
   const { data: copy, error: copyErr } = await supabaseService
     .from('templates')
     .insert({
@@ -117,6 +126,7 @@ export async function POST(
       tag: src.tag,
       subject: src.subject,
       body: src.body,
+      ...(copyFormat === 'html' ? { body_format: 'html' } : {}),
       is_active: true,
       location_uuid: targetLocation,
       cloned_from_id: src.id,

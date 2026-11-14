@@ -313,8 +313,9 @@ describe('drips are byte-identical to before the footer slot existed', () => {
 
   it('the drip send site passes no footer', () => {
     const src = readFileSync(join(__dirname, 'drip-send.ts'), 'utf8')
-    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look \}\)/)
-    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look \}\)/)
+    // bodyFormat (2026-11-13, the body's shape) joined the context; still no third argument, so no footer.
+    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}\)/)
+    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}\)/)
   })
 })
 

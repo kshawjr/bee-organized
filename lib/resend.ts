@@ -17,6 +17,8 @@ import { logNotificationFanout, type NotificationContext } from './notification-
 import { resolveHandlerForRawType } from './project-type-handlers'
 import { SIGNATURE_MARKER, SIGNATURE_TAG_RE } from './email-signature'
 import { displayPhone } from './phone'
+import { escHtml } from './email-escape'
+import type { BodyFormat } from './email-body-html'
 import {
   SENDER_DOMAIN_UNVERIFIED,
   isSenderDomainRejection,
@@ -140,15 +142,18 @@ export interface RenderContext {
 
 const VAR_RE = /\{\{(\w+)\}\}/g
 
-function applyVars(input: string | null | undefined, ctx: RenderContext): string {
+// escape: the body is HTML (body_format 'html'), so every value is escaped as
+// it goes in — a client called "Tom <b>" or a link with "&" in it is text in
+// the email, never markup. A plain body is escaped later, whole, by the layout.
+function applyVars(input: string | null | undefined, ctx: RenderContext, escape = false): string {
   if (!input) return ''
   return input.replace(VAR_RE, (_match, key: string) => {
     const v = (ctx as Record<string, unknown>)[key]
     if (v === null || v === undefined) return ''
     // {{phone}} / {{location_phone}} read in the universal shape,
     // (123) 456-7890 (lib/phone.ts), whatever is stored.
-    if (key === 'phone' || key === 'location_phone') return displayPhone(v)
-    return String(v)
+    const out = key === 'phone' || key === 'location_phone' ? displayPhone(v) : String(v)
+    return escape ? escHtml(out) : out
   })
 }
 
@@ -161,7 +166,7 @@ function applyVars(input: string | null | undefined, ctx: RenderContext): string
 export function renderTemplate(
   template: { subject: string | null; body: string },
   context: RenderContext,
-  options: { signatureMarker?: boolean } = {},
+  options: { signatureMarker?: boolean; bodyFormat?: BodyFormat | null } = {},
 ): { subject: string; body: string } {
   const subject = (template.subject ?? '').replace(SIGNATURE_TAG_RE, '')
   const body = options.signatureMarker
@@ -169,7 +174,8 @@ export function renderTemplate(
     : template.body
   return {
     subject: applyVars(subject, context),
-    body: applyVars(body, context),
+    // The subject is always text. Only an html BODY has its values escaped.
+    body: applyVars(body, context, options.bodyFormat === 'html'),
   }
 }
 

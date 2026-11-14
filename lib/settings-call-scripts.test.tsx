@@ -162,10 +162,17 @@ describe('a script’s shape is plain text inside body', () => {
     expect(callScriptSummary({ when: '', mins: null, stages: [] })).toBe('')
   })
 
-  it('no new columns, and no route changed: the table and the three routes are what they were', () => {
-    const atHead = (f: string) => execSync(`git show HEAD:"${f}"`, { cwd: process.cwd(), maxBuffer: 16 * 1024 * 1024 }).toString()
-    for (const f of ['lib/db-columns.snapshot.txt', 'app/api/templates/route.ts', 'app/api/templates/[id]/route.ts', 'app/api/templates/[id]/duplicate/route.ts']) expect(read(f), f).toBe(atHead(f))
-    expect(read('lib/db-columns.snapshot.txt')).toMatch(/^templates:id,legacy_id,name,type,tag,subject,body,is_active,created_at,updated_at,location_uuid,cloned_from_id,created_by,button_text,button_link,button_align$/m)
+  // Until 2026-11-13 this also compared the column record and the three
+  // templates routes to the last commit, byte for byte. That check only ever
+  // saw UNCOMMITTED work, so it said nothing about call scripts once they
+  // were committed, and it went red for any later change to those files (the
+  // email body's body_format column and its route handling, here). What it
+  // was for is kept: a call script adds no column of its own. The templates
+  // line is pinned whole, so a new column has to be added here on purpose;
+  // body_format (migrations/email_body_format.sql) is the email body's shape
+  // and is always 'plain' for a call script.
+  it('a call script adds no column of its own: the templates table is the known list', () => {
+    expect(read('lib/db-columns.snapshot.txt')).toMatch(/^templates:id,legacy_id,name,type,tag,subject,body,is_active,created_at,updated_at,location_uuid,cloned_from_id,created_by,button_text,button_link,button_align,body_format$/m)
   })
 })
 

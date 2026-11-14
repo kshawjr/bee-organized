@@ -18,6 +18,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { buttonAlignIn } from '@/lib/drip-step-extras'
+import { bodyForSave, bodyFormatIn, isMissingBodyFormatColumn, BODY_FORMAT_MIGRATION } from '@/lib/email-body-save'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -128,7 +129,16 @@ export async function PATCH(
   if ('subject' in body) {
     patch.subject = typeof body.subject === 'string' ? body.subject : null
   }
-  if (typeof body.body === 'string') patch.body = body.body
+  if (typeof body.body === 'string') {
+    // Only an EMAIL can be html: a text message or a call script is read as
+    // plain text everywhere it is used.
+    const effectiveType = (typeof body.type === 'string' ? body.type : tpl.type) as string | null
+    if (bodyFormatIn(body.body_format) === 'html' && effectiveType !== 'email') {
+      return NextResponse.json({ error: 'html_only_for_email' }, { status: 400 })
+    }
+    // A body and its shape are written together (lib/email-body-save.ts).
+    Object.assign(patch, bodyForSave(body.body, body.body_format))
+  }
   if (typeof body.is_active === 'boolean') patch.is_active = body.is_active
   // 2026-10-30 — the optional button (migrations/email_buttons.sql). Blank
   // clears. Text is shown as typed (escaped); the link may be a tag such as
@@ -170,6 +180,15 @@ export async function PATCH(
     .maybeSingle()
   let { data, error } = await runUpdate()
 
+  // The body's shape (migrations/email_body_format.sql). Before that migration
+  // runs, a plain save goes without the mark; an html one is refused.
+  if (error && isMissingBodyFormatColumn(error)) {
+    if (patch.body_format === 'html') {
+      return NextResponse.json({ error: 'not_set_up_yet', detail: `${BODY_FORMAT_MIGRATION} has not been run` }, { status: 409 })
+    }
+    delete patch.body_format
+    ;({ data, error } = await runUpdate())
+  }
   if (error && /button_align/.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
     if (patch.button_align) {
       return NextResponse.json({ error: 'not_set_up_yet', detail: 'migrations/button_align.sql has not been run' }, { status: 409 })
