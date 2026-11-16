@@ -87,18 +87,21 @@ describe('a contact with nothing on it: the normal sheet', () => {
     await mount()
     expect($('[data-sheet-name]')!.textContent).toBe('Lisa Snyder')
     expect($$('.ns-type').map((t) => t.textContent)).toEqual(['Not sure yet'])
-    expect($('[data-sheet-tags]')!.textContent).toBe('No tags yet.')
+    expect($('[data-sheet-tags]')!.textContent).toBe('No tags yet.+ add tags')
     expect($('[data-follow-ups-empty]')!.textContent).toBe('No follow-up set. Yours show here and on your Reminders page.')
     expect($('[role="alert"]')).toBeNull()
     expect(host.querySelector('.ns-problem, .ns-error')).toBeNull()
   })
   it('offers each missing detail as something to add, not as a hole', async () => {
     await mount()
-    expect($$('[data-add]').map((b) => b.textContent)).toEqual(['+ add phone', '+ add email', '+ add website', '+ add how you met', '+ add birthday'])
+    expect($$('[data-add]').map((b) => b.textContent)).toEqual(['+ add phone', '+ add email', '+ add website', '+ add how you met', '+ add birthday', '+ add address'])
   })
   it('draws no card for what it does not have', async () => {
     await mount()
-    expect($$('[data-card]').map((c) => c.dataset.card)).toEqual(['essentials', 'follow-ups'])
+    // Slice 4b: the "Touchpoints & notes" card is always there, because it is
+    // where a touchpoint or a note is added. There is still no Address card.
+    expect($$('[data-card]').map((c) => c.dataset.card)).toEqual(['essentials', 'log', 'follow-ups'])
+    expect($('[data-log-line]')!.textContent).toBe('Nothing logged with Lisa yet.')
     expect($('[data-referral-badge]')).toBeNull()
     expect($('[data-sheet-title]')).toBeNull()
     expect($('[data-sheet-company]')).toBeNull()
@@ -176,9 +179,10 @@ describe('the tags are Bee Hub\'s', () => {
     for (const sample of ['Senior living', 'General contractor', 'Estate sale', 'Electrician', 'Handyman', 'Painter', 'Storage', 'Organizer']) expect(src, sample).not.toContain(`'${sample}'`)
     expect(src).not.toMatch(/const TAGS\b|allowCreate/)
   })
-  it('tags are shown, not changed, on this sheet', async () => {
+  it('the tags themselves are not controls; one button opens the picker (contact-sheet-adds.test.tsx)', async () => {
     await mount({ sheet: FULL })
-    expect($('[data-sheet-tags] button, [data-sheet-tags] input')).toBeNull()
+    expect($$('[data-sheet-tags] button').map((b) => b.textContent)).toEqual(['Change tags'])
+    expect($('[data-sheet-tags] input')).toBeNull()
   })
 })
 

@@ -9,12 +9,21 @@
 //
 // WHAT IT CHANGES. The contact's own fields, nine of them: name, job title,
 // company (the text), phone, email, website, how you met, birthday and its
-// reminder. Nothing else on this sheet is a control:
-//   · type, partner level and partner stage are SHOWN, plainly not editable,
-//     with a line saying they change through a confirmation step that is
-//     still to come (slice 6);
-//   · tags, touchpoints, notes, follow-ups, addresses and the company link
-//     are shown as they are; adding to them is slice 4b.
+// reminder. Type, partner level and partner stage are SHOWN, plainly not
+// editable, with a line saying they change through a confirmation step that
+// is still to come (slice 6).
+//
+// WHAT CAN BE ADDED (slice 4b; lib/network/contact-adds.ts has the rules):
+//   · a touchpoint   → POST /api/touchpoints, Bee Hub's own, as the old
+//                      record sent it
+//   · a follow-up    → POST /api/reminders. It is a reminder, the same row
+//                      the Reminders page and Home read. No second system.
+//   · tags           → POST / DELETE /api/partner-tags, one call per tag
+//                      that changed, picked from Bee Hub's own tag list in
+//                      its Relationship / Trade / own sections
+//   · a note, the addresses, the company link → this sheet's own save,
+//                      which writes that one column and nothing else
+// One form is open at a time.
 //
 // HOW IT SAVES. It never sends "the contact". It sends only the fields the
 // person changed in the form, each with what it said when the form opened
@@ -43,7 +52,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { TYPE_META, LEVEL_META, PARTNER_STAGES, normalizeTypes, partnerLevel, partnerStage, money } from '@/lib/network/types'
 import { changesBetween, saveErrorWords } from '@/lib/network/contact-edit'
-import { fixedDateLabel } from '@/lib/reminders'
+import {
+  ADD_ERROR_WORDS, ADDRESS_MAX, ADDRESS_TYPES, NOTE_MAX, TOUCH_METHODS, TOUCH_OUTCOMES,
+  addressFromForm, addressToForm, blankAddress, followUpBody, quickDates, stable, tagChanges, touchpointBody,
+} from '@/lib/network/contact-adds'
+import { RULED_NOT_SURE_IDS } from '@/lib/network/live-mapping'
+import { fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
+import { sectionTags } from '@/lib/tags'
 import { tagTone } from './NetworkListScreen'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
@@ -100,13 +115,13 @@ const CSS = `
 [data-network-sheet] .ns-card[data-tone="notes"]{--ns-accent:${NET.cardNotes}}
 [data-network-sheet] .ns-card[data-tone="referrals"]{--ns-accent:${NET.cardReferrals}}
 [data-network-sheet] .ns-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;margin-bottom:8px}
-[data-network-sheet] .ns-card-title{font-family:${FONT.heading};font-size:13px;font-weight:800;letter-spacing:.02em;color:${T.primary};margin:0}
+[data-network-sheet] .ns-card-title{white-space:nowrap;font-family:${FONT.heading};font-size:13px;font-weight:800;letter-spacing:.02em;color:${T.primary};margin:0}
 [data-network-sheet] .ns-saved{display:inline-flex;align-items:center;padding:1px 8px;border-radius:999px;background:${T.sageSoft};border:1px solid color-mix(in oklab,${T.primary} 30%,transparent);color:${T.primary};font-size:11px;font-weight:700}
 [data-network-sheet] .ns-list{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px 12px;margin:0;font-size:14px}
 [data-network-sheet] .ns-list dt{color:${T.mutedFg}}
 [data-network-sheet] .ns-list dd{margin:0;min-width:0;overflow-wrap:anywhere;color:${T.primary}}
 [data-network-sheet] .ns-list a{color:${T.primary};text-decoration:underline;text-decoration-color:${T.input};text-underline-offset:3px}
-[data-network-sheet] .ns-add{color:${NET.accentFg};font-size:14px!important;min-height:24px}
+[data-network-sheet] .ns-add{white-space:nowrap;color:${NET.accentFg};font-size:14px!important;min-height:24px}
 [data-network-sheet] .ns-add:hover{text-decoration:underline}
 [data-network-sheet] .ns-form{display:grid;gap:12px}
 [data-network-sheet] .ns-field{display:grid;gap:4px;font-size:12px;color:${T.mutedFg}}
@@ -137,6 +152,21 @@ const CSS = `
 [data-network-sheet] .ns-history li[data-kind="touchpoint"]::before{background:${T.primary}}
 [data-network-sheet] .ns-history li[data-kind="note"]::before{border-color:${NET.cardNotes}}
 [data-network-sheet] .ns-history small{display:block;font-size:12px;color:${T.mutedFg}}
+[data-network-sheet] select.ns-input{padding-right:38px;background-image:linear-gradient(45deg,transparent 50%,${T.mutedFg} 50%),linear-gradient(135deg,${T.mutedFg} 50%,transparent 50%);background-position:calc(100% - 21px) 50%,calc(100% - 15px) 50%;background-size:6px 6px;background-repeat:no-repeat}
+[data-network-sheet] .ns-area{height:auto;min-height:88px;padding:10px 12px;line-height:1.45;resize:vertical}
+[data-network-sheet] .ns-sub{margin:0 0 6px;font-size:11.2px;font-weight:700;text-transform:uppercase;color:${T.mutedFg}}
+[data-network-sheet] .ns-sub i{font-style:normal;font-weight:400;text-transform:none;margin-left:6px}
+[data-network-sheet] .ns-picks{display:flex;flex-wrap:wrap;gap:8px}
+[data-network-sheet] .ns-pick{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:999px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:13px!important;font-weight:600}
+[data-network-sheet] .ns-pick:hover{background:${T.muted}}
+[data-network-sheet] .ns-pick[aria-pressed="true"],[data-network-sheet] .ns-pick[aria-checked="true"]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
+[data-network-sheet] .ns-doors{display:flex;flex-wrap:wrap;gap:8px}
+[data-network-sheet] .ns-door{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:13.5px!important;font-weight:600}
+[data-network-sheet] .ns-door:hover{background:${T.muted}}
+[data-network-sheet] .ns-block{display:grid;gap:8px;padding:12px;border:1px solid ${T.border};border-radius:12px;background:${T.card}}
+[data-network-sheet] .ns-block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+[data-network-sheet] .ns-three{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px}
+[data-network-sheet] .ns-tagform{margin-top:16px;padding-top:12px;border-top:1px solid ${T.border}}
 [data-network-sheet] .ns-problem{margin:20px 24px;padding:16px;border:1px solid ${NET.warn};border-radius:10px;background:${NET.warnSoft};font-size:14px}
 @media (max-width:480px){
   [data-network-sheet] .ns-mast{padding:8px 14px 16px}
@@ -149,6 +179,15 @@ const CSS = `
   [data-network-sheet] .ns-steps{grid-template-columns:minmax(0,1fr);border-radius:14px;padding:4px}
   [data-network-sheet] .ns-step{justify-content:flex-start;gap:10px;min-height:40px;padding:0 12px;border-radius:10px;text-align:left}
   [data-network-sheet] .ns-step span{font-size:13px}
+  [data-network-sheet] .ns-three{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  [data-network-sheet] .ns-three > :first-child{grid-column:1 / -1}
+  [data-network-sheet] .ns-pick{min-height:44px}
+  [data-network-sheet] .ns-add{display:inline-flex;align-items:center;min-height:44px}
+  [data-network-sheet] .ns-card-head{flex-wrap:wrap}
+  [data-network-sheet] .ns-name-row{align-items:center}
+  [data-network-sheet] .ns-pencil{width:44px;height:44px}
+  [data-network-sheet] .ns-list{row-gap:0;align-items:center}
+  [data-network-sheet] .ns-list dt,[data-network-sheet] .ns-list dd{min-height:36px;display:flex;align-items:center}
 }
 @media (prefers-reduced-motion:reduce){[data-network-sheet],[data-network-sheet] *{animation:none!important;transition:none!important}}
 `
@@ -231,8 +270,19 @@ const formFrom = (c) => {
     name: c.name || '', title: c.title || '', company: c.company || '',
     phone: c.phone || '', email: c.email || '', website: c.website || '', howWeMet: c.howWeMet || '',
     month, day, birthdayReminder: c.birthdayReminder === true,
+    companyId: c.companyId || '',
   }
 }
+// What each add form starts as.
+const draftFor = (which, c, data) => ({
+  touchpoint: { method: 'call', status: null, notes: '' },
+  note: { text: '' },
+  followUp: { dueOn: '', note: '' },
+  tags: { picked: (data?.tags || []).map((t) => t.id) },
+  addresses: { list: (c.addresses || []).length ? c.addresses.map(addressToForm) : [blankAddress()] },
+}[which] || null)
+const errorWords = (code) => ADD_ERROR_WORDS[code] || saveErrorWords(code)
+const NOT_SAVED = 'That could not be saved. Nothing was changed. Check your connection and try again.'
 const IDENTITY_FIELDS = ['name', 'title', 'company']
 const ESSENTIAL_FIELDS = ['phone', 'email', 'website', 'howWeMet', 'birthday', 'birthdayReminder']
 
@@ -253,6 +303,9 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null) // { field, words }
   const [saved, setSaved] = useState(null) // { where, words }
+  const [draft, setDraft] = useState(null) // the open add form's boxes (slice 4b)
+  const [tagList, setTagList] = useState(null) // { sections } | { problem: true }
+  const [companies, setCompanies] = useState(null) // [{ id, name }] | 'problem'
   const sheet = useRef(null)
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
 
@@ -266,10 +319,20 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
       })
       .catch((e) => setProblem(String(e?.message || e)))
   }
+  // Read the contact again after something was added through another route.
+  // A failed re-read is not a failed save, so it never raises the "could not
+  // open" line: the sheet keeps what it shows and the answer is null.
+  const refresh = () => doFetch(`/api/network/contacts/${contactId}`)
+    .then(async (res) => { const json = await res.json().catch(() => null); if (!res.ok || !json?.contact) return null; setData(json); return json })
+    .catch(() => null)
+  const call = async (url, method, body) => {
+    const res = await doFetch(url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
+    return { res, json: await res.json().catch(() => ({})) }
+  }
 
   useEffect(() => {
     let alive = true
-    setData(null); setReferral(null); setEditing(null); setError(null); setSaved(null); setTab('details')
+    setData(null); setReferral(null); setEditing(null); setError(null); setSaved(null); setTab('details'); setDraft(null); setTagList(null); setCompanies(null)
     load()
     // Real referral numbers, from the route the old record already used.
     doFetch(`/api/partners/${contactId}/referrals`)
@@ -309,9 +372,114 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const stage = c ? partnerStage({ types, stage: c.partnerStage }) : null
   const history = useMemo(() => historyOf(c, data?.touchpoints), [c, data])
 
-  const open = (which) => { setForm(formFrom(c)); setEditing(which); setError(null); setSaved(null) }
+  // Bee Hub's own tag list for THIS contact's location (the same read every
+  // other tag picker makes), in its Relationship / Trade / own sections.
+  const loadTagList = () => {
+    setTagList(null)
+    doFetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(c.locationId)}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || !Array.isArray(json.lookups)) throw new Error('tags')
+        const rows = json.lookups.filter((t) => t.is_active !== false)
+        setTagList({ sections: sectionTags(rows, json.location?.name ? `${json.location.name}’s own` : null) })
+      })
+      .catch(() => setTagList({ problem: true }))
+  }
+  // The companies at THIS contact's location, from the companies table.
+  const loadCompanies = () => {
+    setCompanies(null)
+    doFetch(`/api/companies?location_id=${encodeURIComponent(c.locationId)}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}))
+        const rows = Array.isArray(json) ? json : json.rows
+        if (!res.ok || !Array.isArray(rows)) throw new Error('companies')
+        setCompanies(rows.map((r) => ({ id: r.id, name: r.name })))
+      })
+      .catch(() => setCompanies('problem'))
+  }
+
+  const open = (which) => {
+    if (saving) return // one thing at a time: nothing opens while a save is in flight
+    setForm(formFrom(c)); setDraft(draftFor(which, c, data)); setEditing(which); setError(null); setSaved(null)
+    if (which === 'tags') loadTagList()
+    if (which === 'identity' && !isOrg) loadCompanies()
+  }
   const cancel = () => { setEditing(null); setError(null) }
   const put = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  const putDraft = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
+  const putAddress = (i, k, v) => setDraft((d) => ({ list: d.list.map((a, n) => (n === i ? { ...a, [k]: v } : a)) }))
+
+  // One add at a time. `work` answers { words, contact? } or { error }.
+  async function run(where, work) {
+    setSaving(true); setError(null)
+    try {
+      const r = await work()
+      if (r.error) { setError(r.error); return }
+      setEditing(null); setSaved({ where, words: r.words })
+      if (r.contact) onSaved(r.contact)
+    } catch (e) {
+      setError({ field: null, words: NOT_SAVED })
+    } finally {
+      setSaving(false)
+    }
+  }
+  const refusal = (json, field = null) => ({ error: { field: json?.field || field, words: errorWords(json?.error) } })
+
+  // A touchpoint: Bee Hub's own route, the same request the old record sent.
+  const saveTouchpoint = () => run('log', async () => {
+    const { res, json } = await call('/api/touchpoints', 'POST', touchpointBody(contactId, draft))
+    if (!res.ok) return refusal(json)
+    const fresh = await refresh()
+    return { words: 'Touchpoint logged', contact: fresh?.contact || c }
+  })
+  // A note: the sheet's own save; the server appends it to what is stored.
+  const saveNote = () => run('log', async () => {
+    if (!draft.text.trim()) return { error: { field: 'note', words: errorWords('note_needs_text') } }
+    const { res, json } = await call(`/api/network/contacts/${contactId}`, 'PATCH', { addNote: { text: draft.text } })
+    if (!res.ok) return refusal(json, 'note')
+    setData(json)
+    return { words: 'Note added', contact: json.contact }
+  })
+  // A follow-up IS a reminder: Bee Hub's own reminders route, nothing else.
+  const saveFollowUp = () => run('followUp', async () => {
+    const b = followUpBody(contactId, draft)
+    if (!b.ok) return { error: { field: b.field, words: errorWords(b.error) } }
+    const { res, json } = await call('/api/reminders', 'POST', b.body)
+    if (!res.ok) return refusal(json)
+    const fresh = await refresh()
+    return { words: 'Follow-up set. It is on your Reminders page too.', contact: fresh?.contact || c }
+  })
+  // Tags: one link added or removed per tag that changed, and no others.
+  const saveTags = () => run('tags', async () => {
+    const { add, remove } = tagChanges((data.tags || []).map((t) => t.id), draft.picked)
+    const total = add.length + remove.length
+    if (!total) return { words: 'Nothing changed' }
+    let failed = 0
+    for (const id of add) {
+      const { res } = await call('/api/partner-tags', 'POST', { partner_id: contactId, tag_lookup_id: id })
+      if (!res.ok) failed += 1
+    }
+    for (const id of remove) {
+      const { res } = await call(`/api/partner-tags?partner_id=${encodeURIComponent(contactId)}&tag_lookup_id=${encodeURIComponent(id)}`, 'DELETE')
+      if (!res.ok) failed += 1
+    }
+    const fresh = await refresh()
+    if (failed) {
+      if (fresh) setDraft({ picked: (fresh.tags || []).map((t) => t.id) })
+      return { error: { field: 'tags', words: `${failed} of ${total} tag ${total === 1 ? 'change' : 'changes'} could not be saved. What is ticked above is what is saved now.` } }
+    }
+    return { words: 'Tags saved', contact: fresh?.contact || c }
+  })
+  // Addresses: the list as it was when the form opened, and as it is now.
+  const saveAddresses = () => run('addresses', async () => {
+    const from = c.addresses || []
+    const to = draft.list.map(addressFromForm)
+    if (stable(to) === stable(from)) return { words: 'Nothing changed' }
+    const { res, json } = await call(`/api/network/contacts/${contactId}`, 'PATCH', { addresses: { from, to } })
+    if (!res.ok) { if (res.status === 409) await load(); return refusal(json, 'addresses') }
+    setData(json)
+    return json.written?.length ? { words: 'Saved', contact: json.contact } : { words: 'Nothing changed' }
+  })
 
   async function save() {
     const fields = editing === 'identity' ? IDENTITY_FIELDS : ESSENTIAL_FIELDS
@@ -322,15 +490,19 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
       Object.fromEntries(fields.map((f) => [f, c[f]])),
       Object.fromEntries(fields.map((f) => [f, typed[f]])),
     )
-    if (Object.keys(changes).length === 0) { setEditing(null); setSaved({ where: editing, words: 'Nothing changed' }); return }
+    const request = {}
+    if (Object.keys(changes).length) request.changes = changes
+    // The company LINK rides with the name form, as its own named change.
+    if (editing === 'identity' && !isOrg && (form.companyId || '') !== (c.companyId || '')) request.companyId = { from: c.companyId || null, to: form.companyId || null }
+    if (Object.keys(request).length === 0) { setEditing(null); setSaved({ where: editing, words: 'Nothing changed' }); return }
     setSaving(true); setError(null)
     try {
       const res = await doFetch(`/api/network/contacts/${contactId}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes }),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError({ field: json?.field || null, words: saveErrorWords(json?.error) })
+        setError({ field: json?.field || null, words: errorWords(json?.error) })
         // Someone else changed it: show what it says now, behind the message.
         if (res.status === 409) await load()
         return
@@ -340,11 +512,25 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
       setEditing(null)
       if (json.written?.length) onSaved(json.contact)
     } catch (e) {
-      setError({ field: null, words: 'That could not be saved. Nothing was changed. Check your connection and try again.' })
+      setError({ field: null, words: NOT_SAVED })
     } finally {
       setSaving(false)
     }
   }
+  const submit = (fn) => (e) => { e.preventDefault(); if (!saving) fn() }
+  const foot = (label = 'Save', busy = 'Saving…', off = false) => (
+    <>
+      {error && <p className="ns-error" role="alert" data-save-error>{error.words}</p>}
+      <div className="ns-actions">
+        <button type="button" className="ns-btn ns-btn-ghost" onClick={cancel} disabled={saving} data-cancel>Cancel</button>
+        <button type="submit" className="ns-btn ns-btn-primary" disabled={saving || off} aria-busy={saving || undefined} data-save>{saving ? busy : label}</button>
+      </div>
+    </>
+  )
+  const companyOptions = Array.isArray(companies)
+    ? [...companies, ...(c?.linkedCompany && !companies.some((o) => o.id === c.linkedCompany.id) ? [c.linkedCompany] : [])]
+    : (c?.linkedCompany ? [c.linkedCompany] : [])
+  const quick = quickDates()
 
   const input = (field, label, extra = {}) => (
     <label className="ns-field">{label}
@@ -384,6 +570,22 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
               {input('name', 'Name', { required: true, autoFocus: true })}
               {!isOrg && input('title', 'Job title')}
               {!isOrg && input('company', c.linkedCompany ? `Company text (linked company: ${c.linkedCompany.name})` : 'Company')}
+              {/* The company LINK: picked from the Companies list at this
+                  contact's location. It never reads or changes the text above. */}
+              {!isOrg && (
+                <label className="ns-field">Linked company
+                  <select className="ns-input" value={form.companyId} disabled={saving || !Array.isArray(companies)} onChange={(e) => put('companyId', e.target.value)}
+                    aria-invalid={error?.field === 'companyId' || undefined} data-field="companyId">
+                    <option value="">No linked company</option>
+                    {companyOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                  <span data-company-hint>
+                    {companies === null && 'Loading your Companies list…'}
+                    {companies === 'problem' && 'Your Companies list could not be loaded, so the link is left as it is.'}
+                    {Array.isArray(companies) && (companies.length ? 'Picked from your Companies list. It does not change the company text above.' : 'There are no companies at this location yet.')}
+                  </span>
+                </label>
+              )}
               {formFoot}
             </form>
           )}
@@ -417,7 +619,9 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                 {/* Only when there is something to show. A partner who has sent
                     nobody yet gets no "$0" badge: on the first screenshots it
                     was the loudest thing on an otherwise empty sheet. */}
-                {referral && referral.count > 0 && (
+                {/* And never for the four contacts Kevin ruled are not referral
+                    partners, even though a lead still points at one of them. */}
+                {referral && referral.count > 0 && !RULED_NOT_SURE_IDS.includes(c.id) && (
                   <div className="ns-badge" aria-label="Work they've sent you" data-referral-badge>
                     <span>Work they&rsquo;ve sent you</span>
                     <strong>{money(referral.revenue)}</strong>
@@ -425,11 +629,33 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                   </div>
                 )}
               </div>
-              <div className="ns-tags" aria-label="Tags" data-sheet-tags>
-                {(data.tags || []).length === 0
-                  ? <p className="ns-quiet">No tags yet.</p>
-                  : data.tags.map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}>{t.label}</span> })}
-              </div>
+              {editing === 'tags' ? (
+                <form className="ns-form ns-tagform" onSubmit={submit(saveTags)} data-form="tags">
+                  {!tagList && <p className="ns-quiet" data-tags-loading>Loading Bee Hub&rsquo;s tags…</p>}
+                  {tagList?.problem && <p className="ns-error" role="alert" data-tags-problem>The tag list could not be loaded. Nothing has been changed.</p>}
+                  {(tagList?.sections || []).map((s) => (
+                    <div key={s.key} role="group" aria-label={s.label} data-tag-section={s.key}>
+                      <p className="ns-sub">{s.label}<i>{s.hint}</i></p>
+                      <div className="ns-picks">
+                        {s.rows.map((t) => {
+                          const on = draft.picked.includes(t.id)
+                          return <button type="button" key={t.id} className="ns-pick" aria-pressed={on} disabled={saving} data-pick-tag={t.id}
+                            onClick={() => setDraft((d) => ({ picked: on ? d.picked.filter((x) => x !== t.id) : [...d.picked, t.id] }))}>{t.label}</button>
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {foot('Save tags', 'Saving…', !tagList?.sections)}
+                </form>
+              ) : (
+                <div className="ns-tags" aria-label="Tags" data-sheet-tags>
+                  {(data.tags || []).length === 0
+                    ? <p className="ns-quiet">No tags yet.</p>
+                    : data.tags.map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}>{t.label}</span> })}
+                  <button type="button" className="ns-add" onClick={() => open('tags')} data-edit="tags">{(data.tags || []).length ? 'Change tags' : '+ add tags'}</button>
+                  {saved?.where === 'tags' && <span className="ns-saved" role="status" data-saved>{saved.words}</span>}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -488,13 +714,15 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                         ['Website', c.website ? webWords(c.website) : null, c.website ? webHref(c.website) : null, 'website'],
                         ['How you met', c.howWeMet, null, 'howWeMet'],
                         ...(isOrg ? [] : [['Birthday', c.birthday ? `${c.birthday}${c.birthdayReminder ? ' · reminder on' : ''}` : null, null, 'birthday']]),
+                        // With no address there is no Address card; this line is its way in.
+                        ...((c.addresses || []).length ? [] : [['Address', null, null, 'addresses']]),
                       ].map(([label, value, href, key]) => (
                         <React.Fragment key={key}>
                           <dt>{label}</dt>
                           <dd data-value={key}>
                             {value
                               ? (href ? <a href={href} {...(key === 'website' ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{value}</a> : value)
-                              : <button type="button" className="ns-add" onClick={() => open('essentials')} data-add={key}>+ add {label.toLowerCase()}</button>}
+                              : <button type="button" className="ns-add" onClick={() => open(key === 'addresses' ? 'addresses' : 'essentials')} data-add={key}>+ add {label.toLowerCase()}</button>}
                           </dd>
                         </React.Fragment>
                       ))}
@@ -518,20 +746,130 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                   </Card>
                 )}
 
-                {(c.addresses || []).length > 0 && (
-                  <Card title={c.addresses.length === 1 ? 'Address' : 'Addresses'} tone="notes" testId="addresses">
-                    <ul className="ns-rows" data-addresses>
-                      {c.addresses.map((a, i) => (
-                        <li key={i}>{a.type && <small>{a.type}</small>}{addressLines(a).map((l, n) => <span key={n} style={{ display: 'block' }}>{l}</span>)}</li>
-                      ))}
-                    </ul>
+                <Card title="Touchpoints & notes" tone="notes" testId="log" saved={saved?.where === 'log' ? saved.words : null}>
+                  {editing === 'touchpoint' && (
+                    <form className="ns-form" onSubmit={submit(saveTouchpoint)} data-form="touchpoint">
+                      <div role="radiogroup" aria-label="How you were in touch">
+                        <p className="ns-sub">How you were in touch</p>
+                        <div className="ns-picks">
+                          {TOUCH_METHODS.map((m) => <button type="button" key={m.value} role="radio" aria-checked={draft.method === m.value} className="ns-pick" disabled={saving} onClick={() => putDraft('method', m.value)} data-method={m.value}>{m.label}</button>)}
+                        </div>
+                      </div>
+                      <div role="group" aria-label="How it went">
+                        <p className="ns-sub">How it went<i>optional</i></p>
+                        <div className="ns-picks">
+                          {TOUCH_OUTCOMES.map((o) => <button type="button" key={o.value} aria-pressed={draft.status === o.value} className="ns-pick" disabled={saving} onClick={() => putDraft('status', draft.status === o.value ? null : o.value)} data-outcome={o.value}>{o.label}</button>)}
+                        </div>
+                      </div>
+                      <label className="ns-field">Notes (optional)
+                        <textarea className="ns-input ns-area" value={draft.notes} disabled={saving} onChange={(e) => putDraft('notes', e.target.value)} data-field="touchNotes" />
+                      </label>
+                      {foot('Log touchpoint', 'Logging…')}
+                    </form>
+                  )}
+                  {editing === 'note' && (
+                    <form className="ns-form" onSubmit={submit(saveNote)} data-form="note">
+                      <label className="ns-field">Note
+                        <textarea className="ns-input ns-area" value={draft.text} disabled={saving} maxLength={NOTE_MAX} autoFocus aria-invalid={error?.field === 'note' || undefined}
+                          onChange={(e) => putDraft('text', e.target.value)} data-field="note" />
+                      </label>
+                      {foot('Add note', 'Adding…')}
+                    </form>
+                  )}
+                  {editing !== 'touchpoint' && editing !== 'note' && (
+                    <>
+                      <div className="ns-doors">
+                        <button type="button" className="ns-door" onClick={() => open('touchpoint')} data-edit="touchpoint">+ Log a touchpoint</button>
+                        <button type="button" className="ns-door" onClick={() => open('note')} data-edit="note">+ Add a note</button>
+                      </div>
+                      <p className="ns-quiet" style={{ marginTop: '10px' }} data-log-line>
+                        {whenLabel(c.lastContactedAt) ? `Last in touch ${whenLabel(c.lastContactedAt)}. ` : ''}
+                        {history.length ? `Everything logged is under History (${history.length}).` : `Nothing logged with ${firstName(c.name)} yet.`}
+                      </p>
+                    </>
+                  )}
+                </Card>
+
+                {((c.addresses || []).length > 0 || editing === 'addresses') && (
+                  <Card title={(c.addresses || []).length > 1 ? 'Addresses' : 'Address'} tone="notes" testId="addresses" saved={saved?.where === 'addresses' ? saved.words : null}
+                    action={editing !== 'addresses' && <button type="button" className="ns-pencil" onClick={() => open('addresses')} aria-label="Edit addresses" title="Edit addresses" data-edit="addresses"><IconPencil /></button>}>
+                    {editing === 'addresses' ? (
+                      <form className="ns-form" onSubmit={submit(saveAddresses)} data-form="addresses">
+                        {draft.list.length === 0 && <p className="ns-quiet" data-no-address>No address. Saving now removes the address from this contact.</p>}
+                        {draft.list.map((a, i) => (
+                          <div className="ns-block" key={i} data-address-block={i}>
+                            <div className="ns-block-head">
+                              <label className="ns-field" style={{ flex: 1 }}>Kind of address
+                                <select className="ns-input" value={a.type} disabled={saving} onChange={(e) => putAddress(i, 'type', e.target.value)} data-field={`type-${i}`}>
+                                  {[...ADDRESS_TYPES, ...(ADDRESS_TYPES.includes(a.type) ? [] : [a.type])].map((t) => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </label>
+                              <button type="button" className="ns-add" disabled={saving} onClick={() => setDraft((d) => ({ list: d.list.filter((_, n) => n !== i) }))} data-remove-address={i}>Remove</button>
+                            </div>
+                            {a.full ? (
+                              <>
+                                <label className="ns-field">Street
+                                  <input className="ns-input" value={a.street} disabled={saving} onChange={(e) => putAddress(i, 'street', e.target.value)} data-field={`street-${i}`} />
+                                </label>
+                                <label className="ns-field">Suite or unit
+                                  <input className="ns-input" value={a.apt} disabled={saving} onChange={(e) => putAddress(i, 'apt', e.target.value)} data-field={`apt-${i}`} />
+                                </label>
+                                <div className="ns-three">
+                                  <label className="ns-field">City
+                                    <input className="ns-input" value={a.city} disabled={saving} onChange={(e) => putAddress(i, 'city', e.target.value)} data-field={`city-${i}`} />
+                                  </label>
+                                  <label className="ns-field">State
+                                    <input className="ns-input" value={a.state} disabled={saving} onChange={(e) => putAddress(i, 'state', e.target.value)} data-field={`state-${i}`} />
+                                  </label>
+                                  <label className="ns-field">Zip
+                                    <input className="ns-input" value={a.zip} disabled={saving} inputMode="numeric" onChange={(e) => putAddress(i, 'zip', e.target.value)} data-field={`zip-${i}`} />
+                                  </label>
+                                </div>
+                              </>
+                            ) : (
+                              <label className="ns-field">Address
+                                <input className="ns-input" value={a.value} disabled={saving} onChange={(e) => putAddress(i, 'value', e.target.value)} data-field={`value-${i}`} />
+                              </label>
+                            )}
+                          </div>
+                        ))}
+                        {draft.list.length < ADDRESS_MAX && <button type="button" className="ns-add" disabled={saving} onClick={() => setDraft((d) => ({ list: [...d.list, blankAddress()] }))} data-add-address>{draft.list.length ? '+ add another address' : '+ add an address'}</button>}
+                        {foot()}
+                      </form>
+                    ) : (
+                      <ul className="ns-rows" data-addresses>
+                        {c.addresses.map((a, i) => (
+                          <li key={i}>{a.type && <small>{a.type}</small>}{addressLines(a).map((l, n) => <span key={n} style={{ display: 'block' }}>{l}</span>)}</li>
+                        ))}
+                      </ul>
+                    )}
                   </Card>
                 )}
 
-                <Card title="Follow-ups" tone="referrals" testId="follow-ups">
-                  {(data.followUps || []).length === 0
-                    ? <p className="ns-quiet" data-follow-ups-empty>No follow-up set. Yours show here and on your Reminders page.</p>
-                    : <ul className="ns-rows" data-follow-ups>{data.followUps.map((r) => <li key={r.id}>{r.note || 'Follow up'}<small>{fixedDateLabel(r.due_on)}</small></li>)}</ul>}
+                <Card title="Follow-ups" tone="referrals" testId="follow-ups" saved={saved?.where === 'followUp' ? saved.words : null}
+                  action={editing !== 'followUp' && <button type="button" className="ns-add" onClick={() => open('followUp')} data-edit="followUp">+ Set a follow-up</button>}>
+                  {/* The follow-ups already set stay on top; the form opens under them. */}
+                  {(data.followUps || []).length > 0 && <ul className="ns-rows" data-follow-ups>{data.followUps.map((r) => <li key={r.id}>{r.note || 'Follow up'}<small>{fixedDateLabel(r.due_on)}</small></li>)}</ul>}
+                  {editing === 'followUp' && (
+                    <form className="ns-form" onSubmit={submit(saveFollowUp)} data-form="followUp" style={{ marginTop: (data.followUps || []).length ? '16px' : 0 }}>
+                      <div role="group" aria-label="When">
+                        <p className="ns-sub">When</p>
+                        <div className="ns-picks">
+                          <button type="button" className="ns-pick" aria-pressed={draft.dueOn === quick.tomorrow} disabled={saving} onClick={() => putDraft('dueOn', quick.tomorrow)} data-quick="tomorrow">Tomorrow</button>
+                          <button type="button" className="ns-pick" aria-pressed={draft.dueOn === quick.nextWeek} disabled={saving} onClick={() => putDraft('dueOn', quick.nextWeek)} data-quick="nextWeek">Next week</button>
+                        </div>
+                      </div>
+                      <label className="ns-field">Or pick a day
+                        <input type="date" className="ns-input" value={draft.dueOn} disabled={saving} aria-invalid={error?.field === 'dueOn' || undefined} onChange={(e) => putDraft('dueOn', e.target.value)} data-field="dueOn" />
+                      </label>
+                      <label className="ns-field">What it&rsquo;s about
+                        <input className="ns-input" value={draft.note} disabled={saving} maxLength={REMINDER_NOTE_MAX} aria-invalid={error?.field === 'note' || undefined} onChange={(e) => putDraft('note', e.target.value)} data-field="followNote" />
+                      </label>
+                      <p className="ns-quiet">This is one of your reminders. It shows on your Reminders page, and on Home on its day.</p>
+                      {foot('Set follow-up', 'Setting…')}
+                    </form>
+                  )}
+                  {(data.followUps || []).length === 0 && editing !== 'followUp' && <p className="ns-quiet" data-follow-ups-empty>No follow-up set. Yours show here and on your Reminders page.</p>}
                 </Card>
 
                 {(c.relationship || (c.specialties || []).length > 0 || (c.nextSteps || []).length > 0) && (

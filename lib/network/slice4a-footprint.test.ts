@@ -88,9 +88,22 @@ describe('slice 4a left everything outside the new Network screens alone', () =>
     // The one time it names the old address is to READ the referral count.
     const old = sheet.split('\n').filter((l) => l.includes('/api/partners'))
     expect(old.map((l) => l.trim())).toEqual(['doFetch(`/api/partners/${contactId}/referrals`)'])
-    // And it sends exactly one kind of write: a PATCH, to the new address.
-    const writes = sheet.split('\n').filter((l) => /method:/.test(l))
-    expect(writes).toHaveLength(1)
-    expect(writes[0]).toContain("'PATCH'")
+    // Every write the sheet can send, by address and kind. Slice 4b added the
+    // last five on purpose: a note and addresses through the sheet's own
+    // save, and a touchpoint, a follow-up and tags through the routes Bee Hub
+    // already had for them. Nothing else, and never a write to /api/partners.
+    const writes = Array.from(sheet.matchAll(/call\((['`][^'`]+['`]), '(POST|PATCH|DELETE)'/g)).map((m) => `${m[2]} ${m[1]!.slice(1, -1).split('?')[0]}`)
+    expect(writes).toEqual([
+      'POST /api/touchpoints',
+      'PATCH /api/network/contacts/${contactId}',
+      'POST /api/reminders',
+      'POST /api/partner-tags',
+      'DELETE /api/partner-tags',
+      'PATCH /api/network/contacts/${contactId}',
+    ])
+    // Outside that one helper there is a single direct write: the name form.
+    const direct = sheet.split('\n').filter((l) => /method: '(GET|POST|PUT|PATCH|DELETE)'/.test(l))
+    expect(direct).toHaveLength(1)
+    expect(direct[0]).toContain("'PATCH'")
   })
 })

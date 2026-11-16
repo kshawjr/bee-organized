@@ -87,7 +87,7 @@ beforeEach(() => {
     partners: [stored(), { ...stored(), id: GONE, deleted_at: '2026-10-01T00:00:00Z' }],
     companies: [{ id: CO, name: 'Compass Greenwood Village', deleted_at: null }],
     locations: [{ id: LOC, name: 'Greensboro' }],
-    lookups: [{ id: 't1', label: 'Realtor', attrs: { section: 'trade' }, location_id: null }],
+    lookups: [{ id: 't1', label: 'Realtor', attrs: { section: 'trade' }, location_id: null, is_active: true }],
     touchpoints: [{ id: 'tp1', partner_id: ID, kind: 'reach_out', method: 'call', label: 'Phone Call', status: 'reached', notes: 'Spring listings', occurred_at: '2026-09-14T15:00:00Z' }],
     reminders: [
       { id: 'r1', user_id: ME, partner_id: ID, due_on: '2026-11-20', note: 'Coffee', done_at: null },
@@ -299,7 +299,8 @@ describe('nothing outside partners is written', () => {
     const src = readFileSync(join(process.cwd(), 'app/api/network/contacts/[id]/route.ts'), 'utf8')
     const check = src.indexOf('const blocked = await readOnlyWriteBlock({ role: caller.role }, (stored as any).location_id)\n  if (blocked) return blocked')
     expect(check).toBeGreaterThan(0)
-    expect(check).toBeLessThan(src.indexOf('const plan = planContactSave('))
+    expect(check).toBeLessThan(src.indexOf('planContactSave(row'))
+    expect(check).toBeLessThan(src.indexOf('planContactAdds(row'))
     expect(check).toBeLessThan(src.indexOf('.update('))
   })
 })

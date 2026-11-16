@@ -24,9 +24,20 @@
 // those columns and updated_at, and nothing else. If the set is empty it
 // writes NOTHING: no update is sent, and updated_at does not move.
 //
+// SLICE 4b adds three more things the same save can carry, each under the
+// same rule (lib/network/contact-adds.ts planContactAdds):
+//   addNote:   { text }        the server appends it to the stored notes
+//   addresses: { from, to }    the address list; 409 if it moved meanwhile
+//   companyId: { from, to }    the company LINK, an id from the companies
+//                              table at the contact's own location, or null
+// One request, one update: a save that changes a name and the link writes
+// those two columns and updated_at together.
+//
 // It never writes: type, stage, tier, network_types, partner_level,
-// partner_stage, tags, addresses, company_id, notes, next_steps,
-// relationship, specialties, met_date, or any other table. (The older
+// partner_stage, next_steps, relationship, specialties, met_date, or any
+// other table. Tags, touchpoints and follow-ups are not written here at
+// all: the sheet sends those to the routes Bee Hub already has for them
+// (/api/partner-tags, /api/touchpoints, /api/reminders). (The older
 // /api/partners/[id] PATCH writes whatever keys it is sent, and adds a
 // timeline note when a phone field holds two numbers; this one refuses such
 // a field instead, so that it stays a one-table, named-columns write.)
@@ -48,6 +59,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { planContactAdds, ADD_KEYS } from '@/lib/network/contact-adds'
 import { planContactSave } from '@/lib/network/contact-edit'
 
 export const runtime = 'nodejs'
@@ -60,8 +72,9 @@ const SHEET_COLS =
   'network_types, partner_level, partner_stage, birthday, birthday_reminder, ' +
   'last_contacted_at, created_at, updated_at, deleted_at, partner_tags(tag_lookup_id)'
 
-// What a save compares against. The nine editable columns and nothing more.
-const EDIT_COLS = 'id, location_id, deleted_at, name, title, company, phone, email, website, how_we_met, birthday, birthday_reminder'
+// What a save compares against: the nine editable columns, and the three
+// slice 4b can add to. Nothing more.
+const EDIT_COLS = 'id, location_id, deleted_at, name, title, company, phone, email, website, how_we_met, birthday, birthday_reminder, notes, addresses, company_id'
 
 async function gate() {
   const supabase = await createServerSupabaseClient()
@@ -116,7 +129,9 @@ async function loadSheet(id: string, userId: string) {
       : Promise.resolve({ data: null, error: null }),
     supabaseService.from('locations').select('id, name').eq('id', r.location_id).maybeSingle(),
     tagIds.length
-      ? supabaseService.from('lookups').select('id, label, attrs, location_id').in('id', tagIds)
+      // A switched-off tag is hidden here as it is on the old record: the
+      // link is kept, so switching the tag back on brings it back.
+      ? supabaseService.from('lookups').select('id, label, attrs, location_id').in('id', tagIds).eq('is_active', true)
       : Promise.resolve({ data: [], error: null }),
     supabaseService.from('touchpoints').select('id, kind, method, label, status, notes, occurred_at').eq('partner_id', id).order('occurred_at', { ascending: false }),
     supabaseService.from('reminders').select('id, due_on, note').eq('user_id', userId).eq('partner_id', id).is('done_at', null).order('due_on', { ascending: true }),
@@ -171,9 +186,38 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const blocked = await readOnlyWriteBlock({ role: caller.role }, (stored as any).location_id)
   if (blocked) return blocked
 
-  const plan = planContactSave(stored as Record<string, unknown>, body?.changes)
-  if (!plan.ok) {
-    return NextResponse.json({ error: plan.error, field: plan.field ?? null, current: plan.current ?? null, written: [] }, { status: plan.status })
+  const row = stored as Record<string, unknown>
+  const hasAdds = !!body && typeof body === 'object' && ADD_KEYS.some((k) => k in body)
+  const refused = (p: { status: number; error: string; field?: string; current?: unknown }) =>
+    NextResponse.json({ error: p.error, field: p.field ?? null, current: p.current ?? null, written: [] }, { status: p.status })
+
+  // The nine fields (slice 4a). Asked for whenever `changes` is sent, and
+  // also when nothing else is, so an empty save is still refused as before.
+  const fields = body?.changes !== undefined || !hasAdds ? planContactSave(row, body?.changes) : null
+  if (fields && !fields.ok) return refused(fields)
+
+  // The note, the addresses and the company link (slice 4b).
+  let company: any = null
+  let author = ''
+  if (hasAdds) {
+    const to = body?.companyId?.to
+    if (typeof to === 'string' && UUID.test(to)) {
+      const found = await supabaseService.from('companies').select('id, location_id, deleted_at').eq('id', to).maybeSingle()
+      if (found.error) return NextResponse.json({ error: found.error.message, written: [] }, { status: 500 })
+      company = found.data
+    }
+    if ('addNote' in body) {
+      const me = await supabaseService.from('hub_users').select('id, full_name, first_name').eq('id', caller.userId).maybeSingle()
+      author = (me.data as any)?.first_name || (me.data as any)?.full_name || ''
+    }
+  }
+  const adds = planContactAdds(row, hasAdds ? body : {}, { author, now: new Date(), company })
+  if (!adds.ok) return refused(adds)
+
+  const plan = {
+    update: { ...(fields && fields.ok ? fields.update : {}), ...adds.update },
+    written: [...(fields && fields.ok ? fields.written : []), ...adds.written],
+    notes: [...(fields && fields.ok ? fields.notes : []), ...adds.notes],
   }
 
   // Nothing really changed: write nothing at all. updated_at does not move.
