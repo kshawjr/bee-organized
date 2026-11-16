@@ -19,7 +19,7 @@
 //     columns.
 //
 // What was proved once by running, and is recorded rather than re-run here
-// (the proof script and its 40 results are beside the dry-run report in
+// (the proof script and its 41 results are beside the dry-run report in
 // ~/Projects/bee-organized-repair-reports/2026-11-15/): every old column on
 // every row unchanged after the backfill; a second backfill changes 0 rows;
 // both undos return the table to where it started; nothing outside partners
@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { mapLivePartner, summarizeMapping } from './live-mapping'
+import { RULED_NOT_SURE_IDS, mapLivePartner, summarizeMapping } from './live-mapping'
 import { NET_TYPES, PARTNER_LEVELS, PARTNER_STAGES } from './types'
 import fixture from './__fixtures__/live-mapping-sql.json'
 
@@ -174,6 +174,13 @@ describe('The check query: read-only', () => {
 
 describe('The SQL rules and the TypeScript rules give the same answer', () => {
   const answer = (m: ReturnType<typeof mapLivePartner>) => `${m.types.join('+')}|${m.level ?? ''}|${m.stage ?? ''}`
+  // A shape marked `ruled` is one of the four contacts held by id (rule 6). The
+  // fixture carries no ids, so any one of the four stands in: the rule is the
+  // same for each.
+  type Shape = (typeof fixture.shapes)[number]
+  const factsOf = (s: Shape) => ({
+    id: s.ruled ? RULED_NOT_SURE_IDS[0] : null, tier: s.tier, stage: s.stage, tagLabels: s.tags, hasSentLead: s.sent,
+  })
 
   it('the SQL in the backfill is the SQL the answers were captured from', () => {
     expect(sha256(mappingBlock(BACKFILL))).toBe(fixture.mappingBlockSha256)
@@ -182,7 +189,7 @@ describe('The SQL rules and the TypeScript rules give the same answer', () => {
     let rows = 0
     let live = 0
     for (const s of fixture.shapes) {
-      const ts = mapLivePartner({ tier: s.tier, stage: s.stage, tagLabels: s.tags, hasSentLead: s.sent })
+      const ts = mapLivePartner(factsOf(s))
       expect({ types: ts.types, level: ts.level, stage: ts.stage }, JSON.stringify(s))
         .toEqual({ types: s.types, level: s.level, stage: s.stage_out })
       rows += s.live + s.binned
@@ -191,10 +198,23 @@ describe('The SQL rules and the TypeScript rules give the same answer', () => {
     expect([rows, live]).toEqual([269, 263])
     expect([fixture.rows, fixture.live]).toEqual([269, 263])
   })
-  it('which, counted by the TypeScript rules, is 55 Referral partners (6 also Vendor), 15 Vendor only, 193 Not sure yet', () => {
-    const live = fixture.shapes.flatMap((s) => Array.from({ length: s.live }, () => ({ tier: s.tier, stage: s.stage, tagLabels: s.tags, hasSentLead: s.sent })))
+  it('which, counted by the TypeScript rules, is 51 Referral partners (6 also Vendor), 15 Vendor only, 197 Not sure yet', () => {
+    const live = fixture.shapes.flatMap((s) => Array.from({ length: s.live }, () => factsOf(s)))
     const sum = summarizeMapping(live)
-    expect([sum.total, sum.referralPartner, sum.referralAndVendor, sum.vendorOnly, sum.notSure]).toEqual([263, 55, 6, 15, 193])
+    expect([sum.total, sum.referralPartner, sum.referralAndVendor, sum.vendorOnly, sum.notSure, sum.ruledNotSure]).toEqual([263, 51, 6, 15, 197, 4])
+  })
+  it('the four contacts Kevin ruled on are the same four ids in the SQL and in the TypeScript', () => {
+    const inSql = Array.from(mappingBlock(BACKFILL).matchAll(/'([0-9a-f]{8}-[0-9a-f-]{27})'/g)).map((m) => m[1])
+    expect(inSql).toEqual([...RULED_NOT_SURE_IDS])
+    expect(fixture.shapes.filter((s) => s.ruled).reduce((n, s) => n + s.live + s.binned, 0)).toBe(4)
+  })
+  it('and each of the four is Not sure yet in both, even given a Power tier, both tags and a sent lead', () => {
+    const f = fixture.ruled.facts
+    expect(fixture.ruled.answers.map((a) => a.id)).toEqual([...RULED_NOT_SURE_IDS])
+    for (const a of fixture.ruled.answers) {
+      expect(a.a, a.id).toBe('unsure||')
+      expect(answer(mapLivePartner({ id: a.id, tier: f.tier, stage: f.stage, tagLabels: f.tags, hasSentLead: f.sent })), a.id).toBe(a.a)
+    }
   })
   it('on a made-up grid of every tier, stage, tag set and sent-a-lead: 1,728 combinations', () => {
     const g = fixture.grid

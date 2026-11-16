@@ -4,8 +4,8 @@
  "rows": 269,
  "live": 263,
  "productionOldColumnsFingerprint": "584feac9215993451ac8263416fb0af3",
- "productionMappingFingerprint": "47faf225129dcf2916b40b7bcf5f71b7",
- "mappingBlockSha256": "dd4f1da5d2f88fadfed91aceb9ce96823bf6ac13ac7f0029fef6dcaedbef5339",
+ "productionMappingFingerprint": "a2bfad2a81a6b24143a90abb6bbde157",
+ "mappingBlockSha256": "3fed76fabfc0ebaad6f256d5a6635fc7c6dca0855e9cd8fde4de2bb1addf718a",
  "shapes": [
   {
    "live": 100,
@@ -18,7 +18,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 21,
@@ -33,10 +34,11 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
-   "live": 20,
+   "live": 18,
    "binned": 0,
    "tier": null,
    "stage": "New Contact",
@@ -46,7 +48,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 11,
@@ -61,7 +64,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 10,
@@ -74,7 +78,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 8,
@@ -87,7 +92,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 7,
@@ -102,7 +108,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 6,
@@ -117,7 +124,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 4,
@@ -132,7 +140,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 4,
@@ -147,7 +156,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 4,
@@ -162,7 +172,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 3,
@@ -177,7 +188,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 3,
@@ -192,7 +204,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 3,
@@ -207,7 +220,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 3,
@@ -223,7 +237,8 @@
     "vendor"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 2,
@@ -233,10 +248,25 @@
    "tags": [],
    "sent": true,
    "types": [
-    "partner"
+    "unsure"
    ],
-   "level": "referral",
-   "stage_out": "New Contact"
+   "level": null,
+   "stage_out": null,
+   "ruled": true
+  },
+  {
+   "live": 2,
+   "binned": 0,
+   "tier": null,
+   "stage": "New Contact",
+   "tags": [],
+   "sent": true,
+   "types": [
+    "unsure"
+   ],
+   "level": null,
+   "stage_out": null,
+   "ruled": true
   },
   {
    "live": 2,
@@ -251,7 +281,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 2,
@@ -266,7 +297,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 2,
@@ -281,7 +313,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 2,
@@ -297,7 +330,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 2,
@@ -312,7 +346,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 2,
@@ -327,7 +362,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 2,
@@ -342,7 +378,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -357,7 +394,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -372,7 +410,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -389,7 +428,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -406,7 +446,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -421,7 +462,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -437,7 +479,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -453,7 +496,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -468,7 +512,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -483,7 +528,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -499,7 +545,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -515,7 +562,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -531,7 +579,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -546,7 +595,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -562,7 +612,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -577,7 +628,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -590,7 +642,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -605,7 +658,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "Reaching Out"
+   "stage_out": "Reaching Out",
+   "ruled": false
   },
   {
    "live": 1,
@@ -620,7 +674,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -636,7 +691,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -651,7 +707,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -667,7 +724,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -682,7 +740,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -697,7 +756,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -713,7 +773,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -729,7 +790,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -744,7 +806,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -759,7 +822,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -774,7 +838,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -790,7 +855,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -806,7 +872,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -821,7 +888,8 @@
     "unsure"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   },
   {
    "live": 1,
@@ -839,7 +907,8 @@
     "vendor"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -854,7 +923,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -869,7 +939,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -885,7 +956,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -901,7 +973,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -916,7 +989,8 @@
     "partner"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -933,7 +1007,8 @@
     "vendor"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -950,7 +1025,8 @@
     "vendor"
    ],
    "level": "referral",
-   "stage_out": "New Contact"
+   "stage_out": "New Contact",
+   "ruled": false
   },
   {
    "live": 1,
@@ -965,7 +1041,8 @@
     "vendor"
    ],
    "level": null,
-   "stage_out": null
+   "stage_out": null,
+   "ruled": false
   }
  ],
  "grid": {
@@ -2755,6 +2832,36 @@
    "partner+vendor|referral|New Contact",
    "unsure||",
    "partner|referral|New Contact"
+  ]
+ },
+ "ruled": {
+  "about": "The SQL rules answer for the four ids Kevin ruled Not sure yet, each given tier Power Partner, stage Active Partner, tags Partner and Vendor, and a sent lead.",
+  "facts": {
+   "tier": "power-partner",
+   "stage": "Active Partner",
+   "tags": [
+    "Partner",
+    "Vendor"
+   ],
+   "sent": true
+  },
+  "answers": [
+   {
+    "id": "0988e56f-ee8b-4ca1-804b-8733e9e0f797",
+    "a": "unsure||"
+   },
+   {
+    "id": "2700f38b-cea1-4878-ace9-58b5737612e3",
+    "a": "unsure||"
+   },
+   {
+    "id": "32ab75f7-daf6-4dc0-884b-8c3b6129776a",
+    "a": "unsure||"
+   },
+   {
+    "id": "ee138794-65e1-4146-bc79-f334a79d822c",
+    "a": "unsure||"
+   }
   ]
  }
 }

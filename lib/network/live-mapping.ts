@@ -18,6 +18,12 @@
 //      in bare): Not sure yet. A trade tag is NEVER used to guess a type.
 //   5. The live stage carries across only for Referral partners; live
 //      Dormant becomes Gone quiet. Every other type drops its stage.
+//   6. FOUR CONTACTS KEVIN RULED ON BY NAME (2026-11-15) are Not sure yet
+//      whatever rules 1 and 2 say. Each one counted as a Referral partner
+//      only because a single client's "referred by" points at it, and none
+//      is one: they are Bee Organized's own people and locations, and a test
+//      entry. They are held here by id (RULED_NOT_SURE_IDS); their names are
+//      in the dry-run report, not in the code.
 //
 // The live `type` column (partner / contact) is deliberately not an input:
 // it is 'partner' on 262 of 263 rows, a default nobody chose.
@@ -50,8 +56,22 @@ export const LIVE_TIER = {
 export const REFERRAL_TAG_LABELS = ['partner', 'referral'] as const
 export const VENDOR_TAG_LABELS = ['vendor'] as const
 
+/**
+ * Rule 6. The partners.id of the four contacts Kevin ruled are NOT Referral
+ * partners. The backfill SQL holds the same four ids; a test fails if the
+ * two lists ever differ.
+ */
+export const RULED_NOT_SURE_IDS: readonly string[] = [
+  '0988e56f-ee8b-4ca1-804b-8733e9e0f797',
+  '2700f38b-cea1-4878-ace9-58b5737612e3',
+  '32ab75f7-daf6-4dc0-884b-8c3b6129776a',
+  'ee138794-65e1-4146-bc79-f334a79d822c',
+]
+
 /** What the mapping needs to know about one live contact. */
 export type LivePartnerFacts = {
+  /** partners.id. Only rule 6 reads it; without it rule 6 cannot apply. */
+  id?: string | null
   /** partners.tier — the key ('referral-partner') or the label ('Referral Partner'). */
   tier?: string | null
   /** partners.stage, as stored. */
@@ -114,6 +134,23 @@ export function mapLivePartner(facts: LivePartnerFacts): MappedContact {
   if (hasTag(VENDOR_TAG_LABELS)) vendorReasons.push('tagged Vendor')
   const isVendor = vendorReasons.length > 0
 
+  // Rule 6 — ruled by name. Nothing above counts for these four.
+  if (RULED_NOT_SURE_IDS.includes(clean(facts.id))) {
+    const would = [...refReasons, ...vendorReasons]
+    const liveStage = String(facts.stage ?? '').trim()
+    return {
+      types: ['unsure'],
+      level: null,
+      stage: null,
+      why: ['Not sure yet: Kevin ruled this contact is not a Referral partner'],
+      flags: [
+        ...(would.length ? [`Ruled Not sure yet; the rules alone would have read: ${would.join(', ')}`] : []),
+        ...(liveStage && clean(liveStage) !== clean(DEFAULT_PARTNER_STAGE)
+          ? [`Live stage “${liveStage}” dropped: only a Referral partner has a stage`] : []),
+      ],
+    }
+  }
+
   const types: NetType[] = []
   if (isReferral) { types.push('partner'); why.push(`Referral partner: ${refReasons.join(', ')}`) }
   if (isVendor) { types.push('vendor'); why.push(`Vendor / Service Provider: ${vendorReasons.join(', ')}`) }
@@ -163,12 +200,14 @@ export type MappingSummary = {
   vendorOnly: number
   notSure: number
   powerPartner: number
+  /** Rule 6: contacts Kevin ruled Not sure yet by name. Counted in notSure too. */
+  ruledNotSure: number
   flagged: number
 }
 
 /** Counts for a batch of live contacts — the top of slice 2's dry-run report. */
 export function summarizeMapping(rows: readonly LivePartnerFacts[]): MappingSummary {
-  const s: MappingSummary = { total: 0, referralPartner: 0, referralAndVendor: 0, vendorOnly: 0, notSure: 0, powerPartner: 0, flagged: 0 }
+  const s: MappingSummary = { total: 0, referralPartner: 0, referralAndVendor: 0, vendorOnly: 0, notSure: 0, powerPartner: 0, ruledNotSure: 0, flagged: 0 }
   for (const row of rows) {
     const m = mapLivePartner(row)
     s.total += 1
@@ -179,6 +218,7 @@ export function summarizeMapping(rows: readonly LivePartnerFacts[]): MappingSumm
     if (ven && !ref) s.vendorOnly += 1
     if (m.types.includes('unsure')) s.notSure += 1
     if (m.level === 'power') s.powerPartner += 1
+    if (RULED_NOT_SURE_IDS.includes(clean(row.id))) s.ruledNotSure += 1
     if (m.flags.length) s.flagged += 1
   }
   return s

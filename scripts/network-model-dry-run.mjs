@@ -61,7 +61,7 @@ const vite = await createServer({
   root: repo, configFile: false, logLevel: 'error', appType: 'custom',
   server: { middlewareMode: true, hmr: false, ws: false }, optimizeDeps: { noDiscovery: true },
 })
-const { mapLivePartner, summarizeMapping } = await vite.ssrLoadModule('/lib/network/live-mapping.ts')
+const { mapLivePartner, summarizeMapping, RULED_NOT_SURE_IDS } = await vite.ssrLoadModule('/lib/network/live-mapping.ts')
 const { TYPE_META, LEVEL_META } = await vite.ssrLoadModule('/lib/network/types.ts')
 await vite.close()
 
@@ -100,7 +100,7 @@ const TIER_LABEL = {
 }
 const rows = partners.map(p => {
   const tags = (tagsOf.get(p.id) || []).slice().sort((a, b) => a.localeCompare(b))
-  const facts = { tier: p.tier, stage: p.stage, tagLabels: tags, hasSentLead: (sentCount.get(p.id) || 0) > 0 }
+  const facts = { id: p.id, tier: p.tier, stage: p.stage, tagLabels: tags, hasSentLead: (sentCount.get(p.id) || 0) > 0 }
   const m = mapLivePartner(facts)
   return {
     id: p.id, live: p.deleted_at === null, location: locName.get(p.location_id) || `(unknown location ${p.location_id})`,
@@ -137,6 +137,7 @@ const byName = (a, b) => a.name.localeCompare(b.name)
 const both = live.filter(r => r.types.includes('partner') && r.types.includes('vendor')).sort(byName)
 const droppedStage = live.filter(r => r.flags.some(f => f.includes('dropped: only a Referral partner has a stage'))).sort(byName)
 const networkingElsewhere = live.filter(r => r.nowTierKey === 'networking-contact' && !r.types.includes('unsure')).sort(byName)
+const ruled = rows.filter(r => RULED_NOT_SURE_IDS.includes(r.id)).sort(byName)
 const noStage = live.filter(r => r.flags.some(f => f.startsWith('No live stage') || f.includes('is not one of the five'))).sort(byName)
 
 // ── The report ─────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ L.push(`| Referral partner | **${sum.referralPartner}** |`)
 L.push(`| … of those, also Vendor / Service Provider (two types) | ${sum.referralAndVendor} |`)
 L.push(`| Vendor / Service Provider only | **${sum.vendorOnly}** |`)
 L.push(`| Not sure yet | **${sum.notSure}** |`)
+L.push(`| … of those, ruled Not sure yet by Kevin, by name | ${sum.ruledNotSure} |`)
 L.push(`| **Total live** | **${sum.total}** |`)
 L.push(`| In the recycle bin (mapped too, listed last) | ${binned.length} |`)
 L.push('')
@@ -172,6 +174,11 @@ L.push(`Mapping fingerprint (TypeScript rules, all ${rows.length} rows): \`${fin
 L.push('')
 L.push('## Read these first')
 L.push('')
+L.push(`### ${ruled.length} contacts Kevin ruled are not Referral partners`)
+L.push('')
+L.push('Each would have counted as a Referral partner only because one client\'s "referred by" points at it. They are held by id in the rules, so they stay Not sure yet whatever tier, tag or lead they have.')
+L.push('')
+table(ruled, { head: 'What the rules alone would have read', cell: r => r.flags.join('; ') || '(nothing)' })
 L.push(`### ${both.length} contacts that get two types: Referral partner and Vendor`)
 L.push('')
 table(both, { head: 'Why both', cell: r => r.why.join('; ') })
@@ -241,6 +248,7 @@ console.log('═══ Network model — dry run (read-only) ═══')
 console.log(`rows read: ${rows.length} (${live.length} live, ${binned.length} in the recycle bin)`)
 console.log(`Referral partner ${sum.referralPartner} (also Vendor ${sum.referralAndVendor}) · Vendor only ${sum.vendorOnly} · Not sure yet ${sum.notSure} · total ${sum.total}`)
 console.log(`Greensboro: ${greensboro.length} contacts, ${greensboro.filter(r => r.types.includes('unsure')).length} Not sure yet`)
+console.log(`ruled Not sure yet by name ${ruled.length} (found ${ruled.length} of ${RULED_NOT_SURE_IDS.length} ids)`)
 console.log(`two types ${both.length} · chosen stage dropped ${droppedStage.length} · Networking Contact decided elsewhere ${networkingElsewhere.length} · no usable stage ${noStage.length}`)
 console.log(`MAPPING FINGERPRINT (TypeScript): ${fingerprint}`)
 console.log(`report: ${join(outDir, 'network-model-dry-run.md')}`)

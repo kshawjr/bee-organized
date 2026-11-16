@@ -39,6 +39,11 @@
 --      A contact who meets 1 and 2 holds both types.
 --   3. Everything else, Networking Contact included: Not sure yet. No level,
 --      no stage. A trade tag (Realtor, Mover…) is never used to guess.
+--   4. Four contacts Kevin ruled on by name are Not sure yet whatever 1 and
+--      2 say. Each counted as a Referral partner only because one client's
+--      "referred by" points at it, and none is one. They are held by id
+--      below (the same four ids as RULED_NOT_SURE_IDS in the TypeScript);
+--      their names are in the dry-run report.
 --
 -- UNDO: migrations/network_model_backfill_undo.sql (blanks the three columns)
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -58,13 +63,19 @@ facts as (
                  where pt.partner_id = p.id
                    and lower(btrim(lk.label, E' \t\r\n')) = 'vendor') as tag_vendor,
          exists (select 1 from public.leads l
-                 where l.referred_by_kind = 'partner' and l.referred_by_id = p.id) as sent_lead
+                 where l.referred_by_kind = 'partner' and l.referred_by_id = p.id) as sent_lead,
+         p.id in ('0988e56f-ee8b-4ca1-804b-8733e9e0f797',
+                  '2700f38b-cea1-4878-ace9-58b5737612e3',
+                  '32ab75f7-daf6-4dc0-884b-8c3b6129776a',
+                  'ee138794-65e1-4146-bc79-f334a79d822c') as ruled_not_sure
   from public.partners p
 ),
 ruled as (
   select f.*,
-         (f.tier in ('referral-partner', 'power-partner') or f.tag_referral or f.sent_lead) as is_referral,
-         (f.tier = 'service-provider' or f.tag_vendor) as is_vendor
+         (not f.ruled_not_sure
+          and (f.tier in ('referral-partner', 'power-partner') or f.tag_referral or f.sent_lead)) as is_referral,
+         (not f.ruled_not_sure
+          and (f.tier = 'service-provider' or f.tag_vendor)) as is_vendor
   from facts f
 ),
 mapped as (

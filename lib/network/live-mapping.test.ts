@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mapLivePartner, mapLiveStage, summarizeMapping, tierKey } from './live-mapping'
+import { RULED_NOT_SURE_IDS, mapLivePartner, mapLiveStage, summarizeMapping, tierKey } from './live-mapping'
 import { PARTNER_LEVELS, PARTNER_STAGES } from './types'
 
 // One test per mapping rule, in Kevin's order (see the header of
@@ -149,6 +149,36 @@ describe('Rule 5 — the stage carries across for Referral partners only', () =>
   })
 })
 
+describe('Rule 6 — four contacts Kevin ruled are not Referral partners', () => {
+  it('holds exactly four ids', () => {
+    expect(RULED_NOT_SURE_IDS).toHaveLength(4)
+    expect(new Set(RULED_NOT_SURE_IDS).size).toBe(4)
+    for (const id of RULED_NOT_SURE_IDS) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  })
+  it.each([...RULED_NOT_SURE_IDS])('%s is Not sure yet although a lead points at it', (id) => {
+    const m = mapLivePartner({ id, tier: null, stage: 'New Contact', tagLabels: [], hasSentLead: true })
+    expect(m).toMatchObject({ types: ['unsure'], level: null, stage: null })
+    expect(m.why).toEqual(['Not sure yet: Kevin ruled this contact is not a Referral partner'])
+    expect(m.flags).toEqual(['Ruled Not sure yet; the rules alone would have read: has sent a lead'])
+  })
+  it('stays Not sure yet whatever tier, tag or lead it is given', () => {
+    const m = mapLivePartner({ id: RULED_NOT_SURE_IDS[0], tier: 'power-partner', stage: 'Active Partner', tagLabels: ['Partner', 'Vendor'], hasSentLead: true })
+    expect(m).toMatchObject({ types: ['unsure'], level: null, stage: null })
+    expect(m.flags).toEqual([
+      'Ruled Not sure yet; the rules alone would have read: tier is Power Partner, tagged Partner or Referral, has sent a lead, tagged Vendor',
+      'Live stage “Active Partner” dropped: only a Referral partner has a stage',
+    ])
+  })
+  it('reads the id whatever its case', () => {
+    expect(mapLivePartner({ id: ` ${RULED_NOT_SURE_IDS[1]!.toUpperCase()} `, hasSentLead: true }).types).toEqual(['unsure'])
+  })
+  it('touches nobody else: the same facts under any other id are a Referral partner', () => {
+    const facts = { tier: null, stage: 'New Contact', tagLabels: [], hasSentLead: true }
+    expect(mapLivePartner({ ...facts, id: '11111111-2222-4333-8444-555555555555' }).types).toEqual(['partner'])
+    expect(mapLivePartner(facts).types).toEqual(['partner'])
+  })
+})
+
 describe('Reading what is stored', () => {
   it('reads a tier by its key or its label, any case', () => {
     expect(tierKey('Referral Partner')).toBe('referral-partner')
@@ -179,8 +209,12 @@ describe('Counting a batch for the dry-run report', () => {
       { tier: null, stage: 'New Contact', tagLabels: ['Realtor'] },
       { tier: null, stage: null, hasSentLead: true },
     ])).toEqual({
-      total: 7, referralPartner: 4, referralAndVendor: 1, vendorOnly: 1, notSure: 2, powerPartner: 1, flagged: 2,
+      total: 7, referralPartner: 4, referralAndVendor: 1, vendorOnly: 1, notSure: 2, powerPartner: 1, ruledNotSure: 0, flagged: 2,
     })
+  })
+  it('counts a ruled contact as Not sure yet, and says how many were ruled', () => {
+    const s = summarizeMapping([{ id: RULED_NOT_SURE_IDS[2], hasSentLead: true }, { hasSentLead: true }])
+    expect(s).toMatchObject({ total: 2, referralPartner: 1, notSure: 1, ruledNotSure: 1 })
   })
   it('every contact lands in exactly one of Referral partner, Vendor only, or Not sure yet', () => {
     const s = summarizeMapping([{}, { tier: 'service-provider' }, { hasSentLead: true }, { tagLabels: ['Vendor', 'Partner'] }])
