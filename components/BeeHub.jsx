@@ -87,6 +87,7 @@ import NetworkScreen from "@/components/hive/NetworkScreen"
 // a viewer lib/network/access.ts says yes to; everyone else still gets the
 // closed line below (CLOSED_NAV).
 import NetworkListScreen from "@/components/network/NetworkListScreen"
+import ContactSheet from "@/components/network/ContactSheet"
 import { maySeeNewNetwork } from "@/lib/network/access"
 import BeeRosterSettings from "@/components/hive/BeeRosterSettings"
 import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
@@ -16424,6 +16425,8 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
   const [showAdd, setShowAdd] = useState(false)
   const [addCompanyPreset, setAddCompanyPreset] = useState(null)
   const [selectedCompany, setSelectedCompany] = useState(null)
+  // Counts saves made in the new contact sheet, so the new list reloads.
+  const [sheetSaves, setSheetSaves] = useState(0)
 
   const allPartners = (locFilter==='all' ? partners : partners.filter(p=>p.locationId===locFilter)).filter(p=>!p.isDeleted)
   const allCompanies = locFilter==='all' ? companies : companies.filter(c=>c.locationId===locFilter)
@@ -16447,6 +16450,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onOpenContact={locFilter==='all' ? null : (id)=>{ const p = allPartners.find(x=>x.id===id); if (p) setSelected(p) }}
           initialTagId={initialTagId}
           onInitialTagConsumed={onInitialTagConsumed}
+          refreshKey={sheetSaves}
         />
       ) : (
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -16472,7 +16476,24 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           company overlay (both retired-unrendered above in this file, like
           the Classic list). Person + company records are §8.5 modules; the
           host supplies state access + the CRM write paths. */}
-      {selected&&(
+      {/* THE NEW CONTACT SHEET (slice 4a) replaces the record below wherever
+          the new list is shown. It loads the contact itself and saves only
+          the fields a person changed, so it does not depend on this screen's
+          partners state the way NetworkPersonRecord does. After a save it
+          hands back the contact: the list is told to reload, and the few
+          plain fields are copied into state so Search shows the new name.
+          That copy is state only; it sends nothing. */}
+      {selected&&newList&&(
+        <ContactSheet
+          contactId={selected.id}
+          onClose={()=>setSelected(null)}
+          onSaved={(c)=>{
+            setSheetSaves(n=>n+1)
+            setPartners(prev=>prev.map(p=>p.id===c.id ? { ...p, name:c.name, title:c.title||'', company:c.company||'', phone:c.phone||'', email:c.email||'', website:c.website||'', howWeMet:c.howWeMet||'' } : p))
+          }}
+        />
+      )}
+      {selected&&!newList&&(
         <NetworkPersonRecord
           partner={selected}
           companies={allCompanies}

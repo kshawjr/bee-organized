@@ -90,6 +90,7 @@ const REMINDER = { id: 'r1', user_id: 'me', partner_id: PAT.id, lead_id: null, e
 const answer = (url: string) => {
   if (url.startsWith('/api/network/list')) return { contacts: [{ id: PAT.id, locationId: KC, locationName: 'Kansas City', name: PAT.name, company: PAT.company, networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'New Contact', tagIds: ['t1'], lastContactedAt: null, isCustomer: false }], tags: [{ id: 't1', label: 'Realtor' }], followUps: {}, total: 1, truncated: false }
   if (url.startsWith('/api/network/summary')) return { referrers: [], totals: { count: 0, converted: 0, revenue: 0 } }
+  if (url.startsWith('/api/network/contacts/')) return { contact: { id: PAT.id, locationId: KC, locationName: 'Kansas City', name: PAT.name, title: null, company: PAT.company, companyId: null, linkedCompany: null, phone: null, email: null, website: null, addresses: [], howWeMet: null, specialties: [], relationship: null, notes: [], nextSteps: [], activity: [], isCustomer: false, networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'New Contact', birthday: null, birthdayReminder: false, createdAt: '2026-08-24T15:00:00Z', tagIds: ['t1'] }, tags: [{ id: 't1', label: 'Realtor', section: 'trade' }], touchpoints: [], followUps: [] }
   if (url.startsWith('/api/reminders')) return { reminders: [REMINDER] }
   if (url.startsWith('/api/search')) return { results: [], partners: [PAT], tagMatches: [{ id: 't1', label: 'Realtor', clients: 0, network: 1 }] }
   return {}
@@ -130,7 +131,18 @@ const type = async (input: Element | null, value: string) => {
 // What a viewer can end up looking at.
 const closedLine = () => host.querySelector('[data-nav-closed]') as HTMLElement | null
 const newList = () => host.querySelector('[data-network-list]') as HTMLElement | null
-const personOpen = () => !!document.body.querySelector('[data-testid="person-stats"]')
+// A contact is "open" if EITHER record is on screen: the old one
+// (NetworkPersonRecord) or the new contact sheet (slice 4a). The closed roles
+// must get neither. A super admin must get the new sheet and never the old.
+const oldRecordOpen = () => !!document.body.querySelector('[data-testid="person-stats"]')
+const sheetOpen = () => document.body.querySelector('[data-contact-sheet]') as HTMLElement | null
+const personOpen = () => oldRecordOpen() || !!sheetOpen()
+const expectSheetFor = (id: string) => {
+  expect(sheetOpen(), 'the new contact sheet').toBeTruthy()
+  expect(sheetOpen()!.getAttribute('data-contact-sheet')).toBe(id)
+  expect(sheetOpen()!.querySelector('[data-sheet-name]')!.textContent).toBe('Pat Partner')
+  expect(oldRecordOpen(), 'the old record').toBe(false)
+}
 const networkRead = () => calls.some(c => c.url.startsWith('/api/network/list'))
 // Text only the OLD Network screen and its add doors draw.
 const OLD_SCREEN = ['Add Contact', 'Add Company', 'in your referral network', 'Gone cold 60d+']
@@ -247,7 +259,15 @@ describe('5 · a reminder about a Network person, on the Reminders page', () => 
     await mount({ ...SUPER.props, initialRoute: 'reminders' })
     await click(reminderButton())
     expectNewList()
-    expect(personOpen()).toBe(true)
+    expectSheetFor(PAT.id)
+  })
+  it("super admin: the sheet's own close button closes it, back to the list", async () => {
+    await mount({ ...SUPER.props, initialRoute: 'reminders' })
+    await click(reminderButton())
+    expectSheetFor(PAT.id)
+    await click(sheetOpen()!.querySelector('[data-close]'))
+    expect(sheetOpen()).toBeNull()
+    expectNewList()
   })
 })
 
@@ -262,7 +282,7 @@ describe('6 · a reminder about a Network person, on the Home screen', () => {
     await mount(SUPER.props)
     await click(homeReminder())
     expectNewList()
-    expect(personOpen()).toBe(true)
+    expectSheetFor(PAT.id)
   })
 })
 
@@ -276,7 +296,7 @@ describe('7 · Search → a Network person', () => {
     await mount(SUPER.props); await openSearch()
     await click(searchPerson())
     expectNewList()
-    expect(personOpen()).toBe(true)
+    expectSheetFor(PAT.id)
   })
 })
 
@@ -310,6 +330,94 @@ describe('a super admin viewing as someone else sees what they see', () => {
     expect(HUB).toContain('const [role, setRole]                     = useState(initialRole ?? \'super_admin\')')
     expect(HUB).toContain('const networkOpen = maySeeNewNetwork(role)')
   })
+
+  // A REAL view-as session, driven through the app's own controls (slice 4
+  // carry-over: slice 3 read the code and believed this; it was never driven).
+  const USERS = [
+    { id: 'o1', name: 'Olive Owner', email: 'o@x.com', role: 'owner', locationId: KC, status: 'active' },
+    { id: 'm1', name: 'Max Manager', email: 'm@x.com', role: 'manager', locationId: KC, status: 'active' },
+  ]
+  const byText = (re: RegExp) => Array.from(document.body.querySelectorAll('button')).find(b => re.test(b.textContent || ''))
+  const openPicker = async () => {
+    await click(document.body.querySelector('button[aria-label="Account and scope"]'))
+    await click(document.body.querySelector('[data-section="viewing-as"] button'))
+  }
+  const back = async () => { await act(async () => { window.history.pushState({}, '', '/network'); window.dispatchEvent(new PopStateEvent('popstate')) }); await settle(3) }
+
+  for (const who of ['Olive Owner', 'Max Manager']) {
+    it(`viewing as ${who}: Network turns to the grey, by the menu and by the address, and no list is read`, async () => {
+      await mount({ ...SUPER.props, initialRoute: 'network', initialUsers: USERS })
+      expectNewList()
+
+      // Opening the picker already acts as a franchise user: the list is gone.
+      await openPicker()
+      expect(newList(), 'the list, while the picker is open').toBeNull()
+      expect(closedLine(), 'the closed line, while the picker is open').toBeTruthy()
+
+      await click(byText(new RegExp(who)))
+      // The account control now says who is being viewed, and offers the way back.
+      await click(document.body.querySelector('button[aria-label="Account and scope"]'))
+      expect(byText(/Return to yourself/), 'now viewing as them').toBeTruthy()
+      expect(document.body.querySelector('[data-section="viewing-as"]')!.textContent).toContain(who)
+      await click(document.body.querySelector('button[aria-label="Account and scope"]'))
+      calls.length = 0
+
+      // The menu item is greyed and is not a control…
+      expect(item('partners').tagName).toBe('DIV')
+      expect(item('partners').getAttribute('aria-disabled')).toBe('true')
+      expect(item('partners').querySelector('[data-soon-chip]')!.textContent).toBe('Under redesign')
+      await click(item('partners'))
+      expect(newList()).toBeNull()
+
+      // …and the address lands on the closed line, with nothing read.
+      await back()
+      expect(closedLine()!.textContent).toContain('Network & Nurture is being redesigned.')
+      expect(newList()).toBeNull()
+      expect(personOpen()).toBe(false)
+      expect(networkRead(), 'a read of the new list while viewing as them').toBe(false)
+    })
+  }
+
+  it('Return to yourself brings the new list back', async () => {
+    await mount({ ...SUPER.props, initialRoute: 'network', initialUsers: USERS })
+    await openPicker()
+    await click(byText(/Olive Owner/))
+    expect(item('partners').tagName).toBe('DIV')
+    await click(document.body.querySelector('button[aria-label="Account and scope"]'))
+    await click(byText(/Return to yourself/))
+    expect(item('partners').tagName).toBe('BUTTON')
+    await click(item('partners'))
+    expectNewList()
+  })
+})
+
+describe('the older menu inside the Home dashboard is dead, not a tenth door', () => {
+  // DashboardScreen (the Home screen's component) still carries a list of
+  // menu items that names Network, and a branch that would draw the old
+  // Network screen. Neither can be reached:
+  const dash = HUB.slice(HUB.indexOf('function DashboardScreen('), HUB.indexOf('function isDeferredTier('))
+  it('the only thing that would draw that menu draws nothing', () => {
+    expect(dash).toContain("{ key:'partners', icon:'👥', label:'Network' },")
+    expect(dash).toContain('const BottomNav = () => null')
+    // The list is built and handed to nothing else.
+    expect(dash.match(/navItems/g)!.length).toBe(1)
+  })
+  it('nothing inside it ever asks for Network', () => {
+    const asked = Array.from(dash.matchAll(/\bnav\('([a-z]+)'\)/g)).map(m => m[1])
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked).not.toContain('partners')
+    expect(dash).not.toMatch(/onNavigate\(['"]partners/)
+  })
+  it("it is mounted once, on the app's own section and its own nav, after Network has already been answered", () => {
+    expect(HUB.match(/<DashboardScreen\b/g)!.length).toBe(1)
+    const screen = HUB.slice(HUB.indexOf('  const screen = () => {'), HUB.indexOf('<DashboardScreen'))
+    // closed sections first, then the Network branch, and only then Home.
+    expect(screen.indexOf('if (closedFor(activeNav)) {')).toBeGreaterThan(0)
+    expect(screen.indexOf("if (activeNav==='partners') return (")).toBeGreaterThan(screen.indexOf('if (closedFor(activeNav)) {'))
+    const mountProps = HUB.slice(HUB.indexOf('<DashboardScreen'), HUB.indexOf('<DashboardScreen') + 2500)
+    expect(mountProps).toContain('activeNav={activeNav}')
+    expect(mountProps).toContain('nav={nav}')
+  })
 })
 
 describe('on All Locations the new list is look-only', () => {
@@ -341,7 +449,7 @@ describe('opening the new list changes nothing', () => {
     await mount({ ...SUPER.props, initialRoute: 'network' })
     await click(newList()!.querySelector('[data-type-pill="partner"]'))
     await click(newList()!.querySelector('[data-row]'))
-    expect(personOpen()).toBe(true)
+    expectSheetFor(PAT.id)
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 })

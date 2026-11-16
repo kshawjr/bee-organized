@@ -566,7 +566,8 @@ describe('Lato and Arvo cannot leak', () => {
     // 2026-11-13: the left menu was rebuilt too, and asks for the same fonts,
     // at the same address, for itself only (its [data-app-rail]).
     // 2026-11-15: and the new Network list, for itself only (its [data-network-ui]).
-    expect(users).toEqual(['components/design/AppRail.jsx', 'components/design/tokens.js', 'components/network/NetworkListScreen.jsx', 'components/settings/SettingsShell.jsx'])
+    // 2026-11-15: and the new contact sheet (slice 4a), for itself only (its [data-network-sheet]).
+    expect(users).toEqual(['components/design/AppRail.jsx', 'components/design/tokens.js', 'components/network/ContactSheet.jsx', 'components/network/NetworkListScreen.jsx', 'components/settings/SettingsShell.jsx'])
     await mount({ franchiseRole: 'owner' })
     const links = Array.from(container.querySelectorAll('link[rel="stylesheet"]')).map(l => l.getAttribute('href'))
     expect(links).toEqual([FONT_STYLESHEET_HREF])
@@ -676,7 +677,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
     // ONE colour from the tokens, the gold of its "Change this territory"
     // label. It names no font: see the Lato test above.
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/NetworkListScreen.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/ContactSheet.jsx', 'components/network/NetworkListScreen.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })

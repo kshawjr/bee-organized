@@ -246,7 +246,8 @@ function Pager({ label, total, page, size, onPage, onSize }) {
   )
 }
 
-const initialsOf = (name) => String(name).replace(/—.*/, '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+// Two initials, from words that start with a letter or a digit ("Drew & Bill" is DB).
+const initialsOf = (name) => String(name).replace(/—.*/, '').split(/\s+/).filter((w) => /^[\p{L}\p{N}]/u.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 
 function Stats({ c, today, referralsKnown }) {
   const due = dueForFollowUp(c, today)
@@ -338,13 +339,15 @@ function Group({ type, contacts, open, onToggle, page, size, onPage, onSize, onO
  *   onOpenContact     (id) => void. Omit it and rows are not buttons: the
  *                     every-location view passes none, because the existing
  *                     record can only be opened inside one location.
+ *   refreshKey        change it to read the list again (the host does, after a
+ *                     save in the contact sheet)
  *   initialTagId      a tag to start filtered by (Search's "All N tagged X in Network")
  *   onInitialTagConsumed
  *   fetchImpl, now    for tests
  */
 export default function NetworkListScreen({
   locationId = null, locationName = '', onOpenContact = null,
-  initialTagId = null, onInitialTagConsumed = () => {}, fetchImpl = null, now = null,
+  initialTagId = null, onInitialTagConsumed = () => {}, fetchImpl = null, now = null, refreshKey = 0,
 }) {
   const [data, setData] = useState(null)        // { contacts, tags, followUps, truncated }
   const [referrals, setReferrals] = useState(null) // Map id → rollup, or null until it answers
@@ -384,7 +387,7 @@ export default function NetworkListScreen({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [locationId, fetchImpl])
+  }, [locationId, fetchImpl, refreshKey])
 
   // A tag handed in from Search: start filtered by it, once.
   useEffect(() => {

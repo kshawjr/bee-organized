@@ -166,6 +166,14 @@ export const NET = {
   accentFg:             '#724C1E', // oklch(0.45 0.08 68)
   warn:                 '#AE5528', // oklch(0.55 0.13 45)
   warnSoft:             '#FFE8DC', // oklch(0.95 0.035 45)
+  // The contact sheet's cards: the stripe down each card's left edge, and the
+  // wash two of them fade from.
+  cardEssentials:       '#46968C', // oklch(0.62 0.08 185)
+  cardEssentialsTint:   '#ECFAF8', // oklch(0.975 0.015 185)
+  cardPartner:          '#C79E41', // oklch(0.72 0.12 85)
+  cardPartnerTint:      '#FFF7E8', // oklch(0.978 0.022 85)
+  cardNotes:            '#739F7C', // oklch(0.66 0.07 150)
+  cardReferrals:        '#E47B7C', // oklch(0.7 0.13 20)
 }
 
 // Tag chips: the export gives a tag one of six hues, chosen from its name

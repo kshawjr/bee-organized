@@ -67,7 +67,7 @@ describe('the Network colours are the Network export, converted exactly', () => 
   it('every Network colour has its oklch() beside it, and the hex is that oklch()', () => {
     const net = pairs(NET_SRC)
     expect(net.map(p => p.name).sort()).toEqual(Object.keys(TOKENS.NET).sort())
-    expect(net.length).toBe(13)
+    expect(net.length).toBe(19)
     for (const p of net) {
       expect(p.hex, `NET.${p.name} oklch(${p.L} ${p.C} ${p.H})`).toBe(oklchToHex(p.L, p.C, p.H))
       expect((TOKENS.NET as Record<string, string>)[p.name]).toBe(p.hex)
