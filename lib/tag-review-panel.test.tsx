@@ -14,10 +14,10 @@ import LocationTagsPanel from '@/components/hive/LocationTagsPanel'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-const tagRow = (over: any) => ({ id: 't1', label: 'Chamber', icon: null, is_active: true, location_id: LOC, location_name: 'Portland', created_at: '2026-10-01T00:00:00Z', created_by: 'Pat Owner', people: 3, group: 'Professional services', reviewed: null, ...over })
+const tagRow = (over: any) => ({ id: 't1', label: 'Chamber', icon: null, is_active: true, location_id: LOC, location_name: 'Portland', created_at: '2026-10-01T00:00:00Z', created_by: 'Pat Owner', people: 3, group: 'Professional Services', reviewed: null, ...over })
 const GROUPS = [
   { key: 'chamber', label: 'Chamber', locations: 1, people: 3, tags: [tagRow({})] },
-  { key: 'snowbird', label: 'Snowbird', locations: 1, people: 0, tags: [tagRow({ id: 't2', label: 'Snowbird', people: 0, group: 'Client status', reviewed: 'keep_local' })] },
+  { key: 'snowbird', label: 'Snowbird', locations: 1, people: 0, tags: [tagRow({ id: 't2', label: 'Snowbird', people: 0, group: 'Client Status', reviewed: 'keep_local' })] },
   { key: 'old', label: 'Old One', locations: 1, people: 0, tags: [tagRow({ id: 't3', label: 'Old One', is_active: false, group: null })] },
 ]
 const MAIN_LIST = [{ id: 'c1', label: 'Networking Group', icon: '🤝', location_id: null }, { id: 'c2', label: 'Realtor', icon: '🏠', location_id: null }, { id: 't1', label: 'Chamber', icon: null, location_id: LOC }, { id: 't2', label: 'Snowbird', icon: null, location_id: LOC }]
@@ -55,7 +55,7 @@ describe('what the panel shows', () => {
     await mount(); await openGroup('chamber')
     const line = host.querySelector('[data-tag-group="chamber"]')!.textContent!
     expect(line).toContain('“Chamber” · Portland · 3 people · made ')
-    expect(line).toContain(' by Pat Owner · in Professional services')
+    expect(line).toContain(' by Pat Owner · in Professional Services')
   })
   it('a tag that is switched on can be kept local, merged or deleted', async () => {
     await mount(); await openGroup('chamber')

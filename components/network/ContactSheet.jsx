@@ -59,11 +59,13 @@ import {
 } from '@/lib/network/contact-adds'
 import { RULED_NOT_SURE_IDS } from '@/lib/network/live-mapping'
 import { fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
-import { TAG_GROUP_NEEDED_WORDS, TAG_LIMIT_PER_LOCATION, groupTags, groupsForScreen, tagLimitWords } from '@/lib/tags'
+import { TAG_GROUP_NEEDED_WORDS, groupTags, tagLimitWords } from '@/lib/tags'
+import TagDialog, { TAG_DIALOG_CSS, TagsIcon } from './TagDialog'
 import { tagTone } from './NetworkListScreen'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
 const TYPE_SOFT = { partner: NET.partnerSoft, vendor: NET.vendorSoft, nurture: NET.nurtureSoft, organization: NET.organizationSoft, unsure: NET.unsureSoft }
+const TAGS_SHOWN = 3 // the header shows three tags, then "+N more" (the design's count)
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAYS_IN = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
@@ -310,9 +312,6 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const [tagList, setTagList] = useState(null) // { sections } | { problem: true }
   const [companies, setCompanies] = useState(null) // [{ id, name }] | 'problem'
   const [touchList, setTouchList] = useState(null) // [TouchType] | 'problem'
-  const [newTag, setNewTag] = useState('') // the name typed into "New tag"
-  const [newGroup, setNewGroup] = useState('') // the Network group picked for it; never chosen for them
-  const [tagNote, setTagNote] = useState(null) // a quiet line after a create
   const sheet = useRef(null)
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
 
@@ -385,7 +384,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   // list is kept in view, last, so it can still be unticked.
   const tagListOf = (rows, own) => ({ rows, own, sections: groupTags(rows, 'network', own, (data?.tags || []).map((t) => t.id)) })
   const loadTagList = () => {
-    setTagList(null); setNewTag(''); setNewGroup(''); setTagNote(null)
+    setTagList(null)
     doFetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(c.locationId)}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}))
@@ -496,33 +495,35 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     }
     return { words: 'Tags saved', contact: fresh?.contact || c }
   })
-  // A NEW TAG, made from the picker. It belongs to this contact's location,
-  // goes in the Network group THE PERSON PICKS (one of eight; nothing is
-  // assumed), and counts toward that location's limit of ten. It only creates
-  // the tag and ticks it: nothing is put on the contact until Save tags.
-  async function createTag() {
-    const label = newTag.trim()
-    if (!label || saving || !tagList?.rows) return
-    if (!newGroup) { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return }
-    setSaving(true); setError(null); setTagNote(null)
+  // A NEW TAG, made from the picker's second screen (TagDialog). It belongs to
+  // this contact's location, goes in the Network group THE PERSON PICKS (one
+  // of eight; nothing is assumed), carries the emoji typed or its group's, and
+  // counts toward that location's limit of ten. It only creates the tag and
+  // ticks it: nothing is put on the contact until Done. Answers the tag, or
+  // null with the reason shown.
+  async function createTag({ label, group, icon }) {
+    if (!label || saving || !tagList?.rows) return null
+    if (!group) { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return null }
+    setSaving(true); setError(null)
     try {
-      const { res, json } = await call('/api/lookups', 'POST', { category: 'tags', label, location_id: c.locationId, made_on: 'network', group: newGroup })
-      if (res.status === 409 && json?.error === 'tag_limit') { setError({ field: 'newTag', words: tagLimitWords(Number(json.count) || 0) }); return }
+      const { res, json } = await call('/api/lookups', 'POST', { category: 'tags', label, location_id: c.locationId, made_on: 'network', group, icon })
+      if (res.status === 409 && json?.error === 'tag_limit') { setError({ field: 'newTag', words: tagLimitWords(Number(json.count) || 0) }); return null }
       if (res.status === 409 && json?.error === 'near_match' && json.tag) {
         // Only a tag this picker actually SHOWS can be ticked: a Clients tag
         // of the same name is not pulled onto a Network contact.
         const there = tagList.sections.flatMap((s) => s.rows).find((t) => t.id === json.tag.id)
-        if (there) { setDraft((d) => ({ picked: d.picked.includes(there.id) ? d.picked : [...d.picked, there.id] })); setNewTag(''); setTagNote(`“${there.label}” is already a tag, so it is ticked for you.`) }
-        else setError({ field: 'newTag', words: json.verdict === 'restore' ? `“${json.tag.label}” was removed at this location. Bring it back under Settings rather than making it again.` : `“${json.tag.label}” is already a tag on another list, so it is not offered here.` })
-        return
+        if (there) { setDraft((d) => ({ picked: d.picked.includes(there.id) ? d.picked : [...d.picked, there.id] })); return { ...there, existing: true } }
+        setError({ field: 'newTag', words: json.verdict === 'restore' ? `“${json.tag.label}” was removed at this location. Bring it back under Settings rather than making it again.` : `“${json.tag.label}” is already a tag on another list, so it is not offered here.` })
+        return null
       }
-      if (res.status === 400 && json?.error === 'group_required') { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return }
-      if (!res.ok || !json?.lookup) { setError({ field: 'newTag', words: 'That tag could not be created. Nothing was changed.' }); return }
+      if (res.status === 400 && json?.error === 'group_required') { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return null }
+      if (!res.ok || !json?.lookup) { setError({ field: 'newTag', words: 'That tag could not be created. Nothing was changed.' }); return null }
       setTagList(tagListOf([...tagList.rows, json.lookup], tagList.own))
       setDraft((d) => ({ picked: [...d.picked, json.lookup.id] }))
-      setNewTag(''); setNewGroup(''); setTagNote(`“${json.lookup.label}” was created and ticked. Save tags to put it on this contact.`)
+      return json.lookup
     } catch (e) {
       setError({ field: 'newTag', words: NOT_SAVED })
+      return null
     } finally {
       setSaving(false)
     }
@@ -609,6 +610,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     <div data-network-sheet>
       <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
       <style>{CSS}</style>
+      <style>{TAG_DIALOG_CSS}</style>
       <aside ref={sheet} className="ns-sheet" role="dialog" aria-modal="true" aria-label={c ? `Contact details for ${c.name}` : 'Contact details'} tabIndex={-1} data-contact-sheet={contactId}>
         {/* The close bar stays at the top of the sheet however far it is
             scrolled: on a phone there is no Escape key, and the first
@@ -686,49 +688,20 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                   </div>
                 )}
               </div>
-              {editing === 'tags' ? (
-                <form className="ns-form ns-tagform" onSubmit={submit(saveTags)} data-form="tags">
-                  {!tagList && <p className="ns-quiet" data-tags-loading>Loading Bee Hub&rsquo;s tags…</p>}
-                  {tagList?.problem && <p className="ns-error" role="alert" data-tags-problem>The tag list could not be loaded. Nothing has been changed.</p>}
-                  {(tagList?.sections || []).map((s) => (
-                    <div key={s.key} role="group" aria-label={s.label} data-tag-section={s.key}>
-                      <p className="ns-sub">{s.label}<i>{s.hint}</i></p>
-                      <div className="ns-picks">
-                        {s.rows.map((t) => {
-                          const on = draft.picked.includes(t.id)
-                          return <button type="button" key={t.id} className="ns-pick" aria-pressed={on} disabled={saving} data-pick-tag={t.id}
-                            onClick={() => setDraft((d) => ({ picked: on ? d.picked.filter((x) => x !== t.id) : [...d.picked, t.id] }))}><span aria-hidden="true" className="ns-emoji">{tagEmoji(t)}</span>{t.label}</button>
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                  {tagList?.sections && (
-                    <div className="ns-field" data-tag-create>New tag{c.locationName ? ` for ${c.locationName}` : ''}
-                      <input className="ns-input" value={newTag} maxLength={60} disabled={saving} aria-invalid={error?.field === 'newTag' || undefined} placeholder="Name it"
-                        onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }} data-field="newTag" />
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <select className="ns-input" aria-label="Which group the new tag goes in" value={newGroup} disabled={saving} aria-invalid={error?.field === 'newGroup' || undefined}
-                          onChange={(e) => { setNewGroup(e.target.value); if (error?.field === 'newGroup') setError(null) }} data-field="newGroup">
-                          <option value="">Which group?</option>
-                          {groupsForScreen('network').map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
-                        </select>
-                        <button type="button" className="ns-btn ns-btn-ghost" style={{ border: `1px solid ${T.input}` }} disabled={saving || !newTag.trim() || !newGroup} onClick={createTag} data-create-tag>Create</button>
-                      </div>
-                      <span data-tag-create-hint>Name it and pick its group. Only {c.locationName || 'this location'} sees it. A location can have up to {TAG_LIMIT_PER_LOCATION} of its own.</span>
-                      {tagNote && <span role="status" style={{ color: T.primary }} data-tag-note>{tagNote}</span>}
-                    </div>
-                  )}
-                  {foot('Save tags', 'Saving…', !tagList?.sections)}
-                </form>
-              ) : (
-                <div className="ns-tags" aria-label="Tags" data-sheet-tags>
-                  {(data.tags || []).length === 0
-                    ? <p className="ns-quiet">No tags yet.</p>
-                    : data.tags.map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}><span aria-hidden="true" className="ns-emoji">{tagEmoji(t)}</span>{t.label}</span> })}
-                  <button type="button" className="ns-add" onClick={() => open('tags')} data-edit="tags">{(data.tags || []).length ? 'Change tags' : '+ add tags'}</button>
-                  {saved?.where === 'tags' && <span className="ns-saved" role="status" data-saved>{saved.words}</span>}
-                </div>
-              )}
+              {/* Tags: the design's one-line button. It opens the tag box (TagDialog),
+                  drawn over the sheet, further down this file. */}
+              <div aria-label="Tags" data-sheet-tags>
+                <button type="button" className="td-trigger" aria-haspopup="dialog" data-has={(data.tags || []).length > 0} title={(data.tags || []).map((t) => t.label).join(', ') || undefined} onClick={() => open('tags')} data-edit="tags">
+                  <span className="td-tlabel"><TagsIcon size={16} />Tags</span>
+                  <span className="td-tchips">
+                    {(data.tags || []).length === 0
+                      ? <span data-no-tags>Add tags</span>
+                      : data.tags.slice(0, TAGS_SHOWN).map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}><span aria-hidden="true" className="ns-emoji">{tagEmoji(t)}</span>{t.label}</span> })}
+                    {(data.tags || []).length > TAGS_SHOWN && <span className="ns-chip td-more" data-more-tags>+{data.tags.length - TAGS_SHOWN} more</span>}
+                  </span>
+                </button>
+                {saved?.where === 'tags' && <div className="td-after"><span className="ns-saved" role="status" data-saved>{saved.words}</span></div>}
+              </div>
             </>
           )}
         </div>
@@ -964,6 +937,10 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
           </>
         )}
       </aside>
+      {editing === 'tags' && draft && (
+        <TagDialog list={tagList} picked={draft.picked} setPicked={(ids) => setDraft({ picked: ids })} create={createTag} done={saveTags} close={cancel}
+          saving={saving} error={error} clearError={() => setError(null)} />
+      )}
     </div>
   )
 }

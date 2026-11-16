@@ -87,7 +87,7 @@ describe('a contact with nothing on it: the normal sheet', () => {
     await mount()
     expect($('[data-sheet-name]')!.textContent).toBe('Lisa Snyder')
     expect($$('.ns-type').map((t) => t.textContent)).toEqual(['Not sure yet'])
-    expect($('[data-sheet-tags]')!.textContent).toBe('No tags yet.+ add tags')
+    expect($('[data-sheet-tags]')!.textContent).toBe('TagsAdd tags')
     expect($('[data-follow-ups-empty]')!.textContent).toBe('No follow-up set. Yours show here and on your Reminders page.')
     expect($('[role="alert"]')).toBeNull()
     expect(host.querySelector('.ns-problem, .ns-error')).toBeNull()
@@ -181,7 +181,8 @@ describe('the tags are Bee Hub\'s', () => {
   })
   it('the tags themselves are not controls; one button opens the picker (contact-sheet-adds.test.tsx)', async () => {
     await mount({ sheet: FULL })
-    expect($$('[data-sheet-tags] button').map((b) => b.textContent)).toEqual(['Change tags'])
+    expect($$('[data-sheet-tags] button').map((b) => b.dataset.edit)).toEqual(['tags'])
+    expect($$('[data-sheet-tags] [data-tag]').map((t) => t.tagName)).toEqual(['SPAN', 'SPAN', 'SPAN'])
     expect($('[data-sheet-tags] input')).toBeNull()
   })
 })

@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   TAG_GROUPS, TAG_LIMIT_PER_LOCATION, TAG_GROUP_NEEDED_WORDS, groupsForScreen, tagGroup, tagShowsOn, groupTags, newTagPlacement, tagLimitWords, tagReview, sectionTags,
+  firstEmoji, isOneEmoji, groupEmoji, newTagEmoji, isAllowedNewTagIcon,
 } from './tags'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -44,9 +45,9 @@ const labels = (sections: any[]) => sections.map((s) => [s.label, s.rows.map((r:
 
 describe('A) the nine groups', () => {
   it('are the nine Kevin approved, in this order', () => {
-    expect(TAG_GROUPS.map((g) => g.label)).toEqual(['Client status', 'Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    expect(TAG_GROUPS.map((g) => g.label)).toEqual(['Client Status', 'Relationship', 'Home & Property', 'Design & Staging', 'Cleaning', 'Moving & Hauling', 'Senior Living', 'Valuables', 'Professional Services'])
   })
-  it('Client status shows on Clients (and so Nurture); every other group shows on Network', () => {
+  it('Client Status shows on Clients (and so Nurture); every other group shows on Network', () => {
     expect(TAG_GROUPS.filter((g) => (g.screens as readonly string[]).includes('clients')).map((g) => g.key)).toEqual(['client_status'])
     expect(TAG_GROUPS.filter((g) => (g.screens as readonly string[]).includes('network')).map((g) => g.key)).toEqual(TAG_GROUPS.slice(1).map((g) => g.key))
   })
@@ -75,15 +76,15 @@ describe("B) a tag's group and screens come from its settings box", () => {
 })
 
 describe('C) the list for one screen', () => {
-  it('Clients: Client status in list order, then Relationship holding only Referral. No trade is offered', () => {
-    expect(labels(groupTags(AFTER, 'clients'))).toEqual([['Client status', ['Hot Lead', 'VIP', 'DO NOT BOOK']], ['Relationship', ['Referral']]])
+  it('Clients: Client Status in list order, then Relationship holding only Referral. No trade is offered', () => {
+    expect(labels(groupTags(AFTER, 'clients'))).toEqual([['Client Status', ['Hot Lead', 'VIP', 'DO NOT BOOK']], ['Relationship', ['Referral']]])
   })
   it('Network: Relationship, then the seven trade groups, each A to Z. No client status', () => {
     expect(labels(groupTags(AFTER, 'network'))).toEqual([
       ['Relationship', ['Referral', 'Partner', 'Vendor']],
-      ['Home & property', ['General Contractor', 'Realtor']],
-      ['Design & staging', ['Designer']], ['Cleaning', ['Cleaner']], ['Moving & hauling', ['Mover']], ['Senior living', ['Senior Living']], ['Valuables', ['Estate Sale']],
-      ['Professional services', ['Applicant', 'Networking Group']],
+      ['Home & Property', ['General Contractor', 'Realtor']],
+      ['Design & Staging', ['Designer']], ['Cleaning', ['Cleaner']], ['Moving & Hauling', ['Mover']], ['Senior Living', ['Senior Living']], ['Valuables', ['Estate Sale']],
+      ['Professional Services', ['Applicant', 'Networking Group']],
     ])
   })
   it("a location's own tag sits in its group with the rest, not in a section of its own", () => {
@@ -92,7 +93,7 @@ describe('C) the list for one screen', () => {
     expect(s.at(-1)!.rows.map((r) => r.label)).toContain('Applicant')
   })
   it('a group with nothing in it is left out', () => {
-    expect(groupTags(AFTER.filter((t) => t.id !== 'des'), 'network').map((s) => s.label)).not.toContain('Design & staging')
+    expect(groupTags(AFTER.filter((t) => t.id !== 'des'), 'network').map((s) => s.label)).not.toContain('Design & Staging')
   })
   it('a tag the record already carries from another list is kept in view, last, and only for that record', () => {
     const s = groupTags(AFTER, 'clients', null, ['rea', 'des'])
@@ -124,11 +125,11 @@ describe('D) before the data change runs, nothing moves', () => {
 })
 
 describe("E) a location's new tag", () => {
-  it('made on Clients lands in Client status and shows on Clients', () => {
+  it('made on Clients lands in Client Status and shows on Clients', () => {
     expect(newTagPlacement('clients')).toEqual({ group: 'client_status', shows_on: ['clients'], section: 'relationship', made_on: 'clients' })
   })
   it('made on Network: the owner picks one of the eight Network groups, and it shows on Network', () => {
-    expect(groupsForScreen('network').map((g) => g.label)).toEqual(['Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    expect(groupsForScreen('network').map((g) => g.label)).toEqual(['Relationship', 'Home & Property', 'Design & Staging', 'Cleaning', 'Moving & Hauling', 'Senior Living', 'Valuables', 'Professional Services'])
     for (const g of groupsForScreen('network')) {
       expect(newTagPlacement('network', g.key)).toEqual({ group: g.key, shows_on: ['network'], section: g.key === 'relationship' ? 'relationship' : 'trade', made_on: 'network' })
     }
@@ -208,5 +209,57 @@ describe('F) the SQL that puts the existing tags into groups', () => {
     expect(UNDO).toContain('INSERT INTO lead_tags (lead_id, tag_lookup_id, added_at, added_by) VALUES')
     expect(UNDO).toContain('INSERT INTO partner_tags (partner_id, tag_lookup_id, added_at, added_by) VALUES')
     expect(UNDO).toContain('UPDATE lookups l SET attrs = v.attrs, is_active = v.is_active, updated_at = v.updated_at')
+  })
+})
+
+describe('G) group names and the three trades Kevin moved (2026-11-16)', () => {
+  const RUN = readFileSync(join(process.cwd(), 'migrations', 'tag_groups_and_cleanup.sql'), 'utf8')
+  it('every word of every group name is capitalised', () => {
+    expect(groupsForScreen('network').map((g) => g.label)).toEqual(['Relationship', 'Home & Property', 'Design & Staging', 'Cleaning', 'Moving & Hauling', 'Senior Living', 'Valuables', 'Professional Services'])
+    for (const g of TAG_GROUPS) for (const word of g.label.split(' ').filter((w) => w !== '&')) expect(word[0], g.label).toBe(word[0].toUpperCase())
+  })
+  it('the SQL names the groups the same way, and never the old way', () => {
+    for (const name of ['Client Status', 'Home & Property', 'Design & Staging', 'Moving & Hauling', 'Senior Living', 'Professional Services']) expect(RUN).toContain(name)
+    expect(RUN).not.toMatch(/Client status|Home & property|Design & staging|Moving & hauling|Senior living|Professional services/)
+  })
+  it.each(['General Contractor', 'Electrician', 'Handyman'])('the SQL puts %s in Home & Property, not Professional Services', (label) => {
+    const rows = Array.from(RUN.matchAll(/^\s+\('[0-9a-f-]{36}'::uuid, '((?:[^']|'')+)', '([a-z_]+)', '(\[[^\]]*\])'::jsonb\)/gm)).filter((r) => r[1] === label)
+    expect(rows.map((r) => [r[2], r[3]])).toEqual([['home_property', '["network"]']])
+  })
+  it('the SQL says so in words too', () => {
+    expect(RUN).toContain('General Contractor, Electrician and Handyman are in Home & Property,')
+  })
+})
+
+describe("H) a new Network tag's emoji", () => {
+  it('each Network group has the emoji the design gives it', () => {
+    expect(groupsForScreen('network').map((g) => g.emoji)).toEqual(['🤝', '🏡', '🎨', '🧽', '📦', '🌷', '💎', '💼'])
+    expect(groupEmoji('cleaning_care')).toBe('🧽')
+    expect(groupEmoji('made_up')).toBe('')
+  })
+  it('keeps the first emoji typed and nothing else', () => {
+    expect(firstEmoji('ab🔧🪠 c')).toBe('🔧')
+    expect(firstEmoji('🧑‍🤝‍🧑 friends')).toBe('🧑‍🤝‍🧑')
+    expect(firstEmoji('wrench 123')).toBeNull()
+    expect(firstEmoji('')).toBeNull()
+    expect(firstEmoji(null)).toBeNull()
+  })
+  it('with none typed, the tag takes its group\'s emoji', () => {
+    expect(newTagEmoji('senior_living', '')).toBe('🌷')
+    expect(newTagEmoji('senior_living', 'abc')).toBe('🌷')
+    expect(newTagEmoji('senior_living', '🔧')).toBe('🔧')
+  })
+  it('one emoji is one emoji: not two, not words, not an emoji with words', () => {
+    expect(['🔧', ' 🔧 ', '🧑‍🤝‍🧑', '🛠️'].map(isOneEmoji)).toEqual([true, true, true, true])
+    expect(['🔧🪠', 'Realtor', '🔧 fix', '', null, 7].map(isOneEmoji)).toEqual([false, false, false, false, false, false])
+  })
+  it('a Network tag may carry any one emoji; a Clients tag still picks from the grid', () => {
+    expect(isAllowedNewTagIcon('🏡', 'network')).toBe(true)
+    expect(isAllowedNewTagIcon('🏡 home', 'network')).toBe(false)
+    expect(isAllowedNewTagIcon('<b>', 'network')).toBe(false)
+    expect(isAllowedNewTagIcon('🏡', 'clients')).toBe(false)
+    expect(isAllowedNewTagIcon('🏡', undefined)).toBe(false)
+    expect(isAllowedNewTagIcon('🐾', 'clients')).toBe(true)
+    expect([isAllowedNewTagIcon('', 'network'), isAllowedNewTagIcon(null, 'clients')]).toEqual([true, true])
   })
 })

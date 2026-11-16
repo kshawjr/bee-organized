@@ -202,7 +202,7 @@ export function describeTagBlockers(blockers: string[] | null | undefined): stri
 // ── GROUPS (2026-11-15, Kevin) ───────────────────────────────────────────────
 // ONE master tag list, used everywhere: Clients, Nurture and Network. Tags sit
 // in GROUPS, and each screen shows only its own:
-//   Clients and Nurture   Client status
+//   Clients and Nurture   Client Status
 //   Network               Relationship, and the seven trade groups
 // A tag's group and the screens it shows on are DATA, in its settings box:
 // lookups.attrs.group and lookups.attrs.shows_on (written for the existing
@@ -214,15 +214,15 @@ export function describeTagBlockers(blockers: string[] | null | undefined): stri
 // screen, under Relationship / Trade / the location's own. So this code is
 // safe on either side of that data change.
 export const TAG_GROUPS = [
-  { key: 'client_status', label: 'Client status', hint: 'Where a client stands with you', screens: ['clients'] },
-  { key: 'relationship', label: 'Relationship', hint: 'What they are to you', screens: ['network'] },
-  { key: 'home_property', label: 'Home & property', hint: '', screens: ['network'] },
-  { key: 'design_staging', label: 'Design & staging', hint: '', screens: ['network'] },
-  { key: 'cleaning_care', label: 'Cleaning', hint: '', screens: ['network'] },
-  { key: 'moving_hauling', label: 'Moving & hauling', hint: '', screens: ['network'] },
-  { key: 'senior_living', label: 'Senior living', hint: '', screens: ['network'] },
-  { key: 'valuables_specialty', label: 'Valuables', hint: '', screens: ['network'] },
-  { key: 'professional_services', label: 'Professional services', hint: '', screens: ['network'] },
+  { key: 'client_status', emoji: '', label: 'Client Status', hint: 'Where a client stands with you', screens: ['clients'] },
+  { key: 'relationship', emoji: '🤝', label: 'Relationship', hint: 'What they are to you', screens: ['network'] },
+  { key: 'home_property', emoji: '🏡', label: 'Home & Property', hint: '', screens: ['network'] },
+  { key: 'design_staging', emoji: '🎨', label: 'Design & Staging', hint: '', screens: ['network'] },
+  { key: 'cleaning_care', emoji: '🧽', label: 'Cleaning', hint: '', screens: ['network'] },
+  { key: 'moving_hauling', emoji: '📦', label: 'Moving & Hauling', hint: '', screens: ['network'] },
+  { key: 'senior_living', emoji: '🌷', label: 'Senior Living', hint: '', screens: ['network'] },
+  { key: 'valuables_specialty', emoji: '💎', label: 'Valuables', hint: '', screens: ['network'] },
+  { key: 'professional_services', emoji: '💼', label: 'Professional Services', hint: '', screens: ['network'] },
 ] as const
 export type TagGroupKey = (typeof TAG_GROUPS)[number]['key']
 // Nurture shows what Clients shows, so it asks as 'clients'.
@@ -279,7 +279,7 @@ export function groupTags<T extends Groupable>(rows: T[], screen: TagScreen, own
 // ── A LOCATION'S OWN TAGS (2026-11-15, Kevin) ────────────────────────────────
 // An owner can create a tag from the picker. It shows on the screen it was
 // made on, and only there.
-//   made on Clients   it goes to Client status, the one Clients group.
+//   made on Clients   it goes to Client Status, the one Clients group.
 //   made on Network   the OWNER PICKS which of the eight Network groups it
 //                     goes in (Kevin, 2026-11-16). Nothing is assumed: with no
 //                     group, or a group that is not a Network one, no tag is
@@ -296,6 +296,35 @@ export function newTagPlacement(madeOn: unknown, group?: unknown) {
   const g = groupsForScreen('network').find((x) => x.key === group)
   if (!g) return null
   return { group: g.key as TagGroupKey, shows_on: ['network'], section: g.key === 'relationship' ? 'relationship' : 'trade', made_on: 'network' }
+}
+// ── A NEW NETWORK TAG'S EMOJI (2026-11-16, Kevin) ────────────────────────────
+// Optional. Any ONE emoji the person types; with none typed, the emoji of the
+// group the tag goes in. (A tag made on Clients still picks from the grid
+// above.)
+const EMOJI = new RegExp('\\p{Extended_Pictographic}', 'u')
+/** The first emoji in what was typed, or null. Letters and digits are not emoji. */
+export function firstEmoji(text: unknown): string | null {
+  if (typeof text !== 'string') return null
+  const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  for (const { segment } of Array.from(seg.segment(text))) if (EMOJI.test(segment)) return segment
+  return null
+}
+/** Exactly one emoji and nothing else. */
+export function isOneEmoji(icon: unknown): boolean {
+  return typeof icon === 'string' && icon.trim().length > 0 && icon.trim().length <= 24 && firstEmoji(icon) === icon.trim()
+}
+/** The emoji a group gives a new tag when none is typed. */
+export function groupEmoji(group: unknown): string {
+  return TAG_GROUPS.find((g) => g.key === group)?.emoji || ''
+}
+/** The emoji a new Network tag is made with: the one typed, else its group's. */
+export function newTagEmoji(group: unknown, typed: unknown): string {
+  return firstEmoji(typed) || groupEmoji(group)
+}
+/** May a new tag made on this screen carry this icon? Network: any one emoji. Clients: the grid. */
+export function isAllowedNewTagIcon(icon: unknown, madeOn: unknown): boolean {
+  if (icon == null || icon === '') return true
+  return madeOn === 'network' ? isOneEmoji(icon) : isAllowedTagIcon(icon)
 }
 export const TAG_GROUP_NEEDED_WORDS = 'Pick which group this tag goes in.'
 export const tagLimitWords = (count: number) =>

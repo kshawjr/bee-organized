@@ -7,9 +7,13 @@
 -- WHAT IT DOES
 --   1. GROUPS. Writes "group" and "shows_on" into the settings box (attrs) of
 --      48 tags. Nothing else in the box is touched.
---        Client status        shows on Clients and Nurture
+--        Client Status        shows on Clients and Nurture
 --        Relationship         shows on Network (Referral: on both)
 --        the seven trade groups   show on Network (their group is already stored)
+--          Home & Property, Design & Staging, Cleaning, Moving & Hauling,
+--          Senior Living, Valuables, Professional Services
+--        General Contractor, Electrician and Handyman are in Home & Property,
+--        not Professional Services (Kevin, 2026-11-16).
 --   2. MERGE Business Networking Group (North Jersey) INTO Networking Group.
 --      3 Network contacts get Networking Group; the North Jersey tag is deleted.
 --   3. MERGE Builder INTO General Contractor. 1 Network contact gets General
@@ -20,7 +24,7 @@
 --   5. DELETE business (Portland). 3 clients and 4 Network contacts lose it.
 --   6. DELETE Oak & Key (Portland). The one client who carries it gets a note
 --      saying "Oak & Key" first. They are not added to Network.
---   Applicant (Seattle) is kept, local, and placed in Professional services.
+--   Applicant (Seattle) is kept, local, and placed in Professional Services.
 --
 -- EVERY DELETE goes through delete_tag_if_unused(), the database's own delete
 -- (migrations/tag_delete.sql), so each deleted tag is copied whole into

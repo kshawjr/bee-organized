@@ -4,7 +4,7 @@
 // shared tag picker (components/hive/shared/PickerModal.jsx) that Clients and
 // Network both open through the one shared tag row (TagsRow.jsx).
 //
-//   A) Clients: Client status (and Referral). No trade is offered.
+//   A) Clients: Client Status (and Referral). No trade is offered.
 //   B) Network: Relationship and the trade groups. No client status.
 //   C) a tag the record already carries from the other list stays in view
 //   D) a tag made from the picker says which screen it was made on, so the
@@ -59,7 +59,7 @@ const type = async (v: string) => act(async () => {
 const click = async (el: Element | null) => act(async () => { (el as HTMLElement).click() })
 
 describe('A) on Clients', () => {
-  it('shows Client status, then Relationship holding only Referral', async () => {
+  it('shows Client Status, then Relationship holding only Referral', async () => {
     installFetch(); await mount({ screen: 'clients' })
     expect(sections()).toEqual(['client_status', 'relationship'])
     expect(inSection('client_status')).toEqual(['Hot Lead', 'DO NOT BOOK', 'Snowbird'])
@@ -69,7 +69,7 @@ describe('A) on Clients', () => {
     installFetch(); await mount({ screen: 'clients' })
     for (const never of ['Realtor', 'Mover', 'Vendor', 'Chamber']) expect(offered()).not.toContain(never)
   })
-  it("the location's own client tag sits in Client status, not in a section of its own", async () => {
+  it("the location's own client tag sits in Client Status, not in a section of its own", async () => {
     installFetch(); await mount({ screen: 'clients' })
     expect(sections()).not.toContain('own')
     expect(inSection('client_status')).toContain('Snowbird')
@@ -89,8 +89,8 @@ describe('B) on Network', () => {
   })
   it('the group headings are the group names', async () => {
     installFetch(); await mount({ screen: 'network' })
-    expect(host.querySelector('[data-section="home_property"]')!.textContent).toContain('Home & property')
-    expect(host.querySelector('[data-section="professional_services"]')!.textContent).toContain('Professional services')
+    expect(host.querySelector('[data-section="home_property"]')!.textContent).toContain('Home & Property')
+    expect(host.querySelector('[data-section="professional_services"]')!.textContent).toContain('Professional Services')
   })
 })
 
@@ -130,7 +130,7 @@ describe('D) a tag made from the picker', () => {
     installFetch(made); await mount({ screen: 'network' })
     await type('Piano tuner'); await click(host.querySelector('[data-create]'))
     const select = host.querySelector('[data-create-group]') as HTMLSelectElement
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Pick a group', 'Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Pick a group', 'Relationship', 'Home & Property', 'Design & Staging', 'Cleaning', 'Moving & Hauling', 'Senior Living', 'Valuables', 'Professional Services'])
     expect(select.value).toBe('')
   })
   it('made on Network: Create is off until a group is picked, and nothing is sent', async () => {

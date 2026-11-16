@@ -83,7 +83,7 @@ const fakeFetch = (o: Opts) => vi.fn(async (url: string, init?: any) => {
   const answer = (a: Answer) => ({ ok: a.status >= 200 && a.status < 300, status: a.status, json: async () => a.json })
   if (url.endsWith('/referrals')) return answer({ status: 200, json: o.referral || { total: 0, totals: { converted: 0, revenue: 0 } } })
   if (url.startsWith('/api/lookups') && url.includes('touchpoint_types')) return answer(o.touchTypesStatus ? { status: o.touchTypesStatus, json: {} } : { status: 200, json: { lookups: TOUCH_LOOKUPS, location: null } })
-  if (url === '/api/lookups' && method === 'POST') return answer(o.createTag ? o.createTag(body) : { status: 200, json: { ok: true, lookup: { id: 'made', label: body.label, icon: null, category: 'tags', location_id: body.location_id, is_active: true, sort_order: 9000, attrs: { group: body.group, shows_on: ['network'], section: 'trade' } } } })
+  if (url === '/api/lookups' && method === 'POST') return answer(o.createTag ? o.createTag(body) : { status: 200, json: { ok: true, lookup: { id: 'made', label: body.label, icon: body.icon || null, category: 'tags', location_id: body.location_id, is_active: true, sort_order: 9000, attrs: { group: body.group, shows_on: ['network'], section: 'trade' } } } })
   if (url.startsWith('/api/lookups')) return answer(o.lookupsStatus ? { status: o.lookupsStatus, json: {} } : { status: 200, json: { lookups: o.lookups || LOOKUPS, location: { id: LOC, name: 'Greensboro' } } })
   if (url.startsWith('/api/companies')) return answer(o.companiesStatus ? { status: o.companiesStatus, json: {} } : { status: 200, json: { rows: COMPANIES, total: 2, truncated: false } })
   if (url === '/api/touchpoints') {
@@ -137,8 +137,8 @@ const type = async (sel: string, value: string) => {
 const submit = async (form: string) => { await act(async () => { ($(`[data-form="${form}"]`) as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle(4) }
 const sent = () => calls.filter((c) => c.method !== 'GET')
 // A tag's or a type's WORDS, without the emoji drawn in front of them.
-const words = (el: Element) => Array.from(el.childNodes).filter((n) => !(n instanceof HTMLElement && n.classList.contains('ns-emoji'))).map((n) => n.textContent).join('')
-const emoji = (el: Element) => el.querySelector('.ns-emoji')?.textContent ?? null
+const words = (el: Element) => Array.from(el.childNodes).filter((n) => !(n instanceof HTMLElement && (n.classList.contains('ns-emoji') || n.classList.contains('td-emoji')))).map((n) => n.textContent).join('')
+const emoji = (el: Element) => el.querySelector('.ns-emoji, .td-emoji')?.textContent ?? null
 const pressed = (sel: string) => $$(sel).filter((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true').map((b) => words(b))
 
 describe('a touchpoint', () => {
@@ -324,7 +324,7 @@ describe("tags are picked from Bee Hub's own list", () => {
   it('shows it in its sections, Relationship then Trade then the location\'s own, in Bee Hub\'s order', async () => {
     await mount({ sheet: TAGGED })
     await click($('[data-edit="tags"]'))
-    expect($$('[data-tag-section]').map((s) => [s.dataset.tagSection, s.querySelector('.ns-sub')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])).toEqual([
+    expect($$('[data-tag-section]').filter((s) => s.querySelector('[data-pick-tag]')).map((s) => [s.dataset.tagSection, s.querySelector('h3')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])).toEqual([
       ['relationship', 'Relationship', ['Hot Lead', 'VIP']],
       ['trade', 'Trade', ['Mover', 'Realtor']],
       ['own', 'Greensboro’s own', ['Garden Club']],
@@ -342,16 +342,16 @@ describe("tags are picked from Bee Hub's own list", () => {
     await click($('[data-edit="tags"]'))
     // LOOKUPS above carry no emoji at all, so every one of these is a stand-in or the plain mark…
     expect($$('[data-pick-tag]').map((b) => emoji(b))).toEqual(['🏷️', '🏷️', '🏷️', '🏷️', '🏷️'])
-    expect($$('[data-pick-tag] .ns-emoji').every((e) => e.getAttribute('aria-hidden') === 'true')).toBe(true)
+    expect($$('[data-pick-tag] .td-emoji')).toHaveLength(5)
+    expect($$('[data-pick-tag] .td-emoji').every((e) => e.getAttribute('aria-hidden') === 'true')).toBe(true)
   })
   it('on the sheet, a tag shows its stored emoji, and a tag with none shows its stand-in', async () => {
     await mount({ sheet: sheetOf({}, { tags: [
       { id: 't1', label: 'Realtor', icon: '🏠', section: 'trade' }, { id: 'p', label: 'Partner', icon: null, section: 'relationship' },
-      { id: 'l', label: 'Lead', icon: null, section: 'location' }, { id: 'b', label: 'Business Networking Group', icon: null, section: 'location' },
-      { id: 'o', label: 'Oak & Key', icon: null, section: 'location' }, { id: 'n', label: 'Brand New Tag', icon: null, section: 'trade' },
+      { id: 'n', label: 'Brand New Tag', icon: null, section: 'trade' },
     ] }) })
     expect($$('[data-tag]').map((t) => [emoji(t), words(t)])).toEqual([
-      ['🏠', 'Realtor'], ['🧑‍🤝‍🧑', 'Partner'], ['🌱', 'Lead'], ['🤝', 'Business Networking Group'], ['🔑', 'Oak & Key'], ['🏷️', 'Brand New Tag'],
+      ['🏠', 'Realtor'], ['🧑‍🤝‍🧑', 'Partner'], ['🏷️', 'Brand New Tag'],
     ])
   })
   it('the tags the contact has are the ones ticked', async () => {
@@ -568,15 +568,15 @@ const GROUPED = [
 
 describe('the Network sheet shows only the Network groups', () => {
   const open = async (o: Opts = {}) => { await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')) }
-  const groups = () => $$('[data-tag-section]').map((s) => [s.querySelector('.ns-sub')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])
+  const groups = () => $$('[data-tag-section]').map((s) => [s.querySelector('h3')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])
   it('Relationship, then the seven trade groups, in order, each A to Z', async () => {
     await open()
     expect(groups()).toEqual([
-      ['Relationship', ['Referral', 'Vendor']], ['Home & property', ['General Contractor', 'Realtor']], ['Design & staging', ['Designer']], ['Cleaning', ['Cleaner']],
-      ['Moving & hauling', ['Mover']], ['Senior living', ['Senior Living']], ['Valuables', ['Estate Sale']], ['Professional services', ['Garden Club', 'Networking Group']],
+      ['Relationship', ['Referral', 'Vendor']], ['Home & Property', ['General Contractor', 'Realtor']], ['Design & Staging', ['Designer']], ['Cleaning', ['Cleaner']],
+      ['Moving & Hauling', ['Mover']], ['Senior Living', ['Senior Living']], ['Valuables', ['Estate Sale']], ['Professional Services', ['Garden Club', 'Networking Group']],
     ])
   })
-  it('no Client status tag is offered on a Network contact', async () => {
+  it('no Client Status tag is offered on a Network contact', async () => {
     await open()
     const all = $$('[data-pick-tag]').map((b) => words(b))
     for (const never of ['Hot Lead', 'DO NOT BOOK']) expect(all).not.toContain(never)
@@ -596,76 +596,214 @@ describe('the Network sheet shows only the Network groups', () => {
   })
 })
 
+describe('the tag box (the design\'s picker)', () => {
+  const open = async (o: Opts = {}) => { const m = await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')); return m }
+  it('opens over the sheet as its own box, with search, the count of the location\'s own tags, and Done', async () => {
+    await open()
+    const box = $('[data-tag-dialog] [role="dialog"]')!
+    expect(box.getAttribute('aria-modal')).toBe('true')
+    expect($('#td-title')!.textContent).toBe('Tags')
+    expect($('[data-field="tagSearch"]')!.getAttribute('placeholder')).toBe('Search tags…')
+    expect($('[data-new-tag]')!.textContent).toBe('Create a new tag')
+    expect($('[data-own-count]')!.textContent).toBe('1 / 10 location tags')
+    expect($('[data-picked-count]')!.textContent).toBe('0 selected')
+    expect($('[data-form="tags"] [data-save]')!.textContent).toBe('Done')
+    expect($('[data-clear-tags]')).toBeNull()
+  })
+  it('a group with no tags is still shown, saying so', async () => {
+    await open({ lookups: GROUPED.filter((t) => t.id !== 'des') })
+    expect($('[data-tag-section="design_staging"]')!.textContent).toBe('Design & StagingNo tags yet')
+    expect($$('[data-tag-section]')).toHaveLength(8)
+  })
+  it('search narrows the list as you type, hides groups with no match, and says when nothing matches', async () => {
+    await open()
+    await type('[data-field="tagSearch"]', 'REAL')
+    expect($$('[data-tag-section]').map((s) => s.dataset.tagSection)).toEqual(['home_property'])
+    expect($$('[data-pick-tag]').map((b) => words(b))).toEqual(['Realtor'])
+    expect($('[data-no-match]')).toBeNull()
+    await type('[data-field="tagSearch"]', 'zzz')
+    expect($$('[data-tag-section]')).toEqual([])
+    expect($('[data-no-match]')!.textContent).toBe('No tags match.')
+  })
+  it('the count of ticked tags follows the ticks, and Clear all unticks every one', async () => {
+    await open({ sheet: sheetOf({ tagIds: ['rea', 'ven'] }, { tags: [{ id: 'rea', label: 'Realtor', section: 'trade' }, { id: 'ven', label: 'Vendor', section: 'relationship' }] }) })
+    expect($('[data-picked-count]')!.textContent).toBe('2 selected')
+    await click($('[data-pick-tag="mov"]'))
+    expect($('[data-picked-count]')!.textContent).toBe('3 selected')
+    await click($('[data-clear-tags]'))
+    expect(pressed('[data-pick-tag]')).toEqual([])
+    expect(sent()).toEqual([])
+    await submit('tags')
+    expect(sent().map((c) => c.method)).toEqual(['DELETE', 'DELETE'])
+  })
+  it('the ✕ leaves without saving anything', async () => {
+    await open()
+    await click($('[data-pick-tag="mov"]')); await click($('[data-tag-dialog] [data-cancel]'))
+    expect($('[data-tag-dialog]')).toBeNull()
+    expect(sent()).toEqual([])
+  })
+  it('a tap outside the box does not close it', async () => {
+    await open()
+    await click($('[data-tag-dialog]'))
+    expect($('[data-tag-dialog] [role="dialog"]')).toBeTruthy()
+  })
+  it('the header shows three tags, then how many more, and names them all on hover', async () => {
+    const six = ['Realtor', 'Vendor', 'Mover', 'Designer', 'Cleaner', 'Estate Sale'].map((label, i) => ({ id: `x${i}`, label, icon: null, section: 'trade' }))
+    await mount({ sheet: sheetOf({}, { tags: six }) })
+    expect($$('[data-sheet-tags] [data-tag]').map((t) => words(t))).toEqual(['Realtor', 'Vendor', 'Mover'])
+    expect($('[data-more-tags]')!.textContent).toBe('+3 more')
+    expect($('[data-edit="tags"]')!.getAttribute('title')).toBe('Realtor, Vendor, Mover, Designer, Cleaner, Estate Sale')
+  })
+  it('with three or fewer there is no "more"; with none it says Add tags', async () => {
+    await mount()
+    expect($('[data-no-tags]')!.textContent).toBe('Add tags')
+    expect($('[data-more-tags]')).toBeNull()
+  })
+})
+
 describe('making a tag from the Network picker', () => {
   const open = async (o: Opts = {}) => { const m = await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')); return m }
-  const create = async (name: string, group = 'home_property') => { await type('[data-field="newTag"]', name); if (group) await type('[data-field="newGroup"]', group); await click($('[data-create-tag]')) }
-  it('says, before anything is made, who sees it and the limit', async () => {
+  const begin = async () => { await click($('[data-new-tag]')) }
+  const off = () => ($('[data-create-tag]') as HTMLButtonElement).disabled
+  // Pressing Create is the form's submit; a Create that is off is not pressed.
+  const press = async () => { if (!off()) await submit('new-tag') }
+  const create = async (name: string, group = 'home_property', emojiTyped = '') => {
+    await begin(); await type('[data-field="newTag"]', name)
+    if (group) await click($(`[data-group="${group}"]`))
+    if (emojiTyped) await type('[data-field="newEmoji"]', emojiTyped)
+    await press()
+  }
+  it('Create a new tag opens a second screen, and Back returns with nothing made', async () => {
     await open()
-    expect($('[data-tag-create-hint]')!.textContent).toBe('Name it and pick its group. Only Greensboro sees it. A location can have up to 10 of its own.')
-    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(true)
+    await begin()
+    expect($('#td-title')!.textContent).toBe('Create a new tag')
+    expect($('[data-form="tags"]')).toBeNull()
+    expect($('[data-own-count]')!.textContent).toBe('1 / 10 location tags')
+    expect(off()).toBe(true)
+    await click($('[data-create-back]'))
+    expect($('#td-title')!.textContent).toBe('Tags')
+    expect(sent()).toEqual([])
   })
-  it('asks which of the eight Network groups it goes in, with none picked for them', async () => {
+  it('what was typed in search becomes the new tag\'s name', async () => {
     await open()
-    const select = $('[data-field="newGroup"]') as HTMLSelectElement
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Which group?', 'Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
-    expect(select.value).toBe('')
+    await type('[data-field="tagSearch"]', ' Plumber ')
+    await begin()
+    expect(($('[data-field="newTag"]') as HTMLInputElement).value).toBe('Plumber')
+  })
+  it('asks which of the eight Network groups it goes in, each with its emoji, with none picked for them', async () => {
+    await open(); await begin()
+    expect($$('[data-group]').map((b) => b.textContent)).toEqual(['🤝Relationship', '🏡Home & Property', '🎨Design & Staging', '🧽Cleaning', '📦Moving & Hauling', '🌷Senior Living', '💎Valuables', '💼Professional Services'])
+    expect($$('[data-group]').map((b) => [b.getAttribute('role'), b.getAttribute('aria-checked')])).toEqual(Array(8).fill(['radio', 'false']))
   })
   it('Create stays off until there is a name AND a group', async () => {
-    await open()
+    await open(); await begin()
+    await click($('[data-group="home_property"]'))
+    expect(off()).toBe(true) // a group, no name
+    await click($('[data-create-cancel]')); await begin()
     await type('[data-field="newTag"]', 'Plumber')
-    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(true)
-    await type('[data-field="newGroup"]', 'home_property')
-    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(false)
+    expect(off()).toBe(true) // a name, no group
+    await type('[data-field="newTag"]', '   ')
+    await click($('[data-group="home_property"]'))
+    expect(off()).toBe(true) // spaces are not a name
+    await type('[data-field="newTag"]', 'Plumber')
+    expect(off()).toBe(false)
+    expect($$('[data-group]').filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.dataset.group)).toEqual(['home_property'])
   })
-  it('Enter with no group picked makes nothing and says to pick one', async () => {
-    await open()
+  it('Enter with no group picked makes nothing', async () => {
+    await open(); await begin()
     await type('[data-field="newTag"]', 'Plumber')
-    await act(async () => { $('[data-field="newTag"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
-    await settle(2)
+    await submit('new-tag')
     expect(sent()).toEqual([])
-    expect($('[data-save-error]')!.textContent).toBe('Pick which group this tag goes in.')
-    expect($('[data-field="newGroup"]')!.getAttribute('aria-invalid')).toBe('true')
+    expect($('#td-title')!.textContent).toBe('Create a new tag')
   })
-  it('if the server says a group is needed, it says so on the group box', async () => {
+  it('if the server says a group is needed, it says so', async () => {
     await open({ createTag: () => ({ status: 400, json: { error: 'group_required' } }) })
     await create('Plumber')
     expect($('[data-save-error]')!.textContent).toBe('Pick which group this tag goes in.')
+    expect($('[data-field="newGroup"]')!.getAttribute('aria-invalid')).toBe('true')
   })
-  it("is sent to Bee Hub's own tag list, for the contact's location, saying it was made on Network", async () => {
+  it("is sent to Bee Hub's own tag list, for the contact's location, made on Network, with its group's emoji when none is typed", async () => {
     await open()
     await create('  Plumber ')
-    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network', group: 'home_property' } }])
+    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network', group: 'home_property', icon: '🏡' } }])
   })
-  it('the new tag appears in its group, ticked, and nothing is on the contact until Save tags', async () => {
+  it('the emoji box keeps one emoji and drops everything else typed; that emoji is the one sent', async () => {
+    await open(); await begin()
+    expect($('[data-emoji-preview]')!.textContent).toBe('🏷️')
+    await type('[data-field="newTag"]', 'Plumber'); await click($('[data-group="cleaning_care"]'))
+    expect($('[data-emoji-preview]')!.textContent).toBe('🧽')
+    await type('[data-field="newEmoji"]', 'ab🔧🪠 c')
+    expect(($('[data-field="newEmoji"]') as HTMLInputElement).value).toBe('🔧')
+    expect($('[data-emoji-preview]')!.textContent).toBe('🔧')
+    await type('[data-field="newEmoji"]', 'wrench')
+    expect(($('[data-field="newEmoji"]') as HTMLInputElement).value).toBe('')
+    expect($('[data-emoji-preview]')!.textContent).toBe('🧽')
+    await type('[data-field="newEmoji"]', '🔧')
+    await press()
+    expect(sent()[0].body).toMatchObject({ group: 'cleaning_care', icon: '🔧' })
+  })
+  it('the new tag appears in its group with its emoji, ticked, and nothing is on the contact until Done', async () => {
     await open()
     await create('Plumber', 'senior_living')
-    expect($$('[data-tag-section="senior_living"] [data-pick-tag]').map((b) => words(b))).toEqual(['Plumber', 'Senior Living'])
+    expect($('#td-title')!.textContent).toBe('Tags')
+    expect($$('[data-tag-section="senior_living"] [data-pick-tag]').map((b) => [emoji(b), words(b)])).toEqual([['🌷', 'Plumber'], ['🏷️', 'Senior Living']])
     expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toEqual(['Garden Club', 'Networking Group'])
     expect(pressed('[data-pick-tag]')).toEqual(['Plumber'])
-    // the boxes are cleared, so the next tag starts with no group picked
-    expect([($('[data-field="newTag"]') as HTMLInputElement).value, ($('[data-field="newGroup"]') as HTMLSelectElement).value]).toEqual(['', ''])
-    expect($('[data-tag-note]')!.textContent).toBe('“Plumber” was created and ticked. Save tags to put it on this contact.')
+    expect($('[data-tag-note]')!.textContent).toBe('🌷 Plumber created and selected.')
+    expect($('[data-own-count]')!.textContent).toBe('2 / 10 location tags')
+    expect($('[data-picked-count]')!.textContent).toBe('1 selected')
     expect(sent().filter((c) => c.url.startsWith('/api/partner-tags'))).toEqual([])
+    // the next new tag starts clean: no name, no group, no emoji
+    await begin()
+    expect([($('[data-field="newTag"]') as HTMLInputElement).value, ($('[data-field="newEmoji"]') as HTMLInputElement).value, $$('[data-group][aria-checked="true"]').length]).toEqual(['', '', 0])
+    await click($('[data-create-back]'))
     await submit('tags')
     expect(sent().at(-1)).toEqual({ url: '/api/partner-tags', method: 'POST', body: { partner_id: ID, tag_lookup_id: 'made' } })
   })
-  it('Enter in the box makes the tag; it does not save the form', async () => {
+  it('making the tag does not save the picker: it is still open', async () => {
     await open()
-    await type('[data-field="newTag"]', 'Plumber'); await type('[data-field="newGroup"]', 'cleaning_care')
-    await act(async () => { $('[data-field="newTag"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
-    await settle(3)
+    await create('Plumber', 'cleaning_care')
     expect(sent().map((c) => c.url)).toEqual(['/api/lookups'])
     expect($('[data-form="tags"]')).toBeTruthy()
   })
-  it('at the limit of ten: said in plain words, nothing made, nothing ticked', async () => {
+  it('a name that is already in the list: it says so and Create stays off', async () => {
+    await open(); await begin()
+    await type('[data-field="newTag"]', ' realtor '); await click($('[data-group="home_property"]'))
+    expect($('[data-tag-duplicate]')!.textContent).toBe('A tag with this name already exists.')
+    expect(off()).toBe(true)
+    await submit('new-tag')
+    expect(sent()).toEqual([])
+  })
+  it('a location already at ten of its own: it says so on both screens, and Create stays off', async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
+    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...ten] })
+    const said = 'This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.'
+    expect($('[data-own-count]')!.textContent).toBe('10 / 10 location tags')
+    expect($('[data-tag-limit]')!.textContent).toBe(said)
+    await begin()
+    await type('[data-field="newTag"]', 'Plumber'); await click($('[data-group="home_property"]'))
+    expect($('[data-tag-limit]')!.textContent).toBe(said)
+    expect(off()).toBe(true)
+    await submit('new-tag')
+    expect(sent()).toEqual([])
+  })
+  it('a switched-off own tag does not count toward the ten', async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
+    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...nine, g('off', 'Old One', 'relationship', ['network'], { location_id: LOC, is_active: false })] })
+    expect($('[data-own-count]')!.textContent).toBe('9 / 10 location tags')
+    expect($('[data-tag-limit]')).toBeNull()
+  })
+  it('if the server says the limit is reached: said in plain words, nothing made, nothing ticked', async () => {
     await open({ createTag: () => ({ status: 409, json: { error: 'tag_limit', limit: 10, count: 10 } }) })
     await create('Plumber')
     expect($('[data-save-error]')!.textContent).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')
     expect($('[data-field="newTag"]')!.getAttribute('aria-invalid')).toBe('true')
+    await click($('[data-create-back]'))
+    expect($('[data-save-error]')).toBeNull()
     expect(pressed('[data-pick-tag]')).toEqual([])
     expect($$('[data-pick-tag]').map((b) => words(b))).not.toContain('Plumber')
   })
-  it('a name that is already a tag here is ticked instead of made twice', async () => {
+  it('a name that is nearly a tag here is ticked instead of made twice', async () => {
     await open({ createTag: () => ({ status: 409, json: { error: 'near_match', verdict: 'use', tag: { id: 'rea', label: 'Realtor' } } }) })
     await create('realtors')
     expect(pressed('[data-pick-tag]')).toEqual(['Realtor'])
@@ -676,15 +814,18 @@ describe('making a tag from the Network picker', () => {
     await open({ createTag: () => ({ status: 409, json: { error: 'near_match', verdict: 'use', tag: { id: 'hot', label: 'Hot Lead' } } }) })
     await create('hot leads')
     expect($('[data-save-error]')!.textContent).toBe('“Hot Lead” is already a tag on another list, so it is not offered here.')
+    await click($('[data-create-back]'))
     expect(pressed('[data-pick-tag]')).toEqual([])
   })
   it('if it cannot be made it says nothing was changed', async () => {
     await open({ createTag: () => ({ status: 500, json: { error: 'Failed to create lookup' } }) })
     await create('Plumber')
     expect($('[data-save-error]')!.textContent).toBe('That tag could not be created. Nothing was changed.')
+    expect($('#td-title')!.textContent).toBe('Create a new tag')
   })
-  it('there is no create box when the tag list could not be loaded', async () => {
+  it('there is no way to make a tag when the tag list could not be loaded', async () => {
     await mount({ lookupsStatus: 500 }); await click($('[data-edit="tags"]'))
     expect($('[data-tag-create]')).toBeNull()
+    expect($('[data-new-tag]')).toBeNull()
   })
 })

@@ -61,7 +61,7 @@ beforeEach(() => {
   }
 })
 const created = () => db().tables.lookups.at(-1)
-// A tag made on Network must name its group; these tests pick Home & property unless they say otherwise.
+// A tag made on Network must name its group; these tests pick Home & Property unless they say otherwise.
 const make = (over: any = {}) => post(createLookup, { category: 'tags', label: 'Plumber', location_id: LOC, ...(over.made_on === 'network' && !('group' in over) ? { group: 'home_property' } : {}), ...over })
 
 describe("A) a location's new tag", () => {
@@ -84,12 +84,29 @@ describe("A) a location's new tag", () => {
     expect(r.body).toEqual({ error: 'group_required', allowed: ['relationship', 'home_property', 'design_staging', 'cleaning_care', 'moving_hauling', 'senior_living', 'valuables_specialty', 'professional_services'] })
     expect(db().calls).toEqual([])
   })
+  it('made on Network with an emoji: stored as sent', async () => {
+    as('owner', LOC)
+    expect((await make({ made_on: 'network', icon: '🏡' })).status).toBe(200)
+    expect(created().icon).toBe('🏡')
+  })
+  it.each(['🏡 home', 'home', '🏡🔧'])('made on Network with %j as its emoji: refused, nothing read or written', async (icon) => {
+    as('owner', LOC)
+    const r = await make({ made_on: 'network', icon })
+    expect([r.status, r.body]).toEqual([400, { error: 'icon_not_allowed' }])
+    expect(db().calls).toEqual([])
+  })
+  it('made on Clients with an emoji that is not on the grid: still refused', async () => {
+    as('owner', LOC)
+    const r = await make({ label: 'Snowbird', made_on: 'clients', icon: '🏡' })
+    expect([r.status, r.body]).toEqual([400, { error: 'icon_not_allowed' }])
+    expect(db().calls).toEqual([])
+  })
   it('made on Clients: a group sent along is not used', async () => {
     as('owner', LOC)
     await make({ label: 'Snowbird', made_on: 'clients', group: 'home_property' })
     expect(created().attrs).toMatchObject({ group: 'client_status', shows_on: ['clients'] })
   })
-  it('made on Clients: Client status, shows on Clients', async () => {
+  it('made on Clients: Client Status, shows on Clients', async () => {
     as('manager', LOC)
     await make({ label: 'Snowbird', made_on: 'clients' })
     expect(created().attrs).toMatchObject({ group: 'client_status', shows_on: ['clients'], section: 'relationship', made_on: 'clients' })

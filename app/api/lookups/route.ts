@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, TAG_LIMIT_PER_LOCATION, isAllowedTagIcon, newTagPlacement, groupsForScreen } from '@/lib/tags'
+import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, TAG_LIMIT_PER_LOCATION, isAllowedNewTagIcon, newTagPlacement, groupsForScreen } from '@/lib/tags'
 import { checkNearTag, nearMatchBody, fileRetiredTagRequest, LOCATION_TAG_ROLES } from '@/lib/tag-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -172,8 +172,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'forbidden_role' }, { status: 403 })
       }
       // A location's own tag takes its icon from the curated grid only
-      // (lib/tags.ts TAG_ICON_CHOICES), or none.
-      if (!isAllowedTagIcon(icon)) {
+      // (lib/tags.ts TAG_ICON_CHOICES), or none. A tag made on Network may
+      // carry any ONE emoji instead (Kevin, 2026-11-16): the one typed, or
+      // its group's.
+      if (!isAllowedNewTagIcon(icon, body?.made_on)) {
         return NextResponse.json({ error: 'icon_not_allowed' }, { status: 400 })
       }
       // A tag made on Network must say which Network group it goes in.
@@ -251,7 +253,7 @@ export async function POST(req: NextRequest) {
     if (location_id != null) {
       insert.location_id = location_id
       // A location's own tag shows on the screen it was made on (lib/tags.ts
-      // newTagPlacement). Made on Clients it goes to Client status. Made on
+      // newTagPlacement). Made on Clients it goes to Client Status. Made on
       // Network the owner picks one of the eight Network groups (`group`);
       // that was checked before anything was read, above. A group sent inside
       // attrs is never used.
