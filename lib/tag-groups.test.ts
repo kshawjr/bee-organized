@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   TAG_GROUPS, TAG_LIMIT_PER_LOCATION, TAG_GROUP_NEEDED_WORDS, groupsForScreen, tagGroup, tagShowsOn, groupTags, newTagPlacement, tagLimitWords, tagReview, sectionTags,
-  firstEmoji, isOneEmoji, groupEmoji, newTagEmoji, isAllowedNewTagIcon,
+  firstEmoji, isOneEmoji, groupEmoji, newTagEmoji, isAllowedNewTagIcon, NEW_TAG_EMOJI_GROUPS,
 } from './tags'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -243,6 +243,12 @@ describe("H) a new Network tag's emoji", () => {
     expect(firstEmoji('wrench 123')).toBeNull()
     expect(firstEmoji('')).toBeNull()
     expect(firstEmoji(null)).toBeNull()
+  })
+  it('every emoji offered to tap is one the server accepts on a Network tag, and none is offered twice', () => {
+    const all = NEW_TAG_EMOJI_GROUPS.flatMap(([, list]) => list)
+    expect(NEW_TAG_EMOJI_GROUPS.map(([heading, list]) => [heading, list.length])).toEqual([['Popular', 12], ['Home', 16], ['Work & trades', 12], ['People', 12], ['Nature & places', 12], ['Symbols', 12]])
+    expect(new Set(all).size).toBe(all.length)
+    expect(all.filter((e) => !isOneEmoji(e) || !isAllowedNewTagIcon(e, 'network') || firstEmoji(e) !== e)).toEqual([])
   })
   it('with none typed, the tag takes its group\'s emoji', () => {
     expect(newTagEmoji('senior_living', '')).toBe('🌷')

@@ -313,6 +313,18 @@ export function firstEmoji(text: unknown): string | null {
 export function isOneEmoji(icon: unknown): boolean {
   return typeof icon === 'string' && icon.trim().length > 0 && icon.trim().length <= 24 && firstEmoji(icon) === icon.trim()
 }
+/**
+ * The emoji offered to tap when a tag is made on Network (the Lovable design's
+ * own list and its six headings). Any other single emoji can still be typed.
+ */
+export const NEW_TAG_EMOJI_GROUPS: [string, string[]][] = [
+  ['Popular', ['🏷️', '⭐', '💛', '✨', '🎉', '📍', '🔑', '🎁', '🤝', '📣', '☕', '💎']],
+  ['Home', ['🏡', '🏠', '🛋️', '🛏️', '🚪', '🪴', '🧺', '🧹', '🧽', '🗄️', '📦', '🗂️', '🍳', '🥫', '🚗', '🧸']],
+  ['Work & trades', ['🔨', '🧰', '⚡', '🖌️', '🎨', '🏗️', '🪜', '🔧', '💼', '📋', '📅', '💡']],
+  ['People', ['💕', '👋', '👪', '👵', '👶', '🐶', '🐱', '🎓', '💍', '🙌', '😊', '🥰']],
+  ['Nature & places', ['🌸', '🌷', '🌿', '🌳', '🌊', '☀️', '🌙', '❄️', '🍂', '🏙️', '⛰️', '🏖️']],
+  ['Symbols', ['❤️', '🧡', '💚', '💙', '💜', '🔥', '🌟', '✅', '❗', '🔔', '🏆', '🐝']],
+]
 /** The emoji a group gives a new tag when none is typed. */
 export function groupEmoji(group: unknown): string {
   return TAG_GROUPS.find((g) => g.key === group)?.emoji || ''

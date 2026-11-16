@@ -134,6 +134,7 @@ const type = async (sel: string, value: string) => {
   const proto = el.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
   await act(async () => { Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })) })
 }
+const enter = async (sel: string) => { await act(async () => { $(sel)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) }); await settle(2) }
 const submit = async (form: string) => { await act(async () => { ($(`[data-form="${form}"]`) as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle(4) }
 const sent = () => calls.filter((c) => c.method !== 'GET')
 // A tag's or a type's WORDS, without the emoji drawn in front of them.
@@ -603,8 +604,9 @@ describe('the tag box (the design\'s picker)', () => {
     const box = $('[data-tag-dialog] [role="dialog"]')!
     expect(box.getAttribute('aria-modal')).toBe('true')
     expect($('#td-title')!.textContent).toBe('Tags')
-    expect($('[data-field="tagSearch"]')!.getAttribute('placeholder')).toBe('Search tags…')
-    expect($('[data-new-tag]')!.textContent).toBe('Create a new tag')
+    expect($('[data-field="tagSearch"]')!.getAttribute('placeholder')).toBe('Search tags or type a new one…')
+    expect($('[data-new-tag]')).toBeNull() // nothing typed: nothing to create
+    expect($('[data-tag-dialog]')!.textContent).not.toContain('Create a new tag')
     expect($('[data-own-count]')!.textContent).toBe('1 / 10 location tags')
     expect($('[data-picked-count]')!.textContent).toBe('0 selected')
     expect($('[data-form="tags"] [data-save]')!.textContent).toBe('Done')
@@ -624,6 +626,30 @@ describe('the tag box (the design\'s picker)', () => {
     await type('[data-field="tagSearch"]', 'zzz')
     expect($$('[data-tag-section]')).toEqual([])
     expect($('[data-no-match]')!.textContent).toBe('No tags match.')
+  })
+  it('the same search bar offers to create what was typed, at the top of the list, unless a tag has exactly that name', async () => {
+    await open()
+    await type('[data-field="tagSearch"]', '   ')
+    expect($('[data-new-tag]')).toBeNull() // spaces are not a name
+    await type('[data-field="tagSearch"]', ' Real ')
+    expect($('[data-new-tag]')!.textContent).toBe('Create “Real”')
+    expect($('.td-list')!.firstElementChild).toBe($('[data-new-tag]')) // in the list, above the matches
+    expect($$('[data-pick-tag]').map((b) => words(b))).toEqual(['Realtor']) // the near matches are still offered
+    for (const same of ['Realtor', ' rEALTOR ']) {
+      await type('[data-field="tagSearch"]', same)
+      expect($('[data-new-tag]')).toBeNull()
+    }
+    await type('[data-field="tagSearch"]', 'zzz')
+    expect($('[data-new-tag]')!.textContent).toBe('Create “zzz”')
+  })
+  it('Enter in the search bar opens the create screen for what was typed; with an exact match it does nothing', async () => {
+    await open()
+    await type('[data-field="tagSearch"]', 'Realtor'); await enter('[data-field="tagSearch"]')
+    expect($('#td-title')!.textContent).toBe('Tags')
+    await type('[data-field="tagSearch"]', 'Plumber'); await enter('[data-field="tagSearch"]')
+    expect($('#td-title')!.textContent).toBe('Create a new tag')
+    expect(($('[data-field="newTag"]') as HTMLInputElement).value).toBe('Plumber')
+    expect(sent()).toEqual([])
   })
   it('the count of ticked tags follows the ticks, and Clear all unticks every one', async () => {
     await open({ sheet: sheetOf({ tagIds: ['rea', 'ven'] }, { tags: [{ id: 'rea', label: 'Realtor', section: 'trade' }, { id: 'ven', label: 'Vendor', section: 'relationship' }] }) })
@@ -663,7 +689,8 @@ describe('the tag box (the design\'s picker)', () => {
 
 describe('making a tag from the Network picker', () => {
   const open = async (o: Opts = {}) => { const m = await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')); return m }
-  const begin = async () => { await click($('[data-new-tag]')) }
+  // The only way in: type a name nobody has in the one search bar, then tap Create “name”.
+  const begin = async (typed = 'Plumber') => { await type('[data-field="tagSearch"]', typed); await click($('[data-new-tag]')) }
   const off = () => ($('[data-create-tag]') as HTMLButtonElement).disabled
   // Pressing Create is the form's submit; a Create that is off is not pressed.
   const press = async () => { if (!off()) await submit('new-tag') }
@@ -673,7 +700,7 @@ describe('making a tag from the Network picker', () => {
     if (emojiTyped) await type('[data-field="newEmoji"]', emojiTyped)
     await press()
   }
-  it('Create a new tag opens a second screen, and Back returns with nothing made', async () => {
+  it('Create “name” opens a second screen, and Back returns with nothing made', async () => {
     await open()
     await begin()
     expect($('#td-title')!.textContent).toBe('Create a new tag')
@@ -686,9 +713,9 @@ describe('making a tag from the Network picker', () => {
   })
   it('what was typed in search becomes the new tag\'s name', async () => {
     await open()
-    await type('[data-field="tagSearch"]', ' Plumber ')
-    await begin()
+    await begin(' Plumber ')
     expect(($('[data-field="newTag"]') as HTMLInputElement).value).toBe('Plumber')
+    expect($$('[data-group][aria-checked="true"]')).toHaveLength(0) // the group is still asked for
   })
   it('asks which of the eight Network groups it goes in, each with its emoji, with none picked for them', async () => {
     await open(); await begin()
@@ -697,13 +724,11 @@ describe('making a tag from the Network picker', () => {
   })
   it('Create stays off until there is a name AND a group', async () => {
     await open(); await begin()
+    expect(off()).toBe(true) // a name (carried from search), no group
+    await type('[data-field="newTag"]', '')
     await click($('[data-group="home_property"]'))
     expect(off()).toBe(true) // a group, no name
-    await click($('[data-create-cancel]')); await begin()
-    await type('[data-field="newTag"]', 'Plumber')
-    expect(off()).toBe(true) // a name, no group
     await type('[data-field="newTag"]', '   ')
-    await click($('[data-group="home_property"]'))
     expect(off()).toBe(true) // spaces are not a name
     await type('[data-field="newTag"]', 'Plumber')
     expect(off()).toBe(false)
@@ -742,6 +767,41 @@ describe('making a tag from the Network picker', () => {
     await press()
     expect(sent()[0].body).toMatchObject({ group: 'cleaning_care', icon: '🔧' })
   })
+  it('an emoji can be chosen with a tap: six headings of emoji, one tap picks, a second tap unpicks', async () => {
+    await open(); await begin()
+    await click($('[data-group="cleaning_care"]'))
+    expect($('[data-emoji-grid]')!.getAttribute('role')).toBe('radiogroup')
+    expect($$('[data-emoji-grid] p').map((h) => h.textContent)).toEqual(['Popular', 'Home', 'Work & trades', 'People', 'Nature & places', 'Symbols'])
+    expect($$('[data-emoji]')).toHaveLength(76)
+    expect($$('[data-emoji][aria-checked="true"]')).toHaveLength(0) // none picked for them
+    await click($('[data-emoji="🔧"]'))
+    expect($$('[data-emoji][aria-checked="true"]').map((b) => b.dataset.emoji)).toEqual(['🔧'])
+    expect($('[data-emoji-preview]')!.textContent).toBe('🔧')
+    expect(($('[data-field="newEmoji"]') as HTMLInputElement).value).toBe('🔧')
+    await click($('[data-emoji="🐝"]')) // another tap moves the choice
+    expect($$('[data-emoji][aria-checked="true"]').map((b) => b.dataset.emoji)).toEqual(['🐝'])
+    await click($('[data-emoji="🐝"]')) // the same one again: back to the group's own
+    expect($$('[data-emoji][aria-checked="true"]')).toHaveLength(0)
+    expect($('[data-emoji-preview]')!.textContent).toBe('🧽')
+    expect(sent()).toEqual([]) // choosing an emoji saves nothing by itself
+  })
+  it('the tapped emoji is the one the tag is made with, and the one it shows in the list', async () => {
+    await open(); await begin()
+    await click($('[data-group="home_property"]')); await click($('[data-emoji="🔧"]'))
+    await press()
+    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network', group: 'home_property', icon: '🔧' } }])
+    expect($$('[data-pick-tag]').filter((b) => words(b) === 'Plumber').map((b) => emoji(b))).toEqual(['🔧'])
+    expect($('[data-tag-note]')!.textContent).toBe('🔧 Plumber created and selected.')
+  })
+  it('typing an emoji replaces a tapped one, and a typed one that is in the grid lights up there', async () => {
+    await open(); await begin()
+    await click($('[data-emoji="🔧"]'))
+    await type('[data-field="newEmoji"]', '🐝')
+    expect($$('[data-emoji][aria-checked="true"]').map((b) => b.dataset.emoji)).toEqual(['🐝'])
+    await type('[data-field="newEmoji"]', '🪠') // not in the grid: still allowed
+    expect($$('[data-emoji][aria-checked="true"]')).toHaveLength(0)
+    expect($('[data-emoji-preview]')!.textContent).toBe('🪠')
+  })
   it('the new tag appears in its group with its emoji, ticked, and nothing is on the contact until Done', async () => {
     await open()
     await create('Plumber', 'senior_living')
@@ -753,9 +813,11 @@ describe('making a tag from the Network picker', () => {
     expect($('[data-own-count]')!.textContent).toBe('2 / 10 location tags')
     expect($('[data-picked-count]')!.textContent).toBe('1 selected')
     expect(sent().filter((c) => c.url.startsWith('/api/partner-tags'))).toEqual([])
-    // the next new tag starts clean: no name, no group, no emoji
-    await begin()
-    expect([($('[data-field="newTag"]') as HTMLInputElement).value, ($('[data-field="newEmoji"]') as HTMLInputElement).value, $$('[data-group][aria-checked="true"]').length]).toEqual(['', '', 0])
+    expect(($('[data-field="tagSearch"]') as HTMLInputElement).value).toBe('') // the search is cleared, so the whole list is back
+    expect($('[data-new-tag]')).toBeNull()
+    // the next new tag starts clean: its own name, no group, no emoji
+    await begin('Painter')
+    expect([($('[data-field="newTag"]') as HTMLInputElement).value, ($('[data-field="newEmoji"]') as HTMLInputElement).value, $$('[data-group][aria-checked="true"]').length, $$('[data-emoji][aria-checked="true"]').length]).toEqual(['Painter', '', 0, 0])
     await click($('[data-create-back]'))
     await submit('tags')
     expect(sent().at(-1)).toEqual({ url: '/api/partner-tags', method: 'POST', body: { partner_id: ID, tag_lookup_id: 'made' } })
@@ -774,17 +836,19 @@ describe('making a tag from the Network picker', () => {
     await submit('new-tag')
     expect(sent()).toEqual([])
   })
-  it('a location already at ten of its own: it says so on both screens, and Create stays off', async () => {
+  it('a location already at ten of its own: it says why, and Create “name” is off, by tap and by Enter', async () => {
     const ten = Array.from({ length: 10 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
     await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...ten] })
     const said = 'This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.'
     expect($('[data-own-count]')!.textContent).toBe('10 / 10 location tags')
     expect($('[data-tag-limit]')!.textContent).toBe(said)
-    await begin()
-    await type('[data-field="newTag"]', 'Plumber'); await click($('[data-group="home_property"]'))
+    await type('[data-field="tagSearch"]', 'Plumber')
+    expect($('[data-new-tag]')!.textContent).toBe('Create “Plumber”')
+    expect(($('[data-new-tag]') as HTMLButtonElement).disabled).toBe(true)
     expect($('[data-tag-limit]')!.textContent).toBe(said)
-    expect(off()).toBe(true)
-    await submit('new-tag')
+    await enter('[data-field="tagSearch"]')
+    expect($('#td-title')!.textContent).toBe('Tags')
+    expect($('[data-form="new-tag"]')).toBeNull()
     expect(sent()).toEqual([])
   })
   it('a switched-off own tag does not count toward the ten', async () => {
@@ -792,6 +856,8 @@ describe('making a tag from the Network picker', () => {
     await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...nine, g('off', 'Old One', 'relationship', ['network'], { location_id: LOC, is_active: false })] })
     expect($('[data-own-count]')!.textContent).toBe('9 / 10 location tags')
     expect($('[data-tag-limit]')).toBeNull()
+    await type('[data-field="tagSearch"]', 'Plumber')
+    expect(($('[data-new-tag]') as HTMLButtonElement).disabled).toBe(false)
   })
   it('if the server says the limit is reached: said in plain words, nothing made, nothing ticked', async () => {
     await open({ createTag: () => ({ status: 409, json: { error: 'tag_limit', limit: 10, count: 10 } }) })
@@ -825,7 +891,9 @@ describe('making a tag from the Network picker', () => {
   })
   it('there is no way to make a tag when the tag list could not be loaded', async () => {
     await mount({ lookupsStatus: 500 }); await click($('[data-edit="tags"]'))
-    expect($('[data-tag-create]')).toBeNull()
+    await type('[data-field="tagSearch"]', 'Plumber')
     expect($('[data-new-tag]')).toBeNull()
+    await enter('[data-field="tagSearch"]')
+    expect($('[data-form="new-tag"]')).toBeNull()
   })
 })
