@@ -59,7 +59,7 @@ import {
 } from '@/lib/network/contact-adds'
 import { RULED_NOT_SURE_IDS } from '@/lib/network/live-mapping'
 import { fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
-import { GROUP_FOR_NEW_TAG, TAG_GROUPS, TAG_LIMIT_PER_LOCATION, groupTags, tagLimitWords } from '@/lib/tags'
+import { TAG_GROUP_NEEDED_WORDS, TAG_LIMIT_PER_LOCATION, groupTags, groupsForScreen, tagLimitWords } from '@/lib/tags'
 import { tagTone } from './NetworkListScreen'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
@@ -311,6 +311,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const [companies, setCompanies] = useState(null) // [{ id, name }] | 'problem'
   const [touchList, setTouchList] = useState(null) // [TouchType] | 'problem'
   const [newTag, setNewTag] = useState('') // the name typed into "New tag"
+  const [newGroup, setNewGroup] = useState('') // the Network group picked for it; never chosen for them
   const [tagNote, setTagNote] = useState(null) // a quiet line after a create
   const sheet = useRef(null)
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
@@ -384,7 +385,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   // list is kept in view, last, so it can still be unticked.
   const tagListOf = (rows, own) => ({ rows, own, sections: groupTags(rows, 'network', own, (data?.tags || []).map((t) => t.id)) })
   const loadTagList = () => {
-    setTagList(null); setNewTag(''); setTagNote(null)
+    setTagList(null); setNewTag(''); setNewGroup(''); setTagNote(null)
     doFetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(c.locationId)}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}))
@@ -496,15 +497,16 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     return { words: 'Tags saved', contact: fresh?.contact || c }
   })
   // A NEW TAG, made from the picker. It belongs to this contact's location,
-  // lands in the Network group for new tags, and counts toward that
-  // location's limit of ten. It only creates the tag and ticks it: nothing is
-  // put on the contact until Save tags.
+  // goes in the Network group THE PERSON PICKS (one of eight; nothing is
+  // assumed), and counts toward that location's limit of ten. It only creates
+  // the tag and ticks it: nothing is put on the contact until Save tags.
   async function createTag() {
     const label = newTag.trim()
     if (!label || saving || !tagList?.rows) return
+    if (!newGroup) { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return }
     setSaving(true); setError(null); setTagNote(null)
     try {
-      const { res, json } = await call('/api/lookups', 'POST', { category: 'tags', label, location_id: c.locationId, made_on: 'network' })
+      const { res, json } = await call('/api/lookups', 'POST', { category: 'tags', label, location_id: c.locationId, made_on: 'network', group: newGroup })
       if (res.status === 409 && json?.error === 'tag_limit') { setError({ field: 'newTag', words: tagLimitWords(Number(json.count) || 0) }); return }
       if (res.status === 409 && json?.error === 'near_match' && json.tag) {
         // Only a tag this picker actually SHOWS can be ticked: a Clients tag
@@ -514,10 +516,11 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
         else setError({ field: 'newTag', words: json.verdict === 'restore' ? `“${json.tag.label}” was removed at this location. Bring it back under Settings rather than making it again.` : `“${json.tag.label}” is already a tag on another list, so it is not offered here.` })
         return
       }
+      if (res.status === 400 && json?.error === 'group_required') { setError({ field: 'newGroup', words: TAG_GROUP_NEEDED_WORDS }); return }
       if (!res.ok || !json?.lookup) { setError({ field: 'newTag', words: 'That tag could not be created. Nothing was changed.' }); return }
       setTagList(tagListOf([...tagList.rows, json.lookup], tagList.own))
       setDraft((d) => ({ picked: [...d.picked, json.lookup.id] }))
-      setNewTag(''); setTagNote(`“${json.lookup.label}” was created and ticked. Save tags to put it on this contact.`)
+      setNewTag(''); setNewGroup(''); setTagNote(`“${json.lookup.label}” was created and ticked. Save tags to put it on this contact.`)
     } catch (e) {
       setError({ field: 'newTag', words: NOT_SAVED })
     } finally {
@@ -701,12 +704,17 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                   ))}
                   {tagList?.sections && (
                     <div className="ns-field" data-tag-create>New tag{c.locationName ? ` for ${c.locationName}` : ''}
+                      <input className="ns-input" value={newTag} maxLength={60} disabled={saving} aria-invalid={error?.field === 'newTag' || undefined} placeholder="Name it"
+                        onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }} data-field="newTag" />
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <input className="ns-input" value={newTag} maxLength={60} disabled={saving} aria-invalid={error?.field === 'newTag' || undefined} placeholder="Name it"
-                          onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }} data-field="newTag" />
-                        <button type="button" className="ns-btn ns-btn-ghost" style={{ border: `1px solid ${T.input}` }} disabled={saving || !newTag.trim()} onClick={createTag} data-create-tag>Create</button>
+                        <select className="ns-input" aria-label="Which group the new tag goes in" value={newGroup} disabled={saving} aria-invalid={error?.field === 'newGroup' || undefined}
+                          onChange={(e) => { setNewGroup(e.target.value); if (error?.field === 'newGroup') setError(null) }} data-field="newGroup">
+                          <option value="">Which group?</option>
+                          {groupsForScreen('network').map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+                        </select>
+                        <button type="button" className="ns-btn ns-btn-ghost" style={{ border: `1px solid ${T.input}` }} disabled={saving || !newTag.trim() || !newGroup} onClick={createTag} data-create-tag>Create</button>
                       </div>
-                      <span data-tag-create-hint>It joins {TAG_GROUPS.find((g) => g.key === GROUP_FOR_NEW_TAG.network).label}, and only {c.locationName || 'this location'} sees it. A location can have up to {TAG_LIMIT_PER_LOCATION} of its own.</span>
+                      <span data-tag-create-hint>Name it and pick its group. Only {c.locationName || 'this location'} sees it. A location can have up to {TAG_LIMIT_PER_LOCATION} of its own.</span>
                       {tagNote && <span role="status" style={{ color: T.primary }} data-tag-note>{tagNote}</span>}
                     </div>
                   )}

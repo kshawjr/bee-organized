@@ -277,17 +277,27 @@ export function groupTags<T extends Groupable>(rows: T[], screen: TagScreen, own
 }
 
 // ── A LOCATION'S OWN TAGS (2026-11-15, Kevin) ────────────────────────────────
-// An owner can create a tag from the picker. It lands in the group for the
-// screen it was made on, and shows on that screen only. A tag made on Clients
-// goes to Client status. Network has eight groups and the picker does not ask
-// which, so a tag made there goes to Professional services (the general one);
-// corporate can move it when they review it.
+// An owner can create a tag from the picker. It shows on the screen it was
+// made on, and only there.
+//   made on Clients   it goes to Client status, the one Clients group.
+//   made on Network   the OWNER PICKS which of the eight Network groups it
+//                     goes in (Kevin, 2026-11-16). Nothing is assumed: with no
+//                     group, or a group that is not a Network one, no tag is
+//                     made.
 export const TAG_LIMIT_PER_LOCATION = 10
-export const GROUP_FOR_NEW_TAG: Record<TagScreen, TagGroupKey> = { clients: 'client_status', network: 'professional_services' }
-export function newTagPlacement(madeOn: unknown) {
-  const screen: TagScreen = madeOn === 'network' ? 'network' : 'clients'
-  return { group: GROUP_FOR_NEW_TAG[screen], shows_on: [screen], section: screen === 'clients' ? 'relationship' : 'trade', made_on: screen }
+/** The groups a tag made on this screen may go in. Clients has one; Network has eight. */
+export function groupsForScreen(screen: TagScreen) {
+  return TAG_GROUPS.filter((g) => (g.screens as readonly string[]).includes(screen))
 }
+/** Where a location's new tag lands, or null when a Network tag has no valid group picked. */
+export function newTagPlacement(madeOn: unknown, group?: unknown) {
+  const screen: TagScreen = madeOn === 'network' ? 'network' : 'clients'
+  if (screen === 'clients') return { group: 'client_status' as TagGroupKey, shows_on: ['clients'], section: 'relationship', made_on: 'clients' }
+  const g = groupsForScreen('network').find((x) => x.key === group)
+  if (!g) return null
+  return { group: g.key as TagGroupKey, shows_on: ['network'], section: g.key === 'relationship' ? 'relationship' : 'trade', made_on: 'network' }
+}
+export const TAG_GROUP_NEEDED_WORDS = 'Pick which group this tag goes in.'
 export const tagLimitWords = (count: number) =>
   `This location already has ${count} tags of its own, and the limit is ${TAG_LIMIT_PER_LOCATION}. Delete one you no longer use, or ask corporate to add this one to the main list.`
 

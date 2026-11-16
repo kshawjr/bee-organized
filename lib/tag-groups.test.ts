@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  TAG_GROUPS, TAG_LIMIT_PER_LOCATION, GROUP_FOR_NEW_TAG, tagGroup, tagShowsOn, groupTags, newTagPlacement, tagLimitWords, tagReview, sectionTags,
+  TAG_GROUPS, TAG_LIMIT_PER_LOCATION, TAG_GROUP_NEEDED_WORDS, groupsForScreen, tagGroup, tagShowsOn, groupTags, newTagPlacement, tagLimitWords, tagReview, sectionTags,
 } from './tags'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -127,12 +127,22 @@ describe("E) a location's new tag", () => {
   it('made on Clients lands in Client status and shows on Clients', () => {
     expect(newTagPlacement('clients')).toEqual({ group: 'client_status', shows_on: ['clients'], section: 'relationship', made_on: 'clients' })
   })
-  it('made on Network lands in Professional services and shows on Network', () => {
-    expect(newTagPlacement('network')).toEqual({ group: 'professional_services', shows_on: ['network'], section: 'trade', made_on: 'network' })
-    expect(GROUP_FOR_NEW_TAG).toEqual({ clients: 'client_status', network: 'professional_services' })
+  it('made on Network: the owner picks one of the eight Network groups, and it shows on Network', () => {
+    expect(groupsForScreen('network').map((g) => g.label)).toEqual(['Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    for (const g of groupsForScreen('network')) {
+      expect(newTagPlacement('network', g.key)).toEqual({ group: g.key, shows_on: ['network'], section: g.key === 'relationship' ? 'relationship' : 'trade', made_on: 'network' })
+    }
+  })
+  it('made on Network with no group, or a group that is not a Network one: nothing is assumed', () => {
+    for (const none of [undefined, null, '', 'client_status', 'made_up', 5]) expect(newTagPlacement('network', none), String(none)).toBeNull()
+    expect(TAG_GROUP_NEEDED_WORDS).toBe('Pick which group this tag goes in.')
+  })
+  it('made on Clients there is one group, so there is nothing to pick; a group sent along is not used', () => {
+    expect(groupsForScreen('clients').map((g) => g.key)).toEqual(['client_status'])
+    expect(newTagPlacement('clients', 'home_property')!.group).toBe('client_status')
   })
   it('anything else is treated as Clients, never as a group of its own', () => {
-    for (const odd of [undefined, null, 'nurture', 'home_property', 5]) expect(newTagPlacement(odd).group).toBe('client_status')
+    for (const odd of [undefined, null, 'nurture', 'home_property', 5]) expect(newTagPlacement(odd)!.group).toBe('client_status')
   })
   it('the limit is ten, and the words say what to do about it', () => {
     expect(TAG_LIMIT_PER_LOCATION).toBe(10)

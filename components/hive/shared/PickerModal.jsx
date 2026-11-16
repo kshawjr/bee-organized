@@ -67,7 +67,7 @@ import { T } from './tokens'
 import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
 import { tagText } from './tagText'
-import { sectionTags, groupTags, nearTagVerdict, tagLimitWords } from '@/lib/tags'
+import { sectionTags, groupTags, groupsForScreen, nearTagVerdict, tagLimitWords } from '@/lib/tags'
 import TagIconGrid from './TagIconGrid'
 
 export default function PickerModal({
@@ -101,6 +101,10 @@ export default function PickerModal({
   // Tags: the create confirm card + its icon (curated grid, '' = none).
   const [confirmCreate, setConfirmCreate] = useState(false)
   const [newIcon, setNewIcon] = useState('')
+  // Network only: which of the eight Network groups the new tag goes in. The
+  // owner picks; nothing is chosen for them.
+  const [newGroup, setNewGroup] = useState('')
+  const needsGroup = sections && screen === 'network'
   const searchRef = useRef(null)
   const titleId = useId()
 
@@ -211,7 +215,7 @@ export default function PickerModal({
     try {
       const res = await fetch('/api/lookups', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, label: createLabel, location_id: locationId, ...(sections && newIcon ? { icon: newIcon } : {}), ...(sections && screen ? { made_on: screen } : {}) }),
+        body: JSON.stringify({ category, label: createLabel, location_id: locationId, ...(sections && newIcon ? { icon: newIcon } : {}), ...(sections && screen ? { made_on: screen } : {}), ...(needsGroup ? { group: newGroup } : {}) }),
       })
       const j = await res.json().catch(() => ({}))
       // The server's near-match guard (a race, or a tag this list didn't
@@ -225,7 +229,7 @@ export default function PickerModal({
       if (!res.ok || !j.lookup) throw new Error(j?.error || `HTTP ${res.status}`)
       setOptions(prev => [...(prev || []), j.lookup])
       announceTag(j.lookup)
-      setConfirmCreate(false); setNewIcon('')
+      setConfirmCreate(false); setNewIcon(''); setNewGroup('')
       if (j.retired) setNotice(`Created. Corporate has been told you needed “${j.retired.label}”.`)
       setSel(prev => {
         // A created option lands selected — unless that would breach the
@@ -404,9 +408,19 @@ export default function PickerModal({
                   <p style={{ fontSize: '13px', color: T.ink.primary, margin: 0 }}>
                     Create {newIcon ? `${newIcon} ` : ''}<strong>“{createLabel}”</strong>? Only {locationName || 'your location'} will see it.
                   </p>
+                  {needsGroup && (
+                    <label style={{ fontSize: '12px', color: T.ink.muted, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      Which group does it go in?
+                      <select data-create-group value={newGroup} onChange={e => { setNewGroup(e.target.value); setError(null) }}
+                        style={{ padding: '8px 10px', borderRadius: T.radius.control, border: T.border.control, fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised }}>
+                        <option value="">Pick a group</option>
+                        {groupsForScreen('network').map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <TagIconGrid value={newIcon} onChange={setNewIcon} label="Icon for the new tag" />
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="button" data-create-go onClick={createOption} disabled={busy === 'create'} style={wizAccentBtn(busy === 'create')}>
+                    <button type="button" data-create-go onClick={createOption} disabled={busy === 'create' || (needsGroup && !newGroup)} style={wizAccentBtn(busy === 'create' || (needsGroup && !newGroup))}>
                       {busy === 'create' ? 'Creating…' : 'Create'}
                     </button>
                     <button type="button" onClick={() => setConfirmCreate(false)} style={wizQuietBtn()}>Cancel</button>

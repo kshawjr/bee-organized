@@ -83,7 +83,7 @@ const fakeFetch = (o: Opts) => vi.fn(async (url: string, init?: any) => {
   const answer = (a: Answer) => ({ ok: a.status >= 200 && a.status < 300, status: a.status, json: async () => a.json })
   if (url.endsWith('/referrals')) return answer({ status: 200, json: o.referral || { total: 0, totals: { converted: 0, revenue: 0 } } })
   if (url.startsWith('/api/lookups') && url.includes('touchpoint_types')) return answer(o.touchTypesStatus ? { status: o.touchTypesStatus, json: {} } : { status: 200, json: { lookups: TOUCH_LOOKUPS, location: null } })
-  if (url === '/api/lookups' && method === 'POST') return answer(o.createTag ? o.createTag(body) : { status: 200, json: { ok: true, lookup: { id: 'made', label: body.label, icon: null, category: 'tags', location_id: body.location_id, is_active: true, sort_order: 9000, attrs: { group: 'professional_services', shows_on: ['network'], section: 'trade' } } } })
+  if (url === '/api/lookups' && method === 'POST') return answer(o.createTag ? o.createTag(body) : { status: 200, json: { ok: true, lookup: { id: 'made', label: body.label, icon: null, category: 'tags', location_id: body.location_id, is_active: true, sort_order: 9000, attrs: { group: body.group, shows_on: ['network'], section: 'trade' } } } })
   if (url.startsWith('/api/lookups')) return answer(o.lookupsStatus ? { status: o.lookupsStatus, json: {} } : { status: 200, json: { lookups: o.lookups || LOOKUPS, location: { id: LOC, name: 'Greensboro' } } })
   if (url.startsWith('/api/companies')) return answer(o.companiesStatus ? { status: o.companiesStatus, json: {} } : { status: 200, json: { rows: COMPANIES, total: 2, truncated: false } })
   if (url === '/api/touchpoints') {
@@ -598,22 +598,52 @@ describe('the Network sheet shows only the Network groups', () => {
 
 describe('making a tag from the Network picker', () => {
   const open = async (o: Opts = {}) => { const m = await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')); return m }
-  const create = async (name: string) => { await type('[data-field="newTag"]', name); await click($('[data-create-tag]')) }
-  it('says, before anything is made, which group it joins, who sees it, and the limit', async () => {
+  const create = async (name: string, group = 'home_property') => { await type('[data-field="newTag"]', name); if (group) await type('[data-field="newGroup"]', group); await click($('[data-create-tag]')) }
+  it('says, before anything is made, who sees it and the limit', async () => {
     await open()
-    expect($('[data-tag-create-hint]')!.textContent).toBe('It joins Professional services, and only Greensboro sees it. A location can have up to 10 of its own.')
+    expect($('[data-tag-create-hint]')!.textContent).toBe('Name it and pick its group. Only Greensboro sees it. A location can have up to 10 of its own.')
     expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('asks which of the eight Network groups it goes in, with none picked for them', async () => {
+    await open()
+    const select = $('[data-field="newGroup"]') as HTMLSelectElement
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Which group?', 'Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    expect(select.value).toBe('')
+  })
+  it('Create stays off until there is a name AND a group', async () => {
+    await open()
+    await type('[data-field="newTag"]', 'Plumber')
+    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(true)
+    await type('[data-field="newGroup"]', 'home_property')
+    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(false)
+  })
+  it('Enter with no group picked makes nothing and says to pick one', async () => {
+    await open()
+    await type('[data-field="newTag"]', 'Plumber')
+    await act(async () => { $('[data-field="newTag"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+    await settle(2)
+    expect(sent()).toEqual([])
+    expect($('[data-save-error]')!.textContent).toBe('Pick which group this tag goes in.')
+    expect($('[data-field="newGroup"]')!.getAttribute('aria-invalid')).toBe('true')
+  })
+  it('if the server says a group is needed, it says so on the group box', async () => {
+    await open({ createTag: () => ({ status: 400, json: { error: 'group_required' } }) })
+    await create('Plumber')
+    expect($('[data-save-error]')!.textContent).toBe('Pick which group this tag goes in.')
   })
   it("is sent to Bee Hub's own tag list, for the contact's location, saying it was made on Network", async () => {
     await open()
     await create('  Plumber ')
-    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network' } }])
+    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network', group: 'home_property' } }])
   })
   it('the new tag appears in its group, ticked, and nothing is on the contact until Save tags', async () => {
     await open()
-    await create('Plumber')
-    expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toEqual(['Garden Club', 'Networking Group', 'Plumber'])
+    await create('Plumber', 'senior_living')
+    expect($$('[data-tag-section="senior_living"] [data-pick-tag]').map((b) => words(b))).toEqual(['Plumber', 'Senior Living'])
+    expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toEqual(['Garden Club', 'Networking Group'])
     expect(pressed('[data-pick-tag]')).toEqual(['Plumber'])
+    // the boxes are cleared, so the next tag starts with no group picked
+    expect([($('[data-field="newTag"]') as HTMLInputElement).value, ($('[data-field="newGroup"]') as HTMLSelectElement).value]).toEqual(['', ''])
     expect($('[data-tag-note]')!.textContent).toBe('“Plumber” was created and ticked. Save tags to put it on this contact.')
     expect(sent().filter((c) => c.url.startsWith('/api/partner-tags'))).toEqual([])
     await submit('tags')
@@ -621,7 +651,7 @@ describe('making a tag from the Network picker', () => {
   })
   it('Enter in the box makes the tag; it does not save the form', async () => {
     await open()
-    await type('[data-field="newTag"]', 'Plumber')
+    await type('[data-field="newTag"]', 'Plumber'); await type('[data-field="newGroup"]', 'cleaning_care')
     await act(async () => { $('[data-field="newTag"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
     await settle(3)
     expect(sent().map((c) => c.url)).toEqual(['/api/lookups'])

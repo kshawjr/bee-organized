@@ -112,19 +112,45 @@ describe('C) a tag the record already carries from the other list', () => {
 })
 
 describe('D) a tag made from the picker', () => {
-  it.each([['clients'], ['network']])('made on %s: the request says so, so the server puts it in that screen\'s group', async (screen) => {
-    installFetch((body) => ({ status: 200, body: { ok: true, lookup: { id: 'new', label: body.label, category: 'tags', location_id: LOC, is_active: true, attrs: { group: screen === 'clients' ? 'client_status' : 'professional_services', shows_on: [screen] } } } }))
-    await mount({ screen })
+  const made = (body: any) => ({ status: 200, body: { ok: true, lookup: { id: 'new', label: body.label, category: 'tags', location_id: LOC, is_active: true, attrs: { group: body.group || 'client_status', shows_on: [body.made_on] } } } })
+  const pickGroup = async (value: string) => act(async () => {
+    const el = host.querySelector('[data-create-group]') as HTMLSelectElement
+    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  it('made on Clients: there is one group, so nothing is asked; the request says it was made on Clients', async () => {
+    installFetch(made); await mount({ screen: 'clients' })
     await type('Piano tuner')
-    await click(host.querySelector('[data-create]')); await click(host.querySelector('[data-create-go]'))
-    const sent = JSON.parse(fetchCalls.find((c) => c.init?.method === 'POST')!.init.body)
-    expect(sent).toEqual({ category: 'tags', label: 'Piano tuner', location_id: LOC, made_on: screen })
-    // ...and it appears at once, ticked, in that screen's group.
-    expect(inSection(screen === 'clients' ? 'client_status' : 'professional_services')).toContain('Piano tuner')
+    await click(host.querySelector('[data-create]'))
+    expect(host.querySelector('[data-create-group]')).toBeNull()
+    await click(host.querySelector('[data-create-go]'))
+    expect(JSON.parse(fetchCalls.find((c) => c.init?.method === 'POST')!.init.body)).toEqual({ category: 'tags', label: 'Piano tuner', location_id: LOC, made_on: 'clients' })
+    expect(inSection('client_status')).toContain('Piano tuner')
+  })
+  it('made on Network: it asks which of the eight Network groups, with none picked for them', async () => {
+    installFetch(made); await mount({ screen: 'network' })
+    await type('Piano tuner'); await click(host.querySelector('[data-create]'))
+    const select = host.querySelector('[data-create-group]') as HTMLSelectElement
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Pick a group', 'Relationship', 'Home & property', 'Design & staging', 'Cleaning', 'Moving & hauling', 'Senior living', 'Valuables', 'Professional services'])
+    expect(select.value).toBe('')
+  })
+  it('made on Network: Create is off until a group is picked, and nothing is sent', async () => {
+    installFetch(made); await mount({ screen: 'network' })
+    await type('Piano tuner'); await click(host.querySelector('[data-create]'))
+    expect((host.querySelector('[data-create-go]') as HTMLButtonElement).disabled).toBe(true)
+    await click(host.querySelector('[data-create-go]'))
+    expect(fetchCalls.filter((c) => c.init?.method === 'POST')).toEqual([])
+  })
+  it('made on Network: the group picked is sent, and the tag appears in that group, ticked', async () => {
+    installFetch(made); await mount({ screen: 'network' })
+    await type('Piano tuner'); await click(host.querySelector('[data-create]'))
+    await pickGroup('moving_hauling')
+    await click(host.querySelector('[data-create-go]'))
+    expect(JSON.parse(fetchCalls.find((c) => c.init?.method === 'POST')!.init.body)).toEqual({ category: 'tags', label: 'Piano tuner', location_id: LOC, made_on: 'network', group: 'moving_hauling' })
+    expect(inSection('moving_hauling')).toEqual(['Mover', 'Piano tuner'])
   })
   it('at the limit of ten it says so in plain words and creates nothing', async () => {
     installFetch(() => ({ status: 409, body: { error: 'tag_limit', limit: 10, count: 10 } }))
-    await mount({ screen: 'network' })
+    await mount({ screen: 'clients' })
     await type('Piano tuner')
     await click(host.querySelector('[data-create]')); await click(host.querySelector('[data-create-go]'))
     expect(host.querySelector('[role="alert"]')!.textContent).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')

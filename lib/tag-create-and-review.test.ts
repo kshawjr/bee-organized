@@ -61,15 +61,33 @@ beforeEach(() => {
   }
 })
 const created = () => db().tables.lookups.at(-1)
-const make = (over: any = {}) => post(createLookup, { category: 'tags', label: 'Plumber', location_id: LOC, ...over })
+// A tag made on Network must name its group; these tests pick Home & property unless they say otherwise.
+const make = (over: any = {}) => post(createLookup, { category: 'tags', label: 'Plumber', location_id: LOC, ...(over.made_on === 'network' && !('group' in over) ? { group: 'home_property' } : {}), ...over })
 
 describe("A) a location's new tag", () => {
-  it('made on Network: Professional services, shows on Network', async () => {
+  it('made on Network: it goes in the group the owner picked, and shows on Network', async () => {
     as('owner', LOC)
-    const r = await make({ made_on: 'network' })
+    const r = await make({ made_on: 'network', group: 'home_property' })
     expect(r.status).toBe(200)
-    expect(created().attrs).toMatchObject({ group: 'professional_services', shows_on: ['network'], section: 'trade', made_on: 'network', created_by_user: 'u-1' })
+    expect(created().attrs).toMatchObject({ group: 'home_property', shows_on: ['network'], section: 'trade', made_on: 'network', created_by_user: 'u-1' })
     expect(created()).toMatchObject({ label: 'Plumber', location_id: LOC, category: 'tags' })
+  })
+  it.each(['relationship', 'home_property', 'design_staging', 'cleaning_care', 'moving_hauling', 'senior_living', 'valuables_specialty', 'professional_services'])('made on Network, picked %s: that is the group it gets', async (group) => {
+    as('owner', LOC)
+    expect((await make({ made_on: 'network', group })).status).toBe(200)
+    expect(created().attrs).toMatchObject({ group, shows_on: ['network'], section: group === 'relationship' ? 'relationship' : 'trade' })
+  })
+  it.each([[undefined], [''], ['client_status'], ['made_up']])('made on Network with group %j: refused, the eight are named, and nothing is read or written', async (group) => {
+    as('owner', LOC)
+    const r = await make({ made_on: 'network', group })
+    expect(r.status).toBe(400)
+    expect(r.body).toEqual({ error: 'group_required', allowed: ['relationship', 'home_property', 'design_staging', 'cleaning_care', 'moving_hauling', 'senior_living', 'valuables_specialty', 'professional_services'] })
+    expect(db().calls).toEqual([])
+  })
+  it('made on Clients: a group sent along is not used', async () => {
+    as('owner', LOC)
+    await make({ label: 'Snowbird', made_on: 'clients', group: 'home_property' })
+    expect(created().attrs).toMatchObject({ group: 'client_status', shows_on: ['clients'] })
   })
   it('made on Clients: Client status, shows on Clients', async () => {
     as('manager', LOC)
@@ -83,8 +101,8 @@ describe("A) a location's new tag", () => {
   })
   it('the server decides the group: one sent by the screen is not used', async () => {
     as('owner', LOC)
-    await make({ made_on: 'network', attrs: { group: 'client_status', shows_on: ['clients', 'network'], review: { decision: 'keep_local' } } })
-    expect(created().attrs).toMatchObject({ group: 'professional_services', shows_on: ['network'] })
+    await make({ made_on: 'network', group: 'senior_living', attrs: { group: 'client_status', shows_on: ['clients', 'network'] } })
+    expect(created().attrs).toMatchObject({ group: 'senior_living', shows_on: ['network'] })
   })
   it('a corporate tag (no location) is not placed by this rule and is not limited', async () => {
     as('super_admin')

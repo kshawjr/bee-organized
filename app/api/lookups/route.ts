@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, TAG_LIMIT_PER_LOCATION, isAllowedTagIcon, newTagPlacement } from '@/lib/tags'
+import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, TAG_LIMIT_PER_LOCATION, isAllowedTagIcon, newTagPlacement, groupsForScreen } from '@/lib/tags'
 import { checkNearTag, nearMatchBody, fileRetiredTagRequest, LOCATION_TAG_ROLES } from '@/lib/tag-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -176,6 +176,10 @@ export async function POST(req: NextRequest) {
       if (!isAllowedTagIcon(icon)) {
         return NextResponse.json({ error: 'icon_not_allowed' }, { status: 400 })
       }
+      // A tag made on Network must say which Network group it goes in.
+      if (category === TAG_CATEGORY && !newTagPlacement(body?.made_on, body?.group)) {
+        return NextResponse.json({ error: 'group_required', allowed: groupsForScreen('network').map((g) => g.key) }, { status: 400 })
+      }
       const roBlock = await readOnlyWriteBlock(hubUser, location_id)
       if (roBlock) return roBlock
 
@@ -246,10 +250,12 @@ export async function POST(req: NextRequest) {
     }
     if (location_id != null) {
       insert.location_id = location_id
-      // A location's own tag lands in the group for the screen it was made
-      // on, and shows on that screen (lib/tags.ts newTagPlacement). The
-      // server decides this from `made_on`; a group sent in attrs is not used.
-      if (category === TAG_CATEGORY) insert.attrs = { ...insert.attrs, ...newTagPlacement(body?.made_on) }
+      // A location's own tag shows on the screen it was made on (lib/tags.ts
+      // newTagPlacement). Made on Clients it goes to Client status. Made on
+      // Network the owner picks one of the eight Network groups (`group`);
+      // that was checked before anything was read, above. A group sent inside
+      // attrs is never used.
+      if (category === TAG_CATEGORY) insert.attrs = { ...insert.attrs, ...newTagPlacement(body?.made_on, body?.group)! }
       // Who made it — lookups has no creator column; corporate's Location
       // tags panel reads this (no schema change).
       insert.attrs = { ...insert.attrs, created_by_user: hubUser.id }
