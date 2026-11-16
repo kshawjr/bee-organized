@@ -145,3 +145,37 @@ export const alpha = (hex, a) => {
 // The export's faint gold honeycomb, for a card that wants it
 // (background-image; the card supplies its own background colour).
 export const HONEYCOMB = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='none' stroke='%23C89A56' stroke-opacity='0.22'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E")`
+
+// ── Network & Nurture (the Network export, 2026-11-15) ───────────────────────
+// What that module's styles.css adds to the table above: one colour and one
+// soft tint per contact type, the brown it writes on gold in, and its "gone
+// quiet" orange. Everything else the Network screens use is already in T
+// (the two exports share their surfaces, text, lines and fonts). The export
+// calls the Nurture type "prospect"; Bee Hub's word is used here.
+export const NET = {
+  partner:              '#C89758', // oklch(0.71 0.1 72)
+  partnerSoft:          '#FDF0DC', // oklch(0.96 0.03 80)
+  vendor:               '#477D75', // oklch(0.55 0.06 183)
+  vendorSoft:           '#DFEFEC', // oklch(0.94 0.018 183)
+  organization:         '#496684', // oklch(0.5 0.06 250)
+  organizationSoft:     '#E7F0F8', // oklch(0.95 0.015 250)
+  nurture:              '#8C6088', // oklch(0.55 0.08 330)
+  nurtureSoft:          '#F8EEF7', // oklch(0.96 0.015 330)
+  unsure:               '#7E817D', // oklch(0.6 0.008 135)
+  unsureSoft:           '#F1F2F0', // oklch(0.96 0.003 135)
+  accentFg:             '#724C1E', // oklch(0.45 0.08 68)
+  warn:                 '#AE5528', // oklch(0.55 0.13 45)
+  warnSoft:             '#FFE8DC', // oklch(0.95 0.035 45)
+}
+
+// Tag chips: the export gives a tag one of six hues, chosen from its name
+// (see tagTone in components/network/NetworkListScreen.jsx), and paints text,
+// fill and edge from that hue.
+export const TAG_TONES = [
+  { fg: '#044E40', bg: '#D7F7ED', border: '#B6E3D5' }, // hue 175: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+  { fg: '#533F0D', bg: '#F9EDD5', border: '#E7D6B3' }, // hue 85: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+  { fg: '#5E3248', bg: '#FFE5F2', border: '#F2CBDC' }, // hue 350: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+  { fg: '#2D4B27', bg: '#E3F5DF', border: '#C7E0C1' }, // hue 140: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+  { fg: '#234566', bg: '#DDF1FF', border: '#BFDBF8' }, // hue 250: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+  { fg: '#613425', bg: '#FFE7DD', border: '#F6CDBF' }, // hue 40: oklch(0.38 0.07 h) on oklch(0.95 0.035 h), edge oklch(0.88 0.05 h)
+]

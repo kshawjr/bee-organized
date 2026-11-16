@@ -80,6 +80,13 @@ const CLOSED: Array<[string, string, string]> = [
   ['reports', 'Reports', 'Reports are on their way.'],
   ['backoffice', 'Back Office', 'Back Office is on its way.'],
 ]
+// Network & Nurture redesign, slice 3 (2026-11-15): the new Network list is
+// being built behind the grey. A SUPER ADMIN now gets it; every other role
+// sees Network closed exactly as before. So for a super admin the closed
+// sections are Reports and Back Office only. (lib/network/doors.test.tsx
+// proves the Network side of this, role by role and door by door.)
+const NETWORK_OPEN_FOR = 'super_admin'
+const closedFor = (label: string) => CLOSED.filter(c => !(c[0] === 'partners' && label === NETWORK_OPEN_FOR))
 const URL_OF: Record<string, string> = { home: '/', reminders: '/reminders', hive: '/clients', settings: '/settings', help: '/help', admin: '/admin' }
 
 let host: HTMLElement
@@ -136,7 +143,7 @@ describe('the menu, per role', () => {
       await mount(props)
       expect(keys()).toEqual(['home', 'reminders', 'hive', 'partners', 'reports', 'backoffice', 'settings', 'help', ...(elevated ? ['admin'] : [])])
       expect(keys().map(k => item(k).textContent)).toEqual([
-        'Home', 'Reminders', 'Clients', 'Network & NurtureUnder redesign', 'Reports', 'Back Office', 'Settings', 'Help',
+        'Home', 'Reminders', 'Clients', label === NETWORK_OPEN_FOR ? 'Network & Nurture' : 'Network & NurtureUnder redesign', 'Reports', 'Back Office', 'Settings', 'Help',
         ...(elevated ? [label === 'super_admin' ? 'Admin' : 'Corp'] : []),
       ])
     })
@@ -205,7 +212,7 @@ describe('Network & Nurture, Reports and Back Office are greyed and are not cont
     it(`${label}: each is a plain element — no button, no link, nothing to tab to — in the menu and in the phone drawer`, async () => {
       await mount(props)
       const d = await openDrawer()
-      for (const nav of [rail(), d]) for (const [key, name] of CLOSED) {
+      for (const nav of [rail(), d]) for (const [key, name] of closedFor(label)) {
         const el = item(key, nav)
         expect(el.tagName, key).toBe('DIV')
         expect(el.hasAttribute('data-soon'), key).toBe(true)
@@ -218,14 +225,21 @@ describe('Network & Nurture, Reports and Back Office are greyed and are not cont
         const nameEl = Array.from(el.querySelectorAll('span')).filter(s => s.children.length === 0 && s.textContent === name).pop() as HTMLElement
         expect(nameEl.style.opacity, key).toBe('0.5')
       }
-      expect(item('partners').querySelector('[data-soon-chip]')!.textContent).toBe('Under redesign')
+      if (label === NETWORK_OPEN_FOR) {
+        // The one role Network is open for: a live item, like Clients.
+        expect(item('partners').tagName).toBe('BUTTON')
+        expect(item('partners').hasAttribute('data-soon')).toBe(false)
+        expect(item('partners').querySelector('[data-soon-chip]')).toBeNull()
+      } else {
+        expect(item('partners').querySelector('[data-soon-chip]')!.textContent).toBe('Under redesign')
+      }
       expect(item('reports').querySelector('[data-soon-chip]')).toBeNull()
     })
 
     it(`${label}: clicking one, or pressing Enter or Space on it, goes nowhere`, async () => {
       await mount(props)
       const push = vi.spyOn(window.history, 'pushState')
-      for (const [key] of CLOSED) {
+      for (const [key] of closedFor(label)) {
         const el = item(key)
         await click(el)
         for (const k of ['Enter', ' ']) await act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); el.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true })) })
@@ -240,13 +254,24 @@ describe('Network & Nurture, Reports and Back Office are greyed and are not cont
   }
 
   it('nothing in the menu can be focused that leads to one: every focusable thing is a live item, search, Ask, the account or collapse', async () => {
-    await mount(ROLES[4].props)
+    // Corporate: the elevated role Network is still closed for.
+    await mount(ROLES[3].props)
     const focusable = Array.from(rail().querySelectorAll('button, a, input, [tabindex]')) as HTMLElement[]
     for (const f of focusable) {
       expect(f.closest('[data-soon]'), f.outerHTML.slice(0, 80)).toBeNull()
       expect(['partners', 'reports', 'backoffice']).not.toContain(f.dataset.nav)
     }
     expect(focusable.filter(f => f.dataset.nav).map(f => f.dataset.nav)).toEqual(['home', 'reminders', 'hive', 'settings', 'help', 'admin'])
+  })
+
+  it('for a super admin the same holds, with Network now one of the live items', async () => {
+    await mount(ROLES[4].props)
+    const focusable = Array.from(rail().querySelectorAll('button, a, input, [tabindex]')) as HTMLElement[]
+    for (const f of focusable) {
+      expect(f.closest('[data-soon]'), f.outerHTML.slice(0, 80)).toBeNull()
+      expect(['reports', 'backoffice']).not.toContain(f.dataset.nav)
+    }
+    expect(focusable.filter(f => f.dataset.nav).map(f => f.dataset.nav)).toEqual(['home', 'reminders', 'hive', 'partners', 'settings', 'help', 'admin'])
   })
 })
 
@@ -256,6 +281,8 @@ describe('…and cannot be opened by any road', () => {
   const REAL_SCREEN = ['Back Office build zone', 'Work in progress', 'building a new Back Office', 'Reports are coming soon', 'Add Contact', 'Add Company']
 
   for (const { label, props } of ROLES) for (const [route, key] of ROUTES) {
+    // A super admin's typed /network opens the new list: lib/network/doors.test.tsx.
+    if (key === 'partners' && label === NETWORK_OPEN_FOR) continue
     it(`${label}, a typed /${route}: the closed line — not the screen, not a blank page`, async () => {
       await mount({ ...props, initialRoute: route })
       const c = CLOSED.find(x => x[0] === key)!
@@ -296,8 +323,13 @@ describe('…and cannot be opened by any road', () => {
     expect(HUB).toContain("onSelectPartner={(p)=>{ setActiveNav('partners'); setGlobalSelectedPartner(p); setShowGlobalSearch(false) }}")
     expect(HUB).toContain("if (kind === 'network') { setNetworkTagIntent(tagId); nav('partners') }")
     const screen = HUB.slice(HUB.indexOf('  const screen = () => {'), HUB.indexOf('  const screen = () => {') + 900)
-    const closedAt = screen.indexOf('if (CLOSED_NAV[activeNav]) {')
+    const closedAt = screen.indexOf('if (closedFor(activeNav)) {')
     expect(closedAt).toBeGreaterThan(0)
+    // closedFor is CLOSED_NAV with ONE exception: Network, for a viewer
+    // lib/network/access.ts says yes to. Nothing else can open a closed section.
+    expect(HUB).toContain("const closedFor = key => (key === 'partners' && networkOpen ? null : (CLOSED_NAV[key] || null))")
+    expect(HUB).toContain('const networkOpen = maySeeNewNetwork(role)')
+    expect(HUB).not.toContain('if (CLOSED_NAV[activeNav]) {')
     // …before every other branch of screen().
     expect(screen.slice(0, closedAt)).not.toMatch(/if \(.*activeNav/)
     expect(HUB).toMatch(/const CLOSED_NAV = \{\s*partners:[\s\S]{0,400}reports:[\s\S]{0,200}backoffice:/)
@@ -344,8 +376,8 @@ describe('the collapse control', () => {
     expect(toggle().getAttribute('aria-label')).toBe('Expand menu')
     // Icons only: no names drawn, but each live item still says what it is.
     expect(rail().querySelector('nav')!.textContent).toBe('')
-    expect(['home', 'reminders', 'hive', 'settings', 'help', 'admin'].map(k => item(k).getAttribute('aria-label'))).toEqual(['Home', 'Reminders', 'Clients', 'Settings', 'Help', 'Admin'])
-    expect(item('partners').getAttribute('title')).toBe('Network & Nurture — under redesign')
+    expect(['home', 'reminders', 'hive', 'partners', 'settings', 'help', 'admin'].map(k => item(k).getAttribute('aria-label'))).toEqual(['Home', 'Reminders', 'Clients', 'Network & Nurture', 'Settings', 'Help', 'Admin'])
+    expect(item('reports').getAttribute('title')).toBe('Reports — not available yet')
     // Still the same items, the live ones still work, the closed ones are still not buttons.
     expect(keys()).toEqual(['home', 'reminders', 'hive', 'partners', 'reports', 'backoffice', 'settings', 'help', 'admin'])
     await click(item('settings')); expect(current()).toBe('settings')

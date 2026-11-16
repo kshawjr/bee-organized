@@ -279,15 +279,25 @@ describe('Network is still closed, and nothing live reads the new columns', () =
     expect(sha256(lines[0]!)).toBe('5457919304c3ea2b38cb67ba7b3391bfdd189773c0dd1cb5ef35d8364a618842')
   })
   it('the menu and the page both still ask that block whether a section is closed', () => {
-    expect(beeHub).toContain('soon: !!CLOSED_NAV[item.key], note: CLOSED_NAV[item.key]?.note,')
-    expect(beeHub).toContain('if (CLOSED_NAV[activeNav]) {')
+    // Slice 3: they ask through closedFor(), which is that block with ONE
+    // exception — Network, for a viewer lib/network/access.ts says yes to
+    // (super admins). lib/network/doors.test.tsx proves every other role
+    // still gets the grey, door by door.
+    expect(beeHub).toContain("const closedFor = key => (key === 'partners' && networkOpen ? null : (CLOSED_NAV[key] || null))")
+    expect(beeHub).toContain('soon: !!closedFor(item.key), note: closedFor(item.key)?.note,')
+    expect(beeHub).toContain('if (closedFor(activeNav)) {')
+    expect(beeHub).not.toMatch(/CLOSED_NAV\[(?!key\])/)
   })
   it('the live partners read names none of the new columns, so it is the same before and after the migration', () => {
     const cols = read('lib/crm.ts').split('export const PARTNER_COLS =')[1]!.split('export const COMPANY_COLS')[0]!
     for (const c of NEW_COLUMNS) expect(cols, c).not.toContain(c)
     expect(cols).not.toContain('*')
   })
-  it('no screen, route or shared code outside lib/network names a new column', () => {
+  it('outside the Network code, no screen, route or shared code names a new column', () => {
+    // Slice 3 reads them in exactly one place outside lib/network/: the
+    // super-admin-only route app/api/network/list (the `network` folders are
+    // skipped below). Everything else — every screen an owner can reach, and
+    // the old partners read above — still knows nothing of them.
     const SKIP = new Set(['node_modules', '.next', '.git', 'network'])
     const found: string[] = []
     const walk = (dir: string) => {

@@ -83,6 +83,11 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
+// The NEW Network list (Network & Nurture redesign, slice 3). Mounted only for
+// a viewer lib/network/access.ts says yes to; everyone else still gets the
+// closed line below (CLOSED_NAV).
+import NetworkListScreen from "@/components/network/NetworkListScreen"
+import { maySeeNewNetwork } from "@/lib/network/access"
 import BeeRosterSettings from "@/components/hive/BeeRosterSettings"
 import LocationTagsPanel from "@/components/hive/LocationTagsPanel"
 import RetiredTagsPanel from "@/components/hive/RetiredTagsPanel"
@@ -16401,7 +16406,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{} }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{}, newList=false, locationName='' }) {
   if (!partners) return null
   // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
   // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
@@ -16430,6 +16435,20 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
 
   return (
     <>
+      {/* THE NEW LIST (slice 3) — only when the host says this viewer may see
+          it (newList). It reads its own data and writes nothing. A row opens
+          the EXISTING record below, and only inside one location: the record
+          saves through this screen's partners state, which holds no rows on
+          All Locations, so there the list is look-only. */}
+      {newList ? (
+        <NetworkListScreen
+          locationId={locFilter==='all' ? null : locFilter}
+          locationName={locationName}
+          onOpenContact={locFilter==='all' ? null : (id)=>{ const p = allPartners.find(x=>x.id===id); if (p) setSelected(p) }}
+          initialTagId={initialTagId}
+          onInitialTagConsumed={onInitialTagConsumed}
+        />
+      ) : (
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
         <NetworkScreen
           partners={partners}
@@ -16447,6 +16466,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onInitialTagConsumed={onInitialTagConsumed}
         />
       </div>
+      )}
 
       {/* Phase 3: the beta records replace Classic's PartnerPanel + inline
           company overlay (both retired-unrendered above in this file, like
@@ -37631,9 +37651,18 @@ if (Array.isArray(initialPeople)) return
   // Help and Admin sit under the line, as in the design. `locked` is the
   // onboarding lock exactly as it was (issues 139, 140): a franchise still
   // setting up may open only Home, Back Office and Help.
+  // THE ONE EXCEPTION (Network & Nurture redesign, slice 3): the new Network
+  // list is being built behind the grey. A viewer lib/network/access.ts says
+  // yes to (super admins, acting as themselves) gets the new list; for every
+  // other role, and for a super admin viewing as someone else, Network is
+  // closed exactly as above. `role` is the role being ACTED as, so view-as
+  // shows what that person sees. closedFor() is the only thing the menu and
+  // the page ask; CLOSED_NAV itself is unchanged.
+  const networkOpen = maySeeNewNetwork(role)
+  const closedFor = key => (key === 'partners' && networkOpen ? null : (CLOSED_NAV[key] || null))
   const railRow = item => ({
     key: item.key, label: item.label, badge: item.badge,
-    soon: !!CLOSED_NAV[item.key], note: CLOSED_NAV[item.key]?.note,
+    soon: !!closedFor(item.key), note: closedFor(item.key)?.note,
     locked: effectiveCrmStatus==='onboarding' && !isElevated && !['home','backoffice','help'].includes(item.key),
   })
   const RAIL_LOWER_KEYS = ['help', 'admin']
@@ -37896,8 +37925,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
   const screen = () => {
     // A closed section shows its one line and nothing of the screen behind it
     // (CLOSED_NAV, above). First, so no other branch can reach it.
-    if (CLOSED_NAV[activeNav]) {
-      const c = CLOSED_NAV[activeNav]
+    if (closedFor(activeNav)) {
+      const c = closedFor(activeNav)
       return <div style={{ paddingTop:`${TOTAL_TOP}px` }}><ClosedSection title={c.title} head={c.head} body={c.body} onHome={()=>nav('home')} /></div>
     }
     // Elevated users (super_admin / corporate) get the unified SuperAdminLayout
@@ -37988,7 +38017,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* locationRequired mirrors HiveScreen above: server truth
             (!!initialAllOverview), so Network prompts on 'all' exactly when
             the record lenses do — never for a franchise user. */}
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} newList={networkOpen} locationName={selectedLoc?.name || ''} />
         {toast && <InlineToast {...toast} />}
       </div>
     )

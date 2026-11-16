@@ -61,6 +61,38 @@ describe('the light table is the export, converted exactly', () => {
   })
 })
 
+describe('the Network colours are the Network export, converted exactly', () => {
+  const NET_SRC = SRC.slice(SRC.indexOf('export const NET = {'), SRC.indexOf('export const TAG_TONES'))
+
+  it('every Network colour has its oklch() beside it, and the hex is that oklch()', () => {
+    const net = pairs(NET_SRC)
+    expect(net.map(p => p.name).sort()).toEqual(Object.keys(TOKENS.NET).sort())
+    expect(net.length).toBe(13)
+    for (const p of net) {
+      expect(p.hex, `NET.${p.name} oklch(${p.L} ${p.C} ${p.H})`).toBe(oklchToHex(p.L, p.C, p.H))
+      expect((TOKENS.NET as Record<string, string>)[p.name]).toBe(p.hex)
+    }
+  })
+
+  it('there is a colour and a soft tint for each of the five contact types, and no Client colour', () => {
+    for (const t of ['partner', 'vendor', 'nurture', 'organization', 'unsure']) {
+      expect(TOKENS.NET, t).toHaveProperty(t)
+      expect(TOKENS.NET, t).toHaveProperty(`${t}Soft`)
+    }
+    expect(Object.keys(TOKENS.NET).join(' ')).not.toMatch(/client|prospect/i)
+  })
+
+  it('the six tag hues are the export\'s, each painted from its hue', () => {
+    const hues = [175, 85, 350, 140, 250, 40]
+    expect(TOKENS.TAG_TONES).toHaveLength(6)
+    TOKENS.TAG_TONES.forEach((tone: { fg: string; bg: string; border: string }, i: number) => {
+      expect(tone.fg, `hue ${hues[i]}`).toBe(oklchToHex(0.38, 0.07, hues[i]))
+      expect(tone.bg, `hue ${hues[i]}`).toBe(oklchToHex(0.95, 0.035, hues[i]))
+      expect(tone.border, `hue ${hues[i]}`).toBe(oklchToHex(0.88, 0.05, hues[i]))
+    })
+  })
+})
+
 describe('dark mode is carried, commented and unused', () => {
   it('the dark values are there, each the exact hex of its oklch()', () => {
     const dark = pairs(DARK_SRC)
@@ -74,7 +106,7 @@ describe('dark mode is carried, commented and unused', () => {
     expect(lines.length).toBe(27)
     for (const l of lines) expect(l.trimStart().startsWith('//'), l).toBe(true)
     expect(Object.keys(TOKENS).filter(k => /dark/i.test(k))).toEqual([])
-    expect(Object.keys(TOKENS).sort()).toEqual(['FONT', 'FONT_STYLESHEET_HREF', 'HONEYCOMB', 'R', 'SHADOW', 'T', 'alpha'])
+    expect(Object.keys(TOKENS).sort()).toEqual(['FONT', 'FONT_STYLESHEET_HREF', 'HONEYCOMB', 'NET', 'R', 'SHADOW', 'T', 'TAG_TONES', 'alpha'])
   })
 
   it('no rebuilt screen asks the browser about dark mode', () => {
