@@ -198,3 +198,106 @@ export function describeTagBlockers(blockers: string[] | null | undefined): stri
   }
   return 'It can’t be deleted.'
 }
+
+// ── GROUPS (2026-11-15, Kevin) ───────────────────────────────────────────────
+// ONE master tag list, used everywhere: Clients, Nurture and Network. Tags sit
+// in GROUPS, and each screen shows only its own:
+//   Clients and Nurture   Client status
+//   Network               Relationship, and the seven trade groups
+// A tag's group and the screens it shows on are DATA, in its settings box:
+// lookups.attrs.group and lookups.attrs.shows_on (written for the existing
+// tags by migrations/tag_groups_and_cleanup.sql; no schema change). The trade
+// groups reuse the keys the trades have carried in attrs.group since the tag
+// merge.
+//
+// UNTIL A TAG HAS A GROUP it behaves exactly as before: it shows on every
+// screen, under Relationship / Trade / the location's own. So this code is
+// safe on either side of that data change.
+export const TAG_GROUPS = [
+  { key: 'client_status', label: 'Client status', hint: 'Where a client stands with you', screens: ['clients'] },
+  { key: 'relationship', label: 'Relationship', hint: 'What they are to you', screens: ['network'] },
+  { key: 'home_property', label: 'Home & property', hint: '', screens: ['network'] },
+  { key: 'design_staging', label: 'Design & staging', hint: '', screens: ['network'] },
+  { key: 'cleaning_care', label: 'Cleaning', hint: '', screens: ['network'] },
+  { key: 'moving_hauling', label: 'Moving & hauling', hint: '', screens: ['network'] },
+  { key: 'senior_living', label: 'Senior living', hint: '', screens: ['network'] },
+  { key: 'valuables_specialty', label: 'Valuables', hint: '', screens: ['network'] },
+  { key: 'professional_services', label: 'Professional services', hint: '', screens: ['network'] },
+] as const
+export type TagGroupKey = (typeof TAG_GROUPS)[number]['key']
+// Nurture shows what Clients shows, so it asks as 'clients'.
+export type TagScreen = 'clients' | 'network'
+export const TAG_SCREENS: readonly TagScreen[] = ['clients', 'network']
+const GROUP_KEYS: readonly string[] = TAG_GROUPS.map((g) => g.key)
+// Groups ordered by hand (their list order); the rest go A–Z.
+const GROUPS_IN_LIST_ORDER: readonly string[] = ['client_status', 'relationship']
+
+type Groupable = { id?: string; label: string; sort_order?: number | null; attrs?: any; group?: any; shows_on?: any; location_id?: any }
+
+/** The group a tag sits in, or null while it has none. */
+export function tagGroup(tag: Groupable | null | undefined): TagGroupKey | null {
+  const g = tag?.group ?? tag?.attrs?.group
+  return typeof g === 'string' && GROUP_KEYS.includes(g) ? (g as TagGroupKey) : null
+}
+
+/** Does this tag belong on this screen? A tag with no group yet shows everywhere, as it always has. */
+export function tagShowsOn(tag: Groupable | null | undefined, screen: TagScreen): boolean {
+  const on = tag?.shows_on ?? tag?.attrs?.shows_on
+  if (Array.isArray(on)) return on.includes(screen)
+  const g = tagGroup(tag)
+  if (!g) return true
+  return (TAG_GROUPS.find((x) => x.key === g)!.screens as readonly string[]).includes(screen)
+}
+
+/**
+ * The tag list for ONE screen, in its groups. A group with no rows is left
+ * out. Rows the record already carries but that belong to another screen
+ * (keepIds) are listed last, so they can still be seen and unticked; they are
+ * never offered to anyone who does not already have them.
+ */
+export function groupTags<T extends Groupable>(rows: T[], screen: TagScreen, ownLabel: string | null = null, keepIds: readonly string[] = []) {
+  const bySort = (a: T, b: T) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || a.label.localeCompare(b.label)
+  const byLabel = (a: T, b: T) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+  const here = rows.filter((r) => tagShowsOn(r, screen))
+  const elsewhere = rows.filter((r) => !tagShowsOn(r, screen) && !!r.id && keepIds.includes(r.id))
+  const placed = here.filter((r) => tagGroup(r))
+  const loose = here.filter((r) => !tagGroup(r))
+  const out: { key: string; label: string; hint: string; rows: T[] }[] = TAG_GROUPS.map((g) => ({
+    key: g.key as string, label: g.label as string, hint: g.hint as string,
+    rows: placed.filter((r) => tagGroup(r) === g.key).sort(GROUPS_IN_LIST_ORDER.includes(g.key) ? bySort : byLabel),
+  }))
+  // Tags with no group yet: where they have always been.
+  for (const s of sectionTags(loose as any, ownLabel)) {
+    const same = out.find((o) => o.key === s.key)
+    if (same) same.rows = [...same.rows, ...(s.rows as T[])].sort(bySort)
+    else out.push({ key: s.key, label: s.label, hint: s.hint, rows: s.rows as T[] })
+  }
+  if (elsewhere.length) out.push({ key: 'elsewhere', label: 'Also on this record', hint: 'From another list. Untick to take it off.', rows: elsewhere.sort(byLabel) })
+  return out.filter((s) => s.rows.length > 0)
+}
+
+// ── A LOCATION'S OWN TAGS (2026-11-15, Kevin) ────────────────────────────────
+// An owner can create a tag from the picker. It lands in the group for the
+// screen it was made on, and shows on that screen only. A tag made on Clients
+// goes to Client status. Network has eight groups and the picker does not ask
+// which, so a tag made there goes to Professional services (the general one);
+// corporate can move it when they review it.
+export const TAG_LIMIT_PER_LOCATION = 10
+export const GROUP_FOR_NEW_TAG: Record<TagScreen, TagGroupKey> = { clients: 'client_status', network: 'professional_services' }
+export function newTagPlacement(madeOn: unknown) {
+  const screen: TagScreen = madeOn === 'network' ? 'network' : 'clients'
+  return { group: GROUP_FOR_NEW_TAG[screen], shows_on: [screen], section: screen === 'clients' ? 'relationship' : 'trade', made_on: screen }
+}
+export const tagLimitWords = (count: number) =>
+  `This location already has ${count} tags of its own, and the limit is ${TAG_LIMIT_PER_LOCATION}. Delete one you no longer use, or ask corporate to add this one to the main list.`
+
+// ── CORPORATE REVIEW of a location's own tag (2026-11-15, Kevin) ─────────────
+// Four outcomes: promote it to the main list (Make corporate, already built),
+// merge it into an existing tag, delete it, or mark it "reviewed, keep local".
+// The mark lives in the tag's settings box: attrs.review.
+export const TAG_REVIEW_ACTIONS = ['keep_local', 'merge', 'delete'] as const
+export type TagReviewAction = (typeof TAG_REVIEW_ACTIONS)[number]
+export function tagReview(tag: { attrs?: any } | null | undefined): { decision: string; at: string | null; by: string | null } | null {
+  const r = tag?.attrs?.review
+  return r && typeof r === 'object' && typeof r.decision === 'string' ? { decision: r.decision, at: r.at ?? null, by: r.by ?? null } : null
+}

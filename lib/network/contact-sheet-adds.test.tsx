@@ -70,6 +70,7 @@ type Opts = {
   tag?: (method: string, tagId: string) => Answer
   patch?: (body: any) => Answer
   lookupsStatus?: number; companiesStatus?: number; touchTypesStatus?: number
+  lookups?: any[]; createTag?: (body: any) => Answer
 }
 let host: HTMLElement
 let root: ReturnType<typeof createRoot>
@@ -82,7 +83,8 @@ const fakeFetch = (o: Opts) => vi.fn(async (url: string, init?: any) => {
   const answer = (a: Answer) => ({ ok: a.status >= 200 && a.status < 300, status: a.status, json: async () => a.json })
   if (url.endsWith('/referrals')) return answer({ status: 200, json: o.referral || { total: 0, totals: { converted: 0, revenue: 0 } } })
   if (url.startsWith('/api/lookups') && url.includes('touchpoint_types')) return answer(o.touchTypesStatus ? { status: o.touchTypesStatus, json: {} } : { status: 200, json: { lookups: TOUCH_LOOKUPS, location: null } })
-  if (url.startsWith('/api/lookups')) return answer(o.lookupsStatus ? { status: o.lookupsStatus, json: {} } : { status: 200, json: { lookups: LOOKUPS, location: { id: LOC, name: 'Greensboro' } } })
+  if (url === '/api/lookups' && method === 'POST') return answer(o.createTag ? o.createTag(body) : { status: 200, json: { ok: true, lookup: { id: 'made', label: body.label, icon: null, category: 'tags', location_id: body.location_id, is_active: true, sort_order: 9000, attrs: { group: 'professional_services', shows_on: ['network'], section: 'trade' } } } })
+  if (url.startsWith('/api/lookups')) return answer(o.lookupsStatus ? { status: o.lookupsStatus, json: {} } : { status: 200, json: { lookups: o.lookups || LOOKUPS, location: { id: LOC, name: 'Greensboro' } } })
   if (url.startsWith('/api/companies')) return answer(o.companiesStatus ? { status: o.companiesStatus, json: {} } : { status: 200, json: { rows: COMPANIES, total: 2, truncated: false } })
   if (url === '/api/touchpoints') {
     const a = await (o.touchpoint ? o.touchpoint(body) : { status: 201, json: { touchpoint: { id: 'tp-new', occurred_at: '2026-11-15T16:00:00Z' } } })
@@ -550,5 +552,109 @@ describe('the referral badge and the four ruled contacts', () => {
   it('any other contact with a referral still shows it', async () => {
     await mount({ referral: REFERRED })
     expect($('[data-referral-badge]')!.textContent).toContain('1 referral')
+  })
+})
+
+// ── Kevin's tag rulings, 2026-11-15: groups, and making a tag from the picker ──
+const g = (id: string, label: string, group: string, shows: string[], over: any = {}) => ({ id, label, icon: null, location_id: null, sort_order: 0, is_active: true, attrs: { group, shows_on: shows, section: group === 'client_status' || group === 'relationship' ? 'relationship' : 'trade' }, ...over })
+const GROUPED = [
+  g('hot', 'Hot Lead', 'client_status', ['clients'], { sort_order: 1010 }), g('dnb', 'DO NOT BOOK', 'client_status', ['clients'], { sort_order: 1080 }),
+  g('ref', 'Referral', 'relationship', ['clients', 'network'], { sort_order: 1030 }), g('ven', 'Vendor', 'relationship', ['network'], { sort_order: 3020 }),
+  g('rea', 'Realtor', 'home_property', ['network']), g('gc', 'General Contractor', 'home_property', ['network']),
+  g('des', 'Designer', 'design_staging', ['network']), g('cle', 'Cleaner', 'cleaning_care', ['network']), g('mov', 'Mover', 'moving_hauling', ['network']),
+  g('sen', 'Senior Living', 'senior_living', ['network']), g('est', 'Estate Sale', 'valuables_specialty', ['network']),
+  g('net', 'Networking Group', 'professional_services', ['network']), g('own', 'Garden Club', 'professional_services', ['network'], { location_id: LOC }),
+]
+
+describe('the Network sheet shows only the Network groups', () => {
+  const open = async (o: Opts = {}) => { await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')) }
+  const groups = () => $$('[data-tag-section]').map((s) => [s.querySelector('.ns-sub')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])
+  it('Relationship, then the seven trade groups, in order, each A to Z', async () => {
+    await open()
+    expect(groups()).toEqual([
+      ['Relationship', ['Referral', 'Vendor']], ['Home & property', ['General Contractor', 'Realtor']], ['Design & staging', ['Designer']], ['Cleaning', ['Cleaner']],
+      ['Moving & hauling', ['Mover']], ['Senior living', ['Senior Living']], ['Valuables', ['Estate Sale']], ['Professional services', ['Garden Club', 'Networking Group']],
+    ])
+  })
+  it('no Client status tag is offered on a Network contact', async () => {
+    await open()
+    const all = $$('[data-pick-tag]').map((b) => words(b))
+    for (const never of ['Hot Lead', 'DO NOT BOOK']) expect(all).not.toContain(never)
+    expect($('[data-tag-section="client_status"]')).toBeNull()
+  })
+  it("the location's own tag sits in its group, with no section of its own", async () => {
+    await open()
+    expect($('[data-tag-section="own"]')).toBeNull()
+    expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toContain('Garden Club')
+  })
+  it('a client-status tag this contact already carries is kept in view, ticked, so it can be taken off', async () => {
+    await open({ sheet: sheetOf({ tagIds: ['hot'] }, { tags: [{ id: 'hot', label: 'Hot Lead', icon: null, section: 'relationship' }] }) })
+    expect(groups().at(-1)).toEqual(['Also on this record', ['Hot Lead']])
+    expect(pressed('[data-tag-section="elsewhere"] [data-pick-tag]')).toEqual(['Hot Lead'])
+    await click($('[data-pick-tag="hot"]')); await submit('tags')
+    expect(sent()).toEqual([{ url: `/api/partner-tags?partner_id=${ID}&tag_lookup_id=hot`, method: 'DELETE', body: null }])
+  })
+})
+
+describe('making a tag from the Network picker', () => {
+  const open = async (o: Opts = {}) => { const m = await mount({ lookups: GROUPED, ...o }); await click($('[data-edit="tags"]')); return m }
+  const create = async (name: string) => { await type('[data-field="newTag"]', name); await click($('[data-create-tag]')) }
+  it('says, before anything is made, which group it joins, who sees it, and the limit', async () => {
+    await open()
+    expect($('[data-tag-create-hint]')!.textContent).toBe('It joins Professional services, and only Greensboro sees it. A location can have up to 10 of its own.')
+    expect(($('[data-create-tag]') as HTMLButtonElement).disabled).toBe(true)
+  })
+  it("is sent to Bee Hub's own tag list, for the contact's location, saying it was made on Network", async () => {
+    await open()
+    await create('  Plumber ')
+    expect(sent()).toEqual([{ url: '/api/lookups', method: 'POST', body: { category: 'tags', label: 'Plumber', location_id: LOC, made_on: 'network' } }])
+  })
+  it('the new tag appears in its group, ticked, and nothing is on the contact until Save tags', async () => {
+    await open()
+    await create('Plumber')
+    expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toEqual(['Garden Club', 'Networking Group', 'Plumber'])
+    expect(pressed('[data-pick-tag]')).toEqual(['Plumber'])
+    expect($('[data-tag-note]')!.textContent).toBe('“Plumber” was created and ticked. Save tags to put it on this contact.')
+    expect(sent().filter((c) => c.url.startsWith('/api/partner-tags'))).toEqual([])
+    await submit('tags')
+    expect(sent().at(-1)).toEqual({ url: '/api/partner-tags', method: 'POST', body: { partner_id: ID, tag_lookup_id: 'made' } })
+  })
+  it('Enter in the box makes the tag; it does not save the form', async () => {
+    await open()
+    await type('[data-field="newTag"]', 'Plumber')
+    await act(async () => { $('[data-field="newTag"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+    await settle(3)
+    expect(sent().map((c) => c.url)).toEqual(['/api/lookups'])
+    expect($('[data-form="tags"]')).toBeTruthy()
+  })
+  it('at the limit of ten: said in plain words, nothing made, nothing ticked', async () => {
+    await open({ createTag: () => ({ status: 409, json: { error: 'tag_limit', limit: 10, count: 10 } }) })
+    await create('Plumber')
+    expect($('[data-save-error]')!.textContent).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')
+    expect($('[data-field="newTag"]')!.getAttribute('aria-invalid')).toBe('true')
+    expect(pressed('[data-pick-tag]')).toEqual([])
+    expect($$('[data-pick-tag]').map((b) => words(b))).not.toContain('Plumber')
+  })
+  it('a name that is already a tag here is ticked instead of made twice', async () => {
+    await open({ createTag: () => ({ status: 409, json: { error: 'near_match', verdict: 'use', tag: { id: 'rea', label: 'Realtor' } } }) })
+    await create('realtors')
+    expect(pressed('[data-pick-tag]')).toEqual(['Realtor'])
+    expect($('[data-tag-note]')!.textContent).toBe('“Realtor” is already a tag, so it is ticked for you.')
+    expect($$('[data-pick-tag]').filter((b) => words(b) === 'Realtor')).toHaveLength(1)
+  })
+  it('a name that is a Clients tag is not pulled onto Network: it says so', async () => {
+    await open({ createTag: () => ({ status: 409, json: { error: 'near_match', verdict: 'use', tag: { id: 'hot', label: 'Hot Lead' } } }) })
+    await create('hot leads')
+    expect($('[data-save-error]')!.textContent).toBe('“Hot Lead” is already a tag on another list, so it is not offered here.')
+    expect(pressed('[data-pick-tag]')).toEqual([])
+  })
+  it('if it cannot be made it says nothing was changed', async () => {
+    await open({ createTag: () => ({ status: 500, json: { error: 'Failed to create lookup' } }) })
+    await create('Plumber')
+    expect($('[data-save-error]')!.textContent).toBe('That tag could not be created. Nothing was changed.')
+  })
+  it('there is no create box when the tag list could not be loaded', async () => {
+    await mount({ lookupsStatus: 500 }); await click($('[data-edit="tags"]'))
+    expect($('[data-tag-create]')).toBeNull()
   })
 })

@@ -123,6 +123,7 @@ export default function TagsRow({ leadId = null, recordId = null, kind = 'client
           mode="multi"
           showIcons
           sections
+          screen={kind === 'partner' ? 'network' : 'clients'}
           allowCreate={!readOnly}
           title="Tags"
           subtitle="Corporate's list, plus your location's own"

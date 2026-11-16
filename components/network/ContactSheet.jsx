@@ -19,8 +19,9 @@
 //   · a follow-up    → POST /api/reminders. It is a reminder, the same row
 //                      the Reminders page and Home read. No second system.
 //   · tags           → POST / DELETE /api/partner-tags, one call per tag
-//                      that changed, picked from Bee Hub's own tag list in
-//                      its Relationship / Trade / own sections
+//                      that changed, picked from Bee Hub's ONE tag list,
+//                      showing only the groups that belong on Network; a
+//                      new tag can be made from the picker (POST /api/lookups)
 //   · a note, the addresses, the company link → this sheet's own save,
 //                      which writes that one column and nothing else
 // One form is open at a time.
@@ -58,7 +59,7 @@ import {
 } from '@/lib/network/contact-adds'
 import { RULED_NOT_SURE_IDS } from '@/lib/network/live-mapping'
 import { fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
-import { sectionTags } from '@/lib/tags'
+import { GROUP_FOR_NEW_TAG, TAG_GROUPS, TAG_LIMIT_PER_LOCATION, groupTags, tagLimitWords } from '@/lib/tags'
 import { tagTone } from './NetworkListScreen'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
@@ -309,6 +310,8 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const [tagList, setTagList] = useState(null) // { sections } | { problem: true }
   const [companies, setCompanies] = useState(null) // [{ id, name }] | 'problem'
   const [touchList, setTouchList] = useState(null) // [TouchType] | 'problem'
+  const [newTag, setNewTag] = useState('') // the name typed into "New tag"
+  const [tagNote, setTagNote] = useState(null) // a quiet line after a create
   const sheet = useRef(null)
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
 
@@ -375,16 +378,19 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const stage = c ? partnerStage({ types, stage: c.partnerStage }) : null
   const history = useMemo(() => historyOf(c, data?.touchpoints), [c, data])
 
-  // Bee Hub's own tag list for THIS contact's location (the same read every
-  // other tag picker makes), in its Relationship / Trade / own sections.
+  // Bee Hub's ONE tag list for THIS contact's location (the same read every
+  // other tag picker makes), showing only the groups that belong on Network
+  // (lib/tags.ts groupTags). A tag this contact already carries from another
+  // list is kept in view, last, so it can still be unticked.
+  const tagListOf = (rows, own) => ({ rows, own, sections: groupTags(rows, 'network', own, (data?.tags || []).map((t) => t.id)) })
   const loadTagList = () => {
-    setTagList(null)
+    setTagList(null); setNewTag(''); setTagNote(null)
     doFetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(c.locationId)}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}))
         if (!res.ok || !Array.isArray(json.lookups)) throw new Error('tags')
         const rows = json.lookups.filter((t) => t.is_active !== false)
-        setTagList({ sections: sectionTags(rows, json.location?.name ? `${json.location.name}’s own` : null) })
+        setTagList(tagListOf(rows, json.location?.name ? `${json.location.name}’s own` : null))
       })
       .catch(() => setTagList({ problem: true }))
   }
@@ -489,6 +495,35 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     }
     return { words: 'Tags saved', contact: fresh?.contact || c }
   })
+  // A NEW TAG, made from the picker. It belongs to this contact's location,
+  // lands in the Network group for new tags, and counts toward that
+  // location's limit of ten. It only creates the tag and ticks it: nothing is
+  // put on the contact until Save tags.
+  async function createTag() {
+    const label = newTag.trim()
+    if (!label || saving || !tagList?.rows) return
+    setSaving(true); setError(null); setTagNote(null)
+    try {
+      const { res, json } = await call('/api/lookups', 'POST', { category: 'tags', label, location_id: c.locationId, made_on: 'network' })
+      if (res.status === 409 && json?.error === 'tag_limit') { setError({ field: 'newTag', words: tagLimitWords(Number(json.count) || 0) }); return }
+      if (res.status === 409 && json?.error === 'near_match' && json.tag) {
+        // Only a tag this picker actually SHOWS can be ticked: a Clients tag
+        // of the same name is not pulled onto a Network contact.
+        const there = tagList.sections.flatMap((s) => s.rows).find((t) => t.id === json.tag.id)
+        if (there) { setDraft((d) => ({ picked: d.picked.includes(there.id) ? d.picked : [...d.picked, there.id] })); setNewTag(''); setTagNote(`“${there.label}” is already a tag, so it is ticked for you.`) }
+        else setError({ field: 'newTag', words: json.verdict === 'restore' ? `“${json.tag.label}” was removed at this location. Bring it back under Settings rather than making it again.` : `“${json.tag.label}” is already a tag on another list, so it is not offered here.` })
+        return
+      }
+      if (!res.ok || !json?.lookup) { setError({ field: 'newTag', words: 'That tag could not be created. Nothing was changed.' }); return }
+      setTagList(tagListOf([...tagList.rows, json.lookup], tagList.own))
+      setDraft((d) => ({ picked: [...d.picked, json.lookup.id] }))
+      setNewTag(''); setTagNote(`“${json.lookup.label}” was created and ticked. Save tags to put it on this contact.`)
+    } catch (e) {
+      setError({ field: 'newTag', words: NOT_SAVED })
+    } finally {
+      setSaving(false)
+    }
+  }
   // Addresses: the list as it was when the form opened, and as it is now.
   const saveAddresses = () => run('addresses', async () => {
     const from = c.addresses || []
@@ -664,6 +699,17 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                       </div>
                     </div>
                   ))}
+                  {tagList?.sections && (
+                    <div className="ns-field" data-tag-create>New tag{c.locationName ? ` for ${c.locationName}` : ''}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input className="ns-input" value={newTag} maxLength={60} disabled={saving} aria-invalid={error?.field === 'newTag' || undefined} placeholder="Name it"
+                          onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }} data-field="newTag" />
+                        <button type="button" className="ns-btn ns-btn-ghost" style={{ border: `1px solid ${T.input}` }} disabled={saving || !newTag.trim()} onClick={createTag} data-create-tag>Create</button>
+                      </div>
+                      <span data-tag-create-hint>It joins {TAG_GROUPS.find((g) => g.key === GROUP_FOR_NEW_TAG.network).label}, and only {c.locationName || 'this location'} sees it. A location can have up to {TAG_LIMIT_PER_LOCATION} of its own.</span>
+                      {tagNote && <span role="status" style={{ color: T.primary }} data-tag-note>{tagNote}</span>}
+                    </div>
+                  )}
                   {foot('Save tags', 'Saving…', !tagList?.sections)}
                 </form>
               ) : (

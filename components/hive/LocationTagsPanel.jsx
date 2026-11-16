@@ -8,6 +8,12 @@
 // own dry run (2026-10-16): each group's "Make corporate…" previews
 // first (POST /api/tags/make-corporate dryRun), runs only on the second
 // press, and every promotion stays undoable from "Recent" below.
+// CORPORATE REVIEW (2026-11-15, Kevin). Each location tag can now be dealt
+// with one of four ways: promoted (Make corporate, above), merged into an
+// existing tag, deleted, or marked "reviewed, keep local" (POST
+// /api/tags/review). Merge and delete take the tag off real people, so each
+// previews first, saying how many, and runs only on the second press. The
+// panel also shows how close each location is to its limit of own tags.
 // §8.5: owns its fetches.
 // ─────────────────────────────────────────────────────────────
 'use client'
@@ -86,6 +92,79 @@ function MakeCorporate({ group, onDone }) {
   )
 }
 
+// One location tag's review: keep local · merge into… · delete…
+function ReviewTag({ tag, onDone }) {
+  const [mode, setMode] = useState(null)       // null | 'merge' | 'delete'
+  const [options, setOptions] = useState(null) // the main list, for "merge into"
+  const [into, setInto] = useState('')
+  const [plan, setPlan] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    if (mode !== 'merge' || options) return
+    let dead = false
+    fetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(tag.location_id)}`)
+      .then(r => r.json()).then(j => { if (!dead) setOptions((j.lookups || []).filter(o => o.id !== tag.id).sort((a, b) => a.label.localeCompare(b.label))) })
+      .catch(() => { if (!dead) setOptions([]) })
+    return () => { dead = true }
+  }, [mode, options, tag.id, tag.location_id])
+
+  const send = async (action, dryRun) => {
+    setBusy(true); setErr(null)
+    try {
+      const r = await fetch('/api/tags/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: tag.id, action, ...(action === 'merge' ? { into } : {}), ...(dryRun ? { dryRun: true } : {}) }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j?.detail || j?.error || `HTTP ${r.status}`)
+      if (dryRun) { setPlan(j.plan); return }
+      setMsg(j.receipt); setMode(null); setPlan(null)
+      onDone()
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const back = () => { setMode(null); setPlan(null); setErr(null); setInto('') }
+
+  if (msg) return <p data-review-receipt style={{ fontSize: 12, color: T.ink.secondary, margin: '2px 0 6px' }}>{msg}</p>
+  return (
+    <div data-review-tag={tag.id} style={{ margin: '2px 0 8px' }}>
+      {!mode && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {tag.reviewed === 'keep_local'
+            ? <span data-reviewed style={{ fontSize: 11, color: T.ink.muted }}>Reviewed · kept local</span>
+            : <button style={actBtn()} disabled={busy} onClick={() => send('keep_local', false)}>Reviewed, keep local</button>}
+          <button style={actBtn()} disabled={busy} onClick={() => setMode('merge')}>Merge into…</button>
+          <button style={actBtn()} disabled={busy} onClick={() => { setMode('delete'); send('delete', true) }}>Delete…</button>
+        </div>
+      )}
+      {mode === 'merge' && !plan && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select aria-label={`Merge “${tag.label}” into`} value={into} onChange={e => setInto(e.target.value)} style={inputStyle}>
+            <option value="">{options ? 'Merge into which tag?' : 'Loading tags…'}</option>
+            {(options || []).map(o => <option key={o.id} value={o.id}>{tagText(o)}{o.location_id ? ' (their own)' : ''}</option>)}
+          </select>
+          <button style={actBtn()} disabled={busy || !into} onClick={() => send('merge', true)}>{busy ? 'Checking…' : 'Preview'}</button>
+          <button style={actBtn()} disabled={busy} onClick={back}>Back</button>
+        </div>
+      )}
+      {plan && (
+        <div data-review-plan style={{ fontSize: 12, color: T.ink.secondary, lineHeight: 1.5 }}>
+          <p style={{ margin: 0 }}>
+            {plan.action === 'merge'
+              ? `${n(plan.clients, 'client', 'clients')} and ${n(plan.network, 'Network person', 'Network people')} carrying “${plan.tag.label}” will carry “${plan.into.label}” instead${plan.alreadyHave.clients + plan.alreadyHave.network ? ` (${plan.alreadyHave.clients + plan.alreadyHave.network} already do)` : ''}. Then “${plan.tag.label}” is deleted.`
+              : `“${plan.tag.label}” will be taken off ${n(plan.clients, 'client', 'clients')} and ${n(plan.network, 'Network person', 'Network people')}, then deleted.`}
+            {' '}There is no undo button for this.
+          </p>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button style={actBtn(true)} disabled={busy} onClick={() => send(plan.action, false)}>{busy ? 'Working…' : plan.action === 'merge' ? 'Merge' : 'Delete tag'}</button>
+            <button style={actBtn()} disabled={busy} onClick={back}>Back</button>
+          </div>
+        </div>
+      )}
+      {err && <p role="alert" style={{ fontSize: 12, color: T.state.danger.fg, margin: '4px 0 0' }}>{err}</p>}
+    </div>
+  )
+}
+
 function RecentPromotions({ refreshKey, onChanged }) {
   const [list, setList] = useState(null)
   const [msg, setMsg] = useState(null)
@@ -118,6 +197,7 @@ function RecentPromotions({ refreshKey, onChanged }) {
 
 export default function LocationTagsPanel() {
   const [groups, setGroups] = useState(null)
+  const [limits, setLimits] = useState({ limit: 10, rows: [] })
   const [error, setError] = useState(null)
   const [open, setOpen] = useState({})
   const [making, setMaking] = useState(null)   // group key
@@ -127,7 +207,7 @@ export default function LocationTagsPanel() {
     let dead = false
     fetch('/api/tags/locations')
       .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`); return j })
-      .then(j => { if (!dead) setGroups(j.groups || []) })
+      .then(j => { if (!dead) { setGroups(j.groups || []); setLimits({ limit: j.limit || 10, rows: j.limits || [] }) } })
       .catch(e => { if (!dead) { setError(String(e?.message || e)); setGroups([]) } })
     return () => { dead = true }
   }, [refreshKey])
@@ -161,8 +241,9 @@ export default function LocationTagsPanel() {
                       “{t.label}” · {t.location_name || 'unknown location'} · {t.people} {t.people === 1 ? 'person' : 'people'}
                       {' · '}made {fmtDate(t.created_at)}{t.created_by ? ` by ${t.created_by}` : ''}
                       {t.is_active ? '' : ' · removed'}
+                      {t.group ? ` · in ${t.group}` : ''}
                     </p>
-                  ))}
+                  )).flatMap((line, i) => [line, g.tags[i].is_active ? <ReviewTag key={`review-${g.tags[i].id}`} tag={g.tags[i]} onDone={() => setRefreshKey(k => k + 1)} /> : null])}
                   {making === g.key
                     ? <MakeCorporate group={g} onDone={() => setRefreshKey(k => k + 1)} />
                     : g.tags.some(t => t.is_active) && (
@@ -173,6 +254,11 @@ export default function LocationTagsPanel() {
             </div>
           ))}
         </div>
+      )}
+      {limits.rows.length > 0 && (
+        <p data-tag-limits style={{ fontSize: 12, color: T.ink.quiet, margin: '8px 0 0' }}>
+          Own tags in use, of {limits.limit} allowed: {limits.rows.map(l => `${l.name || 'Unknown'} ${l.count}`).join(' · ')}
+        </p>
       )}
       <RecentPromotions refreshKey={refreshKey} onChanged={() => setRefreshKey(k => k + 1)} />
     </div>

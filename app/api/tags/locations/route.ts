@@ -10,7 +10,7 @@
 import { NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
-import { TAG_CATEGORIES, tagKey } from '@/lib/tags'
+import { TAG_CATEGORIES, TAG_GROUPS, TAG_LIMIT_PER_LOCATION, tagGroup, tagKey, tagReview } from '@/lib/tags'
 
 export async function GET() {
   try {
@@ -52,6 +52,10 @@ export async function GET() {
         created_at: (t as any).created_at,
         created_by: nameOf.get((t as any).attrs?.created_by_user) || null,
         people: count.get((t as any).id) || 0,
+        // Corporate review (2026-11-15): the group it landed in, and whether
+        // corporate has already looked at it.
+        group: TAG_GROUPS.find((x) => x.key === tagGroup(t as any))?.label || null,
+        reviewed: tagReview(t as any)?.decision || null,
       })
     }
     const out = Array.from(groups.values()).map((g) => ({
@@ -63,7 +67,17 @@ export async function GET() {
     // Most widespread first — the best candidates for a corporate tag.
     out.sort((a, b) => b.locations - a.locations || b.people - a.people || a.label.localeCompare(b.label))
 
-    return NextResponse.json({ groups: out })
+    // How close each location is to its limit of own tags (switched on).
+    const perLocation = new Map<string, { location_id: string; name: string | null; count: number }>()
+    for (const t of tags || []) {
+      if ((t as any).is_active === false) continue
+      const k = (t as any).location_id
+      if (!perLocation.has(k)) perLocation.set(k, { location_id: k, name: (t as any).location?.name || null, count: 0 })
+      perLocation.get(k)!.count += 1
+    }
+    const limits = Array.from(perLocation.values()).sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
+
+    return NextResponse.json({ groups: out, limit: TAG_LIMIT_PER_LOCATION, limits })
   } catch (err: any) {
     console.error('[/api/tags/locations GET] error:', err?.message || err)
     return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })

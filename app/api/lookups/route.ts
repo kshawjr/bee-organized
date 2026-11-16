@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser, isAdmin } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, isAllowedTagIcon } from '@/lib/tags'
+import { TAG_CATEGORY, TAG_CATEGORIES, TAG_SECTIONS, TAG_LIMIT_PER_LOCATION, isAllowedTagIcon, newTagPlacement } from '@/lib/tags'
 import { checkNearTag, nearMatchBody, fileRetiredTagRequest, LOCATION_TAG_ROLES } from '@/lib/tag-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -186,6 +186,21 @@ export async function POST(req: NextRequest) {
       nearVerdict = await checkNearTag(label, location_id)
       const blocked = nearMatchBody(nearVerdict)
       if (blocked) return NextResponse.json(blocked, { status: 409 })
+
+      // THE LIMIT (2026-11-15, Kevin): a location may have ten tags of its
+      // own switched on. At ten, nothing is created: they delete one they no
+      // longer use, or ask corporate. It counts for whoever is creating,
+      // corporate included, because the limit is the location's.
+      const { count: ownCount, error: countError } = await supabaseService
+        .from('lookups')
+        .select('id', { count: 'exact', head: true })
+        .in('category', TAG_CATEGORIES)
+        .eq('location_id', location_id)
+        .eq('is_active', true)
+      if (countError) return NextResponse.json({ error: 'Failed to count tags' }, { status: 500 })
+      if ((ownCount ?? 0) >= TAG_LIMIT_PER_LOCATION) {
+        return NextResponse.json({ error: 'tag_limit', limit: TAG_LIMIT_PER_LOCATION, count: ownCount ?? 0 }, { status: 409 })
+      }
     } else if (hubUser.role !== 'super_admin' && hubUser.role !== 'admin') {
       // ── corporate create — unchanged: admins only ─────────────────
       return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
@@ -231,6 +246,10 @@ export async function POST(req: NextRequest) {
     }
     if (location_id != null) {
       insert.location_id = location_id
+      // A location's own tag lands in the group for the screen it was made
+      // on, and shows on that screen (lib/tags.ts newTagPlacement). The
+      // server decides this from `made_on`; a group sent in attrs is not used.
+      if (category === TAG_CATEGORY) insert.attrs = { ...insert.attrs, ...newTagPlacement(body?.made_on) }
       // Who made it — lookups has no creator column; corporate's Location
       // tags panel reads this (no schema change).
       insert.attrs = { ...insert.attrs, created_by_user: hubUser.id }

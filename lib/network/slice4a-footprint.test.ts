@@ -99,6 +99,7 @@ describe('slice 4a left everything outside the new Network screens alone', () =>
       'POST /api/reminders',
       'POST /api/partner-tags',
       'DELETE /api/partner-tags',
+      'POST /api/lookups',
       'PATCH /api/network/contacts/${contactId}',
     ])
     // Outside that one helper there is a single direct write: the name form.

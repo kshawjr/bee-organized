@@ -67,7 +67,7 @@ import { T } from './tokens'
 import { wizAccentBtn, wizQuietBtn, wizInput } from './CloseWizardKit'
 import { IconCheck, IconPlus } from '@/components/ui/icons'
 import { tagText } from './tagText'
-import { sectionTags, nearTagVerdict } from '@/lib/tags'
+import { sectionTags, groupTags, nearTagVerdict, tagLimitWords } from '@/lib/tags'
 import TagIconGrid from './TagIconGrid'
 
 export default function PickerModal({
@@ -79,6 +79,10 @@ export default function PickerModal({
   maxSelected = null,
   showIcons = false,
   sections = false,
+  // Tags: which screen is asking ('clients' | 'network'). The picker then
+  // shows only that screen's groups (lib/tags.ts groupTags), and a tag
+  // created here lands in that screen's group. null = the older two sections.
+  screen = null,
   title = 'Choose',
   subtitle = null,
   onSave = () => {},
@@ -159,8 +163,12 @@ export default function PickerModal({
   // Tags: Relationship / Trade instead of corporate / own (both kinds of
   // row go into whichever section they belong to).
   const sectioned = useMemo(
-    () => (sections ? sectionTags([...corporate, ...own], locationName ? `${locationName}'s own` : null) : null),
-    [sections, corporate, own, locationName]
+    () => {
+      if (!sections) return null
+      const ownLabel = locationName ? `${locationName}'s own` : null
+      return screen ? groupTags([...corporate, ...own], screen, ownLabel, selected) : sectionTags([...corporate, ...own], ownLabel)
+    },
+    [sections, corporate, own, locationName, screen] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   // The create row shows only when the trimmed text matches NO existing
@@ -203,7 +211,7 @@ export default function PickerModal({
     try {
       const res = await fetch('/api/lookups', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, label: createLabel, location_id: locationId, ...(sections && newIcon ? { icon: newIcon } : {}) }),
+        body: JSON.stringify({ category, label: createLabel, location_id: locationId, ...(sections && newIcon ? { icon: newIcon } : {}), ...(sections && screen ? { made_on: screen } : {}) }),
       })
       const j = await res.json().catch(() => ({}))
       // The server's near-match guard (a race, or a tag this list didn't
@@ -212,6 +220,8 @@ export default function PickerModal({
         setServerVerdict({ kind: j.verdict, tag: j.tag })
         return
       }
+      // The location is at its limit of own tags: say so in plain words.
+      if (res.status === 409 && j?.error === 'tag_limit') { setError(tagLimitWords(Number(j.count) || 0)); return }
       if (!res.ok || !j.lookup) throw new Error(j?.error || `HTTP ${res.status}`)
       setOptions(prev => [...(prev || []), j.lookup])
       announceTag(j.lookup)
