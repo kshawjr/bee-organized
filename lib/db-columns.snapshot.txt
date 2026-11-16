@@ -49,7 +49,7 @@ notes:id,location_id,created_by,lead_id,assessment_id,service_request_id,job_id,
 notification_log:id,created_at,lead_id,lead_name,location_id,location_slug,channel,recipient,subject,email_kind,send_status,resend_message_id,delivery_status,delivery_updated_at,error,sender,reply_to
 onboarding_progress:id,user_id,location_id,onboarding_type,step,completed_at,completed_by,metadata,created_at
 partner_tags:partner_id,tag_lookup_id,added_at,added_by
-partners:id,location_id,type,name,email,phone,company_id,stage,specialties,tier,tags,addresses,notes,next_steps,referrals,activity,deleted_at,created_at,updated_at,created_by,title,company,website,how_we_met,met_date,last_contact,is_customer,relationship,card_image,customer_lead_id,last_contacted_at
+partners:id,location_id,type,name,email,phone,company_id,stage,specialties,tier,tags,addresses,notes,next_steps,referrals,activity,deleted_at,created_at,updated_at,created_by,title,company,website,how_we_met,met_date,last_contact,is_customer,relationship,card_image,customer_lead_id,last_contacted_at,network_types,partner_level,partner_stage,birthday,birthday_reminder
 payments:id,invoice_id,lead_id,location_id,jobber_payment_id,amount,method,paid_at,notes,jobber_synced_at,created_at,updated_at
 pending_invites:id,email,full_name,role,tier,location_id,invite_token,invite_expires_at,invited_by,accepted_at,created_at,accepted_user_id
 quotes:id,service_request_id,lead_id,location_id,jobber_quote_id,quote_url,status,subtotal,tax_amount,discount_amount,total,sent_at,approved_at,expires_at,line_items,jobber_synced_at,created_at,updated_at,phone,engagement_id
