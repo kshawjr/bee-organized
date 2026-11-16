@@ -172,7 +172,7 @@ describe('a contact with everything', () => {
 describe('the tags are Bee Hub\'s', () => {
   it('shows the tags it was sent, each carrying its Bee Hub section', async () => {
     await mount({ sheet: FULL })
-    expect($$('[data-tag]').map((t) => [t.textContent, t.dataset.section])).toEqual([['Realtor', 'trade'], ['VIP', 'relationship'], ['Oak & Key', 'location']])
+    expect($$('[data-tag]').map((t) => [t.lastChild!.textContent, t.dataset.section])).toEqual([['Realtor', 'trade'], ['VIP', 'relationship'], ['Oak & Key', 'location']])
   })
   it('carries none of the design\'s sample tags, and no tag list of its own', () => {
     const src = readFileSync(join(process.cwd(), 'components/network/ContactSheet.jsx'), 'utf8')

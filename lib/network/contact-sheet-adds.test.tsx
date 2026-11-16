@@ -48,6 +48,18 @@ const LOOKUPS = [
   { id: 'o1', label: 'Garden Club', attrs: { section: 'relationship' }, location_id: LOC, sort_order: 0, is_active: true },
   { id: 'x1', label: 'Housekeeper', attrs: { section: 'trade' }, location_id: null, sort_order: 0, is_active: false },
 ]
+// The partner touchpoint list as production holds it (lookups, category
+// touchpoint_types, read 2026-11-15), in a jumbled order, plus one switched off.
+const TOUCH_LOOKUPS = [
+  { id: 'l5', category: 'touchpoint_types', label: 'Text', icon: '💬', sort_order: 50, is_active: true, attrs: { key: 'text' } },
+  { id: 'l1', category: 'touchpoint_types', label: 'Coffee / Lunch', icon: '☕', sort_order: 10, is_active: true, attrs: { key: 'coffee' } },
+  { id: 'l2', category: 'touchpoint_types', label: 'Phone Call', icon: '📞', sort_order: 20, is_active: true, attrs: { key: 'call' } },
+  { id: 'l3', category: 'touchpoint_types', label: 'Email', icon: '📧', sort_order: 30, is_active: true, attrs: { key: 'email' } },
+  { id: 'l4', category: 'touchpoint_types', label: 'Event / Show', icon: '🎪', sort_order: 40, is_active: true, attrs: { key: 'event' } },
+  { id: 'l6', category: 'touchpoint_types', label: 'They Sent a Lead', icon: '🤝', sort_order: 60, is_active: true, attrs: { key: 'referral' } },
+  { id: 'l7', category: 'touchpoint_types', label: 'Thank You Sent', icon: '🙏', sort_order: 70, is_active: true, attrs: { key: 'thankyou' } },
+  { id: 'l8', category: 'touchpoint_types', label: 'Fax', icon: null, sort_order: 5, is_active: false, attrs: { key: 'fax' } },
+]
 const COMPANIES = [{ id: CO, name: 'Compass Greenwood Village' }, { id: CO2, name: 'Oak & Key Realty' }]
 
 type Answer = { status: number; json: any }
@@ -57,7 +69,7 @@ type Opts = {
   reminder?: (body: any) => Answer
   tag?: (method: string, tagId: string) => Answer
   patch?: (body: any) => Answer
-  lookupsStatus?: number; companiesStatus?: number
+  lookupsStatus?: number; companiesStatus?: number; touchTypesStatus?: number
 }
 let host: HTMLElement
 let root: ReturnType<typeof createRoot>
@@ -69,6 +81,7 @@ const fakeFetch = (o: Opts) => vi.fn(async (url: string, init?: any) => {
   calls.push({ url, method, body })
   const answer = (a: Answer) => ({ ok: a.status >= 200 && a.status < 300, status: a.status, json: async () => a.json })
   if (url.endsWith('/referrals')) return answer({ status: 200, json: o.referral || { total: 0, totals: { converted: 0, revenue: 0 } } })
+  if (url.startsWith('/api/lookups') && url.includes('touchpoint_types')) return answer(o.touchTypesStatus ? { status: o.touchTypesStatus, json: {} } : { status: 200, json: { lookups: TOUCH_LOOKUPS, location: null } })
   if (url.startsWith('/api/lookups')) return answer(o.lookupsStatus ? { status: o.lookupsStatus, json: {} } : { status: 200, json: { lookups: LOOKUPS, location: { id: LOC, name: 'Greensboro' } } })
   if (url.startsWith('/api/companies')) return answer(o.companiesStatus ? { status: o.companiesStatus, json: {} } : { status: 200, json: { rows: COMPANIES, total: 2, truncated: false } })
   if (url === '/api/touchpoints') {
@@ -121,38 +134,80 @@ const type = async (sel: string, value: string) => {
 }
 const submit = async (form: string) => { await act(async () => { ($(`[data-form="${form}"]`) as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle(4) }
 const sent = () => calls.filter((c) => c.method !== 'GET')
-const pressed = (sel: string) => $$(sel).filter((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true').map((b) => b.textContent)
+// A tag's or a type's WORDS, without the emoji drawn in front of them.
+const words = (el: Element) => Array.from(el.childNodes).filter((n) => !(n instanceof HTMLElement && n.classList.contains('ns-emoji'))).map((n) => n.textContent).join('')
+const emoji = (el: Element) => el.querySelector('.ns-emoji')?.textContent ?? null
+const pressed = (sel: string) => $$(sel).filter((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true').map((b) => words(b))
 
 describe('a touchpoint', () => {
-  it("offers Bee Hub's four ways of being in touch and its three outcomes, Call picked to start", async () => {
+  it("asks Bee Hub's settings for the PARTNER touchpoint list", async () => {
     await mount()
     await click($('[data-edit="touchpoint"]'))
-    expect($$('[data-method]').map((b) => b.textContent)).toEqual(['Call', 'Text', 'Email', 'In person'])
-    expect($$('[data-outcome]').map((b) => b.textContent)).toEqual(['Reached', 'No answer', 'Left voicemail'])
-    expect(pressed('[data-method]')).toEqual(['Call'])
-    expect(pressed('[data-outcome]')).toEqual([])
+    expect(calls.map((c) => c.url)).toEqual(['/api/lookups?category=touchpoint_types'])
   })
-  it("is sent to Bee Hub's own touchpoints route, exactly as the old record sent it, and to nowhere else", async () => {
+  it('offers the seven partner types, in order, each with its emoji, and nothing picked to start', async () => {
+    await mount()
+    await click($('[data-edit="touchpoint"]'))
+    expect($$('[data-touch-type]').map((b) => [emoji(b), words(b)])).toEqual([
+      ['☕', 'Coffee / Lunch'], ['📞', 'Phone Call'], ['📧', 'Email'], ['🎪', 'Event / Show'], ['💬', 'Text'], ['🤝', 'They Sent a Lead'], ['🙏', 'Thank You Sent'],
+    ])
+    expect(pressed('[data-touch-type]')).toEqual([])
+  })
+  it('offers none of the client call form: no Call / In person tiles, no Reached / No answer / Left voicemail', async () => {
+    await mount()
+    await click($('[data-edit="touchpoint"]'))
+    const form = $('[data-form="touchpoint"]')!
+    expect(form.querySelectorAll('[data-method], [data-outcome]')).toHaveLength(0)
+    for (const word of ['Reached', 'No answer', 'Left voicemail', 'In person', 'How it went']) expect(form.textContent, word).not.toContain(word)
+    expect($$('[data-touch-type]').map((b) => words(b))).not.toContain('Call')
+  })
+  it("is sent to Bee Hub's own touchpoints route, under the type's own words, with no outcome, and to nowhere else", async () => {
     const { onSaved } = await mount()
     await click($('[data-edit="touchpoint"]'))
-    await click($('[data-method="email"]')); await click($('[data-outcome="reached"]')); await type('[data-field="touchNotes"]', ' Spring listings ')
+    await click($('[data-touch-type="coffee"]')); await type('[data-field="touchNotes"]', ' Spring listings ')
     await submit('touchpoint')
-    expect(sent()).toEqual([{ url: '/api/touchpoints', method: 'POST', body: { partner_id: ID, kind: 'reach_out', method: 'email', label: 'Reach-out', status: 'reached', notes: 'Spring listings' } }])
+    expect(sent()).toEqual([{ url: '/api/touchpoints', method: 'POST', body: { partner_id: ID, kind: 'reach_out', method: 'coffee', label: 'Coffee / Lunch', status: null, notes: 'Spring listings' } }])
     expect($('[data-form="touchpoint"]')).toBeNull()
     expect($('[data-card="log"] [data-saved]')!.textContent).toBe('Touchpoint logged')
     expect($('[data-log-line]')!.textContent).toBe('Last in touch Nov 15, 2026. Everything logged is under History (1).')
     expect(onSaved).toHaveBeenCalledTimes(1)
   })
-  it('an outcome can be un-picked, and none is sent as nothing', async () => {
+  it.each([
+    ['call', 'call', 'Phone Call'], ['email', 'email', 'Email'], ['event', 'event', 'Event / Show'], ['text', 'sms', 'Text'], ['thankyou', 'thank_you', 'Thank You Sent'],
+  ])('%s is stored as method %s, label "%s"', async (key, method, label) => {
     await mount()
-    await click($('[data-edit="touchpoint"]'))
-    await click($('[data-outcome="voicemail"]')); await click($('[data-outcome="voicemail"]'))
+    await click($('[data-edit="touchpoint"]')); await click($(`[data-touch-type="${key}"]`)); await submit('touchpoint')
+    expect(sent()[0]!.body).toEqual({ partner_id: ID, kind: 'reach_out', method, label, status: null, notes: null })
+  })
+  it('"They Sent a Lead" has no method word of its own: it is stored by its label', async () => {
+    await mount()
+    await click($('[data-edit="touchpoint"]')); await click($('[data-touch-type="referral"]')); await submit('touchpoint')
+    expect(sent()[0]!.body).toEqual({ partner_id: ID, kind: 'reach_out', method: null, label: 'They Sent a Lead', status: null, notes: null })
+  })
+  it('the one just logged reads by its own name under History', async () => {
+    await mount()
+    await click($('[data-edit="touchpoint"]')); await click($('[data-touch-type="event"]')); await type('[data-field="touchNotes"]', 'Home show'); await submit('touchpoint')
+    await click($('[data-tab="history"]'))
+    expect($('[data-history]')!.textContent).toBe('Event / Show — Home showNov 15, 2026')
+  })
+  it('nothing picked: stopped on the screen, nothing sent', async () => {
+    await mount()
+    await click($('[data-edit="touchpoint"]')); await type('[data-field="touchNotes"]', 'Keep me')
     await submit('touchpoint')
-    expect(sent()[0]!.body).toMatchObject({ method: 'call', status: null, notes: null })
+    expect(sent()).toEqual([])
+    expect($('[data-save-error]')!.textContent).toBe('Pick what kind of touchpoint it was.')
+    expect(($('[data-field="touchNotes"]') as HTMLTextAreaElement).value).toBe('Keep me')
+  })
+  it('if the list cannot be loaded it says so, offers no types of its own, and Log is off', async () => {
+    await mount({ touchTypesStatus: 500 })
+    await click($('[data-edit="touchpoint"]'))
+    expect($('[data-touch-problem]')!.textContent).toBe('The touchpoint list could not be loaded. Nothing has been changed.')
+    expect($$('[data-touch-type]')).toEqual([])
+    expect(($('[data-form="touchpoint"] [data-save]') as HTMLButtonElement).disabled).toBe(true)
   })
   it('a refusal is said in plain words; the form and what was typed stay', async () => {
     const { onSaved } = await mount({ touchpoint: () => ({ status: 403, json: { error: 'forbidden_read_only_location' } }) })
-    await click($('[data-edit="touchpoint"]')); await type('[data-field="touchNotes"]', 'Keep me')
+    await click($('[data-edit="touchpoint"]')); await click($('[data-touch-type="call"]')); await type('[data-field="touchNotes"]', 'Keep me')
     await submit('touchpoint')
     expect($('[data-save-error]')!.textContent).toBe('This location is paused, so nothing can be changed.')
     expect(($('[data-field="touchNotes"]') as HTMLTextAreaElement).value).toBe('Keep me')
@@ -161,11 +216,12 @@ describe('a touchpoint', () => {
   it('while it is being logged: the button says so and nothing can be pressed', async () => {
     let finish: (a: Answer) => void = () => {}
     await mount({ touchpoint: () => new Promise<Answer>((res) => { finish = res }) })
-    await click($('[data-edit="touchpoint"]'))
+    await click($('[data-edit="touchpoint"]')); await click($('[data-touch-type="call"]'))
     await act(async () => { ($('[data-form="touchpoint"]') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
     await settle(1)
     expect($('[data-save]')!.textContent).toBe('Logging…')
-    expect($$('[data-method], [data-outcome], [data-cancel], [data-close], [data-save]').every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
+    expect($$('[data-touch-type]')).toHaveLength(7)
+    expect($$('[data-touch-type], [data-cancel], [data-close], [data-save]').every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
     expect(($('[data-field="touchNotes"]') as HTMLTextAreaElement).disabled).toBe(true)
     // A second press while it is in flight sends nothing more.
     await act(async () => { ($('[data-form="touchpoint"]') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
@@ -266,7 +322,7 @@ describe("tags are picked from Bee Hub's own list", () => {
   it('shows it in its sections, Relationship then Trade then the location\'s own, in Bee Hub\'s order', async () => {
     await mount({ sheet: TAGGED })
     await click($('[data-edit="tags"]'))
-    expect($$('[data-tag-section]').map((s) => [s.dataset.tagSection, s.querySelector('.ns-sub')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => b.textContent)])).toEqual([
+    expect($$('[data-tag-section]').map((s) => [s.dataset.tagSection, s.querySelector('.ns-sub')!.firstChild!.textContent, Array.from(s.querySelectorAll('[data-pick-tag]')).map((b) => words(b))])).toEqual([
       ['relationship', 'Relationship', ['Hot Lead', 'VIP']],
       ['trade', 'Trade', ['Mover', 'Realtor']],
       ['own', 'Greensboro’s own', ['Garden Club']],
@@ -275,9 +331,26 @@ describe("tags are picked from Bee Hub's own list", () => {
   it('never offers a switched-off tag, or any name that is not in the list', async () => {
     await mount({ sheet: TAGGED })
     await click($('[data-edit="tags"]'))
-    const offered = $$('[data-pick-tag]').map((b) => b.textContent)
+    const offered = $$('[data-pick-tag]').map((b) => words(b))
     expect(offered).not.toContain('Housekeeper')
     expect(offered.sort()).toEqual(LOOKUPS.filter((l) => l.is_active).map((l) => l.label).sort())
+  })
+  it('every tag in the picker shows its emoji: the stored one, or the stand-in where it has none', async () => {
+    await mount({ sheet: TAGGED })
+    await click($('[data-edit="tags"]'))
+    // LOOKUPS above carry no emoji at all, so every one of these is a stand-in or the plain mark…
+    expect($$('[data-pick-tag]').map((b) => emoji(b))).toEqual(['🏷️', '🏷️', '🏷️', '🏷️', '🏷️'])
+    expect($$('[data-pick-tag] .ns-emoji').every((e) => e.getAttribute('aria-hidden') === 'true')).toBe(true)
+  })
+  it('on the sheet, a tag shows its stored emoji, and a tag with none shows its stand-in', async () => {
+    await mount({ sheet: sheetOf({}, { tags: [
+      { id: 't1', label: 'Realtor', icon: '🏠', section: 'trade' }, { id: 'p', label: 'Partner', icon: null, section: 'relationship' },
+      { id: 'l', label: 'Lead', icon: null, section: 'location' }, { id: 'b', label: 'Business Networking Group', icon: null, section: 'location' },
+      { id: 'o', label: 'Oak & Key', icon: null, section: 'location' }, { id: 'n', label: 'Brand New Tag', icon: null, section: 'trade' },
+    ] }) })
+    expect($$('[data-tag]').map((t) => [emoji(t), words(t)])).toEqual([
+      ['🏠', 'Realtor'], ['🧑‍🤝‍🧑', 'Partner'], ['🌱', 'Lead'], ['🤝', 'Business Networking Group'], ['🔑', 'Oak & Key'], ['🏷️', 'Brand New Tag'],
+    ])
   })
   it('the tags the contact has are the ones ticked', async () => {
     await mount({ sheet: TAGGED })
@@ -293,7 +366,7 @@ describe("tags are picked from Bee Hub's own list", () => {
       { url: '/api/partner-tags', method: 'POST', body: { partner_id: ID, tag_lookup_id: 't2' } },
       { url: `/api/partner-tags?partner_id=${ID}&tag_lookup_id=r1`, method: 'DELETE', body: null },
     ])
-    expect($$('[data-tag]').map((t) => t.textContent).sort()).toEqual(['Mover', 'Realtor'])
+    expect($$('[data-tag]').map((t) => words(t)).sort()).toEqual(['Mover', 'Realtor'])
     expect($('[data-sheet-tags] [data-saved]')!.textContent).toBe('Tags saved')
     expect(onSaved).toHaveBeenCalledTimes(1)
   })

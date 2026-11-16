@@ -131,7 +131,7 @@ async function loadSheet(id: string, userId: string) {
     tagIds.length
       // A switched-off tag is hidden here as it is on the old record: the
       // link is kept, so switching the tag back on brings it back.
-      ? supabaseService.from('lookups').select('id, label, attrs, location_id').in('id', tagIds).eq('is_active', true)
+      ? supabaseService.from('lookups').select('id, label, icon, attrs, location_id').in('id', tagIds).eq('is_active', true)
       : Promise.resolve({ data: [], error: null }),
     supabaseService.from('touchpoints').select('id, kind, method, label, status, notes, occurred_at').eq('partner_id', id).order('occurred_at', { ascending: false }),
     supabaseService.from('reminders').select('id, due_on, note').eq('user_id', userId).eq('partner_id', id).is('done_at', null).order('due_on', { ascending: true }),
@@ -150,7 +150,7 @@ async function loadSheet(id: string, userId: string) {
         linkedCompany: c && !c.deleted_at ? { id: c.id, name: c.name } : null,
       },
       tags: ((tags as any).data || [])
-        .map((t: any) => ({ id: t.id, label: t.label, section: t.location_id ? 'location' : (t.attrs?.section === 'relationship' ? 'relationship' : 'trade') }))
+        .map((t: any) => ({ id: t.id, label: t.label, icon: t.icon || null, section: t.location_id ? 'location' : (t.attrs?.section === 'relationship' ? 'relationship' : 'trade') }))
         .sort((a: any, b: any) => String(a.label).localeCompare(String(b.label))),
       touchpoints: (touchpoints as any).data || [],
       followUps: (reminders as any).data || [],

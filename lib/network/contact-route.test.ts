@@ -148,7 +148,7 @@ describe('the read', () => {
   })
   it('names the tags with their Bee Hub section', async () => {
     as('super_admin')
-    expect((await (await get()).json()).tags).toEqual([{ id: 't1', label: 'Realtor', section: 'trade' }])
+    expect((await (await get()).json()).tags).toEqual([{ id: 't1', label: 'Realtor', icon: null, section: 'trade' }])
   })
   it("follow-ups are the caller's own open reminders on this contact", async () => {
     as('super_admin')

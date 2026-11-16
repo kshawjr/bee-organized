@@ -98,7 +98,7 @@ beforeEach(() => {
     ],
     locations: [{ id: LOC, name: 'Greensboro' }],
     lookups: [
-      { id: 't1', label: 'Realtor', attrs: { section: 'trade' }, location_id: null, is_active: true },
+      { id: 't1', label: 'Realtor', icon: '🏠', attrs: { section: 'trade' }, location_id: null, is_active: true },
       { id: 't-off', label: 'Housekeeper', attrs: { section: 'trade' }, location_id: null, is_active: false },
     ],
     hub_users: [{ id: ME, full_name: 'Kevin Shaw', first_name: 'Kevin' }],
@@ -294,10 +294,19 @@ describe('what the save compares against', () => {
 })
 
 describe('the tags on the sheet', () => {
+  it("each tag comes with its stored emoji, read from the tag list by name of column", async () => {
+    as('super_admin')
+    h.state.tables.lookups.push({ id: 't2', label: 'Partner', icon: null, attrs: { section: 'relationship' }, location_id: null, is_active: true })
+    h.state.tables.partners[0].partner_tags.push({ tag_lookup_id: 't2' })
+    const json = await (await get()).json()
+    expect(json.tags.map((t: any) => [t.label, t.icon])).toEqual([['Partner', null], ['Realtor', '🏠']])
+    const read = service().find((c: any) => c.table === 'lookups')
+    expect(read.cols).toContain('icon')
+  })
   it('a switched-off tag is not shown, and its link is left alone', async () => {
     as('super_admin')
     const json = await (await get()).json()
-    expect(json.tags).toEqual([{ id: 't1', label: 'Realtor', section: 'trade' }])
+    expect(json.tags).toEqual([{ id: 't1', label: 'Realtor', icon: '🏠', section: 'trade' }])
     expect(json.contact.tagIds).toEqual(['t1', 't-off'])
     expect(writes()).toEqual([])
   })

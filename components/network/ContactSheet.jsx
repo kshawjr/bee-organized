@@ -14,8 +14,8 @@
 // is still to come (slice 6).
 //
 // WHAT CAN BE ADDED (slice 4b; lib/network/contact-adds.ts has the rules):
-//   · a touchpoint   → POST /api/touchpoints, Bee Hub's own, as the old
-//                      record sent it
+//   · a touchpoint   → POST /api/touchpoints, Bee Hub's own, picked from the
+//                      PARTNER touchpoint list in Bee Hub's settings
 //   · a follow-up    → POST /api/reminders. It is a reminder, the same row
 //                      the Reminders page and Home read. No second system.
 //   · tags           → POST / DELETE /api/partner-tags, one call per tag
@@ -53,8 +53,8 @@ import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/desi
 import { TYPE_META, LEVEL_META, PARTNER_STAGES, normalizeTypes, partnerLevel, partnerStage, money } from '@/lib/network/types'
 import { changesBetween, saveErrorWords } from '@/lib/network/contact-edit'
 import {
-  ADD_ERROR_WORDS, ADDRESS_MAX, ADDRESS_TYPES, NOTE_MAX, TOUCH_METHODS, TOUCH_OUTCOMES,
-  addressFromForm, addressToForm, blankAddress, followUpBody, quickDates, stable, tagChanges, touchpointBody,
+  ADD_ERROR_WORDS, ADDRESS_MAX, ADDRESS_TYPES, NOTE_MAX, TOUCH_TYPE_CATEGORY,
+  addressFromForm, addressToForm, blankAddress, followUpBody, quickDates, stable, tagChanges, tagEmoji, touchpointBody, touchTypes, touchWords,
 } from '@/lib/network/contact-adds'
 import { RULED_NOT_SURE_IDS } from '@/lib/network/live-mapping'
 import { fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
@@ -65,7 +65,6 @@ const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurt
 const TYPE_SOFT = { partner: NET.partnerSoft, vendor: NET.vendorSoft, nurture: NET.nurtureSoft, organization: NET.organizationSoft, unsure: NET.unsureSoft }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAYS_IN = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-const TOUCH_WORDS = { call: 'Call', email: 'Email', sms: 'Text', in_person: 'In person' }
 
 const CSS = `
 [data-network-sheet]{position:fixed;inset:0;z-index:400;display:flex;justify-content:flex-end;background:color-mix(in oklab,${T.primary} 30%,transparent);font-family:${FONT.ui};color:${T.foreground};animation:ns-fade 240ms ease-out both}
@@ -160,6 +159,9 @@ const CSS = `
 [data-network-sheet] .ns-pick{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:999px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:13px!important;font-weight:600}
 [data-network-sheet] .ns-pick:hover{background:${T.muted}}
 [data-network-sheet] .ns-pick[aria-pressed="true"],[data-network-sheet] .ns-pick[aria-checked="true"]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
+[data-network-sheet] .ns-emoji{margin-right:7px;font-weight:400;font-size:18px;line-height:1}
+[data-network-sheet] .ns-chip{line-height:22px}
+[data-network-sheet] .ns-chip .ns-emoji{margin-right:5px;font-size:15px}
 [data-network-sheet] .ns-doors{display:flex;flex-wrap:wrap;gap:8px}
 [data-network-sheet] .ns-door{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:13.5px!important;font-weight:600}
 [data-network-sheet] .ns-door:hover{background:${T.muted}}
@@ -233,7 +235,7 @@ export function addressLines(a) {
 export function historyOf(contact, touchpoints) {
   const items = []
   for (const t of touchpoints || []) {
-    items.push({ kind: 'touchpoint', at: t.occurred_at, text: [t.label || TOUCH_WORDS[t.method] || 'Touchpoint', t.notes].filter(Boolean).join(' — ') })
+    items.push({ kind: 'touchpoint', at: t.occurred_at, text: [touchWords(t), t.notes].filter(Boolean).join(' — ') })
   }
   for (const n of contact?.notes || []) items.push({ kind: 'note', at: n.ts || n.at, text: n.text, by: n.user })
   // An activity entry's own time is unusable (see whenLabel). The one kind
@@ -275,7 +277,7 @@ const formFrom = (c) => {
 }
 // What each add form starts as.
 const draftFor = (which, c, data) => ({
-  touchpoint: { method: 'call', status: null, notes: '' },
+  touchpoint: { typeId: '', notes: '' },
   note: { text: '' },
   followUp: { dueOn: '', note: '' },
   tags: { picked: (data?.tags || []).map((t) => t.id) },
@@ -306,6 +308,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const [draft, setDraft] = useState(null) // the open add form's boxes (slice 4b)
   const [tagList, setTagList] = useState(null) // { sections } | { problem: true }
   const [companies, setCompanies] = useState(null) // [{ id, name }] | 'problem'
+  const [touchList, setTouchList] = useState(null) // [TouchType] | 'problem'
   const sheet = useRef(null)
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
 
@@ -332,7 +335,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
 
   useEffect(() => {
     let alive = true
-    setData(null); setReferral(null); setEditing(null); setError(null); setSaved(null); setTab('details'); setDraft(null); setTagList(null); setCompanies(null)
+    setData(null); setReferral(null); setEditing(null); setError(null); setSaved(null); setTab('details'); setDraft(null); setTagList(null); setCompanies(null); setTouchList(null)
     load()
     // Real referral numbers, from the route the old record already used.
     doFetch(`/api/partners/${contactId}/referrals`)
@@ -385,6 +388,19 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
       })
       .catch(() => setTagList({ problem: true }))
   }
+  // The PARTNER touchpoint list (Coffee / Lunch, Phone Call, …): corporate's
+  // own list under Admin › Configure, not the client call form.
+  const loadTouchList = () => {
+    setTouchList(null)
+    doFetch(`/api/lookups?category=${TOUCH_TYPE_CATEGORY}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}))
+        const list = touchTypes(json.lookups)
+        if (!res.ok || list.length === 0) throw new Error('touchpoint types')
+        setTouchList(list)
+      })
+      .catch(() => setTouchList('problem'))
+  }
   // The companies at THIS contact's location, from the companies table.
   const loadCompanies = () => {
     setCompanies(null)
@@ -402,6 +418,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     if (saving) return // one thing at a time: nothing opens while a save is in flight
     setForm(formFrom(c)); setDraft(draftFor(which, c, data)); setEditing(which); setError(null); setSaved(null)
     if (which === 'tags') loadTagList()
+    if (which === 'touchpoint') loadTouchList()
     if (which === 'identity' && !isOrg) loadCompanies()
   }
   const cancel = () => { setEditing(null); setError(null) }
@@ -427,7 +444,9 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
 
   // A touchpoint: Bee Hub's own route, the same request the old record sent.
   const saveTouchpoint = () => run('log', async () => {
-    const { res, json } = await call('/api/touchpoints', 'POST', touchpointBody(contactId, draft))
+    const type = Array.isArray(touchList) ? touchList.find((t) => t.id === draft.typeId) : null
+    if (!type) return { error: { field: 'touchType', words: errorWords('touchpoint_needs_a_type') } }
+    const { res, json } = await call('/api/touchpoints', 'POST', touchpointBody(contactId, type, draft.notes))
     if (!res.ok) return refusal(json)
     const fresh = await refresh()
     return { words: 'Touchpoint logged', contact: fresh?.contact || c }
@@ -640,7 +659,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                         {s.rows.map((t) => {
                           const on = draft.picked.includes(t.id)
                           return <button type="button" key={t.id} className="ns-pick" aria-pressed={on} disabled={saving} data-pick-tag={t.id}
-                            onClick={() => setDraft((d) => ({ picked: on ? d.picked.filter((x) => x !== t.id) : [...d.picked, t.id] }))}>{t.label}</button>
+                            onClick={() => setDraft((d) => ({ picked: on ? d.picked.filter((x) => x !== t.id) : [...d.picked, t.id] }))}><span aria-hidden="true" className="ns-emoji">{tagEmoji(t)}</span>{t.label}</button>
                         })}
                       </div>
                     </div>
@@ -651,7 +670,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                 <div className="ns-tags" aria-label="Tags" data-sheet-tags>
                   {(data.tags || []).length === 0
                     ? <p className="ns-quiet">No tags yet.</p>
-                    : data.tags.map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}>{t.label}</span> })}
+                    : data.tags.map((t) => { const tone = TAG_TONES[tagTone(t.label)]; return <span key={t.id} className="ns-chip" data-tag={t.id} data-section={t.section} style={{ color: tone.fg, background: tone.bg, borderColor: tone.border }}><span aria-hidden="true" className="ns-emoji">{tagEmoji(t)}</span>{t.label}</span> })}
                   <button type="button" className="ns-add" onClick={() => open('tags')} data-edit="tags">{(data.tags || []).length ? 'Change tags' : '+ add tags'}</button>
                   {saved?.where === 'tags' && <span className="ns-saved" role="status" data-saved>{saved.words}</span>}
                 </div>
@@ -749,22 +768,27 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                 <Card title="Touchpoints & notes" tone="notes" testId="log" saved={saved?.where === 'log' ? saved.words : null}>
                   {editing === 'touchpoint' && (
                     <form className="ns-form" onSubmit={submit(saveTouchpoint)} data-form="touchpoint">
-                      <div role="radiogroup" aria-label="How you were in touch">
-                        <p className="ns-sub">How you were in touch</p>
-                        <div className="ns-picks">
-                          {TOUCH_METHODS.map((m) => <button type="button" key={m.value} role="radio" aria-checked={draft.method === m.value} className="ns-pick" disabled={saving} onClick={() => putDraft('method', m.value)} data-method={m.value}>{m.label}</button>)}
-                        </div>
-                      </div>
-                      <div role="group" aria-label="How it went">
-                        <p className="ns-sub">How it went<i>optional</i></p>
-                        <div className="ns-picks">
-                          {TOUCH_OUTCOMES.map((o) => <button type="button" key={o.value} aria-pressed={draft.status === o.value} className="ns-pick" disabled={saving} onClick={() => putDraft('status', draft.status === o.value ? null : o.value)} data-outcome={o.value}>{o.label}</button>)}
-                        </div>
+                      {/* The PARTNER touchpoint list, from Bee Hub's own settings.
+                          No call outcomes here: those are for chasing a
+                          client, not for a Network contact. */}
+                      <div role="radiogroup" aria-label="What kind of touchpoint" aria-invalid={error?.field === 'touchType' || undefined}>
+                        <p className="ns-sub">What kind of touchpoint</p>
+                        {touchList === null && <p className="ns-quiet" data-touch-loading>Loading the touchpoint list…</p>}
+                        {touchList === 'problem' && <p className="ns-error" role="alert" data-touch-problem>The touchpoint list could not be loaded. Nothing has been changed.</p>}
+                        {Array.isArray(touchList) && (
+                          <div className="ns-picks">
+                            {touchList.map((t) => (
+                              <button type="button" key={t.id} role="radio" aria-checked={draft.typeId === t.id} className="ns-pick" disabled={saving} onClick={() => putDraft('typeId', t.id)} data-touch-type={t.key || t.id}>
+                                {t.icon && <span aria-hidden="true" className="ns-emoji">{t.icon}</span>}{t.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <label className="ns-field">Notes (optional)
                         <textarea className="ns-input ns-area" value={draft.notes} disabled={saving} onChange={(e) => putDraft('notes', e.target.value)} data-field="touchNotes" />
                       </label>
-                      {foot('Log touchpoint', 'Logging…')}
+                      {foot('Log touchpoint', 'Logging…', !Array.isArray(touchList))}
                     </form>
                   )}
                   {editing === 'note' && (

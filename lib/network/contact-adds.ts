@@ -46,19 +46,70 @@ const ADDRESS_KEYS = ['type', 'value', ...ADDRESS_PARTS] as const
 export const ADD_COLUMNS = { addNote: 'notes', addresses: 'addresses', companyId: 'company_id' } as const
 export const ADD_KEYS = Object.keys(ADD_COLUMNS) as (keyof typeof ADD_COLUMNS)[]
 
-/** The touchpoint types Bee Hub already has (components/hive/TouchpointModal METHODS). */
-export const TOUCH_METHODS = [
-  { value: 'call', label: 'Call' },
-  { value: 'sms', label: 'Text' },
-  { value: 'email', label: 'Email' },
-  { value: 'in_person', label: 'In person' },
-] as const
-/** And its optional outcomes (components/hive/shared/touchOutcome OUTCOMES). */
-export const TOUCH_OUTCOMES = [
-  { value: 'reached', label: 'Reached' },
-  { value: 'no_answer', label: 'No answer' },
-  { value: 'voicemail', label: 'Left voicemail' },
-] as const
+// ── TOUCHPOINT TYPES, for a Network contact ──────────────────
+// Kevin, 2026-11-15: a Network contact is logged against the PARTNER list,
+// not the client call form. The first cut of this slice reused the client
+// one (Call / Text / Email / In person, with Reached / No answer / Left
+// voicemail). That list is for chasing a lead; nobody "leaves a voicemail"
+// for a coffee with a referral partner.
+//
+// The partner list is DATA: lookups rows in category 'touchpoint_types',
+// managed under Admin › Configure (Coffee / Lunch, Phone Call, Email,
+// Event / Show, Text, They Sent a Lead, Thank You Sent). The sheet reads it
+// from /api/lookups, so a type corporate adds or renames shows up here with
+// no code change. There are no outcomes for a Network touchpoint.
+//
+// HOW ONE IS STORED. touchpoints.label holds the type's own words, so the
+// history reads "Coffee / Lunch". touchpoints.method only allows a fixed set
+// of words (a rule on the table), so each type's key is mapped to the word
+// that rule already has for it. A type with no word of its own ("They Sent a
+// Lead", or anything corporate adds later) is stored with no method: its
+// label says what it was. Nothing here needs the table changed.
+export const TOUCH_TYPE_CATEGORY = 'touchpoint_types'
+export const TOUCH_METHOD_BY_KEY: Record<string, string> = {
+  coffee: 'coffee', call: 'call', email: 'email', event: 'event', text: 'sms', thankyou: 'thank_you',
+}
+export type TouchType = { id: string; key: string; label: string; icon: string | null; method: string | null }
+
+/** The partner touchpoint list as the sheet offers it, in corporate's order. */
+export function touchTypes(lookups: unknown): TouchType[] {
+  return (Array.isArray(lookups) ? lookups : [])
+    .filter((l: any) => l && l.category === TOUCH_TYPE_CATEGORY && l.is_active !== false && text(l.label))
+    .sort((a: any, b: any) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || text(a.label).localeCompare(text(b.label)))
+    .map((l: any) => {
+      const key = text(l.attrs?.key)
+      return { id: String(l.id), key, label: text(l.label), icon: text(l.icon) || null, method: TOUCH_METHOD_BY_KEY[key] || null }
+    })
+}
+
+/** How a logged touchpoint reads in History. Older ones carry the generic label "Reach-out": those read by how they were made. */
+const TOUCH_WORDS_BY_METHOD: Record<string, string> = {
+  call: 'Phone Call', sms: 'Text', email: 'Email', in_person: 'In person', coffee: 'Coffee / Lunch', event: 'Event / Show', thank_you: 'Thank You Sent',
+}
+export function touchWords(t: { label?: unknown; method?: unknown } | null | undefined): string {
+  const label = text(t?.label)
+  if (label && label.toLowerCase() !== 'reach-out') return label
+  return TOUCH_WORDS_BY_METHOD[text(t?.method)] || label || 'Touchpoint'
+}
+
+// ── TAG EMOJIS ───────────────────────────────────────────────
+// A tag's emoji is DATA (lookups.icon) and is shown as stored. Four tags in
+// use have none. Rather than write to the tag list, the sheet shows a
+// stand-in for those four, by name; the moment a real emoji is saved on the
+// tag (Admin › Configure, or the location's own tag settings) the stored one
+// wins and the stand-in is never read. Any other tag with no emoji gets the
+// plain tag mark.
+export const TAG_EMOJI_STAND_INS: Record<string, string> = {
+  partner: '🧑‍🤝‍🧑',
+  lead: '🌱',
+  businessnetworkinggroup: '🤝',
+  oakkey: '🔑',
+}
+export const TAG_EMOJI_PLAIN = '🏷️'
+const nameKey = (label: unknown) => text(label).toLowerCase().replace(/[^a-z0-9]/g, '')
+export function tagEmoji(tag: { label?: unknown; icon?: unknown } | null | undefined): string {
+  return text(tag?.icon) || TAG_EMOJI_STAND_INS[nameKey(tag?.label)] || TAG_EMOJI_PLAIN
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const text = (v: unknown) => (v === null || v === undefined ? '' : String(v)).trim()
@@ -189,9 +240,13 @@ export function tagChanges(before: readonly string[], after: readonly string[]):
   return { add: uniq(after).filter((id) => !before.includes(id)), remove: uniq(before).filter((id) => !after.includes(id)) }
 }
 
-/** What the sheet posts to /api/touchpoints: exactly what the old record posted. */
-export function touchpointBody(contactId: string, form: { method: string; status?: string | null; notes?: string }) {
-  return { partner_id: contactId, kind: 'reach_out', method: form.method, label: 'Reach-out', status: form.status || null, notes: text(form.notes) || null }
+/**
+ * What the sheet posts to /api/touchpoints for a Network contact: the type's
+ * own words as the label, the table's word for it as the method (or none),
+ * and never an outcome.
+ */
+export function touchpointBody(contactId: string, type: Pick<TouchType, 'label' | 'method'>, notes?: string) {
+  return { partner_id: contactId, kind: 'reach_out', method: type.method || null, label: type.label, status: null, notes: text(notes) || null }
 }
 
 /** What the sheet posts to /api/reminders, or the plain reason it cannot. */
@@ -234,6 +289,8 @@ export const ADD_ERROR_WORDS: Record<string, string> = {
   too_many_addresses: 'A contact can hold up to five addresses.',
   company_not_found: 'That company is no longer in your Companies list.',
   company_other_location: 'That company belongs to a different location.',
+  touchpoint_needs_a_type: 'Pick what kind of touchpoint it was.',
+  invalid_method: 'That kind of touchpoint could not be saved. Nothing was changed.',
   follow_up_needs_a_date: 'Pick the day to follow up.',
   follow_up_needs_a_note: 'Say what the follow-up is about.',
   follow_up_note_too_long: 'Keep the follow-up note under 500 characters.',

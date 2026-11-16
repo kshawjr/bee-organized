@@ -7,12 +7,10 @@
 // of production (see ~/Projects/bee-organized-repair-reports).
 import { describe, it, expect } from 'vitest'
 import {
-  ADD_COLUMNS, ADD_ERROR_WORDS, ADDRESS_MAX, NOTE_MAX, TOUCH_METHODS, TOUCH_OUTCOMES,
+  ADD_COLUMNS, ADD_ERROR_WORDS, ADDRESS_MAX, NOTE_MAX, TAG_EMOJI_PLAIN, TAG_EMOJI_STAND_INS, TOUCH_METHOD_BY_KEY,
   addressFromForm, addressToForm, blankAddress, composeAddress, followUpBody, normalizeAddresses,
-  planContactAdds, stable, tagChanges, touchpointBody,
+  planContactAdds, stable, tagChanges, tagEmoji, touchpointBody, touchTypes, touchWords,
 } from './contact-adds'
-import { METHODS } from '@/components/hive/TouchpointModal'
-import { OUTCOMES } from '@/components/hive/shared/touchOutcome'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const CO = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -183,14 +181,91 @@ describe("the screen's half", () => {
     expect(tagChanges(['a', 'b'], ['b', 'a'])).toEqual({ add: [], remove: [] })
     expect(tagChanges([], ['a', 'a'])).toEqual({ add: ['a'], remove: [] })
   })
-  it('a touchpoint is posted exactly as the old record posted it', () => {
-    expect(touchpointBody('p1', { method: 'call', status: 'reached', notes: ' Spring listings ' })).toEqual({ partner_id: 'p1', kind: 'reach_out', method: 'call', label: 'Reach-out', status: 'reached', notes: 'Spring listings' })
-    expect(touchpointBody('p1', { method: 'in_person', status: null, notes: '' })).toEqual({ partner_id: 'p1', kind: 'reach_out', method: 'in_person', label: 'Reach-out', status: null, notes: null })
+  it('tags: only what changed (kept here so the touchpoint tests below stand apart)', () => {
+    expect(tagChanges(['a'], ['a'])).toEqual({ add: [], remove: [] })
   })
-  it("the touchpoint types and outcomes are Bee Hub's own, value for value", () => {
-    expect(TOUCH_METHODS.map((m) => [m.value, m.label])).toEqual(METHODS.map((m: any) => [m.value, m.label]))
-    expect(TOUCH_OUTCOMES).toEqual(OUTCOMES)
+})
+
+// The seven rows production holds in lookups, category touchpoint_types
+// (read 2026-11-15), plus one that is switched off and one of another kind.
+const PARTNER_LIST = [
+  { id: 'l3', category: 'touchpoint_types', label: 'Email', icon: '📧', sort_order: 30, is_active: true, attrs: { key: 'email' } },
+  { id: 'l1', category: 'touchpoint_types', label: 'Coffee / Lunch', icon: '☕', sort_order: 10, is_active: true, attrs: { key: 'coffee' } },
+  { id: 'l2', category: 'touchpoint_types', label: 'Phone Call', icon: '📞', sort_order: 20, is_active: true, attrs: { key: 'call' } },
+  { id: 'l4', category: 'touchpoint_types', label: 'Event / Show', icon: '🎪', sort_order: 40, is_active: true, attrs: { key: 'event' } },
+  { id: 'l5', category: 'touchpoint_types', label: 'Text', icon: '💬', sort_order: 50, is_active: true, attrs: { key: 'text' } },
+  { id: 'l6', category: 'touchpoint_types', label: 'They Sent a Lead', icon: '🤝', sort_order: 60, is_active: true, attrs: { key: 'referral' } },
+  { id: 'l7', category: 'touchpoint_types', label: 'Thank You Sent', icon: '🙏', sort_order: 70, is_active: true, attrs: { key: 'thankyou' } },
+  { id: 'l8', category: 'touchpoint_types', label: 'Fax', icon: null, sort_order: 5, is_active: false, attrs: { key: 'fax' } },
+  { id: 'x1', category: 'tags', label: 'Realtor', icon: '🏠', sort_order: 1, is_active: true, attrs: {} },
+]
+
+describe('touchpoint types for a Network contact', () => {
+  it('are the partner list from Bee Hub\'s settings, in its order: seven, none of them a client call outcome', () => {
+    expect(touchTypes(PARTNER_LIST).map((t) => t.label)).toEqual(['Coffee / Lunch', 'Phone Call', 'Email', 'Event / Show', 'Text', 'They Sent a Lead', 'Thank You Sent'])
   })
+  it('carry the emoji each one has in settings', () => {
+    expect(touchTypes(PARTNER_LIST).map((t) => t.icon)).toEqual(['☕', '📞', '📧', '🎪', '💬', '🤝', '🙏'])
+  })
+  it('leave out a switched-off type and anything that is not a touchpoint type', () => {
+    expect(touchTypes(PARTNER_LIST).map((t) => t.id)).toEqual(['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7'])
+    expect(touchTypes(null)).toEqual([])
+  })
+  it('each maps to the one word the touchpoints table allows for it; "They Sent a Lead" has none and is stored by its label', () => {
+    expect(touchTypes(PARTNER_LIST).map((t) => [t.key, t.method])).toEqual([
+      ['coffee', 'coffee'], ['call', 'call'], ['email', 'email'], ['event', 'event'], ['text', 'sms'], ['referral', null], ['thankyou', 'thank_you'],
+    ])
+  })
+  it('every method it can send is one the touchpoints route accepts', () => {
+    const { readFileSync } = require('node:fs'); const { join } = require('node:path')
+    const route = readFileSync(join(process.cwd(), 'app/api/touchpoints/route.ts'), 'utf8')
+    const allowed = route.split('const VALID_METHODS = [')[1]!.split('] as const')[0]!
+    for (const m of Object.values(TOUCH_METHOD_BY_KEY)) expect(allowed, m).toContain(`'${m}'`)
+    expect(Object.values(TOUCH_METHOD_BY_KEY)).not.toContain('referral')
+  })
+  it('a type corporate adds later is offered, stored by its label, with no method', () => {
+    const more = [...PARTNER_LIST, { id: 'l9', category: 'touchpoint_types', label: 'Gift Dropped Off', icon: '🎁', sort_order: 80, is_active: true, attrs: { key: 'gift' } }]
+    expect(touchTypes(more).at(-1)).toEqual({ id: 'l9', key: 'gift', label: 'Gift Dropped Off', icon: '🎁', method: null })
+  })
+  it('is posted with the type\'s own words as the label, and never an outcome', () => {
+    const [coffee, , , , , lead] = touchTypes(PARTNER_LIST)
+    expect(touchpointBody('p1', coffee!, ' Spring listings ')).toEqual({ partner_id: 'p1', kind: 'reach_out', method: 'coffee', label: 'Coffee / Lunch', status: null, notes: 'Spring listings' })
+    expect(touchpointBody('p1', lead!, '')).toEqual({ partner_id: 'p1', kind: 'reach_out', method: null, label: 'They Sent a Lead', status: null, notes: null })
+  })
+  it('the client call form\'s words are not in this file at all', () => {
+    const { readFileSync } = require('node:fs'); const { join } = require('node:path')
+    for (const f of ['lib/network/contact-adds.ts', 'components/network/ContactSheet.jsx']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf8').split('\n').filter((l: string) => !/^\s*(\/\/|\*|\{\/\*)/.test(l)).join('\n')
+      for (const word of ['Left voicemail', 'No answer', "'no_answer'", "'voicemail'", 'TOUCH_OUTCOMES', 'TOUCH_METHODS', 'TouchpointModal']) expect(src, `${f}: ${word}`).not.toContain(word)
+    }
+  })
+  it('History reads a touchpoint by its own label; an older "Reach-out" reads by how it was made', () => {
+    expect(touchWords({ label: 'Coffee / Lunch', method: 'coffee' })).toBe('Coffee / Lunch')
+    expect(touchWords({ label: 'They Sent a Lead', method: null })).toBe('They Sent a Lead')
+    expect(touchWords({ label: 'Reach-out', method: 'in_person' })).toBe('In person')
+    expect(touchWords({ label: 'Reach-out', method: 'sms' })).toBe('Text')
+    expect(touchWords({ label: 'Reach-out', method: 'call' })).toBe('Phone Call')
+    expect(touchWords({ label: 'Reach-out', method: null })).toBe('Reach-out')
+    expect(touchWords({})).toBe('Touchpoint')
+  })
+})
+
+describe('tag emojis', () => {
+  it('a tag shows the emoji stored on it', () => {
+    expect(tagEmoji({ label: 'Realtor', icon: '🏠' })).toBe('🏠')
+    expect(tagEmoji({ label: 'Partner', icon: '⭐' })).toBe('⭐')
+  })
+  it('the four tags in use with no stored emoji get a stand-in, by name', () => {
+    expect(TAG_EMOJI_STAND_INS).toEqual({ partner: '🧑‍🤝‍🧑', lead: '🌱', businessnetworkinggroup: '🤝', oakkey: '🔑' })
+    expect([['Partner', null], ['Lead', ''], ['Business Networking Group', undefined], ['Oak & Key', '  ']].map(([label, icon]) => tagEmoji({ label, icon }))).toEqual(['🧑‍🤝‍🧑', '🌱', '🤝', '🔑'])
+  })
+  it('any other tag with none gets the plain tag mark, never nothing', () => {
+    expect(tagEmoji({ label: 'Something new', icon: null })).toBe(TAG_EMOJI_PLAIN)
+    expect(tagEmoji(null)).toBe(TAG_EMOJI_PLAIN)
+  })
+})
+
+describe("the screen's half, continued", () => {
   it('a follow-up is a reminder request: the contact, a day and a note, and nothing more', () => {
     expect(followUpBody('p1', { dueOn: '2026-11-20', note: ' Coffee ' })).toEqual({ ok: true, body: { partner_id: 'p1', due_on: '2026-11-20', note: 'Coffee' } })
   })
