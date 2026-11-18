@@ -24,10 +24,17 @@
 //      the row is skipped, and the summary names who it matched. The
 //      existing contact is never changed by a file. Emails are compared
 //      lowercased and trimmed (14 stored emails are not lowercased). Another
-//      location holding the same person is not a duplicate. A row with no
-//      email is never a duplicate. Two rows in the SAME file with the same
-//      email: the first comes in, the later one is skipped, naming the
-//      first by its line.
+//      location holding the same person is not a duplicate. Two rows in
+//      the SAME file with the same email: the first comes in, the later
+//      one is skipped, naming the first by its line.
+//   3. A row with NO email (Kevin, 2026-11-18, so a whole file can be run
+//      again safely) is a duplicate of a contact here, or an earlier row of
+//      the file, when (a) the name AND the phone match, or (b) the name
+//      matches and NEITHER has a phone. A contact with a phone is never
+//      matched by a row without one. Names: trimmed, inner spaces
+//      collapsed, case ignored (nameKey). Phones: digits only, by Bee Hub's
+//      one phone key (lib/phone.ts phoneKey). A row WITH an email uses the
+//      email rule only.
 //
 // A ROW THAT CANNOT BE READ (no name, a phone or email or birthday that does
 // not read, a field too long) is SKIPPED AND NAMED, by line and reason, and
@@ -38,9 +45,10 @@
 // a usable CSV at all (not_csv, no Name column, too big, no rows) is refused
 // whole.
 //
-// THE ADD FLOW checks the same duplicate rule (findDuplicate, the same
-// emailKey): an email already on a live contact here is refused, naming
-// who, unless the person ticks "add anyway" on purpose.
+// THE ADD FLOW checks the same duplicate rules (findDuplicate): an email
+// already on a live contact here, or with no email the same name and phone
+// (or name, no phone either side), is refused, naming who, unless the
+// person ticks "add anyway" on purpose.
 //
 // What the add flow does NOT carry, on purpose (Kevin, slice 5 brief):
 // partner level and stage (slice 6, with their confirmation), consent,
@@ -52,6 +60,7 @@
 import { normalizeField, normalizeBirthday, type EditableField } from './contact-edit'
 import { normalizeTypes, NET_TYPES, type NetType } from './types'
 import { parseCsv, rowsToContacts } from './csv'
+import { phoneKey } from '@/lib/phone'
 import { tagKey, tagShowsOn, cleanTagIds, MAX_TAGS_PER_CREATE, TAG_CATEGORY } from '@/lib/tags'
 
 /** The biggest file an import takes, by characters and by rows. */
@@ -109,13 +118,36 @@ export type NewContactPlan =
 
 /** How two emails are compared, everywhere: lowercased and trimmed. Blank is no email. */
 export const emailKey = (v: unknown) => text(v).toLowerCase()
+/** How two names are compared: trimmed, inner spaces collapsed, case ignored. */
+export const nameKey = (v: unknown) => text(v).replace(/\s+/g, ' ').toLowerCase()
 
-/** The first LIVE contact here holding this email, or null. No email is never a duplicate. */
-export function findDuplicate(email: unknown, existing: readonly ExistingContact[]): ExistingContact | null {
-  const k = emailKey(email)
-  if (!k) return null
-  return existing.find((e) => emailKey(e.email) === k) ?? null
+/** Which rule found a duplicate. */
+export type DupRule = 'email' | 'name_phone' | 'name_only'
+
+/**
+ * The first contact in `existing` this one duplicates, and by which rule, or
+ * null. With an email: the email rule only. With no email: same name and
+ * phone, or same name and no phone on either side.
+ */
+export function findDuplicate<T extends { name?: unknown; email?: unknown; phone?: unknown }>(
+  who: { name?: unknown; email?: unknown; phone?: unknown },
+  existing: readonly T[],
+): { match: T; rule: DupRule } | null {
+  const ek = emailKey(who.email)
+  if (ek) {
+    const m = existing.find((e) => emailKey(e.email) === ek)
+    return m ? { match: m, rule: 'email' } : null
+  }
+  const nk = nameKey(who.name)
+  if (!nk) return null
+  const pk = phoneKey(who.phone)
+  const m = existing.find((e) => nameKey(e.name) === nk && phoneKey(e.phone) === pk)
+  return m ? { match: m, rule: pk ? 'name_phone' : 'name_only' } : null
 }
+
+/** The add flow's refusal code for each rule. */
+const DUP_ERROR: Record<DupRule, string> = { email: 'email_already_here', name_phone: 'name_and_phone_already_here', name_only: 'name_already_here' }
+export const DUP_ERRORS = Object.values(DUP_ERROR)
 
 const ADD_FIELDS: [keyof NewContactInput, EditableField][] = [
   ['name', 'name'], ['title', 'title'], ['company', 'company'], ['phone', 'phone'], ['email', 'email'], ['howWeMet', 'howWeMet'], ['birthday', 'birthday'],
@@ -164,8 +196,8 @@ export function planNewContact(
 
   // The duplicate rule the import uses. Possible, but only on purpose.
   if (b.addAnyway !== undefined && typeof b.addAnyway !== 'boolean') return { ok: false, error: 'add_anyway_must_be_yes_or_no', field: 'email' }
-  const dup = findDuplicate(v.email, ctx.existing || [])
-  if (dup && b.addAnyway !== true) return { ok: false, error: 'email_already_here', field: 'email', matched: { id: dup.id, name: text(dup.name) || 'Unnamed' } }
+  const dup = findDuplicate({ name: v.name, email: v.email, phone: v.phone }, ctx.existing || [])
+  if (dup && b.addAnyway !== true) return { ok: false, error: DUP_ERROR[dup.rule], field: dup.rule === 'email' ? 'email' : 'name', matched: { id: dup.match.id, name: text(dup.match.name) || 'Unnamed' } }
 
   const now = ctx.now || new Date()
   const notes: NewContactRow['notes'] = interest ? [{ id: `n${now.getTime()}`, text: `Interest: ${interest}`, ts: now.toISOString(), user: text(ctx.author) || 'Bee Hub' }] : []
@@ -199,12 +231,14 @@ export const ADD_ERROR_WORDS: Record<string, string> = {
   location_required: 'Pick one location first. A contact belongs to one location.',
   interest_too_long: 'Keep Interest under 500 characters. Put the rest in a note on their sheet.',
   email_already_here: 'Someone at this location already has that email.',
+  name_and_phone_already_here: 'Someone at this location already has that name and phone.',
+  name_already_here: 'Someone at this location already has that name, and neither of you has a phone.',
 }
 
 // ── AN IMPORT ────────────────────────────────────────────────
-export type ExistingContact = { id: string; name: string; email: string | null }
+export type ExistingContact = { id: string; name: string; email: string | null; phone?: string | null }
 export type ImportProblem = { line: number; name: string; problems: string[] }
-export type ImportSkip = { line: number; name: string; email: string; matched: { id: string | null; name: string; line: number | null } }
+export type ImportSkip = { line: number; name: string; email: string | null; phone: string | null; rule: DupRule; matched: { id: string | null; name: string; line: number | null } }
 export type ImportWrite = { line: number; row: NewContactRow; tagIds: string[] }
 export type ImportPlan =
   | { ok: false; reason: 'not_csv' | 'no_name_column' | 'too_big' | 'too_many_rows' | 'no_rows'; problems: []; rows: [] }
@@ -326,12 +360,10 @@ export function planImport(
   const unmatched: string[] = []
   const unmatchedKeys = new Set<string>()
 
-  // Duplicates: by email, lowercased and trimmed, at this location only.
-  const taken = new Map<string, { id: string | null; name: string; line: number | null }>()
-  for (const e of ctx.existing) {
-    const k = emailKey(e.email)
-    if (k && !taken.has(k)) taken.set(k, { id: e.id, name: text(e.name) || 'Unnamed', line: null })
-  }
+  // Duplicates, at this location only: every live contact here, then each
+  // row as it is planned, so a later row can match an earlier one.
+  type Known = { id: string | null; name: string; line: number | null; email: string | null; phone: string | null }
+  const known: Known[] = ctx.existing.map((e) => ({ id: e.id, name: text(e.name) || 'Unnamed', line: null, email: e.email, phone: e.phone ?? null }))
 
   const rows: ImportWrite[] = []
   const skipped: ImportSkip[] = []
@@ -340,11 +372,13 @@ export function planImport(
   for (const { line: at, c, warnings: w, birthday } of planned) {
     const line = rowOf(at)
     const email = emailKey(c.email) || null
-    if (email && taken.has(email)) {
-      skipped.push({ line, name: c.name, email, matched: taken.get(email)! })
+    const phone = c.phone || null
+    const dup = findDuplicate({ name: c.name, email, phone }, known)
+    if (dup) {
+      skipped.push({ line, name: c.name, email, phone, rule: dup.rule, matched: { id: dup.match.id, name: dup.match.name, line: dup.match.line } })
       continue
     }
-    if (email) taken.set(email, { id: null, name: c.name, line })
+    known.push({ id: null, name: c.name, line, email, phone })
 
     const tagIds: string[] = []
     for (const word of c.tags) {

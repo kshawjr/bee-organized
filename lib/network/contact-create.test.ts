@@ -9,16 +9,22 @@
 //     off and NAMED, once; the contact still comes in; no tag is ever made
 //   · Kevin's ruling 2: an email already on a live contact here skips the row
 //     and names that contact BY NAME; case and spaces do not matter
-//   · a row with no email always comes in
+//   · a row with NO email (2026-11-18, so a file can be run twice safely)
+//     is a duplicate when the name AND phone match (phone by digits only), or
+//     the name matches and neither has a phone; never when only the existing
+//     contact has a phone; names ignore case and extra spaces; a row WITH an
+//     email uses the email rule only; a whole file planned twice adds nothing
+//     the second time
 //   · the add flow refuses a tag that is not on this location's Network list
 //   · the add flow refuses an email already on a live contact here, naming
-//     who, case-insensitively on both sides, unless addAnyway is true; no
-//     email is never a duplicate; Interest becomes the first note
+//     who, case-insensitively on both sides, unless addAnyway is true; with
+//     no email it uses the import's name-and-phone rules; Interest becomes
+//     the first note
 //
 // What the routes do with these plans (write all or nothing, at that location
 // only) is pinned in lib/network/import-route.test.ts.
 import { describe, it, expect } from 'vitest'
-import { IMPORT_MAX_ROWS, networkTagsFor, planImport, planNewContact, looksBinary, findDuplicate, type TagDef } from './contact-create'
+import { IMPORT_MAX_ROWS, networkTagsFor, planImport, planNewContact, looksBinary, findDuplicate, type TagDef, type ExistingContact } from './contact-create'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -147,7 +153,7 @@ describe('Kevin’s ruling 2: an email already here', () => {
     expect(p.ok).toBe(true)
     if (!p.ok) return
     expect(p.rows.map((r) => r.row.name)).toEqual(['New Person'])
-    expect(p.skipped).toEqual([{ line: 2, name: 'Dana W', email: 'dana@keystonerealty.com', matched: { id: 'p-dana', name: 'Dana Whitfield', line: null } }])
+    expect(p.skipped).toEqual([{ line: 2, name: 'Dana W', email: 'dana@keystonerealty.com', phone: null, rule: 'email', matched: { id: 'p-dana', name: 'Dana Whitfield', line: null } }])
   })
 
   it('the same email twice in one file: the first comes in, the second is skipped naming the first by line', () => {
@@ -166,12 +172,70 @@ describe('Kevin’s ruling 2: an email already here', () => {
   })
 })
 
-describe('a row with no email', () => {
-  it('always comes in, even beside a stored contact with no email, and two of them are not duplicates', () => {
-    const p = plan(file('No Email Person,,,,,,', 'Another Blank,,,2065550100,,,', 'Another Blank,,,,,,'))
+describe('a row with no email: the same name and phone, or the same name and no phone either side', () => {
+  const HERE: ExistingContact[] = [
+    { id: 'p-phone', name: 'Pat Phone', email: null, phone: '(303) 555-0142' },
+    { id: 'p-bare', name: 'Bo Bare', email: null, phone: null },
+    { id: 'p-mail', name: 'Mel Mail', email: 'mel@x.co', phone: null },
+  ]
+  const at = (csv: string) => { const p = plan(csv, { existing: HERE }); if (!p.ok) throw new Error('should plan'); return p }
+  const why = (p: ReturnType<typeof at>) => p.skipped.map((s) => [s.line, s.name, s.rule, s.matched.id ?? `row ${s.matched.line}`])
+
+  it('a whole file planned twice adds the no-email contacts once, not twice', () => {
+    const csv = file('Nora None,nurture,,,,,', 'Pia Phone,nurture,,206.555.0100,,,', 'Eve Email,nurture,eve@x.co,,,,', 'Fay Full,nurture,fay@x.co,(425) 555-0199,,,')
+    const first = plan(csv, { existing: [] })
+    if (!first.ok) throw new Error('should plan')
+    expect(first.rows).toHaveLength(4)
+    // what the first run stored, exactly as it would be written
+    const stored = first.rows.map((r, i) => ({ id: `new-${i}`, name: r.row.name, email: r.row.email, phone: r.row.phone }))
+    const second = plan(csv, { existing: stored })
+    if (!second.ok) throw new Error('should plan')
+    expect(second.rows).toEqual([])
+    expect(second.skipped.map((s) => [s.name, s.rule])).toEqual([['Nora None', 'name_only'], ['Pia Phone', 'name_phone'], ['Eve Email', 'email'], ['Fay Full', 'email']])
+  })
+
+  it('phone matching ignores formatting: digits only, a leading US 1 dropped', () => {
+    const p = at(file('Pat Phone,,,3035550142,,,', 'pat phone,,,+1 303.555.0142,,,', 'Pat Phone,,,303-555-0143,,,'))
+    expect(why(p)).toEqual([[2, 'Pat Phone', 'name_phone', 'p-phone'], [3, 'pat phone', 'name_phone', 'p-phone']])
+    expect(p.rows.map((r) => r.row.phone)).toEqual(['(303) 555-0143'])
+  })
+
+  it('a phone stored in an older shape (before Bee Hub formatted phones) still matches on its digits', () => {
+    const old: ExistingContact[] = [{ id: 'p-old', name: 'Olga Old', email: null, phone: '303.555.0142' }, { id: 'p-old2', name: 'Otto Old', email: null, phone: '1-720-555-0199 ' }]
+    const p = plan(file('Olga Old,,,(303) 555-0142,,,', 'Otto Old,,,720 555 0199,,,'), { existing: old })
     if (!p.ok) throw new Error('should plan')
-    expect(p.rows.map((r) => [r.row.name, r.row.email])).toEqual([['No Email Person', null], ['Another Blank', null], ['Another Blank', null]])
+    expect(p.skipped.map((s) => [s.name, s.rule, s.matched.id])).toEqual([['Olga Old', 'name_phone', 'p-old'], ['Otto Old', 'name_phone', 'p-old2']])
+    expect(planNewContact({ name: 'Olga Old', types: ['vendor'], phone: '3035550142' }, { locationId: LOC, userId: ME, allowedTagIds: [], existing: old })).toMatchObject({ ok: false, error: 'name_and_phone_already_here' })
+  })
+
+  it('name matching ignores case and extra spaces, and nothing else', () => {
+    const p = at(file('  bO    BARE ,,,,,,', 'Bo Barely,,,,,,', 'B. Bare,,,,,,'))
+    expect(why(p)).toEqual([[2, 'bO    BARE', 'name_only', 'p-bare']])
+    expect(p.rows.map((r) => r.row.name)).toEqual(['Bo Barely', 'B. Bare'])
+  })
+
+  it('an existing contact with a phone is not matched by a row without one, nor the other way round', () => {
+    const p = at(file('Pat Phone,,,,,,', 'Bo Bare,,,(720) 555-0101,,,'))
     expect(p.skipped).toEqual([])
+    expect(p.rows.map((r) => r.row.name)).toEqual(['Pat Phone', 'Bo Bare'])
+  })
+
+  it('the same name with no phone either side matches a stored contact that has an email (it is the only rule a phone-less row has)', () => {
+    expect(why(at(file('Mel Mail,,,,,,')))).toEqual([[2, 'Mel Mail', 'name_only', 'p-mail']])
+  })
+
+  it('a row WITH an email uses the email rule only, even with the same name and phone as someone here', () => {
+    const p = at(file('Pat Phone,,pat@x.co,(303) 555-0142,,,', 'Bo Bare,,bo@x.co,,,,'))
+    expect(p.skipped).toEqual([])
+    expect(p.rows).toHaveLength(2)
+  })
+
+  it('twice in one file: the first comes in, the later one is skipped naming the first by line', () => {
+    const p = at(file('Ray Row,,,,,,', 'ray  row,,,,,,', 'Ray Row,,,(206) 555-0111,,,', 'Ray Row,,,2065550111,,,'))
+    expect(p.rows.map((r) => r.line)).toEqual([2, 4])
+    expect(why(p)).toEqual([[3, 'ray  row', 'name_only', 'row 2'], [5, 'Ray Row', 'name_phone', 'row 4']])
+    expect(p.skipped[0]).toMatchObject({ email: null, phone: null })
+    expect(p.skipped[1]).toMatchObject({ email: null, phone: '(206) 555-0111' })
   })
 })
 
@@ -243,15 +307,40 @@ describe('the add flow: a duplicate email at this location', () => {
     expect(p.ok).toBe(true)
   })
 
-  it('no email is never a duplicate, even with a stored contact that has none', () => {
+  it('a blank email is no email: it never matches a stored blank email', () => {
     expect(planNewContact({ ...base, email: '' }, ctx).ok).toBe(true)
     expect(planNewContact({ ...base }, ctx).ok).toBe(true)
-    expect(findDuplicate('', EXISTING)).toBeNull()
-    expect(findDuplicate('   ', [{ id: 'x', name: 'Blank', email: '  ' }])).toBeNull()
+    expect(findDuplicate({ name: 'Someone Else', email: '   ', phone: '1' }, [{ id: 'x', name: 'Blank', email: '  ', phone: null }])).toBeNull()
   })
 
   it('a different email goes in', () => {
     expect(planNewContact({ ...base, email: 'blaire@x.co' }, ctx).ok).toBe(true)
+  })
+})
+
+describe('the add flow, no email: the import’s name-and-phone rules', () => {
+  const HERE: ExistingContact[] = [
+    { id: 'p-phone', name: 'Pat Phone', email: null, phone: '(303) 555-0142' },
+    { id: 'p-bare', name: 'Bo Bare', email: 'bo@x.co', phone: null },
+  ]
+  const ctx = { locationId: LOC, userId: ME, allowedTagIds: [], existing: HERE, now: NOW }
+  it('the same name and phone (any format, any case and spacing) is refused, naming who', () => {
+    expect(planNewContact({ name: ' pat   PHONE', types: ['vendor'], phone: '303.555.0142' }, ctx))
+      .toEqual({ ok: false, error: 'name_and_phone_already_here', field: 'name', matched: { id: 'p-phone', name: 'Pat Phone' } })
+  })
+  it('the same name and no phone either side is refused', () => {
+    expect(planNewContact({ name: 'Bo Bare', types: ['vendor'] }, ctx))
+      .toEqual({ ok: false, error: 'name_already_here', field: 'name', matched: { id: 'p-bare', name: 'Bo Bare' } })
+  })
+  it('a stored phone and none typed is not a match; a different phone is not a match', () => {
+    expect(planNewContact({ name: 'Pat Phone', types: ['vendor'] }, ctx).ok).toBe(true)
+    expect(planNewContact({ name: 'Pat Phone', types: ['vendor'], phone: '303 555 0143' }, ctx).ok).toBe(true)
+  })
+  it('with an email typed, the email rule only', () => {
+    expect(planNewContact({ name: 'Pat Phone', types: ['vendor'], phone: '3035550142', email: 'pat@x.co' }, ctx).ok).toBe(true)
+  })
+  it('add anyway lets it in', () => {
+    expect(planNewContact({ name: 'Bo Bare', types: ['vendor'], addAnyway: true }, ctx).ok).toBe(true)
   })
 })
 

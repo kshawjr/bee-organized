@@ -160,6 +160,46 @@ describe('the add box', () => {
     expect(onAdded).toHaveBeenCalledWith('new-id')
   })
 
+  it('no email: the same name and phone warns the same way, naming who and why; a changed phone clears it; Add anyway sends', async () => {
+    const posts: any[] = []
+    const dupFetch = vi.fn((url: string, init?: any) => {
+      if (url.startsWith('/api/lookups?')) return json({ lookups: TAGS, location: { name: 'Seattle' } })
+      if (url === '/api/network/contacts') {
+        const b = JSON.parse(init.body); posts.push(b)
+        if (!b.email && b.phone.replace(/\D/g, '') === '3035550142' && b.addAnyway !== true) return json({ error: 'name_and_phone_already_here', field: 'name', matched: { id: 'p-pat', name: 'Pat Phone' } }, 409)
+        if (!b.email && !b.phone && b.addAnyway !== true) return json({ error: 'name_already_here', field: 'name', matched: { id: 'p-pat2', name: 'Pat Phone' } }, 409)
+        return json({ id: 'new-id' }, 201)
+      }
+      return json({}, 404)
+    })
+    const onAdded = vi.fn()
+    mount(<AddContactDialog locationId={LOC} locationName="Seattle" onClose={() => {}} onAdded={onAdded} onOpenExisting={vi.fn() as any} fetchImpl={dupFetch as any} />)
+    await flush()
+    await click($('[data-type="vendor"]'))
+    await type($('[data-field="name"]'), 'Pat Phone')
+    await type($('[data-field="phone"]'), '303.555.0142')
+    const submit = async () => { await act(async () => { ($('[data-add-form]') as HTMLFormElement).requestSubmit() }); await flush() }
+    await submit()
+    expect($('[data-duplicate]')!.getAttribute('data-rule')).toBe('name_phone')
+    expect($('[data-duplicate]')!.textContent).toContain('Pat Phone at Seattle already has this name and phone, and you gave no email. Nothing was added.')
+    expect($('[data-duplicate]')!.textContent).toContain('Add anyway: a different person with the same name and phone')
+    expect(($('[data-save]') as HTMLButtonElement).disabled).toBe(true)
+    await submit()
+    expect(posts).toHaveLength(1)
+    // a changed phone clears it
+    await type($('[data-field="phone"]'), '303.555.0143')
+    expect($('[data-duplicate]')).toBeNull()
+    // no phone at all: the name-only rule, its own words
+    await type($('[data-field="phone"]'), '')
+    await submit()
+    expect($('[data-duplicate]')!.getAttribute('data-rule')).toBe('name_only')
+    expect($('[data-duplicate]')!.textContent).toContain('already has this name, and neither of you has a phone')
+    await click($('[data-add-anyway]'))
+    await submit()
+    expect(posts.map((p) => !!p.addAnyway)).toEqual([false, false, true])
+    expect(onAdded).toHaveBeenCalledWith('new-id')
+  })
+
   it('has none of the design’s cut steps: no card reader, level, stage, consent, Mailchimp, drip or workflow', async () => {
     mount(<AddContactDialog locationId={LOC} locationName="Seattle" onClose={() => {}} onAdded={() => {}} fetchImpl={fetchImpl as any} />)
     await flush()
@@ -199,13 +239,22 @@ describe('the import box', () => {
   it('a duplicate is named by the existing contact’s name; unmatched words are named; Add sends the file once', async () => {
     const check = { ok: true, mode: 'check', location: { id: LOC, name: 'Seattle' }, added: 0,
       adding: [{ line: 2, name: 'Ann One', company: null, email: 'ann@x.co', phone: null, tags: 1 }],
-      skipped: [{ line: 3, name: 'Tommy', email: 'tom@x.co', matched: { id: 'p1', name: 'Tom Minty', line: null } }],
+      skipped: [{ line: 3, name: 'Tommy', email: 'tom@x.co', phone: null, rule: 'email', matched: { id: 'p1', name: 'Tom Minty', line: null } },
+        { line: 4, name: 'Nora None', email: null, phone: '(206) 555-0100', rule: 'name_phone', matched: { id: 'p2', name: 'Nora None', line: null } },
+        { line: 5, name: 'Bo Bare', email: null, phone: null, rule: 'name_only', matched: { id: null, name: 'Bo Bare', line: 2 } }],
       unmatchedTags: ['Downsizing', 'Garage'], warnings: [] }
     const fetchImpl = vi.fn((_u: string, init: any) => json(JSON.parse(init.body).mode === 'check' ? check : { ...check, mode: 'import', added: 1, ids: ['n1'] }))
     const onImported = vi.fn()
     mount(<ImportDialog locationId={LOC} locationName="Seattle" onClose={() => {}} onImported={onImported} fetchImpl={fetchImpl as any} />)
     await chooseFile('mine.csv', 'Name,Email\nAnn One,ann@x.co\nTommy,tom@x.co')
     expect($('[data-skipped]')!.textContent).toContain('Tom Minty')
+    const why = $$('[data-skipped] li').map((li) => li.textContent)
+    expect(why).toEqual([
+      'Row 3Tommy (tom@x.co) matches Tom Minty',
+      'Row 4Nora None has no email, and the same name and phone as Nora None',
+      'Row 5Bo Bare has no email, and the same name as row 2 of this file, Bo Bare, with no phone on either',
+    ])
+    expect($('[data-skipped] h3')!.textContent).toBe('3 rows will be skipped: they’re already here')
     expect($$('[data-word]').map((w) => w.textContent)).toEqual(['Downsizing', 'Garage'])
     expect($('[data-add]')!.textContent).toBe('Add 1 contact')
     await click($('[data-add]'))

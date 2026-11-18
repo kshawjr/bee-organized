@@ -13,8 +13,10 @@
 // contact at this location, compared lowercased and trimmed on both sides,
 // is refused with 409 { error: 'email_already_here', matched: { id, name } },
 // unless the body says addAnyway: true, which the form only sends after the
-// person ticked "add anyway" against that exact email. No email is never a
-// duplicate. The same rule (and the same reads) as an import.
+// person ticked "add anyway" against that exact email. With NO email, the
+// same name and phone (409 name_and_phone_already_here) or the same name and
+// no phone on either side (409 name_already_here) is refused the same way.
+// The same rules (and the same reads) as an import.
 //
 // INTEREST has no column: it is kept as the contact's first note, signed by
 // whoever added them, as an import keeps it.
@@ -41,7 +43,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { maySeeNewNetwork } from '@/lib/network/access'
-import { networkTagsFor, planNewContact } from '@/lib/network/contact-create'
+import { networkTagsFor, planNewContact, DUP_ERRORS } from '@/lib/network/contact-create'
 import { UUID_RE, readLiveContacts, readLocation, readLocationTags } from '@/lib/network/contact-reads'
 import { writeNewContacts } from '@/lib/network/contact-writes'
 
@@ -85,7 +87,7 @@ export async function POST(request: NextRequest) {
     now: new Date(),
   })
   if (!plan.ok) {
-    if (plan.error === 'email_already_here') return NextResponse.json({ error: plan.error, field: plan.field, matched: plan.matched }, { status: 409 })
+    if (DUP_ERRORS.includes(plan.error)) return NextResponse.json({ error: plan.error, field: plan.field, matched: plan.matched }, { status: 409 })
     return NextResponse.json({ error: plan.error, field: plan.field }, { status: 422 })
   }
 

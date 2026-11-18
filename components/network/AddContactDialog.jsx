@@ -25,6 +25,11 @@
 //   · open the contact found (the host opens their sheet; this box closes)
 //   · tick "Add anyway: a different person who shares this email", which
 //     holds only for that exact email, then press Add contact again
+// WITH NO EMAIL (2026-11-18) the server uses the import's other two rules:
+// the same name and phone, or the same name with no phone on either side.
+// The same box, naming who and which rule, with the same three ways (add an
+// email or change the phone, open them, or add anyway). The warning and the
+// tick belong to the exact name, phone and email they were about.
 // After a save the box closes and the new contact opens in the contact
 // sheet that already exists (the host does that, with the id).
 //
@@ -88,6 +93,14 @@ ${S} .na-dup .na-dup-ways{font-size:12.5px;color:${T.mutedFg}}
 
 const EMPTY = { name: '', types: [], company: '', title: '', phone: '', email: '', howWeMet: '', interest: '', month: '', day: '', birthdayReminder: false, tagIds: [] }
 const emailKey = (v) => String(v ?? '').trim().toLowerCase()
+/** What a duplicate warning was about: the email, or with none the name and phone's digits. */
+const dupKey = (f) => emailKey(f.email) ? `e:${emailKey(f.email)}` : `n:${String(f.name ?? '').replace(/\s+/g, ' ').trim().toLowerCase()}|${String(f.phone ?? '').replace(/\D/g, '')}`
+const DUP_RULE = { email_already_here: 'email', name_and_phone_already_here: 'name_phone', name_already_here: 'name_only' }
+const DUP_WORDS = {
+  email: { has: 'already has this email', ways: 'Change the email above', tick: 'a different person who shares this email' },
+  name_phone: { has: 'already has this name and phone, and you gave no email', ways: 'Add an email or change the phone above', tick: 'a different person with the same name and phone' },
+  name_only: { has: 'already has this name, and neither of you has a phone', ways: 'Add an email or a phone above', tick: 'a different person with the same name' },
+}
 const IconX = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
 
 /** The words for a refusal from the add route, beside the field it names. */
@@ -110,13 +123,13 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
   const [error, setError] = useState(null) // { field, words }
   const [tagList, setTagList] = useState(null) // null | { problem } | { rows, own, sections }
   const [tagsOpen, setTagsOpen] = useState(null) // the picked ids when the box opened, to undo on ✕
-  const [dup, setDup] = useState(null) // { id, name, email } the server matched
+  const [dup, setDup] = useState(null) // { id, name, rule, key } the server matched
   const [addAnyway, setAddAnyway] = useState(false)
   const panel = useRef(null)
 
   const put = (k, v) => { setF((x) => ({ ...x, [k]: v })); if (error?.field === k) setError(null) }
-  // The warning, and any "add anyway", belong to the email they were about.
-  const dupShown = dup && emailKey(f.email) === dup.email ? dup : null
+  // The warning, and any "add anyway", belong to what they were about.
+  const dupShown = dup && dupKey(f) === dup.key ? dup : null
   const isOrg = f.types.includes('organization')
   const call = async (url, body) => {
     const res = await doFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -205,8 +218,8 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
         ...(dupShown && addAnyway ? { addAnyway: true } : {}),
       })
       if (res.status === 201 && json?.id) { onAdded(json.id); return }
-      if (res.status === 409 && json?.error === 'email_already_here' && json.matched?.id) {
-        setDup({ id: json.matched.id, name: json.matched.name || 'Unnamed', email: emailKey(f.email) }); setAddAnyway(false)
+      if (res.status === 409 && DUP_RULE[json?.error] && json.matched?.id) {
+        setDup({ id: json.matched.id, name: json.matched.name || 'Unnamed', rule: DUP_RULE[json.error], key: dupKey(f) }); setAddAnyway(false)
         return
       }
       setError({ field: json?.field || 'form', words: json?.error ? addErrorWords(json.error) : NOT_SAVED })
@@ -268,13 +281,13 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
                 {input('email', 'Email', { inputMode: 'email', autoComplete: 'off' })}
               </div>
               {dupShown && (
-                <div className="na-dup" role="alert" data-duplicate={dupShown.id}>
-                  <p><b>{dupShown.name}</b> at {locationName || 'this location'} already has this email. Nothing was added.</p>
-                  <p className="na-dup-ways">Change the email above, open {dupShown.name.split(/\s+/)[0]} instead, or tick the box if this really is someone else.</p>
+                <div className="na-dup" role="alert" data-duplicate={dupShown.id} data-rule={dupShown.rule}>
+                  <p><b>{dupShown.name}</b> at {locationName || 'this location'} {DUP_WORDS[dupShown.rule].has}. Nothing was added.</p>
+                  <p className="na-dup-ways">{DUP_WORDS[dupShown.rule].ways}, open {dupShown.name.split(/\s+/)[0]} instead, or tick the box if this really is someone else.</p>
                   {onOpenExisting && <button type="button" className="ns-btn ns-btn-ghost" onClick={() => onOpenExisting(dupShown.id)} disabled={saving} data-open-existing>Open {dupShown.name}</button>}
                   <label className="ns-check">
                     <input type="checkbox" checked={addAnyway} disabled={saving} onChange={(e) => setAddAnyway(e.target.checked)} data-add-anyway />
-                    Add anyway: a different person who shares this email
+                    Add anyway: {DUP_WORDS[dupShown.rule].tick}
                   </label>
                 </div>
               )}

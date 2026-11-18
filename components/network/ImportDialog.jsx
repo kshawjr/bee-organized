@@ -11,8 +11,10 @@
 //   · THE SERVER CHECKS THE FILE FIRST (POST /api/network/import, mode
 //     'check'), against this location's real contacts and tags, and writes
 //     nothing. The box shows exactly what Add would do: who comes in, who is
-//     skipped because their email is already here (and who it matched), and
-//     every tag word that matched nothing.
+//     skipped because they are already here (and who it matched, and by
+//     which rule: the email, or with no email the same name and phone, or
+//     the same name with no phone on either side), and every tag word that
+//     matched nothing.
 //   · A ROW THAT CANNOT BE READ IS SKIPPED AND NAMED, by line and reason,
 //     and the rest of the file comes in (as the design did, and as a
 //     duplicate is skipped). Every skipped row is listed on screen, none
@@ -221,16 +223,16 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
           {unreadable.length > 0 && (
             <div className="ni-box" data-tone="bad" data-unreadable>
               <h3>{plural(unreadable.length, 'row')} {done ? (unreadable.length === 1 ? 'was' : 'were') : 'will be'} skipped: {unreadable.length === 1 ? 'it' : 'they'} couldn’t be read</h3>
-              <p style={{ marginBottom: 6 }}>{done ? 'Everyone else came in.' : 'Everyone else still comes in.'} To bring {unreadable.length === 1 ? 'this one' : 'these'} in too, fix {unreadable.length === 1 ? 'it' : 'them'} in your file and import just {unreadable.length === 1 ? 'that row' : 'those rows'} again.</p>
+              <p style={{ marginBottom: 6 }}>{done ? 'Everyone else came in.' : 'Everyone else still comes in.'} To bring {unreadable.length === 1 ? 'this one' : 'these'} in too, fix {unreadable.length === 1 ? 'it' : 'them'} in your file and import the whole file again: everyone already here is skipped.</p>
               <ul>{unreadable.map((p) => <li key={p.line} data-unreadable-line={p.line}><span className="ni-line">Row {p.line}</span>{p.name ? <b>{p.name}: </b> : null}{p.problems.join('; ')}</li>)}</ul>
             </div>
           )}
 
           {summary?.ok && summary.skipped.length > 0 && (
             <div className="ni-box" data-tone="warn" data-skipped>
-              <h3>{plural(summary.skipped.length, 'row')} {done ? (summary.skipped.length === 1 ? 'was' : 'were') : 'will be'} skipped: that email is already on a contact here</h3>
+              <h3>{plural(summary.skipped.length, 'row')} {done ? (summary.skipped.length === 1 ? 'was' : 'were') : 'will be'} skipped: they’re already here</h3>
               <p style={{ marginBottom: 6 }}>{done ? 'Nobody was changed.' : 'Nobody here will be changed.'} To update someone, open them on the list and edit them there.</p>
-              <ul>{summary.skipped.map((s) => <li key={s.line}><span className="ni-line">Row {s.line}</span><b>{s.name}</b> ({s.email}) matches {s.matched.id ? <b data-matched={s.matched.id}>{s.matched.name}</b> : <>row {s.matched.line} of this file, <b>{s.matched.name}</b></>}</li>)}</ul>
+              <ul>{summary.skipped.map((s) => <li key={s.line}><span className="ni-line">Row {s.line}</span><b>{s.name}</b>{s.email ? <> ({s.email})</> : null} {s.rule === 'name_phone' ? 'has no email, and the same name and phone as' : s.rule === 'name_only' ? 'has no email, and the same name as' : 'matches'} {s.matched.id ? <b data-matched={s.matched.id}>{s.matched.name}</b> : <>row {s.matched.line} of this file, <b>{s.matched.name}</b></>}{s.rule === 'name_only' ? ', with no phone on either' : ''}</li>)}</ul>
             </div>
           )}
 

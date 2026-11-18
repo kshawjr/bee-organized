@@ -42,7 +42,7 @@ export async function readLiveContacts(db: Db, locationId: string): Promise<{ ok
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     const { data, error } = await db
       .from('partners')
-      .select('id, name, email')
+      .select('id, name, email, phone')
       .eq('location_id', locationId)
       .is('deleted_at', null)
       .order('id', { ascending: true })

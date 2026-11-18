@@ -27,7 +27,10 @@ const h = vi.hoisted(() => {
   const svc = (table: string) => {
     const ctx: any = { op: 'select', filters: [] as any[], payload: null, returning: false, range: null as any }
     const b: any = {}
-    b.select = (c?: string) => { if (ctx.op !== 'select') ctx.returning = true; return b }
+    // A read hands back only the columns it asked for, as the database does,
+    // so a read that forgets a column (the phone, for the duplicate check)
+    // is caught here.
+    b.select = (c?: string) => { if (ctx.op !== 'select') ctx.returning = true; else ctx.cols = c; return b }
     b.insert = (rows: any) => { ctx.op = 'insert'; ctx.payload = Array.isArray(rows) ? rows : [rows]; return b }
     b.delete = () => { ctx.op = 'delete'; return b }
     b.update = () => { ctx.op = 'update'; return b }
@@ -65,6 +68,10 @@ const h = vi.hoisted(() => {
       if (ctx.op !== 'select') throw new Error(`unexpected ${ctx.op} on ${table}`)
       let out = rows.filter(match)
       if (ctx.range) out = out.slice(ctx.range[0], ctx.range[1] + 1)
+      if (typeof ctx.cols === 'string' && /^[\w\s,]+$/.test(ctx.cols)) {
+        const cols = ctx.cols.split(',').map((x: string) => x.trim())
+        out = out.map((r: any) => Object.fromEntries(cols.map((k: string) => [k, r[k]])))
+      }
       return { data: single ? out[0] ?? null : out, error: null }
     }
     b.single = () => run(true)
@@ -181,7 +188,7 @@ describe('the location being viewed, and only that one', () => {
   it('an email already on a live contact here is skipped, naming them', async () => {
     const r = await send(IMPORT, { location_id: LOC, csv: [...FILE, 'Tommy,TOM@x.co,'].join('\n'), mode: 'import' })
     expect(r.body.added).toBe(3)
-    expect(r.body.skipped).toEqual([{ line: 5, name: 'Tommy', email: 'tom@x.co', matched: { id: 'p1', name: 'Tom Here', line: null } }])
+    expect(r.body.skipped).toEqual([{ line: 5, name: 'Tommy', email: 'tom@x.co', phone: null, rule: 'email', matched: { id: 'p1', name: 'Tom Here', line: null } }])
   })
 
   it('no location, or one that does not exist: nothing is read or written', async () => {
@@ -215,6 +222,31 @@ describe('the location being viewed, and only that one', () => {
     const r = await send(ADD, { location_id: LOC, name: 'Tom Twice', types: ['vendor'], email: 'tom@x.co', addAnyway: true })
     expect(r.status).toBe(201)
     expect(h.state.tables.partners.filter((p: any) => p.location_id === LOC && p.email === 'tom@x.co')).toHaveLength(2)
+  })
+
+  it('a whole file imported twice: the second run adds nobody, the no-email rows included', async () => {
+    const csv = ['Name,Email,Phone,Tags', 'Ann One,ann@x.co,,Realtor', 'Ben Two,,,Realtor', 'Pia Phone,,206.555.0100,', 'Cat Three,cat@x.co,(303) 555-0142,'].join('\n')
+    const first = await send(IMPORT, { location_id: LOC, csv, mode: 'import' })
+    expect(first.body.added).toBe(4)
+    const before = counts()
+    const again = await send(IMPORT, { location_id: LOC, csv, mode: 'import' })
+    expect(again.body.added).toBe(0)
+    expect(again.body.skipped.map((s: any) => [s.line, s.name, s.rule])).toEqual([[2, 'Ann One', 'email'], [3, 'Ben Two', 'name_only'], [4, 'Pia Phone', 'name_phone'], [5, 'Cat Three', 'email']])
+    expect(counts()).toEqual(before)
+  })
+
+  it('the add route, no email: the same name and phone, or the same name and no phone either side, is a 409 naming who', async () => {
+    h.state.tables.partners.push({ id: 'p4', location_id: LOC, name: 'Pat Phone', email: null, phone: '(303) 555-0142', deleted_at: null })
+    h.state.tables.partners.push({ id: 'p5', location_id: LOC, name: 'Bo Bare', email: null, phone: null, deleted_at: null })
+    const before = counts()
+    const a = await send(ADD, { location_id: LOC, name: 'PAT  phone', types: ['vendor'], phone: '3035550142' })
+    expect([a.status, a.body.error, a.body.matched]).toEqual([409, 'name_and_phone_already_here', { id: 'p4', name: 'Pat Phone' }])
+    const b = await send(ADD, { location_id: LOC, name: 'bo bare', types: ['vendor'] })
+    expect([b.status, b.body.error, b.body.matched]).toEqual([409, 'name_already_here', { id: 'p5', name: 'Bo Bare' }])
+    expect(counts()).toEqual(before)
+    // a stored phone and none typed: not a match; add anyway: in
+    expect((await send(ADD, { location_id: LOC, name: 'Pat Phone', types: ['vendor'] })).status).toBe(201)
+    expect((await send(ADD, { location_id: LOC, name: 'Bo Bare', types: ['vendor'], addAnyway: true })).status).toBe(201)
   })
 
   it('another location holding the email, or no email at all: not a duplicate', async () => {
