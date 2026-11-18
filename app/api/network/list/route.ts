@@ -43,7 +43,7 @@ const CHUNK = 200
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const LIST_COLS =
-  'id, location_id, name, company, title, phone, email, how_we_met, ' +
+  'id, location_id, name, company, title, phone, email, how_we_met, birthday, ' +
   'network_types, partner_level, partner_stage, is_customer, last_contacted_at, ' +
   'partner_tags(tag_lookup_id)'
 
@@ -138,6 +138,8 @@ export async function GET(request: NextRequest) {
       phone: r.phone || null,
       email: r.email || null,
       howWeMet: r.how_we_met || null,
+      // Slice 5: the export writes it out, so a file read back keeps it.
+      birthday: r.birthday || null,
       networkTypes: r.network_types ?? null,
       partnerLevel: r.partner_level ?? null,
       partnerStage: r.partner_stage ?? null,

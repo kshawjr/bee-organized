@@ -43,6 +43,8 @@ export type NetworkListRow = {
   phone?: string | null
   email?: string | null
   howWeMet?: string | null
+  /** Month and day, like "Mar 22" (slice 5: read for the export). */
+  birthday?: string | null
   /** partners.network_types, as stored. */
   networkTypes?: readonly string[] | null
   /** partners.partner_level, as stored. */
@@ -109,6 +111,7 @@ export function contactFromRow(row: NetworkListRow, ctx: RowContext): ListContac
     phone: text(row.phone),
     email: text(row.email),
     howMet: text(row.howWeMet),
+    birthday: text(row.birthday),
     referred: Number(ctx.referral?.count) || 0,
     converted: Number(ctx.referral?.converted) || 0,
     revenue: Number(ctx.referral?.revenue) || 0,

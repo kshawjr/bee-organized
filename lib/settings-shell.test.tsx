@@ -677,7 +677,8 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
     // ONE colour from the tokens, the gold of its "Change this territory"
     // label. It names no font: see the Lato test above.
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/ContactSheet.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    // 2026-11-17: Network slice 5's add box and import box, inside the Network list.
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/AddContactDialog.jsx', 'components/network/ContactSheet.jsx', 'components/network/ImportDialog.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })

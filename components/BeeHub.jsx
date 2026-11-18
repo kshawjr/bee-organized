@@ -16447,7 +16447,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
         <NetworkListScreen
           locationId={locFilter==='all' ? null : locFilter}
           locationName={locationName}
-          onOpenContact={locFilter==='all' ? null : (id)=>{ const p = allPartners.find(x=>x.id===id); if (p) setSelected(p) }}
+          onOpenContact={locFilter==='all' ? null : (id)=>{ const p = allPartners.find(x=>x.id===id); setSelected(p || { id }) }}
           initialTagId={initialTagId}
           onInitialTagConsumed={onInitialTagConsumed}
           refreshKey={sheetSaves}

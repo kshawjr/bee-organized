@@ -944,3 +944,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
     </div>
   )
 }
+
+// Slice 5: the add flow and the import box are drawn in the same frame as
+// this sheet, so they read these rules rather than copying them.
+export { CSS as SHEET_CSS }

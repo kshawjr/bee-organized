@@ -45,6 +45,9 @@ import { contactSecondaryDetails } from '@/lib/network/filters'
 import { PAGE_SIZES, clampPage, contactPage, defaultPageSize, pageCount } from '@/lib/network/paging'
 import { fixedDateLabel } from '@/lib/reminders'
 import { NO_FILTERS, anyFilterOn, applyListFilters, contactFromRow, dueForFollowUp, groupForList, menuFilterCount, tagsInUse, typeCounts } from '@/lib/network/list'
+import { downloadText, exportFileName, exportText } from '@/lib/network/csv-download'
+import AddContactDialog from './AddContactDialog'
+import ImportDialog from './ImportDialog'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
 // The group heading's stripe and tint, as the design tones them.
@@ -74,6 +77,12 @@ const CSS = `
 [data-network-ui] .nw-lede{font-family:${FONT.body};font-size:14px;line-height:1.6;color:${T.mutedFg};margin:6px 0 0}
 [data-network-ui] .nw-preview{display:inline-flex;align-items:center;gap:6px;margin-top:12px;padding:5px 10px;border:1px dashed ${T.input};border-radius:999px;font-size:12px!important;color:${T.mutedFg};background:${T.card}}
 [data-network-ui] .nw-toolbar{margin-top:20px}
+[data-network-ui] .nw-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+[data-network-ui] .nw-act{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 16px;border-radius:10px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:14px!important;font-weight:700;white-space:nowrap}
+[data-network-ui] .nw-act:hover:not(:disabled){border-color:${T.primary}}
+[data-network-ui] .nw-act[data-primary]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
+[data-network-ui] .nw-act-note{flex-basis:100%;margin:0;font-size:12.5px;color:${T.mutedFg}}
+[data-network-ui] .nw-act-note[data-tone="good"]{color:${T.primary}}
 [data-network-ui] .nw-controls{display:flex;align-items:center;gap:16px}
 [data-network-ui] .nw-search{position:relative;flex:1;min-width:0}
 [data-network-ui] .nw-input{height:44px;width:100%;border-radius:8px;border:1px solid ${T.input};background:${T.card};padding:0 12px;font-size:14px!important;font-family:inherit;color:${T.foreground};outline:none}
@@ -357,6 +366,10 @@ export default function NetworkListScreen({
   const [pages, setPages] = useState({})
   const [size, setSize] = useState(25)
   const [tagSearch, setTagSearch] = useState('')
+  // Slice 5: adding, importing, exporting. Only ever inside one location.
+  const [dialog, setDialog] = useState(null) // null | 'add' | 'import'
+  const [reloads, setReloads] = useState(0)
+  const [actNote, setActNote] = useState(null) // { words, tone }
 
   const nowMs = useMemo(() => (now ? now.getTime() : Date.now()), [now])
   const today = useMemo(() => new Date(nowMs).toLocaleDateString('en-CA'), [nowMs])
@@ -387,7 +400,7 @@ export default function NetworkListScreen({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [locationId, fetchImpl, refreshKey])
+  }, [locationId, fetchImpl, refreshKey, reloads])
 
   // A tag handed in from Search: start filtered by it, once.
   useEffect(() => {
@@ -419,6 +432,18 @@ export default function NetworkListScreen({
   const menuCount = menuFilterCount(f)
   const shownTags = tags.filter((t) => t.label.toLowerCase().includes(tagSearch.trim().toLowerCase()))
 
+  // EXPORT: every contact at THIS location, whatever the filters show, in the
+  // columns the import reads (lib/network/csv.ts). On All Locations there is
+  // no export: one file across every location is not offered.
+  const exportAll = () => {
+    if (!locationId || !contacts.length) return
+    const name = exportFileName(locationName, new Date(nowMs))
+    // Referral numbers come from a second read. Until it has answered, those
+    // two columns are left blank: never a made-up zero (slice 3's rule).
+    downloadText(name, exportText(referrals ? contacts : contacts.map((c) => ({ ...c, referred: '', converted: '' }))))
+    setActNote({ words: `Saved ${name}: ${contacts.length} contact${contacts.length === 1 ? '' : 's'} at ${locationName || 'this location'}.`, tone: 'good' })
+  }
+
   return (
     <div data-network-ui data-network-list>
       <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
@@ -428,6 +453,15 @@ export default function NetworkListScreen({
         <h1 className="nw-title">Network{locationId && locationName ? ` · ${locationName}` : ''}</h1>
         <p className="nw-lede">Everyone who isn&rsquo;t a client: who sends you work, who you recommend, and who you are still figuring out.</p>
         <span className="nw-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
+
+        <div className="nw-actions" data-actions>
+          <button type="button" className="nw-act" data-primary disabled={!locationId} onClick={() => { setActNote(null); setDialog('add') }} data-act="add">+ Add contact</button>
+          <button type="button" className="nw-act" disabled={!locationId} onClick={() => { setActNote(null); setDialog('import') }} data-act="import">Import CSV</button>
+          <button type="button" className="nw-act" disabled={!locationId || !data || !contacts.length} onClick={exportAll} data-act="export"
+            title={locationId && data ? `All ${contacts.length} at ${locationName || 'this location'}` : undefined}>Export CSV</button>
+          {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add, import or export. A contact belongs to one location, so none of these work across all of them at once.</p>}
+          {locationId && actNote && <p className="nw-act-note" data-tone={actNote.tone} role="status" data-act-note="done">{actNote.words}</p>}
+        </div>
 
         {problem && <div className="nw-problem" role="alert" data-problem>We couldn&rsquo;t load the Network list ({problem}). Nothing has been changed. Reload the page to try again.</div>}
         {!problem && !data && <p className="nw-none" data-loading style={{ marginTop: '20px' }}>Loading contacts…</p>}
@@ -519,6 +553,17 @@ export default function NetworkListScreen({
           </>
         )}
       </div>
+      {dialog === 'add' && locationId && (
+        <AddContactDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
+          onClose={() => setDialog(null)}
+          onAdded={(id) => { setDialog(null); setReloads((n) => n + 1); if (onOpenContact) onOpenContact(id) }}
+          onOpenExisting={onOpenContact ? (id) => { setDialog(null); onOpenContact(id) } : null} />
+      )}
+      {dialog === 'import' && locationId && (
+        <ImportDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
+          onClose={() => setDialog(null)}
+          onImported={() => setReloads((n) => n + 1)} />
+      )}
     </div>
   )
 }

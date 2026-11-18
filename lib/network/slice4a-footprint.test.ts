@@ -47,8 +47,17 @@ const BLOCK_START = '      {/* THE NEW CONTACT SHEET (slice 4a)'
 const BLOCK_END = '      {selected&&!newList&&(\n'
 const OLD_LINE = '      {selected&&(\n'
 
+// Slice 5 changed ONE line of the wiring on purpose: a row the host's own
+// partners list does not hold yet (a contact just added or imported) still
+// opens in the sheet, by its id. Put the slice 3 line back before comparing.
+// lib/network/slice5-footprint.test.ts pins that this is the only change.
+const SLICE5_OPEN_NEW = "if (p) setSelected(p) }}"
+const SLICE5_OPEN_NOW = "setSelected(p || { id }) }}"
+
 function withoutTheSheet(hub: string): string {
   let s = hub
+  expect(s.split(SLICE5_OPEN_NOW).length - 1, 'slice 5 open line').toBe(1)
+  s = s.replace(SLICE5_OPEN_NOW, SLICE5_OPEN_NEW)
   for (const piece of [IMPORT, STATE, REFRESH]) {
     expect(s.split(piece).length - 1, piece.trim().slice(0, 50)).toBe(1)
     s = s.replace(piece, '')
