@@ -180,6 +180,10 @@ describe('No spreadsheet package', () => {
   it('reads CSV with no import of xlsx or any other package', () => {
     const source = readFileSync(new URL('./csv.ts', import.meta.url), 'utf8')
     const imports = Array.from(source.matchAll(/from '([^']+)'/g)).map((m) => m[1])
-    expect(imports).toEqual(['@/lib/phone', './types'])
+    expect(imports).toEqual(['@/lib/phone', './names', './types'])
+    // ./names leans on lib/lead-name.ts only, which imports nothing.
+    const names = readFileSync(new URL('./names.ts', import.meta.url), 'utf8')
+    expect(Array.from(names.matchAll(/from '([^']+)'/g)).map((m) => m[1])).toEqual(['@/lib/lead-name'])
+    expect(readFileSync(new URL('../lead-name.ts', import.meta.url), 'utf8')).not.toMatch(/^import /m)
   })
 })

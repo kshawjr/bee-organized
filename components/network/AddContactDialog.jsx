@@ -30,6 +30,12 @@
 // The same box, naming who and which rule, with the same three ways (add an
 // email or change the phone, open them, or add anyway). The warning and the
 // tick belong to the exact name, phone and email they were about.
+// NAMES (2026-11-19, Kevin: universal with Clients). A person gets two
+// boxes, First and Last, and the full name is set from them the way Clients
+// does (lib/network/names.ts). An organization gets one name box: a chamber
+// of commerce has no last name. The form switches on the type picked, and
+// carries what was typed across the switch. A joint name ("Drew & Bill" /
+// "Crowley") is kept exactly as typed.
 // After a save the box closes and the new contact opens in the contact
 // sheet that already exists (the host does that, with the id).
 //
@@ -91,10 +97,14 @@ ${S} .na-dup .na-dup-ways{font-size:12.5px;color:${T.mutedFg}}
 @media (max-width:600px){ ${S} .na-pair{grid-template-columns:1fr} }
 `
 
-const EMPTY = { name: '', types: [], company: '', title: '', phone: '', email: '', howWeMet: '', interest: '', month: '', day: '', birthdayReminder: false, tagIds: [] }
+const EMPTY = { name: '', firstName: '', lastName: '', types: [], company: '', title: '', phone: '', email: '', howWeMet: '', interest: '', month: '', day: '', birthdayReminder: false, tagIds: [] }
 const emailKey = (v) => String(v ?? '').trim().toLowerCase()
-/** What a duplicate warning was about: the email, or with none the name and phone's digits. */
-const dupKey = (f) => emailKey(f.email) ? `e:${emailKey(f.email)}` : `n:${String(f.name ?? '').replace(/\s+/g, ' ').trim().toLowerCase()}|${String(f.phone ?? '').replace(/\D/g, '')}`
+const tidy = (v) => String(v ?? '').replace(/\s+/g, ' ').trim()
+const isOrgForm = (f) => f.types.includes('organization')
+/** The full name as it will be stored: an organization's one box, or First + Last (lib/lead-name.ts's rule). */
+export const fullNameOf = (f) => isOrgForm(f) ? tidy(f.name) : [tidy(f.firstName), tidy(f.lastName)].filter(Boolean).join(' ')
+/** What a duplicate warning was about: the email, or with none the full name and phone's digits. */
+const dupKey = (f) => emailKey(f.email) ? `e:${emailKey(f.email)}` : `n:${fullNameOf(f).toLowerCase()}|${String(f.phone ?? '').replace(/\D/g, '')}`
 const DUP_RULE = { email_already_here: 'email', name_and_phone_already_here: 'name_phone', name_already_here: 'name_only' }
 const DUP_WORDS = {
   email: { has: 'already has this email', ways: 'Change the email above', tick: 'a different person who shares this email' },
@@ -102,6 +112,15 @@ const DUP_WORDS = {
   name_only: { has: 'already has this name, and neither of you has a phone', ways: 'Add an email or a phone above', tick: 'a different person with the same name' },
 }
 const IconX = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+
+/** One name into the two boxes: first word / the rest; a joint name stays whole in First. */
+function splitForBoxes(name) {
+  const n = tidy(name)
+  if (!n) return {}
+  if (/[&+/]|(^|\s)and(\s|$)/i.test(n) || !n.includes(' ')) return { firstName: n, lastName: '' }
+  const i = n.indexOf(' ')
+  return { firstName: n.slice(0, i), lastName: n.slice(i + 1) }
+}
 
 /** The words for a refusal from the add route, beside the field it names. */
 export function addErrorWords(error) {
@@ -130,7 +149,8 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
   const put = (k, v) => { setF((x) => ({ ...x, [k]: v })); if (error?.field === k) setError(null) }
   // The warning, and any "add anyway", belong to what they were about.
   const dupShown = dup && dupKey(f) === dup.key ? dup : null
-  const isOrg = f.types.includes('organization')
+  const isOrg = isOrgForm(f)
+  const fullName = fullNameOf(f)
   const call = async (url, body) => {
     const res = await doFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     return { res, json: await res.json().catch(() => ({})) }
@@ -167,7 +187,15 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
     const next = f.types.includes(t) ? f.types.filter((x) => x !== t) : [...f.types, t]
     // "Not sure yet" means nothing is decided: it gives way to any real type.
     const clean = t === 'unsure' && !f.types.includes('unsure') ? ['unsure'] : next.filter((x) => x !== 'unsure' || next.length === 1)
-    setF((x) => ({ ...x, types: clean, ...(clean.includes('organization') ? { month: '', day: '', birthdayReminder: false } : {}) }))
+    setF((x) => {
+      const wasOrg = x.types.includes('organization')
+      const nowOrg = clean.includes('organization')
+      // What was typed follows the switch: First + Last become the one name,
+      // and the one name becomes First (first word) and Last (the rest).
+      const carry = nowOrg && !wasOrg && !tidy(x.name) ? { name: fullNameOf(x) }
+        : !nowOrg && wasOrg && !tidy(x.firstName) && !tidy(x.lastName) ? splitForBoxes(x.name) : {}
+      return { ...x, ...carry, types: clean, ...(nowOrg ? { month: '', day: '', birthdayReminder: false } : {}) }
+    })
     if (error?.field === 'types') setError(null)
   }
 
@@ -201,19 +229,19 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
   }
 
   const birthday = f.month && f.day ? `${f.month} ${f.day}` : ''
-  const ready = f.name.trim() && f.types.length > 0
+  const ready = fullName && f.types.length > 0
 
   async function save() {
     if (saving) return
     if (!f.types.length) { setError({ field: 'types', words: addErrorWords('types_required') }); return }
-    if (!f.name.trim()) { setError({ field: 'name', words: addErrorWords('name_required') }); return }
+    if (!fullName) { setError({ field: isOrg ? 'name' : 'firstName', words: addErrorWords(isOrg ? 'name_required' : 'person_name_required') }); return }
     if (f.month && !f.day) { setError({ field: 'birthday', words: addErrorWords('birthday_unreadable') }); return }
     // Enter in a field submits even with the button off: the warning holds here too.
     if (dupShown && !addAnyway) return
     setSaving(true); setError(null)
     try {
       const { res, json } = await call('/api/network/contacts', {
-        location_id: locationId, name: f.name, types: normalizeTypes(f.types), company: f.company, title: f.title,
+        location_id: locationId, ...(isOrg ? { name: f.name } : { firstName: f.firstName, lastName: f.lastName }), types: normalizeTypes(f.types), company: f.company, title: f.title,
         phone: f.phone, email: f.email, howWeMet: f.howWeMet, interest: f.interest, birthday, birthdayReminder: !!(birthday && f.birthdayReminder), tagIds: f.tagIds,
         ...(dupShown && addAnyway ? { addAnyway: true } : {}),
       })
@@ -271,7 +299,12 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
             </fieldset>
 
             <div className="ns-form">
-              {input('name', isOrg ? 'Organization name' : 'Full name', { required: true, autoComplete: 'off', maxLength: 200 })}
+              {isOrg ? input('name', 'Organization name', { required: true, autoComplete: 'off', maxLength: 200 }) : (
+                <div className="ns-two na-pair" data-person-name>
+                  {input('firstName', 'First name', { required: true, autoComplete: 'off', maxLength: 200 })}
+                  {input('lastName', 'Last name', { autoComplete: 'off', maxLength: 200 })}
+                </div>
+              )}
               <div className="ns-two na-pair">
                 {input('company', 'Company')}
                 {input('title', 'Job title')}
@@ -291,8 +324,8 @@ export default function AddContactDialog({ locationId, locationName = '', onClos
                   </label>
                 </div>
               )}
-              {!f.phone.trim() && !f.email.trim() && f.name.trim() && (
-                <p className="na-hint" data-reach-hint>A phone or email lets you actually reach {f.name.trim().split(/\s+/)[0]}. You can still add them without one.</p>
+              {!f.phone.trim() && !f.email.trim() && fullName && (
+                <p className="na-hint" data-reach-hint>A phone or email lets you actually reach {isOrg ? fullName : fullName.split(' ')[0]}. You can still add them without one.</p>
               )}
               {input('howWeMet', 'Where did you meet?', { placeholder: 'e.g. Chamber breakfast, a client’s designer' })}
               {input('interest', 'Interest', { placeholder: 'e.g. Garage, a move in the spring', maxLength: 500 })}

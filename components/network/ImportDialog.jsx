@@ -23,6 +23,20 @@
 //   · Add sends the same file again (mode 'import'). The server plans it
 //     again against the data as it is NOW and answers what it actually did.
 //
+// A FILE THAT ISN'T OURS (third follow-up, 2026-11-19). After a file is
+// chosen, the box shows THEIR columns on the left and Bee Hub's fields on the
+// right, each already guessed from the column's heading (or recalled, if a
+// file with the same headings was imported here before). The owner corrects
+// any guess from a dropdown or marks a column Ignore, and sees the first 3
+// rows EXACTLY AS THEY WOULD LAND (planned by the same rules the server
+// uses), not the raw file. Then the file is rewritten into Bee Hub's own
+// headings (lib/network/import-mapping.ts) and the check above runs as it
+// always has. Columns with nothing in them are left out of the list and
+// ignored. Several phone or email columns: Bee Hub keeps one of each; the
+// guess takes the fullest, the others are named, and a field moves when it
+// is given to another column. No Phone column at all: nobody gets a phone,
+// and the box says so.
+//
 // LOCATION: the one the list is looking at, named in the box. The list only
 // offers Import inside one location.
 //
@@ -31,10 +45,12 @@
 //
 // It closes by its own ✕, Cancel, Done or Escape, never by a tap outside.
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { T, NET } from '@/components/design/tokens'
 import { IMPORT_COLUMNS, SAMPLE_CSV } from '@/lib/network/csv'
-import { IMPORT_MAX_CHARS, IMPORT_REFUSAL_WORDS } from '@/lib/network/contact-create'
+import { IMPORT_MAX_CHARS, IMPORT_REFUSAL_WORDS, looksBinary, planImport } from '@/lib/network/contact-create'
+import { FIELDS, MANY_OF, alsoLooksLike, applyMapping, guessMapping, mappingProblems, readShape, recallMapping, setColumn } from '@/lib/network/import-mapping'
+import { TYPE_META } from '@/lib/network/types'
 import { downloadText } from '@/lib/network/csv-download'
 import { SHEET_CSS } from './ContactSheet'
 
@@ -80,7 +96,27 @@ ${S} .ni-list li{display:grid;gap:2px;padding:9px 14px;border-bottom:1px solid $
 ${S} .ni-list li:last-child{border-bottom:0}
 ${S} .ni-list span{font-size:12.5px;color:${T.mutedFg};overflow-wrap:anywhere}
 ${S} .ni-line{font-variant-numeric:tabular-nums;color:${T.mutedFg};margin-right:6px}
+${S} .ni-map{display:grid;gap:0;margin:0;padding:0;list-style:none;border:1px solid ${T.border};border-radius:12px;background:${T.card}}
+${S} .ni-map-head,${S} .ni-map li{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 12px;align-items:center;padding:9px 14px;border-bottom:1px solid ${T.border}}
+${S} .ni-map li:last-child{border-bottom:0}
+${S} .ni-map-head{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${T.mutedFg}}
+${S} .ni-col{min-width:0}
+${S} .ni-col b{display:block;font-size:14px;color:${T.primary};overflow-wrap:anywhere}
+${S} .ni-col small{display:block;font-size:12px;color:${T.mutedFg};overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+${S} .ni-map select{width:100%;min-height:44px}
+${S} .ni-map li[data-ignored] b{color:${T.mutedFg};font-weight:400}
+${S} .ni-also{grid-column:1/-1;margin:0;font-size:12px;color:${NET.accentFg}}
+${S} .ni-land{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+${S} .ni-land li{display:grid;gap:3px;padding:10px 14px;border:1px solid ${T.border};border-radius:12px;background:${T.card};font-size:13px;color:${T.primary};min-width:0}
+${S} .ni-land li b{font-size:14.5px}
+${S} .ni-land dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:2px 0 0;font-size:12.5px}
+${S} .ni-land dt{font-weight:400;color:${T.mutedFg}}
+${S} .ni-land dd{margin:0;overflow-wrap:anywhere}
+${S} .ni-land li[data-kind="unreadable"]{border-color:color-mix(in oklab,${T.destructive} 35%,transparent)}
+${S} .ni-sub{margin:0;font-size:13px;font-weight:700;color:${T.primary}}
 @media (max-width:600px){
+  ${S} .ni-map li.ni-map-head{display:none}
+  ${S} .ni-map li{grid-template-columns:1fr}
   [data-network-sheet]${S}{padding:0;align-items:flex-end}
   ${S} .ni{max-height:calc(100dvh - 12px);border-radius:16px 16px 0 0}
 }
@@ -106,6 +142,10 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
   const input = useRef(null)
   const box = useRef(null)
   const [file, setFile] = useState(null) // { name, text }
+  const [shape, setShape] = useState(null) // the owner's columns (lib/network/import-mapping readShape)
+  const [mapping, setMapping] = useState(null) // one Bee Hub field (or null = Ignore) per column
+  const [recalled, setRecalled] = useState(false) // the mapping came from an earlier file here
+  const [saved, setSaved] = useState(null) // this location's remembered mappings, once loaded
   const [check, setCheck] = useState(null) // the server's answer to 'check'
   const [done, setDone] = useState(null) // the server's answer to 'import'
   const [refusal, setRefusal] = useState('') // words: the file could not be used at all
@@ -119,12 +159,28 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
     return () => document.removeEventListener('keydown', key)
   }, [busy, onClose])
 
-  const send = async (mode, text) => {
-    const res = await doFetch('/api/network/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location_id: locationId, csv: text, mode }) })
+  // The location's remembered mappings. Not having them never stops an import.
+  useEffect(() => {
+    let alive = true
+    Promise.resolve(doFetch(`/api/network/import?location_id=${encodeURIComponent(locationId)}`))
+      .then(async (res) => { const json = await res.json().catch(() => ({})); if (alive) setSaved(res.ok && json?.mappings && typeof json.mappings === 'object' ? json.mappings : {}) })
+      .catch(() => { if (alive) setSaved({}) })
+    return () => { alive = false }
+  }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A file chosen before the remembered mappings arrived gets them when they do.
+  useEffect(() => {
+    if (!shape || !saved || recalled || check) return
+    const r = recallMapping(saved, shape.headers)
+    if (r) { setMapping(r); setRecalled(true) }
+  }, [saved]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const send = async (mode, text, extra = {}) => {
+    const res = await doFetch('/api/network/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location_id: locationId, csv: text, mode, ...extra }) })
     return { res, json: await res.json().catch(() => ({})) }
   }
 
-  const reset = () => { setFile(null); setCheck(null); setDone(null); setRefusal('') }
+  const reset = () => { setFile(null); setShape(null); setMapping(null); setRecalled(false); setCheck(null); setDone(null); setRefusal('') }
 
   async function load(picked) {
     if (!picked || busy) return
@@ -134,9 +190,39 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
     let text
     try { text = await picked.text() } catch { setRefusal('We couldn’t read that file. Save it as CSV and choose it again.'); return }
     setFile({ name: picked.name, text })
-    setBusy('checking')
+    if (looksBinary(text)) { setRefusal(IMPORT_REFUSAL_WORDS.not_csv); return }
+    const sh = readShape(text)
+    if (!sh || !sh.records.slice(sh.headerAt + 1).some((r) => r.length)) { setRefusal(IMPORT_REFUSAL_WORDS.no_rows); return }
+    setShape(sh)
+    const r = recallMapping(saved, sh.headers)
+    setMapping(r || guessMapping(sh))
+    setRecalled(!!r)
+  }
+
+  // The owner's file, in Bee Hub's own headings: what is checked and sent.
+  const mapped = useMemo(() => (shape && mapping ? applyMapping(shape, mapping) : ''), [shape, mapping])
+  const problems = mapping ? mappingProblems(mapping) : null
+  // The first 3 rows exactly as they would land: the server's own planning
+  // rules, run here on the rewritten file (who is already at the location,
+  // and which tags match, is the check's job).
+  const landing = useMemo(() => {
+    if (!mapped || !problems || problems.noName) return null
+    const p = planImport(mapped, { locationId, userId: null, tags: [], existing: [], now: new Date() })
+    if (!p.ok) return null
+    return [
+      ...p.rows.map((r) => ({ kind: 'in', line: r.line, row: r.row })),
+      ...p.unreadable.map((u) => ({ kind: 'unreadable', line: u.line, name: u.name, problems: u.problems })),
+      ...p.skipped.map((k) => ({ kind: 'skipped', line: k.line, name: k.name, matched: k.matched })),
+    ].sort((a, b) => a.line - b.line).slice(0, 3)
+  }, [mapped]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = (col, value) => { setMapping((m) => setColumn(m, col, value || null)); setCheck(null); setRefusal('') }
+
+  async function runCheck() {
+    if (!mapped || problems?.noName || busy) return
+    setBusy('checking'); setRefusal('')
     try {
-      const { res, json } = await send('check', text)
+      const { res, json } = await send('check', mapped)
       if (res.ok && json.ok) setCheck(json)
       else setRefusal(IMPORT_REFUSAL_WORDS[json?.reason] || NOT_SENT)
     } catch {
@@ -147,10 +233,10 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
   }
 
   async function add() {
-    if (!file?.text || !check?.ok || busy) return
+    if (!mapped || !check?.ok || busy) return
     setBusy('adding')
     try {
-      const { res, json } = await send('import', file.text)
+      const { res, json } = await send('import', mapped, { mapping: { headers: shape.headers, fields: mapping } })
       if (res.ok && json.ok) { setDone(json); if (json.added > 0) onImported(json.added) }
       else if (json?.reason === 'partly_saved') setRefusal('Something went wrong part way and not everything could be taken back out. Please tell Kevin before trying again, so nobody is added twice.')
       else setRefusal(json?.reason === 'not_saved' ? 'That import did not go in. Nothing was added. Try again in a minute.' : (IMPORT_REFUSAL_WORDS[json?.reason] || NOT_SENT))
@@ -164,6 +250,10 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
   const adding = check?.ok ? check.adding.length : 0
   const summary = done || check
   const unreadable = summary?.ok && Array.isArray(summary.unreadable) ? summary.unreadable : []
+  const mapping_open = !!(shape && mapping && !check && !done)
+  const shown = shape ? shape.headers.map((h, i) => i).filter((i) => shape.filled[i] > 0) : []
+  const empty = shape ? shape.headers.length - shown.length : 0
+  const canPickMore = mapping ? shown.some((i) => mapping[i] === null) : false
 
   return (
     <div data-network-sheet data-network-import role="presentation">
@@ -172,7 +262,7 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
         <div className="ni-head">
           <div>
             <p className="ns-eyebrow">Import contacts · {locationName || 'this location'}</p>
-            <h2>From a CSV file</h2>
+            <h2>From a spreadsheet</h2>
           </div>
           <button type="button" className="ns-close" onClick={onClose} disabled={!!busy} aria-label="Close import" title="Close"><IconX /></button>
         </div>
@@ -181,19 +271,22 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
           {!file && (
             <>
               <ol className="ni-steps" data-import-steps>
-                <li><b>Download the sample</b><span>It has the right column names and four example rows.</span></li>
-                <li><b>Fill in your contacts</b><span>One person or organization per row. Only Name is required.</span></li>
-                <li><b>Save it as CSV and choose it here</b><span>Excel and Google Sheets both save as CSV. You’ll see what will happen before anything is added.</span></li>
+                <li><b>Export your contacts as a CSV file</b><span>From Outlook, Google Contacts, Mailchimp, LinkedIn or any spreadsheet. Excel and Google Sheets both save as CSV.</span></li>
+                <li><b>Choose it here</b><span>You’ll match your columns to Bee Hub’s. We guess first, and remember your choices for next time.</span></li>
+                <li><b>Check, then add</b><span>You’ll see exactly what will happen before anything is added.</span></li>
               </ol>
-              <button type="button" className="ni-sample" onClick={() => downloadText('bee-hub-contacts-sample.csv', '﻿' + SAMPLE_CSV + '\n')} data-sample><IconDown />Download sample file</button>
               <button type="button" className="ni-drop" data-drag={drag || undefined} onClick={() => input.current?.click()} data-choose
                 onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
                 onDrop={(e) => { e.preventDefault(); setDrag(false); load(e.dataTransfer.files?.[0]) }}>
                 <IconUp /><b>Choose a file or drop it here</b><small>.csv only</small>
               </button>
+              <button type="button" className="ni-sample" onClick={() => downloadText('bee-hub-contacts-sample.csv', '﻿' + SAMPLE_CSV + '\n')} data-sample><IconDown />Starting from nothing? Download a sample file</button>
               <details data-guide>
                 <summary>Column guide</summary>
-                <dl>{IMPORT_COLUMNS.map((c) => <div key={c.key}><dt>{c.key}{c.required && <em>required</em>}</dt><dd>{c.help}</dd></div>)}</dl>
+                <dl>
+                  <div><dt>First name, Last name<em>or Name</em></dt><dd>A person’s name in two columns, or the whole name in one (we split it: first word, then the rest). An organization’s name is never split.</dd></div>
+                  {IMPORT_COLUMNS.filter((c) => c.key !== 'Name').map((c) => <div key={c.key}><dt>{c.key}</dt><dd>{c.help}</dd></div>)}
+                </dl>
               </details>
             </>
           )}
@@ -205,10 +298,78 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
                 <small>{busy === 'checking' ? 'Checking it against the contacts already here…'
                   : done ? `${plural(done.added, 'contact')} added to ${done.location?.name || locationName}`
                   : check?.ok ? `${plural(adding, 'contact')} ready to add${check.skipped.length ? ` · ${check.skipped.length} already here` : ''}${unreadable.length ? ` · ${unreadable.length} can’t be read` : ''}`
-                  : refusal ? 'This file can’t be used' : ''}</small>
+                  : refusal ? 'This file can’t be used'
+                  : shape ? `${plural(shape.headers.length, 'column')} · ${plural(shape.records.slice(shape.headerAt + 1).filter((r) => r.length).length, 'row')}` : ''}</small>
               </div>
               {!done && !busy && <button type="button" className="ns-btn ns-btn-ghost" onClick={() => { reset(); setTimeout(() => input.current?.click(), 0) }} data-another>Choose another</button>}
             </div>
+          )}
+
+          {mapping_open && (
+            <>
+              <div className="ni-box" data-tone="note" data-map-note={recalled ? 'recalled' : problems.nothingKnown ? 'nothing-known' : 'guessed'}>
+                <p>{recalled ? 'Matched the way you did last time, for a file with these columns. Change anything that’s wrong.'
+                  : problems.nothingKnown ? 'None of these column names are ones we know. Pick what each column holds, or leave it on Ignore.'
+                  : 'We guessed from the column names. Check each one, and change any that’s wrong.'}</p>
+              </div>
+              <ul className="ni-map" data-mapping aria-label="Your columns and Bee Hub’s fields">
+                <li className="ni-map-head" aria-hidden="true"><span>Your column</span><span>Goes into</span></li>
+                {shown.map((i) => {
+                  // A second phone or email column the owner might want instead.
+                  const also = [...MANY_OF].find((k) => alsoLooksLike(shape, mapping, k).includes(i)) || null
+                  return (
+                    <li key={i} data-column={i} data-ignored={mapping[i] === null || undefined}>
+                      <div className="ni-col"><b>{shape.headers[i] || `Column ${i + 1}`}</b><small>{shape.sample[i]}</small></div>
+                      <select className="ns-input" value={mapping[i] || ''} onChange={(e) => pick(i, e.target.value)} aria-label={`What ${shape.headers[i] || `column ${i + 1}`} holds`} data-map-select={i}>
+                        <option value="">Ignore</option>
+                        {FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                      </select>
+                      {also && mapping[i] === null && (
+                        <p className="ni-also" data-also={also}>Another {also} column. Bee Hub keeps one {also} per contact{mapping.includes(also) ? `, from ${shape.headers[mapping.indexOf(also)]}` : ''}. Pick {also === 'phone' ? 'Phone' : 'Email'} here to use this one instead.</p>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+              {empty > 0 && <p className="na-where" data-empty-columns style={{ margin: 0, fontSize: 12.5, color: T.mutedFg }}>{plural(empty, 'column')} {empty === 1 ? 'has' : 'have'} nothing in {empty === 1 ? 'it' : 'them'} in this file, so {empty === 1 ? 'it is' : 'they are'} left out.</p>}
+              {problems.noName ? (
+                <div className="ni-box" data-tone="bad" role="alert" data-no-name><p>Pick the column that holds the name: <b>Name</b>, or <b>First name</b> and <b>Last name</b>.</p></div>
+              ) : (
+                <>
+                  {canPickMore && (problems.noPhone || problems.noEmail) && (
+                    <div className="ni-box" data-tone="warn" data-missing-fields>
+                      <p>{problems.noPhone && problems.noEmail ? 'No column is set as Phone or Email, so these contacts come in with neither.' : problems.noPhone ? 'No column is set as Phone, so these contacts come in without a phone.' : 'No column is set as Email, so these contacts come in without an email.'}</p>
+                    </div>
+                  )}
+                  {landing && (
+                    <div data-landing>
+                      <p className="ni-sub">The first {landing.length === 1 ? 'row' : `${landing.length} rows`}, as {landing.length === 1 ? 'it' : 'they'} would land</p>
+                      <ul className="ni-land" style={{ marginTop: 8 }}>
+                        {landing.map((x) => x.kind === 'in' ? (
+                          <li key={x.line} data-kind="in" data-land-line={x.line}>
+                            <b>{x.row.name}</b>
+                            <dl>
+                              {x.row.first_name || x.row.last_name ? <><dt>First / last</dt><dd>{x.row.first_name || '–'} / {x.row.last_name || '–'}</dd></> : null}
+                              <dt>Type</dt><dd>{x.row.network_types.map((t) => TYPE_META[t]?.label || t).join(', ')}</dd>
+                              {x.row.email ? <><dt>Email</dt><dd>{x.row.email}</dd></> : null}
+                              {x.row.phone ? <><dt>Phone</dt><dd>{x.row.phone}</dd></> : null}
+                              {x.row.company ? <><dt>Company</dt><dd>{x.row.company}</dd></> : null}
+                              {x.row.title ? <><dt>Job title</dt><dd>{x.row.title}</dd></> : null}
+                              {x.row.birthday ? <><dt>Birthday</dt><dd>{x.row.birthday}</dd></> : null}
+                              {x.row.how_we_met ? <><dt>How met</dt><dd>{x.row.how_we_met}</dd></> : null}
+                            </dl>
+                          </li>
+                        ) : x.kind === 'unreadable' ? (
+                          <li key={x.line} data-kind="unreadable" data-land-line={x.line}><b>Row {x.line}{x.name ? `: ${x.name}` : ''}</b><span>Skipped: {x.problems.join('; ')}</span></li>
+                        ) : (
+                          <li key={x.line} data-kind="skipped" data-land-line={x.line}><b>Row {x.line}: {x.name}</b><span>Skipped: the same as row {x.matched.line} of this file</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
 
           {refusal && <div className="ni-box" data-tone="bad" role="alert" data-refusal><p>{refusal}</p></div>}
@@ -264,10 +425,17 @@ export default function ImportDialog({ locationId, locationName = '', onClose, o
             <button type="button" className="ns-btn ns-btn-primary" onClick={onClose} data-close>Done</button>
           ) : (
             <>
+              {check?.ok && <button type="button" className="ns-btn ns-btn-ghost" onClick={() => setCheck(null)} disabled={!!busy} data-change-columns>Change columns</button>}
               <button type="button" className="ns-btn ns-btn-ghost" onClick={onClose} disabled={!!busy} data-cancel>Cancel</button>
-              <button type="button" className="ns-btn ns-btn-primary" onClick={add} disabled={!!busy || !check?.ok || adding === 0} data-add>
-                {busy === 'adding' ? 'Adding…' : adding ? `Add ${plural(adding, 'contact')}` : 'Add contacts'}
-              </button>
+              {mapping_open || busy === 'checking' ? (
+                <button type="button" className="ns-btn ns-btn-primary" onClick={runCheck} disabled={!!busy || !!problems?.noName} data-check>
+                  {busy === 'checking' ? 'Checking…' : `Check against ${locationName || 'this location'}`}
+                </button>
+              ) : (
+                <button type="button" className="ns-btn ns-btn-primary" onClick={add} disabled={!!busy || !check?.ok || adding === 0} data-add>
+                  {busy === 'adding' ? 'Adding…' : adding ? `Add ${plural(adding, 'contact')}` : 'Add contacts'}
+                </button>
+              )}
             </>
           )}
         </div>

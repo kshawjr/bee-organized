@@ -22,11 +22,17 @@
 //   · The browser download helper stayed behind: it touches the page, so it
 //     belongs with the screen (slice 5).
 //
+// NAMES (third follow-up, 2026-11-19). A file may carry "First name" and
+// "Last name" columns, a "Name" column, or both. First and last win when a
+// row has them; otherwise Name is split first word / rest; an organization's
+// name is never split (lib/network/names.ts, the Clients convention).
+//
 // Tags are carried as the words in the file. Matching them to Bee Hub's tag
 // list (lib/tags.ts) needs the database and is the import screen's job.
 // ─────────────────────────────────────────────────────────────
 
 import { phoneForWrite } from '@/lib/phone'
+import { contactNames } from './names'
 import {
   DEFAULT_PARTNER_LEVEL, DEFAULT_PARTNER_STAGE, PARTNER_STAGES,
   contactTypes, normalizeTypes, partnerLevel, partnerStage,
@@ -138,7 +144,15 @@ export function rowsToContacts(rows: string[][], idPrefix = `imp-${Date.now()}`)
     const problems: string[] = []
     const warnings: string[] = []
 
-    const name = get('Name')
+    // Types first: whether a name is split depends on Organization.
+    const typeWords = list(get('Type'))
+    const known = typeWords.map((t) => TYPE_WORDS[word(t)]).filter(Boolean) as NetType[]
+    if (word(get('Record')) === 'company' || word(get('Record')) === 'organization') known.push('organization')
+    const types = normalizeTypes(known)
+    const isOrg = types.includes('organization')
+
+    const names = contactNames({ first: get('First name'), last: get('Last name'), name: get('Name'), isOrg })
+    const name = names.name
     if (!name) problems.push('Missing name')
 
     const phoneRaw = get('Phone')
@@ -151,17 +165,13 @@ export function rowsToContacts(rows: string[][], idPrefix = `imp-${Date.now()}`)
 
     if (problems.length) return { line, problems, warnings: [] }
 
-    // Types. The design's old "Record: company" column still reads, as the
-    // Organization type, so a file made from the design's sample works.
-    const typeWords = list(get('Type'))
-    const known = typeWords.map((t) => TYPE_WORDS[word(t)]).filter(Boolean) as NetType[]
+    // Types (read above). The design's old "Record: company" column still
+    // reads, as the Organization type, so a file made from the design's
+    // sample works.
     for (const t of typeWords) {
       if (!TYPE_WORDS[word(t)]) warnings.push(`Type “${t}” isn't one we use, so it was left out`)
     }
-    if (word(get('Record')) === 'company' || word(get('Record')) === 'organization') known.push('organization')
-    const types = normalizeTypes(known)
     const isPartner = types.includes('partner')
-    const isOrg = types.includes('organization')
 
     const levelRaw = get('Partner level')
     const stageRaw = get('Stage')
@@ -181,6 +191,8 @@ export function rowsToContacts(rows: string[][], idPrefix = `imp-${Date.now()}`)
     const contact: NetContact = {
       id: `${idPrefix}-${i}`,
       name,
+      firstName: names.first_name ?? undefined,
+      lastName: names.last_name ?? undefined,
       types,
       tags: list(get('Tags')),
       company: get('Company') || undefined,

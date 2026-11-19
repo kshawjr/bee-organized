@@ -16,17 +16,17 @@ const save = (changes: unknown, r = row()) => planContactSave(r, changes)
 const written = (changes: unknown, r = row()) => { const p = save(changes, r); if (!p.ok) throw new Error(`refused: ${p.error}`); return p }
 
 describe('what a save may write', () => {
-  it('is nine fields, each one column, and nothing else', () => {
+  it('is nine fields plus a person’s first and last name, each one column, and nothing else', () => {
     expect(EDITABLE_FIELDS).toEqual({
-      name: 'name', title: 'title', company: 'company', phone: 'phone', email: 'email', website: 'website',
+      name: 'name', firstName: 'first_name', lastName: 'last_name', title: 'title', company: 'company', phone: 'phone', email: 'email', website: 'website',
       howWeMet: 'how_we_met', birthday: 'birthday', birthdayReminder: 'birthday_reminder',
     })
-    expect(WRITABLE_COLUMNS).toEqual(['name', 'title', 'company', 'phone', 'email', 'website', 'how_we_met', 'birthday', 'birthday_reminder', 'updated_at'])
+    expect(WRITABLE_COLUMNS).toEqual(['name', 'first_name', 'last_name', 'title', 'company', 'phone', 'email', 'website', 'how_we_met', 'birthday', 'birthday_reminder', 'updated_at'])
   })
   it('can never reach any other column the table has', () => {
     const snapshot = readFileSync(join(process.cwd(), 'lib/db-columns.snapshot.txt'), 'utf8')
     const all = snapshot.split('\n').find((l) => l.startsWith('partners:'))!.slice('partners:'.length).split(',')
-    expect(all).toHaveLength(36)
+    expect(all).toHaveLength(38)
     const never = all.filter((c) => !WRITABLE_COLUMNS.includes(c))
     expect(never.slice().sort()).toEqual([
       'activity', 'addresses', 'card_image', 'company_id', 'created_at', 'created_by', 'customer_lead_id', 'deleted_at', 'id',
@@ -54,7 +54,8 @@ describe('saving one field changes only that field', () => {
     ['phone', '720-555-0199', 'phone'], ['email', 'lisa@new.example', 'email'], ['website', 'lisa.example', 'website'],
     ['howWeMet', 'BNI breakfast', 'how_we_met'], ['birthday', 'Mar 22', 'birthday'],
   ])('%s: the plan holds that one column', (field, to, column) => {
-    const p = written({ [field]: { to } })
+    // A name is one column only for an organization; a person's is first + last (below).
+    const p = written({ [field]: { to } }, field === 'name' ? row({ network_types: ['organization'] }) : row())
     expect(p.written).toEqual([column])
     expect(Object.keys(p.update)).toEqual([column])
   })
@@ -62,7 +63,7 @@ describe('saving one field changes only that field', () => {
     expect(written({ title: { to: 'Broker' } }).update).not.toHaveProperty('updated_at')
   })
   it('two fields changed: those two columns, in the list order', () => {
-    expect(written({ email: { to: 'new@x.example' }, name: { to: 'Lisa S' } }).written).toEqual(['name', 'email'])
+    expect(written({ email: { to: 'new@x.example' }, title: { to: 'Broker' } }).written).toEqual(['title', 'email'])
   })
   it('a form that sends every field but changes one writes one', () => {
     const p = written({
@@ -194,5 +195,54 @@ describe("the screen's half: name only what changed", () => {
     const named = Object.keys(changesBetween(loaded, { ...loaded, name: 'x', addresses: [{ value: 'y' }], networkTypes: ['partner'] } as never))
     expect(named).toEqual(['name'])
     for (const n of named) expect(EDITABLE_FIELD_NAMES).toContain(n)
+  })
+})
+
+describe('names: first, last and full name move together (2026-11-19)', () => {
+  const person = (over: Record<string, unknown> = {}) => row({ first_name: 'Lisa', last_name: 'Snyder', network_types: ['partner'], ...over })
+  const org = row({ name: 'Northside Chamber', first_name: null, last_name: null, network_types: ['organization'] })
+
+  it('renaming a person writes first, last and the full name together', () => {
+    const p = written({ lastName: { from: 'Snyder', to: 'Snyder-Hall' } }, person())
+    expect(p.update).toEqual({ name: 'Lisa Snyder-Hall', last_name: 'Snyder-Hall' })
+    expect(p.written.sort()).toEqual(['last_name', 'name'])
+  })
+
+  it('both boxes changed: all three columns, the full name tidied the Clients way', () => {
+    expect(written({ firstName: { to: '  Mary ' }, lastName: { to: 'Van  Der Berg' } }, person()).update)
+      .toEqual({ name: 'Mary Van Der Berg', first_name: 'Mary', last_name: 'Van Der Berg' })
+  })
+
+  it('the full name is tidied the Clients way, even around a part stored with a double space', () => {
+    expect(written({ lastName: { from: 'Snyder', to: 'Hall' } }, person({ first_name: 'Mary  Anne', name: 'Mary  Anne Snyder' })).update.name).toBe('Mary Anne Hall')
+  })
+
+  it('a name not split yet: filling both boxes splits it, and the full name follows', () => {
+    const p = written({ firstName: { from: null, to: 'Mary Lou' }, lastName: { from: null, to: 'Geoghagen' } }, person({ name: 'Mary Lou Geoghagen', first_name: null, last_name: null }))
+    expect(p.update).toEqual({ first_name: 'Mary Lou', last_name: 'Geoghagen' }) // the full name already reads that way
+  })
+
+  it('a person’s bare name cannot be changed on its own: it would leave first and last stale', () => {
+    expect(save({ name: { from: 'Lisa Snyder', to: 'Lisa Hall' } }, person())).toMatchObject({ ok: false, status: 422, error: 'name_is_set_from_first_and_last' })
+    // re-sending the same name is not a change, so it is not refused
+    expect(written({ name: { to: 'Lisa Snyder' } }, person()).written).toEqual([])
+  })
+
+  it('a person needs a first or last name', () => {
+    expect(save({ firstName: { to: '' }, lastName: { to: ' ' } }, person())).toMatchObject({ ok: false, status: 422, error: 'person_name_required', field: 'firstName' })
+  })
+
+  it('an organization keeps one name, and refuses a first or last name', () => {
+    expect(written({ name: { to: 'Northside Chamber of Commerce' } }, org).update).toEqual({ name: 'Northside Chamber of Commerce' })
+    expect(save({ firstName: { to: 'North' } }, org)).toMatchObject({ ok: false, status: 422, error: 'organization_has_one_name' })
+  })
+
+  it('someone else changed the last name meanwhile: nothing is written', () => {
+    expect(save({ lastName: { from: 'Smith', to: 'Hall' } }, person())).toMatchObject({ ok: false, status: 409, error: 'changed_by_someone_else', field: 'lastName' })
+  })
+
+  it('the screen names first and last when they change, never the full name for a person', () => {
+    const loaded = { firstName: 'Lisa', lastName: 'Snyder', title: 'Realtor' }
+    expect(changesBetween(loaded, { firstName: 'Lisa', lastName: 'Hall', title: 'Realtor' })).toEqual({ lastName: { from: 'Snyder', to: 'Hall' } })
   })
 })

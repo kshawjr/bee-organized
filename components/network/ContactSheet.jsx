@@ -7,6 +7,9 @@
 // lib/network/access.ts says yes to ever sees (super admins, for now). The
 // route it reads and saves through answers 403 to everyone else.
 //
+// NAMES (2026-11-19): a person's name is edited as First and Last, and the
+// full name is set from them on the server, so the three always move
+// together; an organization keeps one Name box (the add form's rule).
 // WHAT IT CHANGES. The contact's own fields, nine of them: name, job title,
 // company (the text), phone, email, website, how you met, birthday and its
 // reminder. Type, partner level and partner stage are SHOWN, plainly not
@@ -272,7 +275,7 @@ function Card({ title, tone, action, saved, children, testId }) {
 const formFrom = (c) => {
   const [month = '', day = ''] = String(c.birthday || '').split(' ')
   return {
-    name: c.name || '', title: c.title || '', company: c.company || '',
+    name: c.name || '', firstName: c.firstName || '', lastName: c.lastName || '', title: c.title || '', company: c.company || '',
     phone: c.phone || '', email: c.email || '', website: c.website || '', howWeMet: c.howWeMet || '',
     month, day, birthdayReminder: c.birthdayReminder === true,
     companyId: c.companyId || '',
@@ -288,7 +291,9 @@ const draftFor = (which, c, data) => ({
 }[which] || null)
 const errorWords = (code) => ADD_ERROR_WORDS[code] || saveErrorWords(code)
 const NOT_SAVED = 'That could not be saved. Nothing was changed. Check your connection and try again.'
-const IDENTITY_FIELDS = ['name', 'title', 'company']
+// A person's name is First and Last (the full name is set from them on the
+// server); an organization's is one Name (2026-11-19, same as the add form).
+const identityFields = (isOrg) => (isOrg ? ['name', 'title', 'company'] : ['firstName', 'lastName', 'title', 'company'])
 const ESSENTIAL_FIELDS = ['phone', 'email', 'website', 'howWeMet', 'birthday', 'birthdayReminder']
 
 /**
@@ -540,7 +545,7 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   })
 
   async function save() {
-    const fields = editing === 'identity' ? IDENTITY_FIELDS : ESSENTIAL_FIELDS
+    const fields = editing === 'identity' ? identityFields(isOrg) : ESSENTIAL_FIELDS
     const typed = { ...form, birthday: form.month && form.day ? `${form.month} ${form.day}` : '', birthdayReminder: form.birthdayReminder && !!(form.month && form.day) }
     if (editing === 'essentials' && (form.month ? !form.day : form.day)) { setError({ field: 'birthday', words: saveErrorWords('birthday_unreadable') }); return }
     // Only the fields in THIS form, and of those only what the person changed.
@@ -626,7 +631,17 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
 
           {c && editing === 'identity' && (
             <form className="ns-form" onSubmit={(e) => { e.preventDefault(); save() }} data-form="identity">
-              {input('name', 'Name', { required: true, autoFocus: true })}
+              {isOrg ? input('name', 'Name', { required: true, autoFocus: true }) : (
+                <>
+                  <div className="ns-two" data-person-name>
+                    {input('firstName', 'First name', { autoFocus: true })}
+                    {input('lastName', 'Last name')}
+                  </div>
+                  {!c.firstName && !c.lastName && (
+                    <p className="ns-quiet" data-name-not-split>Bee Hub hasn&rsquo;t split &ldquo;{c.name}&rdquo; into a first and last name yet. Fill both boxes to do it, or leave them empty to keep the name as it is.</p>
+                  )}
+                </>
+              )}
               {!isOrg && input('title', 'Job title')}
               {!isOrg && input('company', c.linkedCompany ? `Company text (linked company: ${c.linkedCompany.name})` : 'Company')}
               {/* The company LINK: picked from the Companies list at this

@@ -1,11 +1,20 @@
 // app/api/network/import/route.ts
 //
 //   POST   bring a CSV file of contacts into ONE location (slice 5)
+//   GET    ?location_id=  that location's remembered column mappings
+//          (third follow-up), so a second file from the same program
+//          arrives already mapped
 //
 // WHO MAY CALL IT: super admins only, for now (lib/network/access.ts), the
 // same rule as the rest of the new Network. Everyone else: 403, nothing read.
 //
-// Body: { location_id, csv, mode: 'check' | 'import' }
+// Body: { location_id, csv, mode: 'check' | 'import', mapping? }
+//   csv is ALWAYS in Bee Hub's own headings: the screen rewrites the owner's
+//   file into them first (lib/network/import-mapping.ts), so the rules below
+//   never see another program's headings.
+//   mapping { headers, fields }: the owner's column choices. Stored on the
+//   location AFTER an import is saved, never on a check, and a failure to
+//   store it never fails the import (the answer says mappingSaved).
 //   check   reads and plans, writes NOTHING. The import box shows this
 //           before anyone presses Add: who comes in, who is skipped as
 //           already here (and who they matched), which tag words matched
@@ -37,8 +46,21 @@ import { maySeeNewNetwork } from '@/lib/network/access'
 import { IMPORT_MAX_CHARS, planImport } from '@/lib/network/contact-create'
 import { UUID_RE, readLiveContacts, readLocation, readLocationTags } from '@/lib/network/contact-reads'
 import { writeNewContacts } from '@/lib/network/contact-writes'
+import { cleanMappingToSave } from '@/lib/network/import-mapping'
+import { readImportMappings, saveImportMapping } from '@/lib/network/import-mapping-store'
 
 export const runtime = 'nodejs'
+
+export async function GET(request: NextRequest) {
+  const supabase = await createServerSupabaseClient()
+  const caller = await loadCaller(supabase)
+  if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  const locationId = request.nextUrl.searchParams.get('location_id') || ''
+  if (!UUID_RE.test(locationId)) return NextResponse.json({ ok: false, reason: 'location_required' }, { status: 400 })
+  const read = await readImportMappings(supabaseService, locationId)
+  return NextResponse.json({ ok: true, remembered: read.ok, mappings: read.mappings })
+}
 
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
@@ -76,7 +98,7 @@ export async function POST(request: NextRequest) {
 
   const summary = {
     location,
-    adding: plan.rows.map((r) => ({ line: r.line, name: r.row.name, company: r.row.company, email: r.row.email, phone: r.row.phone, tags: r.tagIds.length })),
+    adding: plan.rows.map((r) => ({ line: r.line, name: r.row.name, first_name: r.row.first_name, last_name: r.row.last_name, title: r.row.title, company: r.row.company, email: r.row.email, phone: r.row.phone, tags: r.tagIds.length })),
     unreadable: plan.unreadable,
     skipped: plan.skipped,
     unmatchedTags: plan.unmatchedTags,
@@ -89,5 +111,8 @@ export async function POST(request: NextRequest) {
     console.error('[network import]', { location: locationId, rows: plan.rows.length, ...written })
     return NextResponse.json({ ok: false, reason: written.undone ? 'not_saved' : 'partly_saved', leftBehind: written.leftBehind, location }, { status: 500 })
   }
-  return NextResponse.json({ ok: true, mode, ...summary, added: written.ids.length, ids: written.ids })
+  // Remember how the owner mapped this file's columns, for the next one.
+  const toSave = cleanMappingToSave(body?.mapping)
+  const mappingSaved = toSave ? (await saveImportMapping(supabaseService, locationId, toSave.signature, toSave.mapping, new Date())).saved : false
+  return NextResponse.json({ ok: true, mode, ...summary, added: written.ids.length, ids: written.ids, mappingSaved })
 }

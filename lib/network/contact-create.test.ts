@@ -210,7 +210,8 @@ describe('a row with no email: the same name and phone, or the same name and no 
 
   it('name matching ignores case and extra spaces, and nothing else', () => {
     const p = at(file('  bO    BARE ,,,,,,', 'Bo Barely,,,,,,', 'B. Bare,,,,,,'))
-    expect(why(p)).toEqual([[2, 'bO    BARE', 'name_only', 'p-bare']])
+    // The skipped row is named with its spaces tidied, the Clients rule (lib/lead-name.ts).
+    expect(why(p)).toEqual([[2, 'bO BARE', 'name_only', 'p-bare']])
     expect(p.rows.map((r) => r.row.name)).toEqual(['Bo Barely', 'B. Bare'])
   })
 
@@ -233,7 +234,7 @@ describe('a row with no email: the same name and phone, or the same name and no 
   it('twice in one file: the first comes in, the later one is skipped naming the first by line', () => {
     const p = at(file('Ray Row,,,,,,', 'ray  row,,,,,,', 'Ray Row,,,(206) 555-0111,,,', 'Ray Row,,,2065550111,,,'))
     expect(p.rows.map((r) => r.line)).toEqual([2, 4])
-    expect(why(p)).toEqual([[3, 'ray  row', 'name_only', 'row 2'], [5, 'Ray Row', 'name_phone', 'row 4']])
+    expect(why(p)).toEqual([[3, 'ray row', 'name_only', 'row 2'], [5, 'Ray Row', 'name_phone', 'row 4']])
     expect(p.skipped[0]).toMatchObject({ email: null, phone: null })
     expect(p.skipped[1]).toMatchObject({ email: null, phone: '(206) 555-0111' })
   })

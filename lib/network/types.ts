@@ -114,6 +114,9 @@ export type Mailchimp = { on: boolean; how?: string | undefined; when?: string |
 export type NetContact = {
   id: string
   name: string
+  /** A person's first and last name (an organization has neither). Set with `name` by lib/network/names.ts. */
+  firstName?: string | undefined
+  lastName?: string | undefined
   /** What they like to be called. */
   nickname?: string | undefined
   /** One or more of the five. Read it through contactTypes(), never directly. */

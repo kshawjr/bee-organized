@@ -82,6 +82,12 @@ const CSS = `
 [data-network-ui] .nw-act:hover:not(:disabled){border-color:${T.primary}}
 [data-network-ui] .nw-act[data-primary]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
 [data-network-ui] .nw-act-note{flex-basis:100%;margin:0;font-size:12.5px;color:${T.mutedFg}}
+[data-network-ui] .nw-add-menu{width:min(320px,calc(100vw - 32px));padding:6px}
+[data-network-ui] .nw-add-choice{display:grid;gap:2px;width:100%;min-height:56px;padding:10px 12px!important;border-radius:10px;border:0!important;background:transparent;text-align:left!important;color:${T.primary}}
+[data-network-ui] .nw-add-choice:hover,[data-network-ui] .nw-add-choice:focus-visible{background:${T.sageSoft}}
+[data-network-ui] .nw-add-choice b{font-size:14px}
+[data-network-ui] .nw-add-choice span{font-size:12.5px;line-height:1.35;color:${T.mutedFg}}
+[data-network-ui] .nw-export{flex:0 0 auto}
 [data-network-ui] .nw-act-note[data-tone="good"]{color:${T.primary}}
 [data-network-ui] .nw-controls{display:flex;align-items:center;gap:16px}
 [data-network-ui] .nw-search{position:relative;flex:1;min-width:0}
@@ -186,6 +192,9 @@ const Svg = ({ children, size = 16 }) => (
 const IconSliders = () => <Svg><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></Svg>
 const IconTag = () => <Svg><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z" /><path d="M7 7h.01" /></Svg>
 const IconCheck = () => <Svg size={12}><path d="M5 12l5 5l10 -10" /></Svg>
+const IconPlus = () => <Svg><path d="M12 5v14M5 12h14" /></Svg>
+const IconChevron = () => <Svg size={14}><path d="M6 9l6 6 6-6" /></Svg>
+const IconDownload = () => <Svg><path d="M12 3v12M7 10l5 5 5-5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></Svg>
 const IconClock = () => <Svg><path d="M8 2v4M16 2v4M3 10h18M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" /><circle cx="18" cy="18" r="4" /><path d="M18 16.5V18l1 1" /></Svg>
 const IconFirst = () => <Svg><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" /></Svg>
 const IconPrev = () => <Svg><path d="M15 18l-6-6 6-6" /></Svg>
@@ -455,11 +464,24 @@ export default function NetworkListScreen({
         <span className="nw-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
 
         <div className="nw-actions" data-actions>
-          <button type="button" className="nw-act" data-primary disabled={!locationId} onClick={() => { setActNote(null); setDialog('add') }} data-act="add">+ Add contact</button>
-          <button type="button" className="nw-act" disabled={!locationId} onClick={() => { setActNote(null); setDialog('import') }} data-act="import">Import CSV</button>
-          <button type="button" className="nw-act" disabled={!locationId || !data || !contacts.length} onClick={exportAll} data-act="export"
-            title={locationId && data ? `All ${contacts.length} at ${locationName || 'this location'}` : undefined}>Export CSV</button>
-          {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add, import or export. A contact belongs to one location, so none of these work across all of them at once.</p>}
+          {/* ONE BUTTON for adding (2026-11-19): one person, or from a
+              spreadsheet. It is the list's own Menu, so it closes the way
+              every Bee Hub menu does (Kevin's rule, 75363e9): by picking a
+              choice, pressing the button again, or Escape, never by a tap
+              outside. Export is a different verb and sits by the search. */}
+          <Menu anchorClass="nw-add-anchor" className="nw-add-menu" trigger={(open, toggle) => (
+            <button type="button" className="nw-act" data-primary disabled={!locationId} aria-expanded={open} aria-haspopup="menu" onClick={toggle} data-act="add-contacts">
+              <IconPlus />Add contacts<IconChevron />
+            </button>
+          )}>{(close) => (<>
+            <button type="button" role="menuitem" className="nw-add-choice" onClick={() => { close(); setActNote(null); setDialog('add') }} data-act="add">
+              <b>One person</b><span>Type in someone you met, or an organization.</span>
+            </button>
+            <button type="button" role="menuitem" className="nw-add-choice" onClick={() => { close(); setActNote(null); setDialog('import') }} data-act="import">
+              <b>From a spreadsheet</b><span>A CSV file from Outlook, Google Contacts, Mailchimp, LinkedIn or any spreadsheet.</span>
+            </button>
+          </>)}</Menu>
+          {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add or export contacts. A contact belongs to one location, so neither works across all of them at once.</p>}
           {locationId && actNote && <p className="nw-act-note" data-tone={actNote.tone} role="status" data-act-note="done">{actNote.words}</p>}
         </div>
 
@@ -474,6 +496,8 @@ export default function NetworkListScreen({
                   <input className="nw-input" type="search" enterKeyHint="search" value={f.q} onChange={(e) => set({ q: e.target.value })}
                     placeholder="Search name, company, email or phone…" aria-label="Search network" data-search />
                 </div>
+                <button type="button" className="nw-trigger nw-export" disabled={!locationId || !contacts.length} onClick={exportAll} data-act="export"
+                  title={locationId ? `All ${contacts.length} at ${locationName || 'this location'}` : 'Pick one location to export'}><IconDownload />Export</button>
                 <Menu anchorClass="nw-tags-anchor" trigger={(open, toggle) => (
                   <button type="button" className="nw-trigger" aria-expanded={open} onClick={toggle} data-active={f.tagIds.length > 0 || undefined}
                     aria-label={f.tagIds.length ? `Tags, ${f.tagIds.length} picked` : 'Tags'} data-tags-trigger>

@@ -16,7 +16,9 @@
 // opened it, and what they made it. This route does not take the screen's
 // word for what that means. It reads the row as it is stored NOW and hands
 // both to lib/network/contact-edit.ts (planContactSave), which decides:
-//   · only the nine fields on its list can be written; anything else is 400
+//   · only the fields on its list can be written (the nine, plus a person's
+//     first and last name, which set the full name: lib/network/contact-edit.ts);
+//     anything else is 400
 //   · a field that already holds the new value is not written
 //   · a field somebody else changed since it was opened refuses the whole
 //     save (409), so neither person's edit is silently lost
@@ -67,14 +69,15 @@ export const runtime = 'nodejs'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const SHEET_COLS =
-  'id, location_id, name, title, company, company_id, phone, email, website, addresses, ' +
+  'id, location_id, name, first_name, last_name, title, company, company_id, phone, email, website, addresses, ' +
   'how_we_met, specialties, relationship, notes, next_steps, activity, is_customer, customer_lead_id, ' +
   'network_types, partner_level, partner_stage, birthday, birthday_reminder, ' +
   'last_contacted_at, created_at, updated_at, deleted_at, partner_tags(tag_lookup_id)'
 
-// What a save compares against: the nine editable columns, and the three
+// What a save compares against: the editable columns (and network_types, to
+// know a person from an organization), and the three
 // slice 4b can add to. Nothing more.
-const EDIT_COLS = 'id, location_id, deleted_at, name, title, company, phone, email, website, how_we_met, birthday, birthday_reminder, notes, addresses, company_id'
+const EDIT_COLS = 'id, location_id, deleted_at, name, first_name, last_name, network_types, title, company, phone, email, website, how_we_met, birthday, birthday_reminder, notes, addresses, company_id'
 
 async function gate() {
   const supabase = await createServerSupabaseClient()
@@ -89,6 +92,8 @@ function toContact(row: any) {
     id: row.id,
     locationId: row.location_id,
     name: row.name,
+    firstName: row.first_name || null,
+    lastName: row.last_name || null,
     title: row.title || null,
     company: row.company || null,
     companyId: row.company_id || null,

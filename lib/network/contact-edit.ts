@@ -27,6 +27,15 @@
 // has a reminder therefore also turns the reminder off, and the answer says
 // so in `written`.
 //
+// NAMES (2026-11-19, Kevin: universal with Clients). A PERSON's name is
+// edited as First and Last, and the full name is SET FROM THEM here, the
+// Clients way (lib/lead-name.ts composeLeadName), so first, last and full
+// name are always written together and can never drift. A bare `name` save
+// for a person is refused (Clients' route refuses it the same way). An
+// ORGANIZATION keeps one name and no first or last: a first/last save for one
+// is refused. Whether a contact is an organization is read from the stored
+// row (types are not editable here).
+//
 // WHAT IS NOT EDITABLE HERE, on purpose: types, partner level and partner
 // stage (they need the confirmation step, slice 6); tags, addresses, the
 // company link, notes and next steps (slice 4b, each through its own door);
@@ -35,10 +44,13 @@
 // ─────────────────────────────────────────────────────────────
 
 import { phoneForWrite } from '@/lib/phone'
+import { composeLeadName, normalizeNamePart } from '@/lib/lead-name'
 
 /** The fields a save may name → the partners column each one is. */
 export const EDITABLE_FIELDS = {
   name: 'name',
+  firstName: 'first_name',
+  lastName: 'last_name',
   title: 'title',
   company: 'company',
   phone: 'phone',
@@ -88,6 +100,10 @@ export function normalizeField(field: EditableField, v: unknown): Normalized {
   if (field === 'name') {
     if (!s) return bad('name_required')
     return s.length > 200 ? bad('name_too_long') : good(s)
+  }
+  if (field === 'firstName' || field === 'lastName') {
+    const n = normalizeNamePart(s)
+    return n.length > 200 ? bad('name_too_long') : good(n || null)
   }
   if (!s) return good(null)
   if (s.length > 500) return bad(`${field}_too_long`)
@@ -155,6 +171,21 @@ export function planContactSave(row: Record<string, unknown>, changes: unknown):
     if (!sameAsStored(f, stored, to.value)) next[f] = to.value
   }
 
+  // Names: first, last and full name move together (see the top of this file).
+  const isOrg = Array.isArray(row.network_types) && (row.network_types as unknown[]).includes('organization')
+  const touchesParts = 'firstName' in next || 'lastName' in next
+  const askedParts = entries.some(([f]) => f === 'firstName' || f === 'lastName')
+  if (isOrg && askedParts) return { ok: false, status: 422, error: 'organization_has_one_name', field: 'name' }
+  if (!isOrg && 'name' in next) return { ok: false, status: 422, error: 'name_is_set_from_first_and_last', field: 'firstName' }
+  if (!isOrg && touchesParts) {
+    const first = 'firstName' in next ? next.firstName : storedValue('firstName', row)
+    const last = 'lastName' in next ? next.lastName : storedValue('lastName', row)
+    const full = composeLeadName({ first_name: first as string | null, last_name: last as string | null })
+    if (!full) return { ok: false, status: 422, error: 'person_name_required', field: 'firstName' }
+    if (full.length > 200) return { ok: false, status: 422, error: 'name_too_long', field: 'firstName' }
+    if (full !== storedValue('name', row)) next.name = full
+  }
+
   // A reminder needs a birthday (the table's own rule).
   const notes: string[] = []
   const birthdayAfter = 'birthday' in next ? next.birthday : storedValue('birthday', row)
@@ -192,6 +223,9 @@ export function changesBetween(
 /** Plain words for each refusal, for the sheet to show beside the field. */
 export const SAVE_ERROR_WORDS: Record<string, string> = {
   name_required: 'A contact needs a name.',
+  person_name_required: 'A person needs a first or last name.',
+  name_is_set_from_first_and_last: 'A person’s name is set from their first and last name. Change those instead.',
+  organization_has_one_name: 'An organization has one name, not a first and last name.',
   name_too_long: 'That name is too long.',
   email_looks_wrong: 'That email does not look right. It should read like name@example.com.',
   phone_unreadable: 'That does not read as a phone number.',

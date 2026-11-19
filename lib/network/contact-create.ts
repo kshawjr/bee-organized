@@ -9,7 +9,8 @@
 // TWO DOORS, ONE ROW SHAPE (newContactRow):
 //   · the add flow: one person, typed by hand
 //   · an import: many people, from a CSV file
-// Both write the same columns, nothing else: name, title, company, phone,
+// Both write the same columns, nothing else: name, first_name, last_name
+// (lib/network/names.ts: the Clients convention), title, company, phone,
 // email, how_we_met, birthday, birthday_reminder, network_types, and for a
 // Referral partner only, partner_level and partner_stage. Plus location_id,
 // created_by and the old `type` column ('partner', its own default). An
@@ -60,6 +61,7 @@
 import { normalizeField, normalizeBirthday, type EditableField } from './contact-edit'
 import { normalizeTypes, NET_TYPES, type NetType } from './types'
 import { parseCsv, rowsToContacts } from './csv'
+import { contactNames } from './names'
 import { phoneKey } from '@/lib/phone'
 import { tagKey, tagShowsOn, cleanTagIds, MAX_TAGS_PER_CREATE, TAG_CATEGORY } from '@/lib/tags'
 
@@ -69,7 +71,7 @@ export const IMPORT_MAX_ROWS = 1000
 
 /** The columns a new contact may be written with. The routes write these and nothing else. */
 export const NEW_CONTACT_COLUMNS = [
-  'location_id', 'type', 'created_by', 'name', 'title', 'company', 'phone', 'email', 'how_we_met',
+  'location_id', 'type', 'created_by', 'name', 'first_name', 'last_name', 'title', 'company', 'phone', 'email', 'how_we_met',
   'birthday', 'birthday_reminder', 'network_types', 'partner_level', 'partner_stage', 'notes',
 ] as const
 
@@ -78,6 +80,8 @@ export type NewContactRow = {
   type: 'partner'
   created_by: string | null
   name: string
+  first_name: string | null
+  last_name: string | null
   title: string | null
   company: string | null
   phone: string | null
@@ -108,7 +112,8 @@ export function networkTagsFor(tags: readonly TagDef[], locationId: string): Tag
 
 // ── THE ADD FLOW ─────────────────────────────────────────────
 export type NewContactInput = {
-  name?: unknown; types?: unknown; company?: unknown; title?: unknown; phone?: unknown; email?: unknown
+  /** A person: first and last. An organization: name. A bare name for a person is split first word / rest. */
+  name?: unknown; firstName?: unknown; lastName?: unknown; types?: unknown; company?: unknown; title?: unknown; phone?: unknown; email?: unknown
   birthday?: unknown; birthdayReminder?: unknown; howWeMet?: unknown; tagIds?: unknown
   interest?: unknown; addAnyway?: unknown
 }
@@ -150,7 +155,7 @@ const DUP_ERROR: Record<DupRule, string> = { email: 'email_already_here', name_p
 export const DUP_ERRORS = Object.values(DUP_ERROR)
 
 const ADD_FIELDS: [keyof NewContactInput, EditableField][] = [
-  ['name', 'name'], ['title', 'title'], ['company', 'company'], ['phone', 'phone'], ['email', 'email'], ['howWeMet', 'howWeMet'], ['birthday', 'birthday'],
+  ['title', 'title'], ['company', 'company'], ['phone', 'phone'], ['email', 'email'], ['howWeMet', 'howWeMet'], ['birthday', 'birthday'],
 ]
 
 /**
@@ -176,6 +181,18 @@ export function planNewContact(
   if (b.types.some((t) => !NET_TYPES.includes(t as NetType))) return { ok: false, error: 'type_unknown', field: 'types' }
   const types = normalizeTypes(b.types)
   const isOrg = types.includes('organization')
+
+  // The name: one box for an organization, First and Last for a person, and
+  // the full name set from them the way Clients does (lib/network/names.ts).
+  for (const k of ['name', 'firstName', 'lastName'] as const) {
+    if (b[k] !== undefined && b[k] !== null && typeof b[k] !== 'string') return { ok: false, error: 'name_must_be_text', field: k }
+  }
+  const names = contactNames({ first: b.firstName, last: b.lastName, name: b.name, isOrg })
+  const nameField = isOrg || (b.firstName === undefined && b.lastName === undefined) ? 'name' : 'firstName'
+  const nn = normalizeField('name', names.name)
+  if (!nn.ok) return { ok: false, error: nn.error === 'name_required' && nameField === 'firstName' ? 'person_name_required' : nn.error, field: nameField }
+  v.name = names.name
+
   if (b.birthdayReminder !== undefined && typeof b.birthdayReminder !== 'boolean') return { ok: false, error: 'reminder_must_be_yes_or_no', field: 'birthdayReminder' }
   // An organization has no birthday (the design, and csv.ts, agree).
   if (isOrg && v.birthday) return { ok: false, error: 'organization_has_no_birthday', field: 'birthday' }
@@ -210,6 +227,8 @@ export function planNewContact(
       type: 'partner',
       created_by: ctx.userId,
       name: v.name as string,
+      first_name: names.first_name,
+      last_name: names.last_name,
       title: v.title, company: v.company, phone: v.phone, email: v.email, how_we_met: v.howWeMet,
       birthday: v.birthday,
       birthday_reminder: reminder,
@@ -233,6 +252,8 @@ export const ADD_ERROR_WORDS: Record<string, string> = {
   email_already_here: 'Someone at this location already has that email.',
   name_and_phone_already_here: 'Someone at this location already has that name and phone.',
   name_already_here: 'Someone at this location already has that name, and neither of you has a phone.',
+  person_name_required: 'A person needs a first or last name.',
+  name_must_be_text: 'A name must be text.',
 }
 
 // ── AN IMPORT ────────────────────────────────────────────────
@@ -313,7 +334,7 @@ export function planImport(
   if (csvText.length > IMPORT_MAX_CHARS) return refuse('too_big')
   if (looksBinary(csvText)) return refuse('not_csv')
   const table = parseCsv(csvText)
-  if (!table[0]?.some((h) => h.trim().toLowerCase() === 'name')) return refuse('no_name_column')
+  if (!table[0]?.some((h) => ['name', 'first name', 'last name'].includes(h.trim().toLowerCase()))) return refuse('no_name_column')
   if (table.length - 1 > IMPORT_MAX_ROWS) return refuse('too_many_rows')
   if (table.length < 2) return refuse('no_rows')
 
@@ -328,7 +349,7 @@ export function planImport(
   const problems: ImportProblem[] = []
   const planned: { line: number; c: NonNullable<(typeof read)[number]['contact']>; warnings: string[]; birthday: string | null }[] = []
   for (const r of read) {
-    const name = text(r.contact?.name) || cellAt(r.line, 'Name')
+    const name = text(r.contact?.name) || cellAt(r.line, 'Name') || [cellAt(r.line, 'First name'), cellAt(r.line, 'Last name')].filter(Boolean).join(' ')
     const p = [...r.problems]
     let birthday: string | null = null
     if (r.contact) {
@@ -410,6 +431,8 @@ export function planImport(
         type: 'partner',
         created_by: ctx.userId,
         name: c.name,
+        first_name: c.firstName || null,
+        last_name: c.lastName || null,
         title: c.role || null,
         company: c.company || null,
         phone: c.phone || null,
@@ -433,7 +456,7 @@ export function planImport(
 /** The import's refusals, in plain words. */
 export const IMPORT_REFUSAL_WORDS: Record<string, string> = {
   not_csv: 'That file is not a CSV. In Excel or Google Sheets, choose File › Save as (or Download) › CSV, then choose that file here.',
-  no_name_column: 'We couldn’t find a “Name” column. Start from the sample file, or name the column that holds people’s names “Name”.',
+  no_name_column: 'We couldn’t find a name column. Start from the sample file, or name the column that holds people’s names “Name” (or use “First name” and “Last name”).',
   too_big: 'That file is too big to bring in at once. Split it into files of a thousand rows or fewer.',
   too_many_rows: `That file has more than ${IMPORT_MAX_ROWS} rows. Split it into smaller files.`,
   no_rows: 'That file has the headings but no contacts under them.',

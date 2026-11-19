@@ -262,7 +262,8 @@ describe('The undos take back only what was added', () => {
 describe('The column snapshot', () => {
   it('keeps the 31 existing partners columns in their order and adds the five new ones after them', () => {
     const line = read('lib/db-columns.snapshot.txt').split('\n').find((l) => l.startsWith('partners:'))!
-    expect(line.slice('partners:'.length).split(',')).toEqual([...OLD_COLUMNS, ...NEW_COLUMNS])
+    // ...then first_name and last_name (migrations/network_names_columns.sql, run 2026-11-19)
+    expect(line.slice('partners:'.length).split(',')).toEqual([...OLD_COLUMNS, ...NEW_COLUMNS, 'first_name', 'last_name'])
   })
 })
 

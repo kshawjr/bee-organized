@@ -43,14 +43,19 @@ const AT_70EAB32: Record<string, string> = {
   'middleware.ts': '6a17cfac0bc06dce536a02027dcc93f10823d9a70129d2ba35e7e1481b925ead',
   // the gate: still super admins only
   'lib/network/access.ts': '2c76af86bf29a4725d279317cb1aa57cc9d189db0d38241e50e6bb19fe9fe546',
-  // slice 1's CSV module: "done, leave it"
-  'lib/network/csv.ts': '80e21a938072a4c7d52837225fd426acde8c135de64d61807a3dfd1a2cb57002',
+  // slice 1's CSV module: "done, leave it". Refreshed ON PURPOSE by the
+  // third follow-up (2026-11-19): it now reads First name / Last name
+  // columns and sets the three name columns (lib/network/names.ts).
+  'lib/network/csv.ts': '32aa4077a37ab6198754d03182535fcfb4340b1069522c59aa5d179e2b94cc25',
   // the sheet's own save route and rules, and the tag box: reused, not changed
-  'app/api/network/contacts/[id]/route.ts': 'c1a598d266a88ec11ebdaef0acd0527f13f81ddcaa09fa2f7207cc391985eecb',
+  // Refreshed ON PURPOSE (2026-11-19): the sheet edits a person's first and
+  // last name, and the save sets the full name from them (contact-edit.ts).
+  'app/api/network/contacts/[id]/route.ts': 'a0cd41489bf459f399839e072ad78a2f426055f58f2aa4fe8525304612a0018e',
   'app/api/network/summary/route.ts': '075d9fd79131455d016943d5ece20127f5cd2601bbd0ebc191544f83c074c74b',
-  'lib/network/contact-edit.ts': '29489b4231b396a62e5bb93c06803bd5a5202daf1cec42cc351365235ac55ed4',
+  'lib/network/contact-edit.ts': '6563ba3d07b8552026897b5f2df96260727e46045cf5083a4bb5f26ecd82c7f0',
   'lib/network/contact-adds.ts': '7ccf90c5e93ecd106df3103745efdb6726cb9659044a5281aae8034135440bb4',
-  'lib/network/types.ts': '58be033dc9a3b25fa174b68739789b9c1c9bcebf15f99872593145daf8a5ab7a',
+  // Refreshed ON PURPOSE by the third follow-up: firstName / lastName on NetContact.
+  'lib/network/types.ts': 'da1a27a3368d45c24f989aecfe6e70ad8677fedd5494601e058cefb7f346143c',
   'components/network/TagDialog.jsx': '3b3f519293dde0230ebd26174a98a757c92801d2de87883f2d55061da59e3bc5',
 }
 

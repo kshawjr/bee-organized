@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const h = vi.hoisted(() => {
-  const state: any = { role: 'super_admin', tables: {} as Record<string, any[]>, serviceCalls: [] as string[], failInsert: null as string | null }
+  const state: any = { role: 'super_admin', tables: {} as Record<string, any[]>, serviceCalls: [] as string[], failInsert: null as string | null, noMappingColumn: false }
   const svc = (table: string) => {
     const ctx: any = { op: 'select', filters: [] as any[], payload: null, returning: false, range: null as any }
     const b: any = {}
@@ -33,7 +33,7 @@ const h = vi.hoisted(() => {
     b.select = (c?: string) => { if (ctx.op !== 'select') ctx.returning = true; else ctx.cols = c; return b }
     b.insert = (rows: any) => { ctx.op = 'insert'; ctx.payload = Array.isArray(rows) ? rows : [rows]; return b }
     b.delete = () => { ctx.op = 'delete'; return b }
-    b.update = () => { ctx.op = 'update'; return b }
+    b.update = (v: any) => { ctx.op = 'update'; ctx.payload = v; return b }
     b.upsert = () => { ctx.op = 'upsert'; return b }
     b.eq = (c: string, v: any) => { ctx.filters.push(['eq', c, v]); return b }
     b.is = (c: string, v: any) => { ctx.filters.push(['is', c, v]); return b }
@@ -65,6 +65,10 @@ const h = vi.hoisted(() => {
         if (table === 'partners') state.tables.partner_tags = (state.tables.partner_tags || []).filter((t: any) => !gone.has(t.partner_id))
         return { data: null, error: null }
       }
+      // Before the migration runs, locations has no network_import_mappings.
+      const wantsMappings = String(ctx.cols || '').includes('network_import_mappings') || (ctx.op === 'update' && 'network_import_mappings' in (ctx.payload || {}))
+      if (table === 'locations' && wantsMappings && state.noMappingColumn) return { data: null, error: { message: 'column locations.network_import_mappings does not exist' } }
+      if (ctx.op === 'update') { for (const r of rows.filter(match)) Object.assign(r, ctx.payload); return { data: null, error: null } }
       if (ctx.op !== 'select') throw new Error(`unexpected ${ctx.op} on ${table}`)
       let out = rows.filter(match)
       if (ctx.range) out = out.slice(ctx.range[0], ctx.range[1] + 1)
@@ -90,7 +94,8 @@ vi.mock('@/lib/supabase-server', () => ({
   }),
 }))
 
-import { POST as IMPORT } from '@/app/api/network/import/route'
+import { POST as IMPORT, GET as MAPPINGS } from '@/app/api/network/import/route'
+import { cleanMappingToSave, recallMapping, headerSignature } from '@/lib/network/import-mapping'
 import { POST as ADD } from '@/app/api/network/contacts/route'
 
 const LOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -105,6 +110,7 @@ beforeEach(() => {
   h.state.role = 'super_admin'
   h.state.serviceCalls = []
   h.state.failInsert = null
+  h.state.noMappingColumn = false
   h.state.tables = {
     locations: [{ id: LOC, name: 'Seattle' }, { id: OTHER, name: 'Greensboro' }],
     lookups: [{ id: 't-realtor', label: 'Realtor', category: 'tags', location_id: null, is_active: true, attrs: { group: 'home_property', shows_on: ['network'] } }],
@@ -259,5 +265,67 @@ describe('the location being viewed, and only that one', () => {
   it('a contact in the recycle bin is not a duplicate', async () => {
     h.state.tables.partners[0].deleted_at = '2026-11-01T00:00:00Z'
     expect((await send(ADD, { location_id: LOC, name: 'Tom Back', types: ['vendor'], email: 'tom@x.co' })).status).toBe(201)
+  })
+})
+
+describe('names and remembered mappings (third follow-up, 2026-11-19)', () => {
+  const getMappings = async (loc = LOC) => { const res = await MAPPINGS({ nextUrl: new URL(`http://x/api/network/import?location_id=${loc}`) } as any); return { status: res.status, body: await res.json() } }
+  const MAP = { headers: ['Contact', 'Mail'], fields: ['name', 'email'] }
+  const CSV = 'Name,Email\nMary Van Der Berg,mary@x.co\nNorthside Chamber,hi@north.org'
+
+  it('first and last name are written with the full name', async () => {
+    const r = await send(IMPORT, { location_id: LOC, csv: 'First name,Last name,Email\nMary Anne,Smith,ma@x.co', mode: 'import' })
+    expect(r.status).toBe(200)
+    expect(h.state.tables.partners.at(-1)).toMatchObject({ name: 'Mary Anne Smith', first_name: 'Mary Anne', last_name: 'Smith', location_id: LOC })
+    expect(r.body.adding[0]).toMatchObject({ first_name: 'Mary Anne', last_name: 'Smith' })
+  })
+
+  it('an import stores the owner’s mapping on that location, and only that one', async () => {
+    const r = await send(IMPORT, { location_id: LOC, csv: CSV, mode: 'import', mapping: MAP })
+    expect(r.body).toMatchObject({ ok: true, added: 2, mappingSaved: true })
+    const loc = h.state.tables.locations.find((l: any) => l.id === LOC)
+    expect(recallMapping(loc.network_import_mappings, ['Mail', 'Contact'])).toEqual(['email', 'name'])
+    expect(h.state.tables.locations.find((l: any) => l.id === OTHER).network_import_mappings).toBeUndefined()
+    // ...and the screen reads it back
+    const g = await getMappings()
+    expect(g.status).toBe(200)
+    expect(Object.keys(g.body.mappings)).toEqual([headerSignature(MAP.headers)])
+  })
+
+  it('a check never stores a mapping', async () => {
+    await send(IMPORT, { location_id: LOC, csv: CSV, mode: 'check', mapping: MAP })
+    expect(h.state.serviceCalls.filter((c: string) => c.startsWith('update'))).toEqual([])
+    expect(h.state.tables.locations.find((l: any) => l.id === LOC).network_import_mappings).toBeUndefined()
+  })
+
+  it('a bad mapping is not stored, and the import still goes in', async () => {
+    const r = await send(IMPORT, { location_id: LOC, csv: CSV, mode: 'import', mapping: { headers: ['A', 'B'], fields: ['name', 'name'] } })
+    expect(r.body).toMatchObject({ ok: true, added: 2, mappingSaved: false })
+    expect(h.state.serviceCalls.filter((c: string) => c.startsWith('update'))).toEqual([])
+  })
+
+  it('before the migration runs: no remembered mappings, and the import still goes in', async () => {
+    h.state.noMappingColumn = true
+    const g = await getMappings()
+    expect(g.body).toEqual({ ok: true, remembered: false, mappings: {} })
+    const r = await send(IMPORT, { location_id: LOC, csv: CSV, mode: 'import', mapping: MAP })
+    expect(r.status).toBe(200)
+    expect(r.body).toMatchObject({ ok: true, added: 2, mappingSaved: false })
+  })
+
+  it('only super admins may read the mappings', async () => {
+    for (const role of ['owner', 'manager', 'lite_user', 'admin']) {
+      h.state.role = role
+      h.state.serviceCalls = []
+      expect((await getMappings()).status).toBe(403)
+      expect(h.state.serviceCalls).toEqual([])
+    }
+  })
+
+  it('what is stored holds headings and field names only, never a contact', async () => {
+    await send(IMPORT, { location_id: LOC, csv: CSV, mode: 'import', mapping: MAP })
+    const stored = JSON.stringify(h.state.tables.locations.find((l: any) => l.id === LOC).network_import_mappings)
+    expect(stored).not.toMatch(/mary|north|@/i)
+    expect(cleanMappingToSave(MAP)!.mapping.headers).toEqual(['Contact', 'Mail'])
   })
 })

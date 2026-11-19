@@ -37,6 +37,13 @@ const h = vi.hoisted(() => {
         if (fl[0] === 'in') rows = rows.filter((r: any) => fl[2].includes(r[fl[1]]))
       }
       if (ctx.op === 'update') { for (const r of rows) Object.assign(r, ctx.payload); return Promise.resolve({ data: null, error: null }) }
+      // A plain column list hands back only those columns, as the database
+      // does, so a read that forgets one (network_types, to tell a person from
+      // an organization) is caught. A list with a joined table is left whole.
+      if (typeof ctx.cols === 'string' && /^[\w\s,]+$/.test(ctx.cols) && ctx.cols.trim() !== '*') {
+        const keep = ctx.cols.split(',').map((c: string) => c.trim())
+        rows = rows.map((r: any) => Object.fromEntries(keep.map((k: string) => [k, r[k]])))
+      }
       return Promise.resolve({ data: single ? (rows[0] ?? null) : rows.slice(), error: null })
     }
     b.single = () => resolve(true)
@@ -152,7 +159,8 @@ describe('the read', () => {
   })
   it("follow-ups are the caller's own open reminders on this contact", async () => {
     as('super_admin')
-    expect((await (await get()).json()).followUps).toEqual([{ id: 'r1', user_id: ME, partner_id: ID, due_on: '2026-11-20', note: 'Coffee', done_at: null }])
+    // only the columns the route reads (id, due_on, note), as the database answers
+    expect((await (await get()).json()).followUps).toEqual([{ id: 'r1', due_on: '2026-11-20', note: 'Coffee' }])
   })
   it('a reminder already ticked off is not a follow-up', async () => {
     as('super_admin')
@@ -189,7 +197,7 @@ describe('the read', () => {
 
 describe('the save writes only what changed', () => {
   it.each([
-    ['name', 'Lisa S', 'name'], ['title', 'Broker', 'title'], ['company', 'Compass Denver', 'company'], ['phone', '720-555-0199', 'phone'],
+    ['title', 'Broker', 'title'], ['company', 'Compass Denver', 'company'], ['phone', '720-555-0199', 'phone'],
     ['email', 'new@example.com', 'email'], ['website', 'new.example', 'website'], ['howWeMet', 'BNI', 'how_we_met'], ['birthday', 'Mar 22', 'birthday'],
   ])('%s: the database is sent that column and updated_at, and nothing else', async (field, to, column) => {
     as('super_admin')
@@ -232,9 +240,10 @@ describe('the save writes only what changed', () => {
   })
   it('only ever sends columns from the editable list', async () => {
     as('super_admin')
-    await patch({ name: { to: 'A' }, title: { to: 'B' }, company: { to: 'C' }, phone: { to: '720-555-0199' }, email: { to: 'd@example.com' }, website: { to: 'e.example' }, howWeMet: { to: 'F' }, birthday: { to: 'Mar 22' }, birthdayReminder: { to: true } })
+    await patch({ firstName: { to: 'A' }, lastName: { to: 'Z' }, title: { to: 'B' }, company: { to: 'C' }, phone: { to: '720-555-0199' }, email: { to: 'd@example.com' }, website: { to: 'e.example' }, howWeMet: { to: 'F' }, birthday: { to: 'Mar 22' }, birthdayReminder: { to: true } })
     for (const col of Object.keys(writes()[0].payload)) expect(WRITABLE_COLUMNS, col).toContain(col)
-    expect(Object.keys(writes()[0].payload)).toHaveLength(10)
+    // first, last and the full name set from them, the eight others, updated_at
+    expect(Object.keys(writes()[0].payload)).toHaveLength(12)
   })
   it('the answer is the contact as it now stands, with what was written', async () => {
     as('super_admin')
@@ -302,5 +311,35 @@ describe('nothing outside partners is written', () => {
     expect(check).toBeLessThan(src.indexOf('planContactSave(row'))
     expect(check).toBeLessThan(src.indexOf('planContactAdds(row'))
     expect(check).toBeLessThan(src.indexOf('.update('))
+  })
+})
+
+describe('a rename on the sheet keeps first, last and full name together (2026-11-19)', () => {
+  it('a person: the last name changed writes last_name AND name in the same update', async () => {
+    as('super_admin')
+    h.state.tables.partners[0].first_name = 'Lisa'
+    h.state.tables.partners[0].last_name = 'Snyder'
+    const res = await patch({ lastName: { from: 'Snyder', to: 'Snyder-Hall' } })
+    expect(res.status).toBe(200)
+    expect(writes()).toHaveLength(1)
+    expect(Object.keys(writes()[0].payload).sort()).toEqual(['last_name', 'name', 'updated_at'])
+    expect(h.state.tables.partners[0]).toMatchObject({ name: 'Lisa Snyder-Hall', first_name: 'Lisa', last_name: 'Snyder-Hall' })
+    const body = await res.json()
+    expect(body.contact).toMatchObject({ name: 'Lisa Snyder-Hall', firstName: 'Lisa', lastName: 'Snyder-Hall' })
+  })
+  it('a person: the full name alone cannot be changed, and nothing is written', async () => {
+    as('super_admin')
+    const res = await patch({ name: { from: 'Lisa Snyder', to: 'Lisa Hall' } })
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('name_is_set_from_first_and_last')
+    expect(writes()).toEqual([])
+  })
+  it('an organization: one name, first and last stay empty', async () => {
+    as('super_admin')
+    h.state.tables.partners[0].network_types = ['organization']
+    const res = await patch({ name: { to: 'Compass Realty' } })
+    expect(res.status).toBe(200)
+    expect(Object.keys(writes()[0].payload).sort()).toEqual(['name', 'updated_at'])
+    expect((await patch({ firstName: { to: 'Compass' } })).status).toBe(422)
   })
 })
