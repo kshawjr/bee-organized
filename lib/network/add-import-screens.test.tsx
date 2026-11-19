@@ -295,8 +295,11 @@ describe('the buttons on the list', () => {
   it('on All Locations all three are off, and the screen says why', async () => {
     mount(<NetworkListScreen locationId={null} fetchImpl={listFetch([...rows, { ...rows[0], id: 'c3', locationId: OTHER }]) as any} />)
     await flush()
-    for (const a of ['add-contacts', 'export']) expect(($(`[data-act="${a}"]`) as HTMLButtonElement).disabled).toBe(true)
+    expect(($('[data-act="add-contacts"]') as HTMLButtonElement).disabled).toBe(true)
     expect($('[data-act="add"]')).toBeNull() // the choices are inside the one button, which is off
+    await click($('[data-act="more"]'))
+    expect(($('[data-act="export"]') as HTMLButtonElement).disabled).toBe(true)
+    expect($('[data-act="export"]')!.textContent).toContain('Pick one location first.')
     expect($('[data-act-note="pick-location"]')!.textContent).toContain('Pick one location')
   })
 
@@ -311,6 +314,7 @@ describe('the buttons on the list', () => {
     try {
       mount(<NetworkListScreen locationId={LOC} locationName="Seattle" now={new Date('2026-11-17T15:00:00')} fetchImpl={listFetch(rows) as any} />)
       await flush()
+      await click($('[data-act="more"]'))
       await click($('[data-act="export"]'))
       await flush()
     } finally {
@@ -342,6 +346,7 @@ describe('the buttons on the list', () => {
         : summary === 'never' ? new Promise(() => {}) : json({ referrers: [{ kind: 'partner', id: 'c1', count: 3, converted: 2, revenue: 900 }] }))
       mount(<NetworkListScreen locationId={LOC} locationName="Seattle" fetchImpl={f as any} />)
       await flush()
+      await click($('[data-act="more"]'))
       await click($('[data-act="export"]'))
       await flush()
       act(() => root?.unmount()); host?.remove(); root = null; host = null
@@ -546,7 +551,8 @@ describe('one Add contacts button; Export by the search (2026-11-19)', () => {
 
   it('the header has one button for adding; its two choices open the add box and the import box', async () => {
     await open()
-    expect($$('[data-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts'])
+    // slice 6: and More, for the rare actions (Export)
+    expect($$('[data-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts', 'more'])
     await click($('[data-act="add-contacts"]'))
     expect($('[data-act="add-contacts"]')!.getAttribute('aria-expanded')).toBe('true')
     expect($$('[role="menuitem"]').map((b) => b.querySelector('b')!.textContent)).toEqual(['One person', 'From a spreadsheet'])
@@ -576,11 +582,26 @@ describe('one Add contacts button; Export by the search (2026-11-19)', () => {
     expect($('[role="menuitem"]')).toBeNull()
   })
 
-  it('Export sits beside the search box, not with the add button', async () => {
+  it('Export lives in the More menu (slice 6: it is rare), and nowhere else', async () => {
     await open()
-    const exp = $('[data-act="export"]')!
-    expect(exp.closest('.nw-controls')).not.toBeNull()
-    expect(exp.closest('[data-actions]')).toBeNull()
-    expect(exp.previousElementSibling!.classList.contains('nw-search')).toBe(true)
+    expect($('[data-act="export"]')).toBeNull()
+    expect($('.nw-controls [data-act="export"]')).toBeNull()
+    await click($('[data-act="more"]'))
+    expect($$('[data-act="export"]')).toHaveLength(1)
+    expect($('[data-act="export"]')!.closest('[role="menu"]')).not.toBeNull()
+    expect($('[data-act="export"]')!.textContent).toContain('Export CSV')
+  })
+  it('the More menu closes on its choice, on its button again, and on Escape, not on a tap outside', async () => {
+    await open()
+    await click($('[data-act="more"]'))
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); document.body.click() })
+    await flush()
+    expect($('[data-act="export"]')).not.toBeNull()
+    await click($('[data-act="more"]'))
+    expect($('[data-act="export"]')).toBeNull()
+    await click($('[data-act="more"]'))
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    await flush()
+    expect($('[data-act="export"]')).toBeNull()
   })
 })

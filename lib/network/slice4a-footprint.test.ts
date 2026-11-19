@@ -103,6 +103,8 @@ describe('slice 4a left everything outside the new Network screens alone', () =>
     // already had for them. Nothing else, and never a write to /api/partners.
     const writes = Array.from(sheet.matchAll(/call\((['`][^'`]+['`]), '(POST|PATCH|DELETE)'/g)).map((m) => `${m[2]} ${m[1]!.slice(1, -1).split('?')[0]}`)
     expect(writes).toEqual([
+      // slice 6: a confirmed level or stage change, through the same save
+      'PATCH /api/network/contacts/${contactId}',
       'POST /api/touchpoints',
       'PATCH /api/network/contacts/${contactId}',
       'POST /api/reminders',

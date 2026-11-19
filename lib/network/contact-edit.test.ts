@@ -20,8 +20,9 @@ describe('what a save may write', () => {
     expect(EDITABLE_FIELDS).toEqual({
       name: 'name', firstName: 'first_name', lastName: 'last_name', title: 'title', company: 'company', phone: 'phone', email: 'email', website: 'website',
       howWeMet: 'how_we_met', birthday: 'birthday', birthdayReminder: 'birthday_reminder',
+      partnerLevel: 'partner_level', partnerStage: 'partner_stage',
     })
-    expect(WRITABLE_COLUMNS).toEqual(['name', 'first_name', 'last_name', 'title', 'company', 'phone', 'email', 'website', 'how_we_met', 'birthday', 'birthday_reminder', 'updated_at'])
+    expect(WRITABLE_COLUMNS).toEqual(['name', 'first_name', 'last_name', 'title', 'company', 'phone', 'email', 'website', 'how_we_met', 'birthday', 'birthday_reminder', 'partner_level', 'partner_stage', 'updated_at'])
   })
   it('can never reach any other column the table has', () => {
     const snapshot = readFileSync(join(process.cwd(), 'lib/db-columns.snapshot.txt'), 'utf8')
@@ -31,11 +32,11 @@ describe('what a save may write', () => {
     expect(never.slice().sort()).toEqual([
       'activity', 'addresses', 'card_image', 'company_id', 'created_at', 'created_by', 'customer_lead_id', 'deleted_at', 'id',
       'is_customer', 'last_contact', 'last_contacted_at', 'location_id', 'met_date', 'network_types', 'next_steps', 'notes',
-      'partner_level', 'partner_stage', 'referrals', 'relationship', 'specialties', 'stage', 'tags', 'tier', 'type',
+      'referrals', 'relationship', 'specialties', 'stage', 'tags', 'tier', 'type',
     ])
   })
   it.each([
-    'type', 'stage', 'tier', 'networkTypes', 'network_types', 'partnerLevel', 'partner_level', 'partnerStage', 'partner_stage',
+    'type', 'stage', 'tier', 'networkTypes', 'network_types', 'partner_level', 'partner_stage',
     'tags', 'tagIds', 'addresses', 'companyId', 'company_id', 'notes', 'nextSteps', 'relationship', 'specialties',
     'metDate', 'met_date', 'isCustomer', 'customerLeadId', 'location_id', 'deleted_at', 'updated_at', 'id', '__proto__',
   ])('refuses to write %s, and writes nothing else that came with it', (field) => {
@@ -244,5 +245,42 @@ describe('names: first, last and full name move together (2026-11-19)', () => {
   it('the screen names first and last when they change, never the full name for a person', () => {
     const loaded = { firstName: 'Lisa', lastName: 'Snyder', title: 'Realtor' }
     expect(changesBetween(loaded, { firstName: 'Lisa', lastName: 'Hall', title: 'Realtor' })).toEqual({ lastName: { from: 'Snyder', to: 'Hall' } })
+  })
+})
+
+describe('partner level and stage (slice 6): a Referral partner only, written only once confirmed', () => {
+  const partner = (over: Record<string, unknown> = {}) => row({ network_types: ['partner'], partner_level: 'referral', partner_stage: 'New Contact', ...over })
+  const yes = (changes: unknown, r = partner()) => planContactSave(r, changes, { confirmed: true })
+
+  it('without the yes, a real level or stage change is refused whole, nothing planned', () => {
+    for (const confirmed of [undefined, false, 'true', 1]) {
+      expect(planContactSave(partner(), { partnerStage: { from: 'New Contact', to: 'Reaching Out' }, title: { to: 'Broker' } }, { confirmed })).toEqual({ ok: false, status: 428, error: 'needs_confirmation', field: 'partnerStage' })
+    }
+    expect(planContactSave(partner(), { partnerLevel: { to: 'power' } })).toMatchObject({ ok: false, status: 428 })
+  })
+  it('with the yes: that one column, and nothing else (the slice 4 rule)', () => {
+    const p = yes({ partnerStage: { from: 'New Contact', to: 'Reaching Out' } })
+    expect(p).toEqual({ ok: true, update: { partner_stage: 'Reaching Out' }, written: ['partner_stage'], notes: [] })
+    expect(yes({ partnerLevel: { from: 'referral', to: 'power' } })).toMatchObject({ ok: true, update: { partner_level: 'power' } })
+  })
+  it('the level or stage already held is no change and needs no yes', () => {
+    expect(planContactSave(partner(), { partnerStage: { from: 'New Contact', to: 'New Contact' } })).toMatchObject({ ok: true, written: [] })
+  })
+  it('nothing stored reads as Potential / New Contact: picking that writes nothing, and that is what the sheet sends as "from"', () => {
+    const blank = partner({ partner_level: null, partner_stage: null })
+    expect(planContactSave(blank, { partnerLevel: { from: 'potential', to: 'potential' }, partnerStage: { from: 'New Contact', to: 'New Contact' } })).toMatchObject({ ok: true, written: [] })
+    expect(yes({ partnerStage: { from: 'New Contact', to: 'Active Partner' } }, blank)).toMatchObject({ ok: true, update: { partner_stage: 'Active Partner' } })
+  })
+  it('anyone who is not a Referral partner is refused a level or stage, even confirmed', () => {
+    for (const types of [['vendor'], ['organization'], ['nurture'], null]) {
+      expect(yes({ partnerStage: { to: 'Reaching Out' } }, row({ network_types: types }))).toMatchObject({ ok: false, status: 422, error: 'only_referral_partners' })
+    }
+  })
+  it('only the three levels and five stages', () => {
+    expect(yes({ partnerLevel: { to: 'gold' } })).toMatchObject({ ok: false, status: 422, error: 'level_unknown' })
+    expect(yes({ partnerStage: { to: 'Dormant' } })).toMatchObject({ ok: false, status: 422, error: 'stage_unknown' })
+  })
+  it('someone else moved them meanwhile: nothing written', () => {
+    expect(yes({ partnerStage: { from: 'New Contact', to: 'Active Partner' } }, partner({ partner_stage: 'Reaching Out' }))).toMatchObject({ ok: false, status: 409, error: 'changed_by_someone_else' })
   })
 })

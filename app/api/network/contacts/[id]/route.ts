@@ -77,7 +77,7 @@ const SHEET_COLS =
 // What a save compares against: the editable columns (and network_types, to
 // know a person from an organization), and the three
 // slice 4b can add to. Nothing more.
-const EDIT_COLS = 'id, location_id, deleted_at, name, first_name, last_name, network_types, title, company, phone, email, website, how_we_met, birthday, birthday_reminder, notes, addresses, company_id'
+const EDIT_COLS = 'id, location_id, deleted_at, name, first_name, last_name, network_types, partner_level, partner_stage, title, company, phone, email, website, how_we_met, birthday, birthday_reminder, notes, addresses, company_id'
 
 async function gate() {
   const supabase = await createServerSupabaseClient()
@@ -198,7 +198,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   // The nine fields (slice 4a). Asked for whenever `changes` is sent, and
   // also when nothing else is, so an empty save is still refused as before.
-  const fields = body?.changes !== undefined || !hasAdds ? planContactSave(row, body?.changes) : null
+  const fields = body?.changes !== undefined || !hasAdds ? planContactSave(row, body?.changes, { confirmed: body?.confirmed }) : null
   if (fields && !fields.ok) return refused(fields)
 
   // The note, the addresses and the company link (slice 4b).

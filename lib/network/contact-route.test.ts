@@ -257,7 +257,8 @@ describe('the save writes only what changed', () => {
 describe('a refused save writes nothing', () => {
   it.each([
     ['changed by someone else', { phone: { from: '(303) 555-0000', to: '720-555-0199' } }, 409, 'changed_by_someone_else'],
-    ['a field that is not editable', { title: { to: 'Broker' }, partnerStage: { to: 'Active Partner' } }, 400, 'field_not_editable'],
+    ['a field that is not editable', { title: { to: 'Broker' }, tier: { to: 'power-partner' } }, 400, 'field_not_editable'],
+    ['a stage change nobody confirmed', { title: { to: 'Broker' }, partnerStage: { from: 'Reaching Out', to: 'Active Partner' } }, 428, 'needs_confirmation'],
     ['a type change', { networkTypes: { to: ['vendor'] } }, 400, 'field_not_editable'],
     ['an address', { addresses: { to: [] } }, 400, 'field_not_editable'],
     ['the company link', { companyId: { to: null } }, 400, 'field_not_editable'],
@@ -341,5 +342,24 @@ describe('a rename on the sheet keeps first, last and full name together (2026-1
     expect(res.status).toBe(200)
     expect(Object.keys(writes()[0].payload).sort()).toEqual(['name', 'updated_at'])
     expect((await patch({ firstName: { to: 'Compass' } })).status).toBe(422)
+  })
+})
+
+describe('a level or stage change (slice 6)', () => {
+  it('confirmed: the database is sent partner_stage and updated_at, nothing else', async () => {
+    as('super_admin')
+    const res = await route.PATCH({ json: async () => ({ changes: { partnerStage: { from: 'Reaching Out', to: 'Active Partner' } }, confirmed: true }) } as any, ctx(ID))
+    expect(res.status).toBe(200)
+    expect(writes()).toHaveLength(1)
+    expect(Object.keys(writes()[0].payload).sort()).toEqual(['partner_stage', 'updated_at'])
+    expect(h.state.tables.partners[0].partner_stage).toBe('Active Partner')
+  })
+  it('not confirmed: 428, nothing written, the row exactly as it was', async () => {
+    as('super_admin')
+    const before = JSON.stringify(h.state.tables.partners)
+    const res = await patch({ partnerStage: { from: 'Reaching Out', to: 'Active Partner' } })
+    expect(res.status).toBe(428)
+    expect(writes()).toEqual([])
+    expect(JSON.stringify(h.state.tables.partners)).toBe(before)
   })
 })

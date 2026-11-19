@@ -36,6 +36,15 @@
 // is refused. Whether a contact is an organization is read from the stored
 // row (types are not editable here).
 //
+// PARTNER LEVEL AND STAGE (slice 6, 2026-11-19). Editable, on a Referral
+// partner only (the stored row's network_types; the table's own checks say
+// the same). A level or stage that would really change is written ONLY when
+// the save says it was confirmed (`confirmed: true`): the sheet asks first,
+// and a save without it is refused whole (428), so a cancelled or skipped
+// confirmation can never write anything. A level or stage the person did
+// not change needs no confirming. Nothing stored reads as Potential / New
+// Contact (lib/network/types.ts), so picking that writes nothing.
+//
 // WHAT IS NOT EDITABLE HERE, on purpose: types, partner level and partner
 // stage (they need the confirmation step, slice 6); tags, addresses, the
 // company link, notes and next steps (slice 4b, each through its own door);
@@ -45,6 +54,7 @@
 
 import { phoneForWrite } from '@/lib/phone'
 import { composeLeadName, normalizeNamePart } from '@/lib/lead-name'
+import { DEFAULT_PARTNER_LEVEL, DEFAULT_PARTNER_STAGE, PARTNER_LEVELS, PARTNER_STAGES } from './types'
 
 /** The fields a save may name → the partners column each one is. */
 export const EDITABLE_FIELDS = {
@@ -59,6 +69,8 @@ export const EDITABLE_FIELDS = {
   howWeMet: 'how_we_met',
   birthday: 'birthday',
   birthdayReminder: 'birthday_reminder',
+  partnerLevel: 'partner_level',
+  partnerStage: 'partner_stage',
 } as const
 
 export type EditableField = keyof typeof EDITABLE_FIELDS
@@ -101,6 +113,8 @@ export function normalizeField(field: EditableField, v: unknown): Normalized {
     if (!s) return bad('name_required')
     return s.length > 200 ? bad('name_too_long') : good(s)
   }
+  if (field === 'partnerLevel') return (PARTNER_LEVELS as readonly string[]).includes(s) ? good(s) : bad('level_unknown')
+  if (field === 'partnerStage') return (PARTNER_STAGES as readonly string[]).includes(s) ? good(s) : bad('stage_unknown')
   if (field === 'firstName' || field === 'lastName') {
     const n = normalizeNamePart(s)
     return n.length > 200 ? bad('name_too_long') : good(n || null)
@@ -128,6 +142,9 @@ function storedValue(field: EditableField, row: Record<string, unknown>): string
   const raw = row[EDITABLE_FIELDS[field]]
   if (field === 'birthdayReminder') return raw === true
   const s = text(raw)
+  // Nothing stored is read as the default, as every screen shows it.
+  if (field === 'partnerLevel') return (PARTNER_LEVELS as readonly string[]).includes(s) ? s : DEFAULT_PARTNER_LEVEL
+  if (field === 'partnerStage') return (PARTNER_STAGES as readonly string[]).includes(s) ? s : DEFAULT_PARTNER_STAGE
   return s ? s : null
 }
 
@@ -141,7 +158,7 @@ function sameAsStored(field: EditableField, stored: string | boolean | null, val
 
 export type SavePlan =
   | { ok: true; update: Record<string, string | boolean | null>; written: string[]; notes: string[] }
-  | { ok: false; status: 400 | 409 | 422; error: string; field?: string; current?: string | boolean | null }
+  | { ok: false; status: 400 | 409 | 422 | 428; error: string; field?: string; current?: string | boolean | null }
 
 /**
  * Decide what a save writes. `row` is the stored row (column names);
@@ -149,7 +166,7 @@ export type SavePlan =
  * back holds ONLY the columns that really change; updated_at is the caller's
  * to add, and only when `written` is not empty.
  */
-export function planContactSave(row: Record<string, unknown>, changes: unknown): SavePlan {
+export function planContactSave(row: Record<string, unknown>, changes: unknown, opts: { confirmed?: unknown } = {}): SavePlan {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return { ok: false, status: 400, error: 'changes_required' }
   const entries = Object.entries(changes as Record<string, unknown>)
   if (entries.length === 0) return { ok: false, status: 400, error: 'changes_required' }
@@ -169,6 +186,14 @@ export function planContactSave(row: Record<string, unknown>, changes: unknown):
       if (!sameAsStored(f, stored, from)) return { ok: false, status: 409, error: 'changed_by_someone_else', field, current: stored }
     }
     if (!sameAsStored(f, stored, to.value)) next[f] = to.value
+  }
+
+  // Partner level and stage: a Referral partner only, and only once confirmed.
+  const isPartner = Array.isArray(row.network_types) && (row.network_types as unknown[]).includes('partner')
+  const askedPartner = entries.find(([f]) => f === 'partnerLevel' || f === 'partnerStage')
+  if (askedPartner && !isPartner) return { ok: false, status: 422, error: 'only_referral_partners', field: askedPartner[0] }
+  if (('partnerLevel' in next || 'partnerStage' in next) && opts.confirmed !== true) {
+    return { ok: false, status: 428, error: 'needs_confirmation', field: 'partnerLevel' in next ? 'partnerLevel' : 'partnerStage' }
   }
 
   // Names: first, last and full name move together (see the top of this file).
@@ -226,6 +251,10 @@ export const SAVE_ERROR_WORDS: Record<string, string> = {
   person_name_required: 'A person needs a first or last name.',
   name_is_set_from_first_and_last: 'A person’s name is set from their first and last name. Change those instead.',
   organization_has_one_name: 'An organization has one name, not a first and last name.',
+  only_referral_partners: 'Only a Referral partner has a level and a stage.',
+  needs_confirmation: 'That change needs confirming first. Nothing was saved.',
+  level_unknown: 'That is not one of the three levels.',
+  stage_unknown: 'That is not one of the five stages.',
   name_too_long: 'That name is too long.',
   email_looks_wrong: 'That email does not look right. It should read like name@example.com.',
   phone_unreadable: 'That does not read as a phone number.',

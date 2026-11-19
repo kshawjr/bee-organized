@@ -12,7 +12,11 @@
 // together; an organization keeps one Name box (the add form's rule).
 // WHAT IT CHANGES. The contact's own fields, nine of them: name, job title,
 // company (the text), phone, email, website, how you met, birthday and its
-// reminder. Type, partner level and partner stage are SHOWN, plainly not
+// reminder. PARTNER LEVEL AND STAGE (slice 6): a Referral partner's level
+// and stage are buttons; picking a different one asks to confirm
+// (ConfirmChange), with an optional note, and only a yes sends anything
+// (PATCH with confirmed: true; the server refuses it without). Cancel sends
+// nothing. Before slice 6: type, partner level and partner stage are SHOWN, plainly not
 // editable, with a line saying they change through a confirmation step that
 // is still to come (slice 6).
 //
@@ -54,7 +58,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
-import { TYPE_META, LEVEL_META, PARTNER_STAGES, normalizeTypes, partnerLevel, partnerStage, money } from '@/lib/network/types'
+import { TYPE_META, LEVEL_META, PARTNER_LEVELS, PARTNER_STAGES, normalizeTypes, partnerLevel, partnerStage, money } from '@/lib/network/types'
+import ConfirmChange from './ConfirmChange'
 import { changesBetween, saveErrorWords } from '@/lib/network/contact-edit'
 import {
   ADD_ERROR_WORDS, ADDRESS_MAX, ADDRESS_TYPES, NOTE_MAX, TOUCH_TYPE_CATEGORY,
@@ -145,6 +150,12 @@ const CSS = `
 [data-network-sheet] .ns-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;padding:3px;border-radius:999px;background:color-mix(in oklab,${T.card} 62%,${NET.vendorSoft})}
 [data-network-sheet] .ns-step{display:flex;align-items:center;justify-content:center;gap:5px;min-height:52px;padding:0 4px;border-radius:999px;color:${T.mutedFg};text-align:center}
 [data-network-sheet] .ns-step[data-current="true"]{background:${T.primary};color:${T.primaryFg}}
+[data-network-sheet] button.ns-step{border:0!important;background:transparent;font:inherit;cursor:pointer}
+[data-network-sheet] button.ns-step:hover:not([data-current="true"]):not(:disabled){background:color-mix(in oklab,${T.primary} 8%,${T.card})}
+[data-network-sheet] button.ns-step[data-current="true"]{background:${T.primary};color:${T.primaryFg}}
+[data-network-sheet] .ns-levels{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+[data-network-sheet] .ns-level{min-height:36px;padding:0 12px!important;border-radius:999px;border:1px solid ${T.input}!important;background:${T.card};color:${T.primary};font-size:13px!important;font-weight:600}
+[data-network-sheet] .ns-level[aria-pressed="true"]{background:${T.primary};border-color:${T.primary}!important;color:${T.primaryFg}}
 [data-network-sheet] .ns-step[data-done="true"]{background:color-mix(in oklab,${NET.vendor} 16%,${T.card});color:${NET.vendor}}
 [data-network-sheet] .ns-step b{display:grid;place-items:center;flex-shrink:0;width:16px;height:16px;border:1px solid currentColor;border-radius:50%;font-size:9.5px;font-weight:400}
 [data-network-sheet] .ns-step span{min-width:0;overflow-wrap:anywhere;font-size:10.5px;font-weight:600;line-height:1.2}
@@ -382,6 +393,35 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
   const level = c ? partnerLevel({ types, level: c.partnerLevel }) : null
   const stage = c ? partnerStage({ types, stage: c.partnerStage }) : null
   const history = useMemo(() => historyOf(c, data?.touchpoints), [c, data])
+  // A level or stage picked but not yet confirmed: { field, from, to }.
+  const [pending, setPending] = useState(null)
+  const [pendingBusy, setPendingBusy] = useState(false)
+  const [pendingError, setPendingError] = useState(null)
+  const askChange = (field, from, to) => { if (from !== to && !saving) { setPending({ field, from, to }); setPendingError(null) } }
+  async function confirmChange(note) {
+    if (!pending || pendingBusy) return
+    setPendingBusy(true); setPendingError(null)
+    try {
+      const label = pending.field === 'partnerLevel' ? LEVEL_META[pending.to].label : pending.to
+      const { res, json } = await call(`/api/network/contacts/${contactId}`, 'PATCH', {
+        changes: { [pending.field]: { from: pending.from, to: pending.to } },
+        confirmed: true,
+        ...(note ? { addNote: { text: `${pending.field === 'partnerLevel' ? `Level changed to ${label}` : `Moved to ${label}`}: ${note}` } } : {}),
+      })
+      if (!res.ok) {
+        setPendingError(errorWords(json?.error))
+        if (res.status === 409) await load()
+        return
+      }
+      setData(json); setPending(null)
+      setSaved({ where: 'partner', words: json.written?.length ? 'Saved' : 'Nothing changed' })
+      if (json.written?.length) onSaved(json.contact)
+    } catch {
+      setPendingError(NOT_SAVED)
+    } finally {
+      setPendingBusy(false)
+    }
+  }
 
   // Bee Hub's ONE tag list for THIS contact's location (the same read every
   // other tag picker makes), showing only the groups that belong on Network
@@ -794,16 +834,20 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                 </Card>
 
                 {isPartner && (
-                  <Card title="Partner level & stage" tone="partner" testId="partner">
-                    <p className="ns-quiet" style={{ marginBottom: '10px' }}>Level: <b style={{ color: T.primary }} data-sheet-level={level}>{LEVEL_META[level].label}</b></p>
-                    <div className="ns-steps" role="group" aria-label="Partner stage" aria-disabled="true" data-sheet-stages>
+                  <Card title="Partner level & stage" tone="partner" testId="partner" saved={saved?.where === 'partner' ? saved.words : null}>
+                    <div className="ns-levels" role="group" aria-label="Partner level" data-sheet-levels>
+                      {PARTNER_LEVELS.map((l) => (
+                        <button key={l} type="button" className="ns-level" aria-pressed={l === level} disabled={saving || pendingBusy} onClick={() => askChange('partnerLevel', level, l)} data-level-choice={l} data-sheet-level={l === level ? l : undefined}>{LEVEL_META[l].label}</button>
+                      ))}
+                    </div>
+                    <div className="ns-steps" role="group" aria-label="Partner stage" data-sheet-stages>
                       {PARTNER_STAGES.map((s, i) => {
                         const at = PARTNER_STAGES.indexOf(stage)
                         const done = at !== PARTNER_STAGES.length - 1 && i < at
-                        return <div key={s} className="ns-step" data-current={s === stage} data-done={done} aria-current={s === stage ? 'step' : undefined} title={s}><b>{i + 1}</b><span>{s}</span></div>
+                        return <button key={s} type="button" className="ns-step" data-current={s === stage} data-done={done} aria-current={s === stage ? 'step' : undefined} aria-pressed={s === stage} title={s} disabled={saving || pendingBusy} onClick={() => askChange('partnerStage', stage, s)} data-stage-choice={s}><b>{i + 1}</b><span>{s}</span></button>
                       })}
                     </div>
-                    <p className="ns-quiet" style={{ marginTop: '8px' }} data-level-stage-note>Now at <b style={{ color: T.primary }}>{stage}</b>. Level and stage can&rsquo;t be changed from here yet: changing them will ask you to confirm, and that step is still being built.</p>
+                    <p className="ns-quiet" style={{ marginTop: '8px' }} data-level-stage-note>Now at <b style={{ color: T.primary }}>{stage}</b>. Tap a level or stage to change it; you&rsquo;ll be asked to confirm.</p>
                   </Card>
                 )}
 
@@ -952,6 +996,14 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
           </>
         )}
       </aside>
+      {pending && c && (
+        <ConfirmChange
+          title={pending.field === 'partnerLevel' ? `Change ${c.name}’s level to ${LEVEL_META[pending.to].label}?` : `Move ${c.name} to ${pending.to}?`}
+          detail={pending.field === 'partnerLevel' ? `From ${LEVEL_META[pending.from].label}.` : `From ${pending.from}.`}
+          withNote confirmLabel={pending.field === 'partnerLevel' ? 'Change level' : 'Move them'}
+          busy={pendingBusy} error={pendingError}
+          onConfirm={confirmChange} onCancel={() => { if (!pendingBusy) { setPending(null); setPendingError(null) } }} />
+      )}
       {editing === 'tags' && draft && (
         <TagDialog list={tagList} picked={draft.picked} setPicked={(ids) => setDraft({ picked: ids })} create={createTag} done={saveTags} close={cancel}
           saving={saving} error={error} clearError={() => setError(null)} />

@@ -31,6 +31,23 @@
 // the button starts off the screen. Here only the pills scroll and Filters
 // stays put at the right edge. (Found by looking at the 390px screenshot.)
 //
+// SLICE 6 (2026-11-19):
+//   · EXPORT lives in the header's More menu: it is rare (Kevin), so it is not
+//     a main button. The same Menu as Add contacts (closes on a choice, on its
+//     button again, or Escape; never on a tap outside).
+//   · BULK ACTIONS, inside one location only: tick contacts (or a whole page),
+//     then add or take off a tag, or set a Referral partner's level or stage.
+//     ONE confirmation for the whole selection (ConfirmChange); Cancel sends
+//     nothing. The server (POST /api/network/contacts/bulk) refuses without
+//     the yes and writes only the contacts that really change. Follow-ups
+//     and anything Mailchimp/drip are not bulk actions (lib/network/bulk.ts).
+//   · ONE STAGE IS NORMAL: 50 of 56 Referral partners sit at New Contact, so
+//     the Referral partner group says so in one line ("All 50 at New
+//     Contact") instead of drawing four empty columns.
+//   · A contact with NO TYPE stored (made on the old screen) shows as Not sure
+//     yet, as it always has (lib/network/types.ts normalizeTypes). Nothing is
+//     written to them.
+//
 // What the design's list has that this slice leaves out, on purpose: the
 // Board view, bulk selection, the sort menu, Mailchimp marks and the People /
 // Companies switch. They belong to later slices or to data Bee Hub does not
@@ -47,6 +64,9 @@ import { fixedDateLabel } from '@/lib/reminders'
 import { NO_FILTERS, anyFilterOn, applyListFilters, contactFromRow, dueForFollowUp, groupForList, menuFilterCount, tagsInUse, typeCounts } from '@/lib/network/list'
 import { downloadText, exportFileName, exportText } from '@/lib/network/csv-download'
 import AddContactDialog from './AddContactDialog'
+import ConfirmChange from './ConfirmChange'
+import { BULK_ERROR_WORDS, bulkActionWords } from '@/lib/network/bulk'
+import { networkTagsFor } from '@/lib/network/contact-create'
 import ImportDialog from './ImportDialog'
 
 const TYPE_COLOR = { partner: NET.partner, vendor: NET.vendor, nurture: NET.nurture, organization: NET.organization, unsure: NET.unsure }
@@ -87,7 +107,27 @@ const CSS = `
 [data-network-ui] .nw-add-choice:hover,[data-network-ui] .nw-add-choice:focus-visible{background:${T.sageSoft}}
 [data-network-ui] .nw-add-choice b{font-size:14px}
 [data-network-ui] .nw-add-choice span{font-size:12.5px;line-height:1.35;color:${T.mutedFg}}
-[data-network-ui] .nw-export{flex:0 0 auto}
+[data-network-ui] .nw-more-menu{width:min(280px,calc(100vw - 32px));padding:6px}
+@media (max-width:600px){ [data-network-ui] .nw-actions{position:relative} [data-network-ui] .nw-anchor.nw-more-anchor{position:static} [data-network-ui] .nw-more-anchor .nw-menu{left:0;right:auto} }
+[data-network-ui] .nw-actions .nw-act:not([data-primary]){gap:4px}
+[data-network-ui] .nw-row-wrap{display:flex;align-items:stretch;min-width:0;border-bottom:1px solid ${T.border}}
+[data-network-ui] .nw-row-wrap:last-child{border-bottom:0}
+[data-network-ui] .nw-row-wrap[data-even]{background:color-mix(in oklab,var(--nw-tint) 32%,${T.card})}
+[data-network-ui] .nw-row-wrap[data-selected]{background:color-mix(in oklab,${T.primary} 9%,${T.card})}
+[data-network-ui] .nw-row-wrap > .nw-row{flex:1;border-bottom:0!important;background:transparent!important}
+[data-network-ui] .nw-row-wrap > button.nw-row:hover{background:color-mix(in oklab,${T.muted} 60%,transparent)!important}
+[data-network-ui] .nw-check{display:flex;align-items:center;justify-content:center;flex:0 0 44px;cursor:pointer}
+[data-network-ui] .nw-check input,[data-network-ui] .nw-select-page input{width:18px;height:18px;accent-color:${T.primary};cursor:pointer}
+[data-network-ui] .nw-select-page{display:flex;align-items:center;gap:10px;padding:8px 13px;border-bottom:1px solid ${T.border};font-size:12.5px;color:${T.mutedFg};cursor:pointer}
+[data-network-ui] .nw-stage-line{margin:0;padding:8px 16px;border-bottom:1px solid ${T.border};font-size:12.5px;color:${T.mutedFg};background:${T.card}}
+[data-network-ui] .nw-stage-line b{color:${T.primary};font-weight:700}
+[data-network-ui] .nw-bulk{position:fixed;left:50%;transform:translateX(-50%);width:min(1088px,calc(100vw - 32px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:${T.primary};color:${T.primaryFg};box-shadow:0 12px 30px -12px rgba(26,48,44,.5)}
+[data-network-ui] .nw-bulk b{font-size:14px;margin-right:4px}
+[data-network-ui] .nw-bulk select{min-height:40px;max-width:100%;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:color-mix(in oklab,${T.primaryFg} 12%,${T.primary});color:${T.primaryFg};padding:0 8px;font-family:inherit;font-size:13px!important}
+[data-network-ui] .nw-bulk select option{color:${T.primary};background:${T.card}}
+[data-network-ui] .nw-bulk button{min-height:40px;padding:0 12px;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:transparent;color:${T.primaryFg};font-size:13px!important;font-weight:700;margin-left:auto}
+[data-network-ui] .nw-wrap[data-bulk-open]{padding-bottom:140px}
+@media (max-width:600px){ [data-network-ui] .nw-bulk{bottom:calc(8px + env(safe-area-inset-bottom,0px))} [data-network-ui] .nw-bulk select{flex:1 1 40%} [data-network-ui] .nw-bulk button{margin-left:0} }
 [data-network-ui] .nw-act-note[data-tone="good"]{color:${T.primary}}
 [data-network-ui] .nw-controls{display:flex;align-items:center;gap:16px}
 [data-network-ui] .nw-search{position:relative;flex:1;min-width:0}
@@ -136,8 +176,6 @@ const CSS = `
 [data-network-ui] .nw-group-heading[aria-expanded="true"] .nw-chevron{transform:rotate(180deg)}
 [data-network-ui] .nw-rows{background:${T.card};border-bottom:1px solid ${T.border};overflow:hidden}
 [data-network-ui] .nw-row{display:flex;align-items:center;gap:16px;width:100%;padding:12px 16px;border-bottom:1px solid ${T.border};min-width:0}
-[data-network-ui] .nw-row:last-of-type{border-bottom:0}
-[data-network-ui] .nw-row:nth-of-type(even){background:color-mix(in oklab,var(--nw-tint) 32%,${T.card})}
 [data-network-ui] button.nw-row:hover{background:color-mix(in oklab,${T.muted} 60%,${T.card})}
 [data-network-ui] .nw-avatar{position:relative;display:flex;flex-shrink:0;align-items:center;justify-content:center;width:40px;height:40px;border-radius:999px;background:${T.goldSoft};color:${NET.accentFg};font-size:12px;font-weight:700}
 [data-network-ui] .nw-avatar[data-org]{border-radius:8px;background:${T.sageSoft};color:${T.foreground}}
@@ -194,6 +232,7 @@ const IconTag = () => <Svg><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h1
 const IconCheck = () => <Svg size={12}><path d="M5 12l5 5l10 -10" /></Svg>
 const IconPlus = () => <Svg><path d="M12 5v14M5 12h14" /></Svg>
 const IconChevron = () => <Svg size={14}><path d="M6 9l6 6 6-6" /></Svg>
+const IconMore = () => <Svg><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></Svg>
 const IconDownload = () => <Svg><path d="M12 3v12M7 10l5 5 5-5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></Svg>
 const IconClock = () => <Svg><path d="M8 2v4M16 2v4M3 10h18M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" /><circle cx="18" cy="18" r="4" /><path d="M18 16.5V18l1 1" /></Svg>
 const IconFirst = () => <Svg><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" /></Svg>
@@ -285,7 +324,7 @@ function Stats({ c, today, referralsKnown }) {
   )
 }
 
-function Row({ c, onOpen, today, showLocation, referralsKnown }) {
+function Row({ c, onOpen, today, showLocation, referralsKnown, even = false, selectable = false, selected = false, onSelect = null }) {
   const types = contactTypes(c)
   const org = isOrganization(c)
   const level = partnerLevel(c)
@@ -318,12 +357,36 @@ function Row({ c, onOpen, today, showLocation, referralsKnown }) {
       <span className="nw-stats"><Stats c={c} today={today} referralsKnown={referralsKnown} /></span>
     </>
   )
-  return onOpen
-    ? <button type="button" className="nw-row" data-row={c.id} onClick={() => onOpen(c.id)} aria-label={`Open ${c.name}`}>{body}</button>
-    : <div className="nw-row" data-row={c.id}>{body}</div>
+  return (
+    <div className="nw-row-wrap" data-even={even || undefined} data-selected={selected || undefined}>
+      {selectable && (
+        <label className="nw-check"><input type="checkbox" checked={selected} onChange={(e) => onSelect(c.id, e.target.checked)} aria-label={`Select ${c.name}`} data-select={c.id} /></label>
+      )}
+      {onOpen
+        ? <button type="button" className="nw-row" data-row={c.id} onClick={() => onOpen(c.id)} aria-label={`Open ${c.name}`}>{body}</button>
+        : <div className="nw-row" data-row={c.id}>{body}</div>}
+    </div>
+  )
 }
 
-function Group({ type, contacts, open, onToggle, page, size, onPage, onSize, onOpen, today, showLocation, referralsKnown }) {
+/**
+ * The Referral partner group's one line about stages and levels. Nearly
+ * everyone sits at one stage today, so that reads as a plain sentence, not as
+ * a board of empty columns.
+ */
+export function stageLine(contacts) {
+  const count = (pick, order) => order.map((k) => [k, contacts.filter((c) => pick(c) === k).length]).filter(([, n]) => n > 0)
+  const stages = count(partnerStage, PARTNER_STAGES)
+  const levels = count(partnerLevel, PARTNER_LEVELS).map(([k, n]) => [LEVEL_META[k].label, n])
+  if (!contacts.length) return null
+  const list = (xs) => xs.map(([k, n]) => `${k} ${n}`).join(' · ')
+  return {
+    stages: stages.length === 1 ? `All ${contacts.length} at ${stages[0][0]}` : list(stages),
+    levels: levels.length === 1 ? `all ${levels[0][0]}` : list(levels),
+  }
+}
+
+function Group({ type, contacts, open, onToggle, page, size, onPage, onSize, onOpen, today, showLocation, referralsKnown, selectable = false, selected = null, onSelect = null, onSelectMany = null }) {
   const top = useRef(null)
   const label = type ? TYPE_META[type].label : 'Network'
   const tone = toneOf(type)
@@ -341,8 +404,14 @@ function Group({ type, contacts, open, onToggle, page, size, onPage, onSize, onO
       {open && (
         <div className="nw-rows">
           <Pager label={label} total={contacts.length} page={page} size={size} onPage={change} onSize={onSize} />
+          {type === 'partner' && (() => { const l = stageLine(contacts); return l && <p className="nw-stage-line" data-stage-line>Stage: <b>{l.stages}</b>. Level: <b>{l.levels}</b>.</p> })()}
           {contacts.length === 0 && <p className="nw-none">Nobody here yet.</p>}
-          {shown.map((c) => <Row key={c.id} c={c} onOpen={onOpen} today={today} showLocation={showLocation} referralsKnown={referralsKnown} />)}
+          {selectable && shown.length > 0 && (() => {
+            const all = shown.every((c) => selected.has(c.id))
+            return <label className="nw-select-page"><input type="checkbox" checked={all} onChange={(e) => onSelectMany(shown.map((c) => c.id), e.target.checked)} data-select-page={type || 'all'} />{all ? `All ${shown.length} on this page picked` : `Pick all ${shown.length} on this page`}</label>
+          })()}
+          {shown.map((c, i) => <Row key={c.id} c={c} onOpen={onOpen} today={today} showLocation={showLocation} referralsKnown={referralsKnown} even={i % 2 === 1}
+            selectable={selectable} selected={!!selected?.has(c.id)} onSelect={onSelect} />)}
           {contacts.length > size && <Pager label={label} total={contacts.length} page={page} size={size} onPage={change} />}
         </div>
       )}
@@ -379,6 +448,13 @@ export default function NetworkListScreen({
   const [dialog, setDialog] = useState(null) // null | 'add' | 'import'
   const [reloads, setReloads] = useState(0)
   const [actNote, setActNote] = useState(null) // { words, tone }
+  // Slice 6: bulk selection (ids), the action waiting for its one yes, and
+  // this location's Network tags for the bulk tag pickers.
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulk, setBulk] = useState(null) // { action, value, label } waiting to be confirmed
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkError, setBulkError] = useState(null)
+  const [locTags, setLocTags] = useState(null)
 
   const nowMs = useMemo(() => (now ? now.getTime() : Date.now()), [now])
   const today = useMemo(() => new Date(nowMs).toLocaleDateString('en-CA'), [nowMs])
@@ -411,6 +487,19 @@ export default function NetworkListScreen({
     return () => { alive = false }
   }, [locationId, fetchImpl, refreshKey, reloads])
 
+  // A new location (or a reload) starts with nothing picked.
+  useEffect(() => { setSelected(new Set()); setBulk(null) }, [locationId, refreshKey, reloads])
+  // This location's Network tags, for the bulk tag pickers.
+  useEffect(() => {
+    if (!locationId) { setLocTags(null); return undefined }
+    let alive = true
+    const doFetch = fetchImpl || fetch
+    doFetch(`/api/lookups?category=tags&location_id=${encodeURIComponent(locationId)}`)
+      .then(async (res) => { const json = await res.json().catch(() => ({})); if (alive) setLocTags(res.ok && Array.isArray(json.lookups) ? networkTagsFor(json.lookups, locationId).sort((a, b) => String(a.label).localeCompare(String(b.label))) : []) })
+      .catch(() => { if (alive) setLocTags([]) })
+    return () => { alive = false }
+  }, [locationId, fetchImpl])
+
   // A tag handed in from Search: start filtered by it, once.
   useEffect(() => {
     if (!initialTagId) return
@@ -441,6 +530,71 @@ export default function NetworkListScreen({
   const menuCount = menuFilterCount(f)
   const shownTags = tags.filter((t) => t.label.toLowerCase().includes(tagSearch.trim().toLowerCase()))
 
+  // ── Bulk (slice 6) ─────────────────────────────────────────
+  const selectable = !!locationId
+  // In name order, as the list shows them.
+  const pickedContacts = contacts.filter((c) => selected.has(c.id)).sort((a, b) => a.name.localeCompare(b.name))
+  const pickedPartners = pickedContacts.filter((c) => isReferralPartner(c))
+  const onSelect = (id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })
+  const onSelectMany = (ids, on) => setSelected((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id) } return n })
+  const askBulk = (action, value) => {
+    if (!value) return
+    const label = action === 'level' ? LEVEL_META[value].label : action === 'stage' ? value : (locTags || []).find((t) => t.id === value)?.label || 'that tag'
+    setBulk({ action, value, label }); setBulkError(null)
+  }
+  // What the one confirmation says, worked out from the list as it is shown.
+  const bulkSummary = useMemo(() => {
+    if (!bulk) return null
+    const n = pickedContacts.length
+    const people = (k) => `${k} ${k === 1 ? 'contact' : 'contacts'}`
+    if (bulk.action === 'level' || bulk.action === 'stage') {
+      const now = (c) => (bulk.action === 'level' ? partnerLevel(c) : partnerStage(c))
+      const notPartner = n - pickedPartners.length
+      const already = pickedPartners.filter((c) => now(c) === bulk.value).length
+      const moving = pickedPartners.length - already
+      return {
+        title: `${bulkActionWords(bulk.action, bulk.label)}: ${people(moving)}?`,
+        names: pickedPartners.filter((c) => now(c) !== bulk.value).slice(0, 5).map((c) => c.name).concat(moving > 5 ? [`and ${moving - 5} more`] : []),
+        warn: [notPartner ? `${people(notPartner)} ${notPartner === 1 ? 'isn’t a Referral partner' : 'aren’t Referral partners'}, so ${notPartner === 1 ? 'it is' : 'they are'} left as they are.` : '', already ? `${already} already ${already === 1 ? 'is' : 'are'} there.` : ''].filter(Boolean).join(' ') || null,
+        moving,
+      }
+    }
+    const has = (c) => c.tagIds.includes(bulk.value)
+    const moving = pickedContacts.filter((c) => (bulk.action === 'tag_add' ? !has(c) : has(c))).length
+    return {
+      title: `${bulkActionWords(bulk.action, bulk.label)} ${bulk.action === 'tag_add' ? 'on' : 'from'} ${people(moving)}?`,
+      names: pickedContacts.filter((c) => (bulk.action === 'tag_add' ? !has(c) : has(c))).slice(0, 5).map((c) => c.name).concat(moving > 5 ? [`and ${moving - 5} more`] : []),
+      warn: n - moving ? `${people(n - moving)} ${bulk.action === 'tag_add' ? 'already' : 'don’t'} have it, so ${n - moving === 1 ? 'it is' : 'they are'} left as they are.` : null,
+      moving,
+    }
+  }, [bulk, pickedContacts, pickedPartners])
+
+  async function confirmBulk() {
+    if (!bulk || bulkBusy) return
+    setBulkBusy(true); setBulkError(null)
+    try {
+      const doFetch = fetchImpl || fetch
+      const res = await doFetch('/api/network/contacts/bulk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: locationId, ids: [...selected], action: bulk.action, value: bulk.value, confirmed: true }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.ok) {
+        setBulkError(BULK_ERROR_WORDS[json?.error] || 'That did not save. Nothing was changed. Check the connection and try again.')
+        if (json?.error === 'contact_not_found') setReloads((x) => x + 1)
+        return
+      }
+      const left = (json.unchanged || 0) + (json.skipped?.length || 0)
+      setActNote({ words: `${bulkActionWords(bulk.action, bulk.label)}: ${json.changed} changed.${left ? ` ${left} left as ${left === 1 ? 'it was' : 'they were'}.` : ''}`, tone: 'good' })
+      setBulk(null)
+      setReloads((x) => x + 1)
+    } catch {
+      setBulkError('That did not save. Nothing was changed. Check the connection and try again.')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   // EXPORT: every contact at THIS location, whatever the filters show, in the
   // columns the import reads (lib/network/csv.ts). On All Locations there is
   // no export: one file across every location is not offered.
@@ -457,7 +611,7 @@ export default function NetworkListScreen({
     <div data-network-ui data-network-list>
       <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
       <style>{CSS}</style>
-      <div className="nw-wrap">
+      <div className="nw-wrap" data-bulk-open={(selectable && selected.size > 0) || undefined}>
         <p className="nw-eyebrow">Network &amp; Nurture</p>
         <h1 className="nw-title">Network{locationId && locationName ? ` · ${locationName}` : ''}</h1>
         <p className="nw-lede">Everyone who isn&rsquo;t a client: who sends you work, who you recommend, and who you are still figuring out.</p>
@@ -481,7 +635,15 @@ export default function NetworkListScreen({
               <b>From a spreadsheet</b><span>A CSV file from Outlook, Google Contacts, Mailchimp, LinkedIn or any spreadsheet.</span>
             </button>
           </>)}</Menu>
-          {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add or export contacts. A contact belongs to one location, so neither works across all of them at once.</p>}
+          {/* MORE: the rare actions. Export only, for now. */}
+          <Menu anchorClass="nw-more-anchor" className="nw-more-menu" trigger={(open, toggle) => (
+            <button type="button" className="nw-act" aria-expanded={open} aria-haspopup="menu" onClick={toggle} aria-label="More" data-act="more"><IconMore />More</button>
+          )}>{(close) => (<>
+            <button type="button" role="menuitem" className="nw-add-choice" disabled={!locationId || !data || !contacts.length} onClick={() => { close(); exportAll() }} data-act="export">
+              <b><IconDownload /> Export CSV</b><span>{locationId ? (data ? `All ${contacts.length} at ${locationName || 'this location'}, in the columns the import reads.` : 'Loading…') : 'Pick one location first.'}</span>
+            </button>
+          </>)}</Menu>
+          {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add, change or export contacts. A contact belongs to one location, so none of these work across all of them at once.</p>}
           {locationId && actNote && <p className="nw-act-note" data-tone={actNote.tone} role="status" data-act-note="done">{actNote.words}</p>}
         </div>
 
@@ -496,8 +658,6 @@ export default function NetworkListScreen({
                   <input className="nw-input" type="search" enterKeyHint="search" value={f.q} onChange={(e) => set({ q: e.target.value })}
                     placeholder="Search name, company, email or phone…" aria-label="Search network" data-search />
                 </div>
-                <button type="button" className="nw-trigger nw-export" disabled={!locationId || !contacts.length} onClick={exportAll} data-act="export"
-                  title={locationId ? `All ${contacts.length} at ${locationName || 'this location'}` : 'Pick one location to export'}><IconDownload />Export</button>
                 <Menu anchorClass="nw-tags-anchor" trigger={(open, toggle) => (
                   <button type="button" className="nw-trigger" aria-expanded={open} onClick={toggle} data-active={f.tagIds.length > 0 || undefined}
                     aria-label={f.tagIds.length ? `Tags, ${f.tagIds.length} picked` : 'Tags'} data-tags-trigger>
@@ -567,16 +727,49 @@ export default function NetworkListScreen({
                     page={pages[key] || 0} size={size}
                     onPage={(p) => setPages((m) => ({ ...m, [key]: p }))}
                     onSize={(n) => { setSize(n); setPages({}) }}
-                    onOpen={onOpenContact} today={today} showLocation={!locationId} referralsKnown={!!referrals} />
+                    onOpen={onOpenContact} today={today} showLocation={!locationId} referralsKnown={!!referrals}
+                    selectable={selectable} selected={selected} onSelect={onSelect} onSelectMany={onSelectMany} />
                 )
               })}
               {filtered.length === 0 && (
                 <p className="nw-empty" data-empty>{contacts.length === 0 ? 'Nobody in this network yet.' : 'Nobody matches those filters.'}</p>
               )}
             </div>
+
+            {selectable && selected.size > 0 && (
+              <div className="nw-bulk" role="region" aria-label="Change the picked contacts" data-bulk-bar>
+                <b data-bulk-count>{selected.size} picked</b>
+                <select value="" onChange={(e) => askBulk('tag_add', e.target.value)} disabled={!locTags || !locTags.length} aria-label="Add a tag to the picked contacts" data-bulk="tag_add">
+                  <option value="">Add a tag…</option>
+                  {(locTags || []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+                <select value="" onChange={(e) => askBulk('tag_remove', e.target.value)} disabled={!locTags || !locTags.length} aria-label="Take a tag off the picked contacts" data-bulk="tag_remove">
+                  <option value="">Take off a tag…</option>
+                  {(locTags || []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+                <select value="" onChange={(e) => askBulk('level', e.target.value)} disabled={!pickedPartners.length} aria-label="Set the level of the picked Referral partners" data-bulk="level"
+                  title={pickedPartners.length ? undefined : 'Only a Referral partner has a level'}>
+                  <option value="">{pickedPartners.length ? 'Set level…' : 'Level: Referral partners only'}</option>
+                  {PARTNER_LEVELS.map((l) => <option key={l} value={l}>{LEVEL_META[l].label}</option>)}
+                </select>
+                <select value="" onChange={(e) => askBulk('stage', e.target.value)} disabled={!pickedPartners.length} aria-label="Set the stage of the picked Referral partners" data-bulk="stage"
+                  title={pickedPartners.length ? undefined : 'Only a Referral partner has a stage'}>
+                  <option value="">{pickedPartners.length ? 'Set stage…' : 'Stage: Referral partners only'}</option>
+                  {PARTNER_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <button type="button" onClick={() => setSelected(new Set())} data-bulk-clear>Clear</button>
+              </div>
+            )}
           </>
         )}
       </div>
+      {bulk && bulkSummary && (
+        <ConfirmChange title={bulkSummary.title} names={bulkSummary.names} warn={bulkSummary.warn}
+          detail={bulkSummary.moving === 0 ? 'Nothing would change.' : null}
+          confirmLabel={bulkSummary.moving === 0 ? 'OK' : 'Yes, change them'} busy={bulkBusy} error={bulkError}
+          onConfirm={() => { if (bulkSummary.moving === 0) setBulk(null); else confirmBulk() }}
+          onCancel={() => { if (!bulkBusy) { setBulk(null); setBulkError(null) } }} />
+      )}
       {dialog === 'add' && locationId && (
         <AddContactDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
           onClose={() => setDialog(null)}

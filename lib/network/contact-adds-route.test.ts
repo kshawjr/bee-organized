@@ -244,7 +244,7 @@ describe('together with the nine fields', () => {
   })
   it('a slice 4a field cannot be smuggled in beside an add', async () => {
     as('super_admin')
-    expect((await patch({ addNote: { text: 'fine' }, changes: { partnerStage: { to: 'Active Partner' } } })).status).toBe(400)
+    expect((await patch({ addNote: { text: 'fine' }, changes: { tier: { to: 'power-partner' } } })).status).toBe(400)
     expect(writes()).toEqual([])
   })
   it('keys this save does not know are not written: type, stage, tags, met_date', async () => {

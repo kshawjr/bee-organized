@@ -345,12 +345,15 @@ describe('a row', () => {
   })
 })
 
-describe('it only reads', () => {
-  it('asks two addresses, both GET, with the location on each', async () => {
+// Slice 6 changed this on purpose: the list now has ONE write, the bulk
+// action, and only after its confirmation. Everything else still only reads.
+describe('it reads, and writes only a confirmed bulk action', () => {
+  it('asks three addresses, all GET, with the location on each (the third is the tag list, for bulk tags)', async () => {
     await mount()
     expect(calls).toEqual([
       { url: `/api/network/list?location_id=${LOC}`, method: 'GET' },
       { url: `/api/network/summary?location_id=${LOC}`, method: 'GET' },
+      { url: `/api/lookups?category=tags&location_id=${LOC}`, method: 'GET' },
     ])
   })
   it('on every location it asks for everything', async () => {
@@ -361,20 +364,27 @@ describe('it only reads', () => {
     await mount()
     await click(pill('vendor')); await type($('[data-search]'), 'vera'); await openFilters()
     await click(option('follow-up')); await click($('[data-clear-filters]')); await click($('[aria-label="Referral partner next page"]'))
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
   })
-  it('has no control that could change a type, level or stage: no checkbox, no radio, no text field but the search', async () => {
+  it('nothing on the list can change a type; the only extra inputs are the pick boxes; level and stage appear only once someone is picked', async () => {
     await mount()
     await openFilters()
-    expect($$('input').map((i) => (i as HTMLInputElement).type)).toEqual(['search'])
+    const kinds = $$('input').map((i) => (i as HTMLInputElement).type)
+    expect(kinds[0]).toBe('search')
+    expect(kinds.slice(1).every((k) => k === 'checkbox')).toBe(true)
+    expect($$('input[type="checkbox"]').every((i) => i.hasAttribute('data-select') || i.hasAttribute('data-select-page'))).toBe(true)
     expect($$('select').map((s) => s.getAttribute('aria-label'))).toEqual(['Referral partner per page'])
     expect($$('[role="menuitemcheckbox"]').every((o) => o.closest('.nw-menu'))).toBe(true)
   })
-  it('its source calls fetch only with a plain address: no method, no body', () => {
+  it('its source writes in one place only: the confirmed bulk action', () => {
     const src = readFileSync(join(process.cwd(), 'components/network/NetworkListScreen.jsx'), 'utf8')
-    expect(src).not.toMatch(/method:|body:|PATCH|POST|DELETE/)
-    expect(Array.from(src.matchAll(/doFetch\(`([^`$]+)/g)).map((m) => m[1])).toEqual(['/api/network/list', '/api/network/summary'])
+    expect(src.match(/method:/g)).toHaveLength(1)
+    expect(src).not.toMatch(/PATCH|DELETE/)
+    const at = src.indexOf("method: 'POST'")
+    expect(src.slice(src.lastIndexOf('async function', at), at)).toMatch(/^async function confirmBulk\(\)[\s\S]*doFetch\('\/api\/network\/contacts\/bulk'/)
+    expect(src.slice(at, at + 300)).toMatch(/confirmed: true/)
+    expect(Array.from(src.matchAll(/doFetch\(`([^`$]+)/g)).map((m) => m[1])).toEqual(['/api/network/list', '/api/network/summary', '/api/lookups?category=tags&location_id='])
   })
 })
 

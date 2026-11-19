@@ -74,7 +74,7 @@ const click = async (el: Element | null | undefined) => { if (!el) throw new Err
 const type = async (sel: string, value: string) => {
   const el = $(sel) as HTMLInputElement | HTMLSelectElement
   if (!el) throw new Error(`no field ${sel}`)
-  const proto = el.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype
+  const proto = el.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
   await act(async () => { Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })) })
 }
 const submit = async () => { await act(async () => { ($('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle(3) }
@@ -201,7 +201,7 @@ describe('met_date is not used', () => {
   })
 })
 
-describe('partner level and stage: shown, plainly not editable', () => {
+describe('partner level and stage: shown, and changed only after a yes (slice 6)', () => {
   const PARTNER = sheetOf({ networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'Reaching Out' })
   it('a Referral partner sees their level and where they are in the five stages', async () => {
     await mount({ sheet: PARTNER })
@@ -210,11 +210,49 @@ describe('partner level and stage: shown, plainly not editable', () => {
     expect($$('.ns-step').filter((s) => s.dataset.current === 'true').map((s) => s.textContent)).toEqual(['2Reaching Out'])
     expect($$('.ns-step').filter((s) => s.dataset.done === 'true').map((s) => s.textContent)).toEqual(['1New Contact'])
   })
-  it('nothing in that card is a control, and it says so and why', async () => {
+  it('the three levels and five stages are buttons, and the card says a change will ask first', async () => {
     await mount({ sheet: PARTNER })
-    expect(card('partner')!.querySelector('button, input, select, a, [tabindex], [role="button"]')).toBeNull()
-    expect($('[data-sheet-stages]')!.getAttribute('aria-disabled')).toBe('true')
-    expect($('[data-level-stage-note]')!.textContent).toBe('Now at Reaching Out. Level and stage can’t be changed from here yet: changing them will ask you to confirm, and that step is still being built.')
+    expect($$('[data-level-choice]').map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([['Potential', 'false'], ['Referral Partner', 'true'], ['Power Partner', 'false']])
+    expect($$('[data-stage-choice]')).toHaveLength(5)
+    expect($('[data-level-stage-note]')!.textContent).toBe('Now at Reaching Out. Tap a level or stage to change it; you’ll be asked to confirm.')
+  })
+  it('picking a stage asks ONCE; Cancel sends nothing and leaves the card as it was', async () => {
+    await mount({ sheet: PARTNER, patch: () => ({ status: 200, json: { ...PARTNER, written: [], notes: [] } }) })
+    await click($('[data-stage-choice="Active Partner"]'))
+    expect($$('[data-confirm]')).toHaveLength(1)
+    expect($('[data-confirm] h2')!.textContent).toBe('Move Lisa Snyder to Active Partner?')
+    expect(patches()).toEqual([])
+    await click($('[data-confirm-cancel]'))
+    expect($('[data-confirm]')).toBeNull()
+    expect(patches()).toEqual([])
+    expect($$('.ns-step').filter((s) => s.dataset.current === 'true').map((s) => s.textContent)).toEqual(['2Reaching Out'])
+  })
+  it('Escape cancels the same way, and leaves the sheet open', async () => {
+    await mount({ sheet: PARTNER })
+    await click($('[data-level-choice="power"]'))
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    await settle(2)
+    expect($('[data-confirm]')).toBeNull()
+    expect($('[data-contact-sheet]')).not.toBeNull()
+    expect(patches()).toEqual([])
+  })
+  it('a yes sends one save: that field only, from what it showed, confirmed, with the note if one was typed', async () => {
+    const after = sheetOf({ networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'Active Partner' })
+    await mount({ sheet: PARTNER, patch: () => ({ status: 200, json: { ...after, written: ['partner_stage', 'notes'], notes: [] } }) })
+    await click($('[data-stage-choice="Active Partner"]'))
+    await type('[data-confirm-note]', 'Sent two clients in March')
+    await act(async () => { ($('[data-confirm]') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    await settle(3)
+    expect(patches()).toHaveLength(1)
+    expect(patches()[0]!.body).toEqual({ changes: { partnerStage: { from: 'Reaching Out', to: 'Active Partner' } }, confirmed: true, addNote: { text: 'Moved to Active Partner: Sent two clients in March' } })
+    expect($('[data-confirm]')).toBeNull()
+    expect($$('.ns-step').filter((s) => s.dataset.current === 'true').map((s) => s.textContent)).toEqual(['4Active Partner'])
+  })
+  it('the level already held asks nothing', async () => {
+    await mount({ sheet: PARTNER })
+    await click($('[data-level-choice="referral"]'))
+    expect($('[data-confirm]')).toBeNull()
+    expect(patches()).toEqual([])
   })
   it('a Vendor has no level, no stage and no such card', async () => {
     await mount({ sheet: sheetOf({ networkTypes: ['vendor'], partnerLevel: 'power', partnerStage: 'Active Partner' }) })

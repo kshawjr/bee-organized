@@ -50,9 +50,10 @@ const AT_70EAB32: Record<string, string> = {
   // the sheet's own save route and rules, and the tag box: reused, not changed
   // Refreshed ON PURPOSE (2026-11-19): the sheet edits a person's first and
   // last name, and the save sets the full name from them (contact-edit.ts).
-  'app/api/network/contacts/[id]/route.ts': 'a0cd41489bf459f399839e072ad78a2f426055f58f2aa4fe8525304612a0018e',
+  // Slice 6 (2026-11-19): a confirmed partner level or stage, same save.
+  'app/api/network/contacts/[id]/route.ts': '08a80794133107bad58e0034c17943fe0344a15eaf7e03b32e20a366e72d9773',
   'app/api/network/summary/route.ts': '075d9fd79131455d016943d5ece20127f5cd2601bbd0ebc191544f83c074c74b',
-  'lib/network/contact-edit.ts': '6563ba3d07b8552026897b5f2df96260727e46045cf5083a4bb5f26ecd82c7f0',
+  'lib/network/contact-edit.ts': '9908264b7975bcd98f8bb647fabedce9714ec3296eb78e0128f7703c81b70d90',
   'lib/network/contact-adds.ts': '7ccf90c5e93ecd106df3103745efdb6726cb9659044a5281aae8034135440bb4',
   // Refreshed ON PURPOSE by the third follow-up: firstName / lastName on NetContact.
   'lib/network/types.ts': 'da1a27a3368d45c24f989aecfe6e70ad8677fedd5494601e058cefb7f346143c',
@@ -90,6 +91,8 @@ describe('slice 5 left everything outside the new Network screens alone', () => 
     const writes = (file: string) => Array.from(read(file).matchAll(/['`](\/api\/[^'`?$]+)/g)).map((m) => m[1])
     expect(new Set(writes('components/network/AddContactDialog.jsx'))).toEqual(new Set(['/api/lookups', '/api/network/contacts']))
     expect(new Set(writes('components/network/ImportDialog.jsx'))).toEqual(new Set(['/api/network/import']))
-    expect(new Set(writes('components/network/NetworkListScreen.jsx'))).toEqual(new Set(['/api/network/list', '/api/network/summary']))
+    // Slice 6: the list reads the location's tags (for bulk tags) and sends one
+    // write, the confirmed bulk action.
+    expect(new Set(writes('components/network/NetworkListScreen.jsx'))).toEqual(new Set(['/api/network/list', '/api/network/summary', '/api/lookups', '/api/network/contacts/bulk']))
   })
 })
