@@ -28,7 +28,8 @@ const AT_70EAB32: Record<string, string> = {
   'components/hive/NetworkScreen.jsx': '634bb1f08819400cbe4e516b7d8329624a634fa85b181d4d2d74afbabc72eec4',
   'components/hive/NetworkCompanyRecord.jsx': '96cd651dec0869285ada4392e493cf1cad1beebf9dd114a5e46919a735c5ab22',
   'app/api/partners/[id]/route.ts': '0b15077e5dd127dd907fcfaee92394988c6e0c6aa65a1c3362a35b213e87cf7a',
-  'app/api/partners/route.ts': 'adaae2695f11326d0db7476ba2f74c54c5d1ca53d474f7f2d0d65f8033af2026',
+  // Changed ON PURPOSE after this slice: Referred by › Create now sets the contact's type (clients-doors-footprint.test.ts).
+  'app/api/partners/route.ts': 'b9ae5129957215a2727a64c130de303ab94422a3182bf77cb0137d332532a48f',
   'lib/partner-writes.ts': 'c63675a136e1aa5c3db2c65b49f6d08b06939c3245099b488bc799b1bfa4ad25',
   'lib/crm.ts': '0f15c0b894575bbc93287b9e8d3664efca3949327af030d78ba351ddbb74acbb',
   // reminders, tags, phones, read-only: read by the new doors, not changed

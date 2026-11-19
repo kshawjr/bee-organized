@@ -191,7 +191,7 @@ describe('NewClientSheet — referral picker', () => {
     await click(buttonContaining(host, 'to your network')!)
     // stage seed: picker-born partners start INSIDE the pipeline — a NULL
     // stage matches no stage filter and hides from every saved view.
-    expect(partnerPosts).toEqual([{ name: 'New Pro', type: 'partner', location_id: 'loc-uuid-1', stage: 'New Contact' }])
+    expect(partnerPosts).toEqual([{ name: 'New Pro', type: 'partner', location_id: 'loc-uuid-1', stage: 'New Contact', as_referrer: true }])
     expect(host.textContent).toContain('New Pro') // the chip
     await click(buttonByText(host, 'Create — opens card')!)
     expect(createdBodies[0]).toMatchObject({
@@ -412,7 +412,7 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
     await click(buttonContaining(host, 'to your network')!)
-    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'partner', location_id: 'loc-uuid-1', stage: 'New Contact' }])
+    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'partner', location_id: 'loc-uuid-1', stage: 'New Contact', as_referrer: true }])
     expect(patchBodies).toEqual([{ referred_by_kind: 'partner', referred_by_id: 'pt-new-1', source: 'Referral' }])
     expect(host.textContent).toContain('Referred by New Neighbor')
     await unmount()

@@ -23,6 +23,7 @@ import {
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { phoneForWrite } from '@/lib/phone'
 import { recordPhoneNote } from '@/lib/phone-note'
+import { modelForNewContact, attachableTagLabels } from '@/lib/network/new-contact-type'
 
 export const runtime = 'nodejs'
 
@@ -151,12 +152,28 @@ export async function POST(request: NextRequest) {
 
   // Map the client object to a DB row. partnerPatchToRow only copies known
   // fields, so client-only junk (id, isDeleted, etc.) is dropped.
+  // Its place in the new Network model, by the slice 2 rules
+  // (lib/network/new-contact-type.ts). Never left empty: a contact with no
+  // type is one the new screens cannot place. as_referrer comes from a
+  // client's "Referred by" › Create (ReferrerPicker), which makes the
+  // contact in order to name it as that client's referrer: a Referral
+  // partner, as the backfill made the four that came this way.
+  let tagLabels: string[]
+  try {
+    tagLabels = await attachableTagLabels(supabaseService, body?.tagIds, locationId)
+  } catch (e: any) {
+    console.error('[partners POST] tag labels', e?.message || e)
+    return NextResponse.json({ error: 'tag_lookup_failed' }, { status: 503 })
+  }
+  const model = modelForNewContact({ tier: body?.tier, stage: body?.stage, tagLabels, asReferrer: body?.as_referrer === true })
+
   const row: Record<string, any> = {
     ...partnerPatchToRow(body),
     type,
     name: body.name.trim(),
     location_id: locationId,
     created_by: caller.userId,
+    ...model,
   }
 
   // A Network person's phone follows the lead rule (lib/phone.ts): a field

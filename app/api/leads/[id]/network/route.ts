@@ -52,6 +52,7 @@ import {
 import { cleanTagIds } from '@/lib/tags'
 import { attachPartnerTags } from '@/lib/partner-tag-writes'
 import { formatPhone } from '@/lib/phone'
+import { modelForNewContact, attachableTagLabels } from '@/lib/network/new-contact-type'
 import { retireOtherCards, exitLine, actorName } from '@/lib/other-card-sync'
 
 export const runtime = 'nodejs'
@@ -249,11 +250,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     partnerRow = data
   } else {
+    // Its place in the new Network model, by the slice 2 rules
+    // (lib/network/new-contact-type.ts). A contact made from a client record
+    // has no tier and has sent no lead, so it is Not sure yet (rule 4),
+    // unless a tag picked here says Partner, Referral or Vendor. Never empty.
+    let tagLabels: string[]
+    try {
+      tagLabels = await attachableTagLabels(supabaseService, tagIds, lead.location_uuid)
+    } catch (e: any) {
+      console.error('[leads/network POST] tag labels:', e?.message || e)
+      return NextResponse.json({ error: 'tag_lookup_failed' }, { status: 503 })
+    }
     const insert = {
       ...leadToPartnerRow(lead, { stage: NEW_PARTNER_STAGE }),
       customer_lead_id: id,
       is_customer: claimCustomer,
       created_by: caller.userId,
+      ...modelForNewContact({ stage: NEW_PARTNER_STAGE, tagLabels }),
     }
     const { data, error } = await supabaseService
       .from('partners')

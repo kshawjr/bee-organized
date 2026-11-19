@@ -154,7 +154,10 @@ export default function ReferrerPicker({
       const res = await fetch('/api/partners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, type, location_id: locationUuid, stage: 'New Contact' }),
+        // as_referrer: this contact is made to be named as the client's
+        // "Referred by", so the server files it as a Referral partner
+        // (lib/network/new-contact-type.ts, the slice 2 rule).
+        body: JSON.stringify({ name, type, location_id: locationUuid, stage: 'New Contact', as_referrer: true }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json?.id) throw new Error(json?.error || `HTTP ${res.status}`)
