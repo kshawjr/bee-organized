@@ -10,6 +10,9 @@
 //   · super admins only (lib/network/access.ts), and
 //   · never for someone who said no to marketing (saidNoToMarketing), with no
 //     way round it.
+// WHO may set one is the Reminders page's rule, not a write rule (Kevin,
+// 2026-11-20): a follow-up is a note to yourself, so a read-only seat or a
+// paused location may set one, exactly as on /api/reminders.
 // It writes one reminders row and sends nothing.
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,8 +20,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
-import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { networkWriteVerdict, READ_ONLY_ANSWER } from '@/lib/network/route-access'
+import { mayRemindNetworkLocation } from '@/lib/network/route-access'
 import { buildReminderInsert, cleanNote, isValidYmd } from '@/lib/reminders'
 import { REMINDER_COLS, withRecordNames } from '@/lib/reminders-server'
 import { saidNoToMarketing } from '@/lib/network/nurturing-actions'
@@ -43,11 +45,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!lead) return NextResponse.json({ error: 'not_found' }, { status: 404 })
   // The person's OWN location decides, never one sent by the screen.
-  const may = networkWriteVerdict(caller, lead.location_uuid)
-  if (may === 'not_found') return NextResponse.json({ error: 'not_found' }, { status: 404 })
-  if (may === 'read_only') return NextResponse.json(READ_ONLY_ANSWER, { status: 403 })
-  const blocked = await readOnlyWriteBlock({ role: caller.role }, lead.location_uuid)
-  if (blocked) return blocked
+  // Anyone who may read this person may remind themselves about them.
+  if (!mayRemindNetworkLocation(caller, lead.location_uuid)) return NextResponse.json({ error: 'not_found' }, { status: 404 })
   if (saidNoToMarketing(lead)) return NextResponse.json({ error: 'said_no_to_marketing' }, { status: 403 })
 
   const row = buildReminderInsert({ setterId: caller.userId, record: { key: 'lead_id', id }, locationUuid: lead.location_uuid, dueOn: body.due_on, note })

@@ -95,7 +95,7 @@ describe('every Network route asks the gate first, then the location rule', () =
       const src = readFileSync(f, 'utf8')
       expect(src).toMatch(/maySeeNewNetwork\(caller\.role\)/)
       expect(src).toMatch(/from '@\/lib\/network\/route-access'/)
-      expect(src.indexOf('maySeeNewNetwork(caller.role)')).toBeLessThan(src.search(/(mayReadNetworkLocation|maySeeAllNetworkLocations|networkWriteVerdict)\(/))
+      expect(src.indexOf('maySeeNewNetwork(caller.role)')).toBeLessThan(src.search(/(mayReadNetworkLocation|maySeeAllNetworkLocations|networkWriteVerdict|mayRemindNetworkLocation)\(/))
     })
   }
 })

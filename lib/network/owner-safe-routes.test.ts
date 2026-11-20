@@ -15,10 +15,11 @@
 //   · an owner (and a manager, and a lite user) cannot read or write AWAY's
 //     contact or person by ANY route, by naming its id or by naming its location;
 //     a guessed id answers exactly as an id that does not exist
-//   · a lite user cannot write anywhere, not even at HOME
+//   · a lite user cannot write anywhere, not even at HOME, except a follow-up
+//     (a reminder to yourself, Kevin 2026-11-20), as on the Reminders page
 //   · nobody below corporate can open an All locations view or the overview
-//   · a paused location is read-only for its owner
-//   · corporate reads every location and, until Kevin rules, writes nowhere
+//   · a paused location is read-only for its owner (follow-ups aside)
+//   · corporate reads and changes every location (Kevin, 2026-11-20)
 //   · a refused call writes nothing and reads nothing of AWAY's beyond the
 //     one row it had to look at to know whose it was
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -146,7 +147,9 @@ const req = (url: string, body?: any) => {
 const params = (id: string) => ({ params: Promise.resolve({ id }) })
 
 // Every handler, aimed at one location's records. `kind` says what it is.
-type Call = { name: string; kind: 'read' | 'write'; run: (w: Where) => Promise<Response> }
+// 'remind' is a follow-up: allowed wherever reading is (Kevin, 2026-11-20).
+type Kind = 'read' | 'write' | 'remind'
+type Call = { name: string; kind: Kind; run: (w: Where) => Promise<Response> }
 const CALLS: Call[] = [
   { name: 'GET list (one location)', kind: 'read', run: (w) => list.GET(req(`/api/network/list?location_id=${LOCS[w]}`)) },
   { name: 'GET summary (one location)', kind: 'read', run: (w) => summary.GET(req(`/api/network/summary?location_id=${LOCS[w]}`)) },
@@ -154,7 +157,7 @@ const CALLS: Call[] = [
   { name: 'GET nurturing/[id]', kind: 'read', run: (w) => person.GET(req(`/api/network/nurturing/${L[w]}`), params(L[w])) },
   { name: 'GET contacts/[id]', kind: 'read', run: (w) => contact.GET(req(`/api/network/contacts/${C[w]}`), params(C[w])) },
   { name: 'GET import mappings', kind: 'read', run: (w) => importRoute.GET(req(`/api/network/import?location_id=${LOCS[w]}`)) },
-  { name: 'POST nurturing/[id]/follow-up', kind: 'write', run: (w) => followUp.POST(req('/x', { due_on: '2026-12-01', note: 'Call about the garage' }), params(L[w])) },
+  { name: 'POST nurturing/[id]/follow-up', kind: 'remind', run: (w) => followUp.POST(req('/x', { due_on: '2026-12-01', note: 'Call about the garage' }), params(L[w])) },
   { name: 'POST nurturing/bulk', kind: 'write', run: (w) => nurtureBulk.POST(req('/x', { location_id: LOCS[w], action: 'tag_add', tag_id: TAG[w], selection: { ids: [L[w]] }, dry_run: true })) },
   { name: 'POST contacts (add one)', kind: 'write', run: (w) => add.POST(req('/x', { location_id: LOCS[w], name: 'Brand New', types: ['partner'] })) },
   { name: 'PATCH contacts/[id]', kind: 'write', run: (w) => contact.PATCH(req('/x', { changes: { title: { from: 'Realtor', to: 'Broker' } } }), params(C[w])) },
@@ -173,13 +176,12 @@ const touchedAway = () => h.state.calls.filter((c: any) => c.client === 'service
   && c.filters.some(([, , v]: any) => [AWAY, 'loc_away'].includes(v) || (Array.isArray(v) && (v.includes(AWAY) || v.includes(C.AWAY) || v.includes(L.AWAY)))))
 
 // What each role may do at each location.
-const allowed = (role: Role, kind: 'read' | 'write', w: Where) => {
-  if (role === 'super_admin') return true
-  if (role === 'admin') return kind === 'read'
+const allowed = (role: Role, kind: Kind, w: Where) => {
+  if (role === 'super_admin' || role === 'admin') return true
   if (w !== 'HOME') return false
-  return kind === 'read' || role !== 'lite_user'
+  return kind === 'read' || kind === 'remind' || role !== 'lite_user'
 }
-const refusedStatus = (role: Role, kind: 'read' | 'write', w: Where) => {
+const refusedStatus = (role: Role, kind: Kind, w: Where) => {
   // Someone else's record or location: not found (by id) / refused (by location).
   if (w === 'AWAY' && !['super_admin', 'admin'].includes(role)) return 'away'
   return 'read_only'
@@ -301,6 +303,11 @@ describe('a paused location is read-only for its owner', () => {
     as('owner', PAUSED)
     expect((await contact.GET(req('/x'), params(C.PAUSED))).status).toBe(200)
     expect((await list.GET(req(`/x?location_id=${PAUSED}`))).status).toBe(200)
+  })
+  it('a follow-up still works: it is a reminder, not a change (as on the Reminders page)', async () => {
+    as('owner', PAUSED)
+    expect((await followUp.POST(req('/x', { due_on: '2026-12-01', note: 'x' }), params(L.PAUSED))).status).toBe(201)
+    expect(writes().map((c: any) => c.table)).toEqual(['reminders'])
   })
   for (const call of CALLS.filter((c) => c.kind === 'write' && c.name !== 'POST import')) {
     it(`${call.name} → 403 read-only location, nothing written`, async () => {

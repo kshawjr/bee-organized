@@ -24,13 +24,19 @@
 //
 // THE ROLES (hub_users.role):
 //   super_admin  everything, every location
-//   admin        CORPORATE. Reads every location. Writes: NOT YET — Kevin has
-//                not ruled, so Network is read-only for corporate until he does
-//                (CORPORATE_MAY_WRITE_NETWORK). Not even through a paused
-//                location's guard, which would let an admin through.
+//   admin        CORPORATE: one account, tied to no location. Reads AND
+//                changes every location's Network (Kevin, 2026-11-20: "give
+//                them the same write access they would need to fix a
+//                location's Network data"). Like everywhere else in Bee Hub, a
+//                paused location does not stop corporate. The All locations
+//                overview stays a report: it has no way to change anything,
+//                for anyone.
 //   owner        own location: read and write
 //   manager      own location: read and write (the same as lib/crm canWriteLocation)
-//   lite_user    own location: read only
+//   lite_user    own location: read only. The ONE exception is a follow-up,
+//                which is a reminder to yourself and changes nothing about the
+//                person (Kevin, 2026-11-20): mayRemindNetworkLocation, the same
+//                rule as the shared Reminders page (/api/reminders).
 //   anything else: nothing
 // A PAUSED or inactive location is read-only for everyone below super admin:
 // writes also pass lib/read-only-access readOnlyWriteBlock, the guard the
@@ -39,8 +45,8 @@
 
 import type { Caller } from '../crm'
 
-// Kevin's ruling, when it comes, is this one line.
-export const CORPORATE_MAY_WRITE_NETWORK = false
+// Kevin's ruling (2026-11-20, answer B): corporate can change Network records.
+export const CORPORATE_MAY_WRITE_NETWORK = true
 
 const OWN_LOCATION_READERS = new Set(['owner', 'manager', 'lite_user'])
 const OWN_LOCATION_WRITERS = new Set(['owner', 'manager'])
@@ -79,6 +85,18 @@ export function mayWriteNetworkLocation(who: Who, locationUuid: unknown): boolea
 export function networkWriteVerdict(who: Who, locationUuid: unknown): 'ok' | 'not_found' | 'read_only' {
   if (mayWriteNetworkLocation(who, locationUuid)) return 'ok'
   return mayReadNetworkLocation(who, locationUuid) ? 'read_only' : 'not_found'
+}
+
+/**
+ * May set a follow-up (a reminder) on a Network person at this location.
+ * A reminder is a note to yourself, not a change to the person, so this is
+ * the READ rule: anyone who may read the person may remind themselves about
+ * them, read-only seats and paused locations included. It matches
+ * /api/reminders (canReadLocation); lib/network/rulings-2026-11-20.test.ts
+ * drives both routes and pins that they agree.
+ */
+export function mayRemindNetworkLocation(who: Who, locationUuid: unknown): boolean {
+  return mayReadNetworkLocation(who, locationUuid)
 }
 
 export const READ_ONLY_ANSWER = { error: 'forbidden_read_only' } as const
