@@ -428,6 +428,7 @@ describe('codebase sweep: outside-click closers only where Kevin drew the line',
   // September accident (43e72f6) again: do not, unless Kevin says so.
   const CLICK_AWAY_ALLOWED: Record<string, string> = {
     'components/network/NetworkListScreen.jsx': 'Network menus: Tags, Filters, Add contacts, More',
+    'components/network/NurturingScreen.jsx': 'Nurturing menus: Filters (applied as ticked) and Sort (a tap sorts at once); the person view is a window and does not',
     'components/hive/shared/FilterPopover.jsx': 'filter menus on Clients, Inbox and the board (applied as ticked)',
     'components/hive/shared/cardKit.jsx': 'client card ··· menu (not while asking "are you sure?")',
     'components/hive/shared/RecordMenu.jsx': 'client record ··· menu',
@@ -457,6 +458,7 @@ describe('codebase sweep: outside-click closers only where Kevin drew the line',
       'components/hive/OverlayShell.jsx', 'components/hive/shared/PickerModal.jsx', 'components/feedback/FeedbackModal.jsx',
       'components/hive/shared/CloseWizardKit.jsx', 'components/network/ContactSheet.jsx', 'components/network/AddContactDialog.jsx',
       'components/network/ImportDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/TagDialog.jsx',
+      'components/network/NurtureSheet.jsx',
     ]
     for (const f of WINDOWS) expect(read(f), f).not.toMatch(/useClickAway/)
     // In the two files that hold both, the windows stay out: EDialog and the BeeHub modals.

@@ -87,7 +87,7 @@ import NetworkScreen from "@/components/hive/NetworkScreen"
 // The NEW Network list (Network & Nurture redesign, slice 3). Mounted only for
 // a viewer lib/network/access.ts says yes to; everyone else still gets the
 // closed line below (CLOSED_NAV).
-import NetworkListScreen from "@/components/network/NetworkListScreen"
+import NetworkTabs from "@/components/network/NetworkTabs"
 import ContactSheet from "@/components/network/ContactSheet"
 import { maySeeNewNetwork } from "@/lib/network/access"
 import BeeRosterSettings from "@/components/hive/BeeRosterSettings"
@@ -16445,7 +16445,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           saves through this screen's partners state, which holds no rows on
           All Locations, so there the list is look-only. */}
       {newList ? (
-        <NetworkListScreen
+        <NetworkTabs
           locationId={locFilter==='all' ? null : locFilter}
           locationName={locationName}
           onOpenContact={locFilter==='all' ? null : (id)=>{ const p = allPartners.find(x=>x.id===id); setSelected(p || { id }) }}

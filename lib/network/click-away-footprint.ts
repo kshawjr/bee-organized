@@ -7,6 +7,10 @@
 // the lines below. Those tests take these lines back out before comparing,
 // so ANY other change to either file still fails them.
 //
+// SLICE 7 (Nurturing tab, 2026-11-19) changed BeeHub.jsx by exactly two
+// lines too: the Network mount became NetworkTabs (Network & Partners |
+// Nurturing clients), handed the same props. They are put back the same way.
+//
 // Each piece must be present exactly once (or the stated number of times),
 // so this cannot quietly stop matching and hide a real change.
 // ─────────────────────────────────────────────────────────────
@@ -28,6 +32,9 @@ const HUB_PIECES: [string, string, number][] = [
 `, '', 1],
   ['<div data-mobile-profile-menu style={{', '<div style={{', 1],
   ['<div data-loc-picker style={{', '<div style={{', 1],
+  // slice 7: the two tabs mount where the new Network list mounted
+  ['import NetworkTabs from "@/components/network/NetworkTabs"', 'import NetworkListScreen from "@/components/network/NetworkListScreen"', 1],
+  ['        <NetworkTabs\n', '        <NetworkListScreen\n', 1],
 ]
 
 const NETWORK_SCREEN_PIECES: [string, string, number][] = [

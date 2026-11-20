@@ -567,7 +567,8 @@ describe('Lato and Arvo cannot leak', () => {
     // at the same address, for itself only (its [data-app-rail]).
     // 2026-11-15: and the new Network list, for itself only (its [data-network-ui]).
     // 2026-11-15: and the new contact sheet (slice 4a), for itself only (its [data-network-sheet]).
-    expect(users).toEqual(['components/design/AppRail.jsx', 'components/design/tokens.js', 'components/network/ContactSheet.jsx', 'components/network/NetworkListScreen.jsx', 'components/settings/SettingsShell.jsx'])
+    // 2026-11-19: and the Nurturing tab and its person view (slice 7), each for itself only ([data-nurture-ui], [data-nurture-sheet]).
+    expect(users).toEqual(['components/design/AppRail.jsx', 'components/design/tokens.js', 'components/network/ContactSheet.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/NurtureSheet.jsx', 'components/network/NurturingScreen.jsx', 'components/settings/SettingsShell.jsx'])
     await mount({ franchiseRole: 'owner' })
     const links = Array.from(container.querySelectorAll('link[rel="stylesheet"]')).map(l => l.getAttribute('href'))
     expect(links).toEqual([FONT_STYLESHEET_HREF])
@@ -679,7 +680,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // label. It names no font: see the Lato test above.
     // 2026-11-17: Network slice 5's add box and import box, inside the Network list.
     // 2026-11-19: Network slice 6's confirmation box, inside the Network list and sheet.
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/AddContactDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/ContactSheet.jsx', 'components/network/ImportDialog.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/AddContactDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/ContactSheet.jsx', 'components/network/ImportDialog.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/NetworkTabs.jsx', 'components/network/NurtureSheet.jsx', 'components/network/NurturingScreen.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })
