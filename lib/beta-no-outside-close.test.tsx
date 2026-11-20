@@ -20,6 +20,13 @@
 //      out before this change (two source pickers, the location picker,
 //      the assignee pickers) now carry one.
 //
+// ONE EXCEPTION, by Kevin's ruling of 2026-11-19 (slice 6 feedback): the
+// menus on the new Network screens (components/network/NetworkListScreen.jsx,
+// its one shared Menu) DO close on a click anywhere outside — "anywhere on
+// the screen should clear the prompt." The sweep lets that one listener
+// through by file and by its marker, and nothing else. Every other screen
+// keeps the 2026-09-30 rule until Kevin rules on it.
+//
 // Deliberately NOT in scope: type-ahead suggestion lists that fold away
 // when their text field loses focus (address autofill, company search).
 // They close on leaving the field, not on a click, and have no control
@@ -241,14 +248,19 @@ const SOURCES = execSync('git ls-files components app', { encoding: 'utf8' })
 const read = (f: string) => readFileSync(f, 'utf8')
 
 describe('codebase sweep: no outside-click closers left', () => {
-  it('no document/window click, mousedown, pointerdown or touchstart listener', () => {
+  it('no document/window click, mousedown, pointerdown or touchstart listener (but the Network menu, by ruling)', () => {
     const hits: string[] = []
+    const allowed: string[] = []
     for (const f of SOURCES) {
       read(f).split('\n').forEach((l, i) => {
-        if (/addEventListener\(\s*['"](mousedown|mouseup|click|pointerdown|pointerup|touchstart)['"]/.test(l)) hits.push(`${f}:${i + 1}`)
+        if (!/addEventListener\(\s*['"](mousedown|mouseup|click|pointerdown|pointerup|touchstart)['"]/.test(l)) return
+        // Kevin, 2026-11-19: the Network screens' menus close on a click outside.
+        if (f === 'components/network/NetworkListScreen.jsx' && l.includes('// network-menu-click-away (Kevin, 2026-11-19)')) allowed.push(f)
+        else hits.push(`${f}:${i + 1}`)
       })
     }
     expect(hits).toEqual([])
+    expect(allowed).toEqual(['components/network/NetworkListScreen.jsx']) // exactly one, so it cannot quietly spread
   })
 
   it('no "target === currentTarget" backdrop closer', () => {

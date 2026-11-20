@@ -41,7 +41,7 @@ import {
 
 export const IMPORT_COLUMNS = [
   { key: 'Name', required: true, help: 'Full name, or the business name for an organization.' },
-  { key: 'Type', required: false, help: 'partner, vendor, nurture, organization, or unsure. Separate several with ;' },
+  { key: 'Type', required: false, help: 'unsure, partner, vendor, nurture, or organization. Separate several with ;' },
   { key: 'Company', required: false, help: 'Where they work.' },
   { key: 'Job title', required: false, help: 'Their role.' },
   { key: 'Phone', required: false, help: '10 digits; we format it as (303) 555-0142.' },

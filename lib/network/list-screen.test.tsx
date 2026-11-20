@@ -108,18 +108,18 @@ describe('what a super admin sees: the real counts', () => {
   it('names the five types in full, in order, after Everyone, and has no Client', async () => {
     await mount()
     expect($$('[data-type-pill]').map((p) => p.firstChild!.textContent)).toEqual([
-      'Everyone', 'Referral partner', 'Vendor / Service Provider', 'Nurture', 'Organization', 'Not sure yet',
-    ])
+      'Everyone', 'Not sure yet', 'Referral partner', 'Vendor / Service Provider', 'Nurture', 'Organization',
+    ]) // Not sure yet first: the biggest group (Kevin, 2026-11-19)
     expect(host.textContent).not.toMatch(/\bClient\b/)
   })
-  it('opens on the groups: Referral partner first and open, the rest closed, each with its count', async () => {
+  it('opens on the groups: Not sure yet first and open (Kevin, 2026-11-19), the rest closed, each with its count', async () => {
     await mount()
     expect($$('[data-group]').map((g) => [g.dataset.group, g.querySelector('[data-group-count]')!.textContent])).toEqual([
-      ['partner', '51'], ['vendor', '21'], ['nurture', '0'], ['organization', '0'], ['unsure', '197'],
+      ['unsure', '197'], ['partner', '51'], ['vendor', '21'], ['nurture', '0'], ['organization', '0'],
     ])
-    expect($('[data-group="partner"] .nw-group-heading')!.getAttribute('aria-expanded')).toBe('true')
-    expect($('[data-group="unsure"] .nw-group-heading')!.getAttribute('aria-expanded')).toBe('false')
-    expect($$('[data-group="unsure"] [data-row]')).toHaveLength(0)
+    expect($('[data-group="unsure"] .nw-group-heading')!.getAttribute('aria-expanded')).toBe('true')
+    expect($('[data-group="partner"] .nw-group-heading')!.getAttribute('aria-expanded')).toBe('false')
+    expect($$('[data-group="partner"] [data-row]')).toHaveLength(0)
   })
   it('says it is a preview only super admins can see', async () => {
     await mount()
@@ -131,33 +131,33 @@ describe('paging', () => {
   it('shows 25 at a time and says where you are', async () => {
     await mount()
     expect(rows()).toHaveLength(25)
-    expect($('[data-pager-summary]')!.textContent).toBe('1–25 of 51 contacts')
-    expect($('.nw-pager-pos')!.textContent).toBe('Page 1 of 3')
+    expect($('[data-pager-summary]')!.textContent).toBe('1–25 of 197 contacts')
+    expect($('.nw-pager-pos')!.textContent).toBe('Page 1 of 8')
   })
   it('next page replaces the rows; the last page holds the remainder', async () => {
     await mount()
     const first = names()
-    await click($('[aria-label="Referral partner next page"]'))
+    await click($('[aria-label="Not sure yet next page"]'))
     expect(rows()).toHaveLength(25)
     expect(names().some((x) => first.includes(x))).toBe(false)
-    await click($('[aria-label="Referral partner last page"]'))
-    expect(rows()).toHaveLength(1)
-    expect($('[data-pager-summary]')!.textContent).toBe('51–51 of 51 contacts')
-    expect(($('[aria-label="Referral partner next page"]') as HTMLButtonElement).disabled).toBe(true)
+    await click($('[aria-label="Not sure yet last page"]'))
+    expect(rows()).toHaveLength(22)
+    expect($('[data-pager-summary]')!.textContent).toBe('176–197 of 197 contacts')
+    expect(($('[aria-label="Not sure yet next page"]') as HTMLButtonElement).disabled).toBe(true)
   })
   it('a different page size shows that many, from the first page', async () => {
     await mount()
-    await click($('[aria-label="Referral partner next page"]'))
-    const select = $('[aria-label="Referral partner per page"]') as HTMLSelectElement
+    await click($('[aria-label="Not sure yet next page"]'))
+    const select = $('[aria-label="Not sure yet per page"]') as HTMLSelectElement
     await act(async () => { select.value = '50'; select.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(rows()).toHaveLength(50)
-    expect($('[data-pager-summary]')!.textContent).toBe('1–50 of 51 contacts')
+    expect($('[data-pager-summary]')!.textContent).toBe('1–50 of 197 contacts')
   })
   it('changing a filter goes back to the first page', async () => {
     await mount()
-    await click($('[aria-label="Referral partner next page"]'))
-    await click(pill('partner'))
-    expect($('.nw-pager-pos')!.textContent).toBe('Page 1 of 3')
+    await click($('[aria-label="Not sure yet next page"]'))
+    await click(pill('unsure'))
+    expect($('.nw-pager-pos')!.textContent).toBe('Page 1 of 8')
   })
 })
 
@@ -239,25 +239,37 @@ describe('filters', () => {
   })
 })
 
-describe('a menu closes by its own controls, never by a tap outside it', () => {
-  // Bee Hub's rule for every menu and popover since 2026-09-30.
-  const outside = async () => {
-    for (const ev of ['pointerdown', 'mousedown', 'mouseup', 'click']) await act(async () => { document.body.dispatchEvent(new MouseEvent(ev, { bubbles: true })) })
-    await click($('[data-preview-note]'))
+describe('a menu closes on a click anywhere outside it, and applies nothing (Kevin, 2026-11-19)', () => {
+  // Kevin reversed Bee Hub's 2026-09-30 "nothing closes on an outside click"
+  // rule FOR THE NETWORK SCREENS: "anywhere on the screen should clear the
+  // prompt." The rest of Bee Hub is unchanged until he rules on it.
+  const press = async (el: Element) => {
+    for (const ev of ['pointerdown', 'mousedown', 'mouseup', 'click']) await act(async () => { el.dispatchEvent(new MouseEvent(ev, { bubbles: true })) })
   }
-  for (const [name, trigger] of [['Filters', '[data-filters-trigger]'], ['Tags', '[data-tags-trigger]']] as const) {
-    it(`${name}: a tap outside leaves it open`, async () => {
+  const MENUS = [
+    ['Filters', '[data-filters-trigger]'], ['Tags', '[data-tags-trigger]'],
+    ['Add contacts', '[data-act="add-contacts"]'], ['More', '[data-act="more"]'],
+  ] as const
+  for (const [name, trigger] of MENUS) {
+    it(`${name}: a click on the page outside it closes it`, async () => {
       await mount()
       await click($(trigger))
-      await outside()
       expect($('.nw-menu')).toBeTruthy()
+      await press($('[data-preview-note]')!)
+      expect($('.nw-menu')).toBeNull()
+      expect($(trigger)!.getAttribute('aria-expanded')).toBe('false')
     })
-    it(`${name}: Done closes it`, async () => {
+    it(`${name}: a tap on the bare page closes it too`, async () => {
       await mount()
       await click($(trigger))
-      expect($('[data-menu-done]')!.textContent).toBe('Done')
-      await click($('[data-menu-done]'))
+      await press(document.body)
       expect($('.nw-menu')).toBeNull()
+    })
+    it(`${name}: a click inside it does not close it`, async () => {
+      await mount()
+      await click($(trigger))
+      await press($('.nw-menu')!)
+      expect($('.nw-menu')).toBeTruthy()
     })
     it(`${name}: its button again closes it, and Escape closes it`, async () => {
       await mount()
@@ -268,15 +280,62 @@ describe('a menu closes by its own controls, never by a tap outside it', () => {
       expect($('.nw-menu')).toBeNull()
     })
   }
+  for (const [name, trigger] of [['Filters', '[data-filters-trigger]'], ['Tags', '[data-tags-trigger]']] as const) {
+    it(`${name}: Done closes it`, async () => {
+      await mount()
+      await click($(trigger))
+      expect($('[data-menu-done]')!.textContent).toBe('Done')
+      await click($('[data-menu-done]'))
+      expect($('.nw-menu')).toBeNull()
+    })
+  }
+  it('closing from outside applies nothing: the list, the filters and the counts are exactly as before', async () => {
+    await mount()
+    for (const [, trigger] of MENUS) {
+      const before = [names().join('|'), $('[data-matching]')?.textContent ?? null, $$('[data-type-pill][aria-selected="true"]')[0]?.dataset.typePill]
+      await click($(trigger))
+      await press($('[data-preview-note]')!)
+      expect([names().join('|'), $('[data-matching]')?.textContent ?? null, $$('[data-type-pill][aria-selected="true"]')[0]?.dataset.typePill]).toEqual(before)
+      expect($('[data-network-add]')).toBeNull() // Add contacts opened nothing
+      expect($('[data-network-import]')).toBeNull()
+    }
+    expect(calls).toHaveLength(3) // the three first reads; nothing else was asked for or sent
+  })
+  it('a filter ticked before the outside click stays ticked, the same as Escape or Done', async () => {
+    await mount()
+    await openFilters()
+    await click(option('level-referral'))
+    const after = $('[data-matching]')!.textContent
+    await press($('[data-preview-note]')!)
+    expect($('.nw-menu')).toBeNull()
+    expect($('[data-matching]')!.textContent).toBe(after)
+  })
   it('picking a filter keeps the menu open, so several can be picked', async () => {
     await mount()
     await openFilters()
     await click(option('level-referral'))
     expect($('.nw-menu')).toBeTruthy()
   })
-  it('the screen listens for no click, mousedown, pointerdown or touchstart on the page', () => {
+  it('opening one menu closes the other', async () => {
+    await mount()
+    await click($('[data-tags-trigger]'))
+    await press($('[data-filters-trigger]')!)
+    expect($$('.nw-menu')).toHaveLength(1)
+    expect($('[data-tags-trigger]')!.getAttribute('aria-expanded')).toBe('false')
+    expect($('[data-filters-trigger]')!.getAttribute('aria-expanded')).toBe('true')
+  })
+  it('the only page listener on the screen is the menu’s one click-away, and it is taken off when the menu closes', async () => {
     const src = readFileSync(join(process.cwd(), 'components/network/NetworkListScreen.jsx'), 'utf8')
-    expect(src).not.toMatch(/addEventListener\(\s*['"](click|mousedown|pointerdown|touchstart)/)
+    const adds = Array.from(src.matchAll(/addEventListener\(\s*['"](click|mousedown|pointerdown|touchstart)['"][^\n]*/g)).map((m) => m[0])
+    expect(adds).toHaveLength(1)
+    expect(adds[0]).toContain("'pointerdown', away, true")
+    const add = vi.spyOn(document, 'addEventListener'); const off = vi.spyOn(document, 'removeEventListener')
+    await mount()
+    await click($('[data-tags-trigger]'))
+    expect(add.mock.calls.filter((c) => c[0] === 'pointerdown')).toHaveLength(1)
+    await press(document.body)
+    expect(off.mock.calls.filter((c) => c[0] === 'pointerdown')).toHaveLength(1)
+    add.mockRestore(); off.mockRestore()
   })
 })
 
@@ -363,7 +422,7 @@ describe('it reads, and writes only a confirmed bulk action', () => {
   it('using every control makes no further request and never anything but GET', async () => {
     await mount()
     await click(pill('vendor')); await type($('[data-search]'), 'vera'); await openFilters()
-    await click(option('follow-up')); await click($('[data-clear-filters]')); await click($('[aria-label="Referral partner next page"]'))
+    await click(option('follow-up')); await click($('[data-clear-filters]')); await click($('[aria-label="Not sure yet next page"]'))
     expect(calls).toHaveLength(3)
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
   })
@@ -374,7 +433,7 @@ describe('it reads, and writes only a confirmed bulk action', () => {
     expect(kinds[0]).toBe('search')
     expect(kinds.slice(1).every((k) => k === 'checkbox')).toBe(true)
     expect($$('input[type="checkbox"]').every((i) => i.hasAttribute('data-select') || i.hasAttribute('data-select-page'))).toBe(true)
-    expect($$('select').map((s) => s.getAttribute('aria-label'))).toEqual(['Referral partner per page'])
+    expect($$('select').map((s) => s.getAttribute('aria-label'))).toEqual(['Not sure yet per page'])
     expect($$('[role="menuitemcheckbox"]').every((o) => o.closest('.nw-menu'))).toBe(true)
   })
   it('its source writes in one place only: the confirmed bulk action', () => {

@@ -115,7 +115,9 @@ describe('Step 1, the migration: it only adds', () => {
   })
   it("allows exactly Kevin's five types, three levels and five stages, as lib/network/types.ts spells them", () => {
     const rule = (name: string) => all.find((s) => s.includes(`add constraint ${name} `))!
-    expect(quoted(rule('partners_network_types_check'))).toEqual([...NET_TYPES])
+    // The SET the database allows. Its order is the migration's, already run;
+    // the screens' order (Not sure yet first, 2026-11-19) is not a database rule.
+    expect(quoted(rule('partners_network_types_check')).sort()).toEqual([...NET_TYPES].sort())
     expect(quoted(rule('partners_partner_level_check'))).toEqual([...PARTNER_LEVELS, 'partner'])
     expect(quoted(rule('partners_partner_stage_check'))).toEqual([...PARTNER_STAGES, 'partner'])
   })

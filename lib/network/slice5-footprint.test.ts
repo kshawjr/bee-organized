@@ -47,7 +47,9 @@ const AT_70EAB32: Record<string, string> = {
   // slice 1's CSV module: "done, leave it". Refreshed ON PURPOSE by the
   // third follow-up (2026-11-19): it now reads First name / Last name
   // columns and sets the three name columns (lib/network/names.ts).
-  'lib/network/csv.ts': '32aa4077a37ab6198754d03182535fcfb4340b1069522c59aa5d179e2b94cc25',
+  // And by the slice 6 feedback (2026-11-19): the import's Type help names
+  // unsure first, the same order as everywhere else.
+  'lib/network/csv.ts': '74ff110c5cc5146eb6eb25c0c3525dfaea1dada63d4dd2ef47134dff9031bdaf',
   // the sheet's own save route and rules, and the tag box: reused, not changed
   // Refreshed ON PURPOSE (2026-11-19): the sheet edits a person's first and
   // last name, and the save sets the full name from them (contact-edit.ts).
@@ -57,7 +59,8 @@ const AT_70EAB32: Record<string, string> = {
   'lib/network/contact-edit.ts': '9908264b7975bcd98f8bb647fabedce9714ec3296eb78e0128f7703c81b70d90',
   'lib/network/contact-adds.ts': '7ccf90c5e93ecd106df3103745efdb6726cb9659044a5281aae8034135440bb4',
   // Refreshed ON PURPOSE by the third follow-up: firstName / lastName on NetContact.
-  'lib/network/types.ts': 'da1a27a3368d45c24f989aecfe6e70ad8677fedd5494601e058cefb7f346143c',
+  // And by the slice 6 feedback (Kevin, 2026-11-19): Not sure yet first in NET_TYPES.
+  'lib/network/types.ts': '9bdb9958b334623c733eadf9f00959243bf0ce3b071f4148cfe719ef3240325d',
   'components/network/TagDialog.jsx': '3b3f519293dde0230ebd26174a98a757c92801d2de87883f2d55061da59e3bc5',
 }
 

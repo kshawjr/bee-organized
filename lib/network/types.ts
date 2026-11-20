@@ -8,8 +8,8 @@
 // and CHANGED to Kevin's rulings of 2026-11-15, which override the design:
 //
 //   TYPES — a contact can hold more than one. Exactly five:
-//     Referral partner · Vendor / Service Provider · Nurture ·
-//     Organization · Not sure yet
+//     Not sure yet · Referral partner · Vendor / Service Provider ·
+//     Nurture · Organization   (Not sure yet first: Kevin, 2026-11-19)
 //   There is NO Client type (clients live in their own tab), so the design's
 //   "client" type, activeJob flag and startJob() did not come across.
 //
@@ -27,8 +27,13 @@
 
 export type NetType = 'partner' | 'vendor' | 'nurture' | 'organization' | 'unsure'
 
-/** The five types, in the order every picker and filter shows them. */
-export const NET_TYPES: readonly NetType[] = ['partner', 'vendor', 'nurture', 'organization', 'unsure']
+/**
+ * The five types, in the order every picker, filter, pill row and group list
+ * shows them. NOT SURE YET COMES FIRST (Kevin, 2026-11-19): it is by far the
+ * biggest group, so it is not buried at the end. Changing this one list moves
+ * it everywhere the Network screens list types.
+ */
+export const NET_TYPES: readonly NetType[] = ['unsure', 'partner', 'vendor', 'nurture', 'organization']
 
 export const TYPE_META: Record<NetType, { label: string; short: string; blurb: string; examples: string }> = {
   partner: {

@@ -177,10 +177,11 @@ describe('Filters', () => {
   })
   it('groups by type in the type order, A to Z inside, a two-type contact in both', () => {
     const groups = groupForList(all, NO_FILTERS)
-    expect(groups.map((g) => g.type)).toEqual(['partner', 'vendor', 'nurture', 'organization', 'unsure'])
-    expect(ids(groups[0]!.contacts)).toEqual(['a', 'b', 'c'])
-    expect(ids(groups[1]!.contacts)).toEqual(['c', 'd'])
-    expect(groups[2]!.contacts).toEqual([])
+    // Not sure yet first (Kevin, 2026-11-19)
+    expect(groups.map((g) => g.type)).toEqual(['unsure', 'partner', 'vendor', 'nurture', 'organization'])
+    expect(ids(groups[1]!.contacts)).toEqual(['a', 'b', 'c'])
+    expect(ids(groups[2]!.contacts)).toEqual(['c', 'd'])
+    expect(groups[3]!.contacts).toEqual([])
   })
   it('shows one group when one type is picked, so a two-type contact is listed once', () => {
     const groups = groupForList(applyListFilters(all, f({ type: 'vendor' }), TODAY), f({ type: 'vendor' }))

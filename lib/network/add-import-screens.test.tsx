@@ -568,11 +568,15 @@ describe('one Add contacts button; Export by the search (2026-11-19)', () => {
     expect($('[data-network-import]')).not.toBeNull()
   })
 
-  it('it closes by its own button or Escape, and NOT by a tap outside (Bee Hub’s rule, 75363e9)', async () => {
+  it('it closes by its own button, Escape, or a tap outside (Kevin, 2026-11-19), and the tap opens nothing', async () => {
     await open()
     await click($('[data-act="add-contacts"]'))
-    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); document.body.click() })
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); document.body.click() })
     await flush()
+    expect($('[role="menuitem"]')).toBeNull()
+    expect($('[data-network-add]')).toBeNull()
+    expect($('[data-network-import]')).toBeNull()
+    await click($('[data-act="add-contacts"]'))
     expect($('[role="menuitem"]')).not.toBeNull()
     await click($('[data-act="add-contacts"]'))
     expect($('[role="menuitem"]')).toBeNull()
@@ -591,11 +595,14 @@ describe('one Add contacts button; Export by the search (2026-11-19)', () => {
     expect($('[data-act="export"]')!.closest('[role="menu"]')).not.toBeNull()
     expect($('[data-act="export"]')!.textContent).toContain('Export CSV')
   })
-  it('the More menu closes on its choice, on its button again, and on Escape, not on a tap outside', async () => {
+  it('the More menu closes on its choice, on its button again, on Escape, and on a tap outside (2026-11-19), which exports nothing', async () => {
     await open()
     await click($('[data-act="more"]'))
-    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); document.body.click() })
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); document.body.click() })
     await flush()
+    expect($('[data-act="export"]')).toBeNull()
+    expect($('[data-act-note="done"]')).toBeNull() // no "Saved …" line: nothing was exported
+    await click($('[data-act="more"]'))
     expect($('[data-act="export"]')).not.toBeNull()
     await click($('[data-act="more"]'))
     expect($('[data-act="export"]')).toBeNull()

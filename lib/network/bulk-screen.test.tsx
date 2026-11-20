@@ -121,9 +121,9 @@ describe('bulk: asked once, and a cancel changes nothing', () => {
 describe('who can be given a level or stage', () => {
   it('only Referral partners: with none picked, level and stage are off; with a mix, the rest are named as left alone', async () => {
     await mount([row(1, { networkTypes: ['vendor'], partnerLevel: null, partnerStage: null }), row(2, { networkTypes: null, partnerLevel: null, partnerStage: null }), row(3)])
-    // only the first group starts open; open the Vendor and Not sure yet groups
+    // only the first group (Not sure yet, since 2026-11-19) starts open; open Vendor and Referral partner
     await click($('[data-group="vendor"] .nw-group-heading'))
-    await click($('[data-group="unsure"] .nw-group-heading'))
+    await click($('[data-group="partner"] .nw-group-heading'))
     await click($(`[data-select="${id(1)}"]`))
     await click($(`[data-select="${id(2)}"]`))
     expect(($('[data-bulk="level"]') as HTMLSelectElement).disabled).toBe(true)

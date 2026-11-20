@@ -34,7 +34,7 @@
 // SLICE 6 (2026-11-19):
 //   · EXPORT lives in the header's More menu: it is rare (Kevin), so it is not
 //     a main button. The same Menu as Add contacts (closes on a choice, on its
-//     button again, or Escape; never on a tap outside).
+//     button again, on Escape, or on a click outside: Kevin, 2026-11-19).
 //   · BULK ACTIONS, inside one location only: tick contacts (or a whole page),
 //     then add or take off a tag, or set a Referral partner's level or stage.
 //     ONE confirmation for the whole selection (ConfirmChange); Cancel sends
@@ -121,13 +121,14 @@ const CSS = `
 [data-network-ui] .nw-select-page{display:flex;align-items:center;gap:10px;padding:8px 13px;border-bottom:1px solid ${T.border};font-size:12.5px;color:${T.mutedFg};cursor:pointer}
 [data-network-ui] .nw-stage-line{margin:0;padding:8px 16px;border-bottom:1px solid ${T.border};font-size:12.5px;color:${T.mutedFg};background:${T.card}}
 [data-network-ui] .nw-stage-line b{color:${T.primary};font-weight:700}
-[data-network-ui] .nw-bulk{position:fixed;left:50%;transform:translateX(-50%);width:min(1088px,calc(100vw - 32px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:${T.primary};color:${T.primaryFg};box-shadow:0 12px 30px -12px rgba(26,48,44,.5)}
+[data-network-ui] .nw-bulk{position:fixed;left:32px;right:32px;margin:0 auto;max-width:1088px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:${T.primary};color:${T.primaryFg};box-shadow:0 12px 30px -12px rgba(26,48,44,.5)}
 [data-network-ui] .nw-bulk b{font-size:14px;margin-right:4px}
 [data-network-ui] .nw-bulk select{min-height:40px;max-width:100%;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:color-mix(in oklab,${T.primaryFg} 12%,${T.primary});color:${T.primaryFg};padding:0 8px;font-family:inherit;font-size:13px!important}
 [data-network-ui] .nw-bulk select option{color:${T.primary};background:${T.card}}
 [data-network-ui] .nw-bulk button{min-height:40px;padding:0 12px;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:transparent;color:${T.primaryFg};font-size:13px!important;font-weight:700;margin-left:auto}
 [data-network-ui] .nw-wrap[data-bulk-open]{padding-bottom:140px}
-@media (max-width:600px){ [data-network-ui] .nw-bulk{bottom:calc(8px + env(safe-area-inset-bottom,0px))} [data-network-ui] .nw-bulk select{flex:1 1 40%} [data-network-ui] .nw-bulk button{margin-left:0} }
+@media (min-width:768px){ [data-network-ui] .nw-bulk{left:calc(var(--bee-rail-w,0px) + 32px)} }
+@media (max-width:600px){ [data-network-ui] .nw-bulk{left:16px;right:16px;bottom:calc(8px + env(safe-area-inset-bottom,0px))} [data-network-ui] .nw-bulk select{flex:1 1 40%} [data-network-ui] .nw-bulk button{margin-left:0} }
 [data-network-ui] .nw-act-note[data-tone="good"]{color:${T.primary}}
 [data-network-ui] .nw-controls{display:flex;align-items:center;gap:16px}
 [data-network-ui] .nw-search{position:relative;flex:1;min-width:0}
@@ -241,22 +242,37 @@ const IconNext = () => <Svg><path d="M9 18l6-6-6-6" /></Svg>
 const IconLast = () => <Svg><path d="M13 17l5-5-5-5M6 17l5-5-5-5" /></Svg>
 
 /**
- * A small menu under its button. It closes by its OWN controls: its Done
- * button, its trigger pressed again, or Escape. It does NOT close on a tap
- * outside it (Bee Hub's rule since 2026-09-30, for every menu and popover;
- * the design's menu did, and that one behaviour was not brought across).
+ * A small menu under its button. It closes on a click or tap ANYWHERE outside
+ * it, on its trigger pressed again, on Escape, or on its own Done button.
+ *
+ * KEVIN'S RULING, 2026-11-19 (slice 6 feedback): "anywhere on the screen
+ * should clear the prompt." That reverses, FOR THE NETWORK SCREENS ONLY, Bee
+ * Hub's 2026-09-30 rule (75363e9: nothing closes on an outside click). Every
+ * other menu in Bee Hub still follows the old rule until Kevin rules on them;
+ * lib/beta-no-outside-close.test.tsx lets this one listener through by name.
+ *
+ * Closing from outside CANCELS: it only closes. It picks nothing in the menu
+ * and changes no filter. (A filter box applies each tick as it is ticked, as
+ * it always has, so what is already ticked stays ticked, exactly as with
+ * Escape or Done.) The click itself carries on to whatever it landed on.
  * `children` is handed close(), for the Done button.
  */
 function Menu({ trigger, children, className, anchorClass = '' }) {
   const [open, setOpen] = useState(false)
+  const anchor = useRef(null)
   useEffect(() => {
     if (!open) return undefined
     const key = (e) => { if (e.key === 'Escape') setOpen(false) }
+    // Pointer down, in the capture phase, so nothing on the page can swallow
+    // it first. A press inside the anchor (the trigger or the menu) is left
+    // to them: the trigger toggles, a choice closes the way it always has.
+    const away = (e) => { if (anchor.current && !anchor.current.contains(e.target)) setOpen(false) }
     document.addEventListener('keydown', key)
-    return () => document.removeEventListener('keydown', key)
+    document.addEventListener('pointerdown', away, true) // network-menu-click-away (Kevin, 2026-11-19)
+    return () => { document.removeEventListener('keydown', key); document.removeEventListener('pointerdown', away, true) }
   }, [open])
   return (
-    <div className={`nw-anchor ${anchorClass}`}>
+    <div className={`nw-anchor ${anchorClass}`} ref={anchor}>
       {trigger(open, () => setOpen((v) => !v))}
       {open && <div className={`nw-menu ${className || ''}`} role="menu">{children(() => setOpen(false))}</div>}
     </div>
@@ -619,10 +635,9 @@ export default function NetworkListScreen({
 
         <div className="nw-actions" data-actions>
           {/* ONE BUTTON for adding (2026-11-19): one person, or from a
-              spreadsheet. It is the list's own Menu, so it closes the way
-              every Bee Hub menu does (Kevin's rule, 75363e9): by picking a
-              choice, pressing the button again, or Escape, never by a tap
-              outside. Export is a different verb and sits by the search. */}
+              spreadsheet. It is the list's own Menu: it closes by picking a
+              choice, pressing the button again, Escape, or a click anywhere
+              outside it (Kevin, 2026-11-19). */}
           <Menu anchorClass="nw-add-anchor" className="nw-add-menu" trigger={(open, toggle) => (
             <button type="button" className="nw-act" data-primary disabled={!locationId} aria-expanded={open} aria-haspopup="menu" onClick={toggle} data-act="add-contacts">
               <IconPlus />Add contacts<IconChevron />
@@ -736,6 +751,14 @@ export default function NetworkListScreen({
               )}
             </div>
 
+            {/* THE BULK BAR is pinned to the bottom of the window, but it is
+                drawn inside the CONTENT AREA, not the whole window: on a
+                desktop Bee Hub's left menu (192px, or 80 folded, set as
+                --bee-rail-w by BeeHub.jsx, drawn on top) covers the window's
+                left edge. Slice 6 centred it on the whole window, so its left
+                end sat under that menu (Kevin, on the preview). Now its edges
+                are the list's own edges: 32px in from the content area, 16px
+                on a phone, never wider than the list. */}
             {selectable && selected.size > 0 && (
               <div className="nw-bulk" role="region" aria-label="Change the picked contacts" data-bulk-bar>
                 <b data-bulk-count>{selected.size} picked</b>

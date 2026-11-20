@@ -21,7 +21,9 @@ const AT_0C61AFC: Record<string, string> = {
   'lib/lead-to-network.ts': '76807abc8b63bf214a199bca0ec61568c270c9e85276480204d9cefdf1e516d2',
   'lib/network/access.ts': '2c76af86bf29a4725d279317cb1aa57cc9d189db0d38241e50e6bb19fe9fe546',
   'lib/network/live-mapping.ts': '66130cbd4cd5b3097f728aebfd0411f4daf891ec5d09d5e123a29f67c02d9df3',
-  'lib/network/types.ts': 'da1a27a3368d45c24f989aecfe6e70ad8677fedd5494601e058cefb7f346143c',
+  // Refreshed ON PURPOSE by the slice 6 feedback (Kevin, 2026-11-19): Not sure
+  // yet moved to the front of NET_TYPES. Nothing else in the file changed.
+  'lib/network/types.ts': '9bdb9958b334623c733eadf9f00959243bf0ce3b071f4148cfe719ef3240325d',
   'lib/network/contact-create.ts': '6b7853d51ed4860c65f37fd4bf445d970ed186bd0457d22a1b688bc7660e54d2',
   'lib/network/contact-writes.ts': '5c067c66b8f4bc7200a0125103d5d6565cea6a499c42ebfd418056940d3b6793',
   'middleware.ts': '6a17cfac0bc06dce536a02027dcc93f10823d9a70129d2ba35e7e1481b925ead',

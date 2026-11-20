@@ -7,10 +7,10 @@ import {
 import { sampleContact } from './testing'
 
 describe("Kevin's rulings, word for word", () => {
-  it('has exactly five types, in his order, with his labels', () => {
-    expect(NET_TYPES).toEqual(['partner', 'vendor', 'nurture', 'organization', 'unsure'])
+  it('has exactly five types, in his order, with his labels: Not sure yet FIRST (2026-11-19, the biggest group)', () => {
+    expect(NET_TYPES).toEqual(['unsure', 'partner', 'vendor', 'nurture', 'organization'])
     expect(NET_TYPES.map((t) => TYPE_META[t].label)).toEqual([
-      'Referral partner', 'Vendor / Service Provider', 'Nurture', 'Organization', 'Not sure yet',
+      'Not sure yet', 'Referral partner', 'Vendor / Service Provider', 'Nurture', 'Organization',
     ])
   })
   it('has no Client type', () => {
