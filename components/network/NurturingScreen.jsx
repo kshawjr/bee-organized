@@ -288,6 +288,7 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
               {!data.rows.length && (
                 <p className="nn-empty" data-empty>
                   {askedQ ? <>Nobody here matches &ldquo;{askedQ}&rdquo;{needsOnly ? ' among people who need contact info' : ''}.<button type="button" onClick={() => setQ('')} data-clear-search>Clear search</button></>
+                    : data.excluded ? <>{locationName || 'This location'} is left out of Nurturing: it is Bee Hub&rsquo;s test location or the transfer queue.</>
                     : needsOnly ? <>Everyone here has an email or a phone.<button type="button" onClick={() => setNeedsOnly(false)} data-clear-filter>Show everyone</button></>
                       : <>Nobody at {locationName || 'this location'} is Nurturing right now.</>}
                 </p>

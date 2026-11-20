@@ -26,7 +26,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import {
-  NURTURING_QUIET_DAYS, foldActivity, needsContactInfo, nurtureName, nurturingCutoffs, nurturingVerdict, addressLine,
+  NURTURING_QUIET_DAYS, NURTURING_EXCLUDED_LOCATIONS, foldActivity, needsContactInfo, nurtureName, nurturingCutoffs, nurturingVerdict, addressLine,
   quoteAt, assessmentAt, jobCounts,
   type NurtureRow,
 } from './nurturing'
@@ -35,10 +35,10 @@ const PAGE = 1000
 const PARALLEL = 6
 const CACHE_MS = 60_000
 
-export const NURTURE_LEAD_COLS = 'id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk'
+export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk'
 
 export type NurtureLocation = { id: string; slug: string; name: string | null }
-export type NurtureList = { rows: NurtureRow[]; counts: { nurturing: number; needsContactInfo: number; hadQuoteOrAssessment: number }; readMs: number; peopleRead: number }
+export type NurtureList = { excluded?: boolean; rows: NurtureRow[]; counts: { nurturing: number; needsContactInfo: number; hadQuoteOrAssessment: number }; readMs: number; peopleRead: number }
 
 type Db = { from: (table: string) => any }
 
@@ -94,13 +94,16 @@ async function readCandidates(db: Db, loc: NurtureLocation, createdBefore: strin
   return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
 }
 
-async function readActivity(db: Db, slug: string) {
-  const [assessments, quotes, jobs] = await Promise.all([
+async function readActivity(db: Db, slug: string, uuid: string) {
+  const [assessments, quotes, jobs, cards] = await Promise.all([
     pageAll(() => db.from('assessments').select('id, lead_id, completed_at, scheduled_at, created_at').eq('location_id', slug).order('id'), 'assessments'),
     pageAll(() => db.from('quotes').select('id, lead_id, status, sent_at, created_at').eq('location_id', slug).order('id'), 'quotes'),
     pageAll(() => db.from('jobs').select('id, lead_id, status').eq('location_id', slug).order('id'), 'jobs'),
+    // Open cards only (2,285 across every location on 2026-11-20). Engagements
+    // carry the location uuid; every open card sits at its person's location.
+    pageAll(() => db.from('engagements').select('id, client_id, closed_at').eq('location_uuid', uuid).is('closed_at', null).order('id'), 'engagements'),
   ])
-  return { assessments, quotes, jobs }
+  return { assessments, quotes, jobs, cards }
 }
 
 const cache = new Map<string, { at: number; list: NurtureList }>()
@@ -115,9 +118,13 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.list
 
   const started = Date.now()
+  // Test Location and the transfer queue: nobody is Nurturing there, so nothing is read.
+  if (NURTURING_EXCLUDED_LOCATIONS.includes(loc.slug)) {
+    return { excluded: true, rows: [], counts: { nurturing: 0, needsContactInfo: 0, hadQuoteOrAssessment: 0 }, readMs: 0, peopleRead: 0 }
+  }
   const { createdBefore } = nurturingCutoffs(now, quietDays)
-  const [people, act] = await Promise.all([readCandidates(db, loc, createdBefore), readActivity(db, loc.slug)])
-  const folded = foldActivity(act.assessments, act.quotes, act.jobs)
+  const [people, act] = await Promise.all([readCandidates(db, loc, createdBefore), readActivity(db, loc.slug, loc.id)])
+  const folded = foldActivity(act.assessments, act.quotes, act.jobs, act.cards)
   const rows: NurtureRow[] = []
   let needs = 0
   let had = 0
@@ -162,7 +169,7 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
     one('jobs', 'id, status, title, total, created_at'),
     one('service_requests', 'id, status, stage, requested_at, created_at, source'),
     (async () => {
-      const { data, error: e } = await db.from('engagements').select('id, title, stage, closed_reason, closed_at, created_at').eq('client_id', id).order('created_at', { ascending: false }).limit(50)
+      const { data, error: e } = await db.from('engagements').select('id, client_id, title, stage, closed_reason, closed_at, created_at').eq('client_id', id).order('created_at', { ascending: false }).limit(50)
       if (e) throw new Error(`engagements: ${e.message}`)
       return data || []
     })(),
@@ -185,7 +192,7 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
     if (e) throw new Error(`lookups: ${e.message}`)
     tags = (data || []).map((t: any) => ({ id: t.id, label: t.label, icon: t.icon ?? null }))
   }
-  const folded = foldActivity(assessments.map((a: any) => ({ ...a, lead_id: id })), quotes.map((q: any) => ({ ...q, lead_id: id })), jobs.map((j: any) => ({ ...j, lead_id: id })))
+  const folded = foldActivity(assessments.map((a: any) => ({ ...a, lead_id: id })), quotes.map((q: any) => ({ ...q, lead_id: id })), jobs.map((j: any) => ({ ...j, lead_id: id })), engagements.map((e: any) => ({ client_id: id, closed_at: e.closed_at })))
   const verdict = nurturingVerdict(lead, folded, now, quietDays)
   return {
     person: {

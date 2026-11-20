@@ -24,6 +24,7 @@ const row = (i: number, over: any = {}) => ({
 
 let people: any[] = []
 let quietDays = 90
+let excludedLoc = false
 let calls: { url: string; method: string }[] = []
 const server = vi.fn(async (url: string, init?: any) => {
   calls.push({ url, method: init?.method || 'GET' })
@@ -37,7 +38,7 @@ const server = vi.fn(async (url: string, init?: any) => {
     const pages = Math.max(1, Math.ceil(rows.length / size))
     const page = Math.min(Number(u.searchParams.get('page')), pages - 1)
     return { ok: true, status: 200, json: async () => ({
-      location: { id: LOC, name: 'Philadelphia Suburbs' }, quietDays,
+      location: { id: LOC, name: 'Philadelphia Suburbs' }, quietDays, excluded: excludedLoc,
       counts: { nurturing: people.length, needsContactInfo: people.filter((r) => r.needsContactInfo).length, hadQuoteOrAssessment: people.filter((r) => r.lastActivity).length },
       total: rows.length, page, size, sort: u.searchParams.get('sort'), rows: rows.slice(page * size, (page + 1) * size),
     }) }
@@ -61,7 +62,7 @@ const server = vi.fn(async (url: string, init?: any) => {
 let host: HTMLElement
 let root: ReturnType<typeof createRoot>
 beforeEach(() => {
-  calls = []; quietDays = 90; server.mockClear()
+  calls = []; quietDays = 90; excludedLoc = false; server.mockClear()
   people = Array.from({ length: 18826 }, (_, i) => row(i))
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
 })
@@ -149,6 +150,14 @@ describe('a location with 12 people', () => {
     await screen({ locationName: 'Reno' })
     expect(text('[data-empty]')).toBe('Nobody at Reno is Nurturing right now.')
     expect($('[data-problem]')).toBeNull()
+  })
+})
+
+describe('Test Location', () => {
+  it('says it is left out, not that nobody is Nurturing', async () => {
+    people = []; excludedLoc = true
+    await screen({ locationName: 'Test Location' })
+    expect(text('[data-empty]')).toBe('Test Location is left out of Nurturing: it is Bee Hub’s test location or the transfer queue.')
   })
 })
 

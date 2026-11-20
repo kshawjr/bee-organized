@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       location: { id: loc.id, name: loc.name },
       quietDays: NURTURING_QUIET_DAYS,
+      excluded: !!list.excluded,
       counts: list.counts,
       total: rows.length,
       page,

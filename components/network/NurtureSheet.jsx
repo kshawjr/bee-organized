@@ -88,6 +88,8 @@ const money = (n) => (n == null || n === '' ? null : `$${Number(n).toLocaleStrin
 export const initials = (name) => String(name || '?').split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'
 
 const WHY_NOT = {
+  excluded_location: 'at Test Location or in the transfer queue',
+  open_card: 'has an open card on the board',
   archived: 'archived',
   junk: 'marked junk',
   too_new: 'added in the last 30 days',
@@ -173,6 +175,7 @@ export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowM
               <ul className="nu-why">
                 <li><i />Added {dayLabel(p.createdAt)}, {daysAgo(p.createdAt, nowMs).toLocaleString()} days ago.</li>
                 <li><i />{data.jobs.some((j) => j.counts) ? 'Has had a job.' : 'Never had a job.'}</li>
+                <li data-why-card><i />{data.engagements.some((e) => !e.closedAt) ? 'Has an open card on the board.' : 'No open card on the board.'}</li>
                 <li data-why-last><i />{v?.lastActivity
                   ? `Last ${v.lastActivity.kind === 'quote' ? 'quote' : 'assessment'} ${dayLabel(v.lastActivity.at)}, ${daysAgo(v.lastActivity.at, nowMs).toLocaleString()} days ago. Nurturing starts ${quiet} days after the last assessment or quote.`
                   : 'No assessment or quote, ever.'}</li>

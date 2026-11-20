@@ -25,7 +25,7 @@ import {
 const NOW = new Date('2026-11-20T03:00:00Z')
 const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86400000).toISOString()
 const lead = (over: any = {}) => ({ id: 'L1', created_at: daysAgo(400), archived_at: null, is_junk: false, email: 'a@b.com', phone: null, ...over })
-const fold = (a: any[] = [], q: any[] = [], j: any[] = []) => foldActivity(a, q, j)
+const fold = (a: any[] = [], q: any[] = [], j: any[] = [], c: any[] = []) => foldActivity(a, q, j, c)
 const v = (l: any, act = fold(), quiet?: number) => nurturingVerdict(l, act, NOW, quiet)
 
 describe('Kevin\'s rule, clause by clause', () => {
@@ -185,6 +185,8 @@ import { clearNurtureCache, loadNurturingList } from './nurturing-read'
 
 const PHILLY = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const TEST_LOC = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const QUEUE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 const as = (role: string | null) => { h.state.sessionUser = role ? { id: 'me' } : null; h.state.hubUser = role ? { id: 'me', role, location_id: null } : null }
 const getList = (qs: string) => listRoute.GET({ nextUrl: new URL(`http://x/api/network/nurturing?${qs}`) } as any)
 const pid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`
@@ -205,15 +207,60 @@ beforeEach(() => {
     { id: pid(901), location_uuid: PHILLY, location_id: 'loc_phillysuburbs', name: 'Had Job', email: 'j@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
     { id: pid(902), location_uuid: PHILLY, location_id: 'loc_phillysuburbs', name: 'Junk', email: 'k@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: true },
     { id: pid(903), location_uuid: PHILLY, location_id: 'loc_phillysuburbs', name: 'Fresh Quote', email: 'f@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: null },
-    { id: pid(904), location_uuid: OTHER, location_id: 'loc_other', name: 'Elsewhere', email: 'e@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
+    { id: pid(904), location_uuid: OTHER, location_id: 'loc_tulsa', name: 'Elsewhere', email: 'e@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
   ]
   h.state.tables = {
-    locations: [{ id: PHILLY, slug: 'loc_phillysuburbs', name: 'Philadelphia Suburbs' }, { id: OTHER, slug: 'loc_other', name: 'Other' }],
+    locations: [{ id: PHILLY, slug: 'loc_phillysuburbs', name: 'Philadelphia Suburbs' }, { id: OTHER, slug: 'loc_tulsa', name: 'Tulsa' }, { id: TEST_LOC, slug: 'loc_test', name: 'Test Location' }, { id: QUEUE, slug: 'loc_other', name: 'Other' }],
     leads,
     jobs: [{ id: 'j1', lead_id: pid(901), location_id: 'loc_phillysuburbs', status: 'completed' }],
     quotes: [{ id: 'q1', lead_id: pid(903), location_id: 'loc_phillysuburbs', status: 'sent', created_at: new Date().toISOString(), sent_at: null }],
     assessments: [],
+    engagements: [],
   }
+  h.state.tables.leads.push(
+    { id: pid(905), location_uuid: PHILLY, location_id: 'loc_phillysuburbs', name: 'Open Card', email: 'o@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
+    { id: pid(906), location_uuid: PHILLY, location_id: 'loc_phillysuburbs', name: 'Closed Lost', email: 'l@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
+    { id: pid(907), location_uuid: TEST_LOC, location_id: 'loc_test', name: 'Sandbox Sam', email: 's@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
+    { id: pid(908), location_uuid: QUEUE, location_id: 'loc_other', name: 'Queue Quinn', email: 'q@x.com', created_at: '2025-01-01T00:00:00Z', archived_at: null, is_junk: false },
+  )
+  h.state.tables.engagements.push(
+    { id: 'e-open', client_id: pid(905), location_uuid: PHILLY, stage: 'Request', closed_at: null },
+    { id: 'e-lost', client_id: pid(906), location_uuid: PHILLY, stage: 'Closed Lost', closed_reason: 'No response', closed_at: '2025-03-01T00:00:00Z' },
+  )
+})
+
+describe('Kevin\'s answers, 2026-11-20', () => {
+  it('1. an open card wins: a person with an open engagement is not listed', async () => {
+    const j = await (await getList(`location_id=${PHILLY}&size=100`)).json()
+    expect(j.rows.map((r: any) => r.name)).not.toContain('Open Card')
+    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: null }]))).toMatchObject({ nurturing: false, why: 'open_card' })
+  })
+  it('1. …and comes back when the card closes, Won or Lost', () => {
+    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: daysAgo(200) }]))).toMatchObject({ nurturing: true })
+  })
+  it('2. closed as Lost stays in', async () => {
+    const j = await (await getList(`location_id=${PHILLY}&size=100`)).json()
+    expect(j.rows.map((r: any) => r.name)).toContain('Closed Lost')
+  })
+  it('3. nobody from Test Location or the transfer queue is listed, and nothing there is even read', async () => {
+    for (const loc of [TEST_LOC, QUEUE]) {
+      h.state.calls = []
+      const j = await (await getList(`location_id=${loc}`)).json()
+      expect(j).toMatchObject({ excluded: true, total: 0, rows: [], counts: { nurturing: 0 } })
+      expect(h.state.calls.map((c) => c.table)).toEqual(['hub_users', 'locations'])
+    }
+    expect(v(lead({ location_id: 'loc_test' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
+    expect(v(lead({ location_id: 'loc_other' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
+    expect(v(lead({ location_id: 'loc_tulsa' }))).toMatchObject({ nurturing: true })
+  })
+  it('the SQL carries both new clauses', () => {
+    expect(nurturingSql()).toContain("and l.location_id not in ('loc_test', 'loc_other')")
+    expect(nurturingSql()).toContain('and not exists (select 1 from engagements e where e.client_id = l.id and e.closed_at is null)')
+  })
+  it('the person view knows about the open card too', async () => {
+    const j = await (await personRoute.GET({} as any, { params: Promise.resolve({ id: pid(905) }) })).json()
+    expect(j.verdict).toMatchObject({ nurturing: false, why: 'open_card' })
+  })
 })
 
 describe('the list route', () => {
@@ -222,11 +269,11 @@ describe('the list route', () => {
     expect(res.status).toBe(200)
     const j = await res.json()
     const names = j.rows.map((r: any) => r.name)
-    expect(j.total).toBe(31)
+    expect(j.total).toBe(32) // 30 + No Contact + Closed Lost
     expect(names).toContain('No Contact')
     expect(j.rows.find((r: any) => r.name === 'No Contact').needsContactInfo).toBe(true)
     for (const out of ['Had Job', 'Junk', 'Fresh Quote', 'Elsewhere']) expect(names).not.toContain(out)
-    expect(j.counts).toEqual({ nurturing: 31, needsContactInfo: 1, hadQuoteOrAssessment: 0 })
+    expect(j.counts).toEqual({ nurturing: 32, needsContactInfo: 1, hadQuoteOrAssessment: 0 })
     expect(j.quietDays).toBe(NURTURING_QUIET_DAYS)
     expect(j.location).toEqual({ id: PHILLY, name: 'Philadelphia Suburbs' })
   })
@@ -263,7 +310,7 @@ describe('the list route', () => {
     expect(j.page).toBe(2)
     const last = await (await getList(`location_id=${PHILLY}&size=10&page=999`)).json()
     expect(last.page).toBe(3)
-    expect(last.rows).toHaveLength(1)
+    expect(last.rows).toHaveLength(2)
     const odd = await (await getList(`location_id=${PHILLY}&size=7`)).json()
     expect(odd.size).toBe(25)
   })
@@ -276,7 +323,7 @@ describe('the list route', () => {
 describe('18,826 people at one location', () => {
   it('are read in pages of at most 1,000, and only one page is sent', async () => {
     h.state.tables.leads = seedPhilly(18826)
-    h.state.tables.jobs = []; h.state.tables.quotes = []
+    h.state.tables.jobs = []; h.state.tables.quotes = []; h.state.tables.engagements = []
     const t0 = Date.now()
     const res = await getList(`location_id=${PHILLY}&size=25&page=0`)
     const j = await res.json()
@@ -298,7 +345,7 @@ describe('18,826 people at one location', () => {
   })
   it('a person added between the count and the pages is still read', async () => {
     h.state.tables.leads = seedPhilly(1000)
-    h.state.tables.jobs = []; h.state.tables.quotes = []
+    h.state.tables.jobs = []; h.state.tables.quotes = []; h.state.tables.engagements = []
     const real = h.state.tables.leads
     let counted = false
     const orig = builder

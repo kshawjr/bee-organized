@@ -26,10 +26,12 @@
 // Lato and Arvo are asked for by this screen itself (FONT_STYLESHEET_HREF),
 // never app-wide.
 //
-// ONE DEPARTURE FROM THE DESIGN'S LAYOUT, on a phone: there the design puts
-// Filters at the far end of the row of type pills, which scrolls sideways, so
-// the button starts off the screen. Here only the pills scroll and Filters
-// stays put at the right edge. (Found by looking at the 390px screenshot.)
+// THE TYPE PILLS WRAP (Kevin, 2026-11-20, seen on the preview): at every
+// width the pills fill their own space and run onto a second line when they
+// need it, and Filters stays at the right of the FIRST line. Before, the
+// pills refused to shrink, so on a narrower window they pushed Filters onto
+// a row of its own, right-aligned and alone; and on a phone they scrolled
+// sideways with most of them off the screen.
 //
 // SLICE 6 (2026-11-19):
 //   · EXPORT lives in the header's More menu: it is rare (Kevin), so it is not
@@ -142,8 +144,8 @@ const CSS = `
 [data-network-ui] .nw-trigger:hover{border-color:${T.primary}}
 [data-network-ui] .nw-trigger[data-active]{border-color:${T.primary};background:color-mix(in oklab,${T.primary} 8%,${T.card})}
 [data-network-ui] .nw-trigger-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:${T.primary};color:${T.primaryFg};font-size:11px}
-[data-network-ui] .nw-refine{display:flex;align-items:center;gap:10px;margin-top:12px;padding-bottom:12px;border-bottom:1px solid ${T.border};flex-wrap:wrap}
-[data-network-ui] .nw-pills{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
+[data-network-ui] .nw-refine{display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding-bottom:12px;border-bottom:1px solid ${T.border};flex-wrap:nowrap}
+[data-network-ui] .nw-pills{display:flex;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
 [data-network-ui] .nw-pill{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid ${T.border};border-radius:999px;background:${T.card};white-space:nowrap;font-size:13px!important;color:${T.mutedFg};transition:background-color 150ms,color 150ms,border-color 150ms}
 [data-network-ui] .nw-pill:hover{background:${T.muted};color:${T.primary}}
 [data-network-ui] .nw-pill span{font-size:11px;color:${T.mutedFg};font-variant-numeric:tabular-nums}
@@ -214,9 +216,6 @@ const CSS = `
   [data-network-ui] .nw-controls{flex-wrap:wrap;gap:8px}
   [data-network-ui] .nw-search{flex:1 1 100%}
   [data-network-ui] .nw-tags-anchor{flex:1 1 0;min-width:0}
-  [data-network-ui] .nw-refine{flex-wrap:nowrap}
-  [data-network-ui] .nw-pills{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-  [data-network-ui] .nw-pills::-webkit-scrollbar{display:none}
   [data-network-ui] .nw-pill{font-size:12.5px!important}
   [data-network-ui] .nw-row{gap:12px;align-items:flex-start}
   [data-network-ui] .nw-stats{display:none}

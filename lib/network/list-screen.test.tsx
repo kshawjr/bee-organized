@@ -476,13 +476,14 @@ describe('the look is the design', () => {
     const css = src.slice(src.indexOf('const CSS = `'), src.indexOf('const Svg ='))
     expect(css.match(/#[0-9A-Fa-f]{3,8}\b/g)).toBeNull()
   })
-  it('on a phone only the type pills scroll sideways, so Filters stays on screen', () => {
+  it('on a phone the type pills wrap (no sideways scroll), so every pill and Filters stay on screen', () => {
     // Layout cannot be seen here (this test browser lays nothing out); it was
-    // measured in Chromium at 390px, where the Filters button was first found
-    // off the screen. This holds the rule that fixed it.
+    // measured in Chromium at 390px and 360px. Until 2026-11-20 the pills
+    // scrolled sideways here; Kevin ruled they wrap at every width
+    // (lib/network/pills-wrap.test.ts holds the rule for all widths).
     const phone = src.slice(src.indexOf('@media (max-width:767px){'), src.indexOf('@media (prefers-reduced-motion'))
-    expect(phone).toContain('[data-network-ui] .nw-pills{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;')
-    expect(phone).toContain('[data-network-ui] .nw-refine{flex-wrap:nowrap}')
+    expect(phone).not.toMatch(/\.nw-pills\{/)
+    expect(src).not.toMatch(/\.nw-pills\{[^}]*overflow-x/)
     expect(src).not.toMatch(/\.nw-refine\{[^}]*overflow-x/)
     expect(src).not.toMatch(/\.nw-menu-row[^{]*\{[^}]*overflow/)
   })
