@@ -53,7 +53,7 @@ const server = vi.fn(async (url: string, init?: any) => {
       assessments: [], quotes: [{ id: 'q1', status: 'sent', total: 1200, at: '2025-06-01T00:00:00Z', counts: true }, { id: 'q2', status: 'draft', total: 50, at: '2026-11-01T00:00:00Z', counts: false }],
       jobs: [], requests: [{ id: 'r1', status: 'new', at: '2025-01-01T00:00:00Z' }],
       engagements: [{ id: 'e1', title: 'Garage', stage: 'Closed Lost', closedReason: 'stale_on_import', closedAt: '2025-02-05T00:00:00Z' }],
-      tags: [{ id: 't1', label: 'Hot Lead', icon: '🔥' }], touchpoints: [],
+      tags: [{ id: 't1', label: 'Hot Lead', icon: '🔥' }], touchpoints: [], followUps: [],
     }) }
   }
   return { ok: false, status: 404, json: async () => ({}) }
@@ -214,7 +214,8 @@ describe('opening a person', () => {
     expect(text('[data-why-last]')).toContain('Nurturing starts 90 days after the last assessment or quote.')
     expect(words).not.toContain('stale_on_import') // a code, never shown raw
     for (const partnerOnly of ['Partner level', 'Referral partner', 'Power Partner', 'Not sure yet', 'Vendor', 'New Contact', 'Reaching Out']) expect(words).not.toContain(partnerOnly)
-    expect(sheet.querySelectorAll('input, textarea, select')).toHaveLength(0)
+    // slice 8: the only things to fill in are a lead's: a tag and a follow-up. No partner field.
+    expect(Array.from(sheet.querySelectorAll('input, textarea, select')).map((e) => Object.keys((e as HTMLElement).dataset)[0]).sort()).toEqual(['dueInput', 'followUpNote', 'tagPick'])
   })
   it('it is a window: a click outside never closes it; its ✕ and Escape do', async () => {
     await screen()
@@ -276,15 +277,16 @@ describe('on a phone', () => {
 })
 
 describe('read only', () => {
-  it('every request is a GET; there is nothing to tick and no bulk bar', async () => {
+  // Slice 8 ended "read only" on purpose (ticks, a bulk bar, tags and follow-ups:
+  // lib/network/nurturing-actions-screen.test.tsx). Looking and paging still only read.
+  it('opening a person, closing and paging only read', async () => {
     await screen()
     await press($('[data-row="p0"]')!)
     await press($('[data-nurture-sheet] [data-close]')!)
     await press($('[data-page="next"]')!)
     expect(calls.length).toBeGreaterThan(2)
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
-    expect($$('[data-nurture-ui] input[type="checkbox"]')).toHaveLength(0)
-    expect(text('[data-preview-note]')).toContain('read only')
+    expect(text('[data-preview-note]')).toContain('Only super admins')
   })
   it('the person view is not the partner sheet, and imports nothing that saves', () => {
     const src = (f: string) => readFileSync(join(process.cwd(), f), 'utf8')

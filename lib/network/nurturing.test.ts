@@ -103,9 +103,9 @@ describe('Kevin\'s rule, clause by clause', () => {
 
 describe('search, sort, names', () => {
   const rows = [
-    { id: 'b', name: 'Beth Ames', email: 'beth@x.com', phone: '(215) 555-0101', city: 'Media', zip: '19063', createdAt: daysAgo(100), needsContactInfo: false, lastActivity: null },
-    { id: 'a', name: 'aaron Zed', email: null, phone: null, city: 'Wayne', zip: '19087', createdAt: daysAgo(50), needsContactInfo: true, lastActivity: { at: daysAgo(200), kind: 'quote' as const } },
-    { id: 'c', name: 'Cal Moss', email: 'cal@y.com', phone: '610-555-0199', city: null, zip: null, createdAt: daysAgo(900), needsContactInfo: false, lastActivity: { at: daysAgo(100), kind: 'assessment' as const } },
+    { id: 'b', name: 'Beth Ames', email: 'beth@x.com', phone: '(215) 555-0101', city: 'Media', zip: '19063', createdAt: daysAgo(100), needsContactInfo: false, lastActivity: null, noMarketing: false },
+    { id: 'a', name: 'aaron Zed', email: null, phone: null, city: 'Wayne', zip: '19087', createdAt: daysAgo(50), needsContactInfo: true, lastActivity: { at: daysAgo(200), kind: 'quote' as const }, noMarketing: false },
+    { id: 'c', name: 'Cal Moss', email: 'cal@y.com', phone: '610-555-0199', city: null, zip: null, createdAt: daysAgo(900), needsContactInfo: false, lastActivity: { at: daysAgo(100), kind: 'assessment' as const }, noMarketing: false },
   ]
   it('finds by name, email, town, zip and phone digits however they are typed', () => {
     expect(searchNurture(rows, 'beth').map((r) => r.id)).toEqual(['b'])
@@ -126,7 +126,7 @@ describe('search, sort, names', () => {
     expect(nurtureName({ name: ', Bernadette Gruszka' })).toBe('Bernadette Gruszka')
     expect(nurtureName({ name: '. Openaker' })).toBe('Openaker')
     expect(nurtureName({ name: "Mary-Kate O'Neil" })).toBe("Mary-Kate O'Neil")
-    const r = (id: string, name: string) => ({ id, name: nurtureName({ name }), email: null, phone: null, city: null, zip: null, createdAt: daysAgo(40), needsContactInfo: false, lastActivity: null })
+    const r = (id: string, name: string) => ({ id, name: nurtureName({ name }), email: null, phone: null, city: null, zip: null, createdAt: daysAgo(40), needsContactInfo: false, lastActivity: null, noMarketing: false })
     expect(sortNurture([r('1', 'Bob'), r('2', ', Al')], 'az').map((x) => x.id)).toEqual(['2', '1'])
   })
   it('an address never says the town or zip twice (some imports hold the whole line in the street field)', () => {
@@ -247,7 +247,8 @@ describe('Kevin\'s answers, 2026-11-20', () => {
       h.state.calls = []
       const j = await (await getList(`location_id=${loc}`)).json()
       expect(j).toMatchObject({ excluded: true, total: 0, rows: [], counts: { nurturing: 0 } })
-      expect(h.state.calls.map((c) => c.table)).toEqual(['hub_users', 'locations'])
+      // slice 8 also reads the tag list; no person and no activity is read
+      expect(h.state.calls.map((c) => c.table).sort()).toEqual(['hub_users', 'locations', 'lookups'])
     }
     expect(v(lead({ location_id: 'loc_test' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
     expect(v(lead({ location_id: 'loc_other' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
@@ -382,7 +383,11 @@ describe('one person', () => {
   })
 })
 
-describe('nothing in this slice writes', () => {
+// Slice 8 (2026-11-20) added writes on purpose: tags and follow-ups, in their
+// own files (lib/network/nurturing-actions.ts, the bulk and follow-up routes,
+// the screens' buttons), pinned in lib/network/nurturing-actions.test.ts. The
+// READS below stay read-only: these files still write nothing.
+describe('the reads write nothing', () => {
   it('every database call the routes made was a read', async () => {
     await getList(`location_id=${PHILLY}`)
     await personRoute.GET({} as any, { params: Promise.resolve({ id: pid(1) }) })
@@ -392,7 +397,7 @@ describe('nothing in this slice writes', () => {
   const FILES = [
     'lib/network/nurturing.ts', 'lib/network/nurturing-read.ts',
     'app/api/network/nurturing/route.ts', 'app/api/network/nurturing/[id]/route.ts',
-    'components/network/NurturingScreen.jsx', 'components/network/NurtureSheet.jsx', 'components/network/NetworkTabs.jsx',
+    'components/network/NetworkTabs.jsx',
   ]
   const code = (f: string) => readFileSync(join(process.cwd(), f), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
   it('by fingerprint: no write verb, no database function, no POST/PATCH/DELETE in any slice 7 file', () => {
@@ -407,7 +412,7 @@ describe('nothing in this slice writes', () => {
     expect(Object.keys(personRoute).filter((k) => /^(GET|POST|PATCH|PUT|DELETE)$/.test(k))).toEqual(['GET'])
   })
   it('the 90 is typed in exactly one place: the rule file', () => {
-    for (const f of FILES.filter((x) => x !== 'lib/network/nurturing.ts')) expect(code(f), f).not.toMatch(/\b90\b/)
+    for (const f of [...FILES, 'components/network/NurturingScreen.jsx', 'components/network/NurtureSheet.jsx'].filter((x) => x !== 'lib/network/nurturing.ts')) expect(code(f), f).not.toMatch(/\b90\b/)
     expect(code('lib/network/nurturing.ts').match(/\b90\b/g)).toHaveLength(1)
   })
 })

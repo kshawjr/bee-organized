@@ -6,11 +6,17 @@
 // mounts this (super admins, for now); the route it reads answers 403 to
 // everyone else. Kevin: nothing un-greys until all nine slices are done.
 //
-// READ-ONLY. It reads two addresses and writes nothing:
-//   /api/network/nurturing          one page of the list, and the counts
+// WHAT IT READS:
+//   /api/network/nurturing          one page of the list, the counts, the tags
 //   /api/network/nurturing/<id>     one person (NurtureSheet.jsx)
-// There is no tick box, no bulk bar and no edit here. Every action is
-// slice 8, which waits on Kevin's consent decision.
+// WHAT IT CAN CHANGE (slice 8, Kevin 2026-11-20), and nothing else:
+//   · tags, in bulk: tick people (or "all N matching"), pick a tag, and ONE
+//     confirmation names the exact number (NurtureBulkConfirm.jsx). The
+//     server works the selection out again and writes all or nothing.
+//   · one person's tags and follow-ups, and the link to their full client
+//     record, from the person view.
+// Nothing here sends an email. Anyone who said no to marketing is left out
+// of every action by the server, with no way round it.
 //
 // WHO IS LISTED is Kevin's rule, in lib/network/nurturing.ts, worked out on
 // the server. This screen never decides it.
@@ -35,6 +41,7 @@ import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { T, NET, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { PAGE_SIZES, defaultPageSize, pageCount } from '@/lib/network/paging'
 import NurtureSheet, { dayLabel, initials } from './NurtureSheet'
+import NurtureBulkConfirm from './NurtureBulkConfirm'
 
 // The same four sorts the server knows (lib/network/nurturing.ts NURTURE_SORTS).
 const SORTS = [
@@ -104,6 +111,26 @@ const CSS = `
 [data-nurture-ui] .nn-empty button{margin-left:6px;font-weight:700;color:${T.primary};text-decoration:underline}
 [data-nurture-ui] .nn-problem{margin-top:20px;padding:16px;border:1px solid ${NET.warn};border-radius:10px;background:${NET.warnSoft};font-size:14px}
 [data-nurture-ui] .nn-busy{opacity:.55;transition:opacity .15s}
+[data-nurture-ui] .nn-rowwrap{display:flex;align-items:stretch;min-width:0;border-bottom:1px solid ${T.border}}
+[data-nurture-ui] .nn-rowwrap:last-child{border-bottom:0}
+[data-nurture-ui] .nn-rowwrap[data-even]{background:color-mix(in oklab,${NET.nurtureSoft} 30%,${T.card})}
+[data-nurture-ui] .nn-rowwrap[data-picked]{background:color-mix(in oklab,${T.primary} 9%,${T.card})}
+[data-nurture-ui] .nn-rowwrap > .nn-row{flex:1;border-bottom:0;background:transparent}
+[data-nurture-ui] .nn-check{display:flex;align-items:center;justify-content:center;flex:0 0 44px;cursor:pointer}
+[data-nurture-ui] .nn-check input,[data-nurture-ui] .nn-selectpage input{width:18px;height:18px;accent-color:${T.primary};cursor:pointer}
+[data-nurture-ui] .nn-selectbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:8px 13px;border-bottom:1px solid ${T.border};font-size:12.5px;color:${T.mutedFg}}
+[data-nurture-ui] .nn-selectpage{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:36px}
+[data-nurture-ui] .nn-selectbar button{min-height:36px;font-weight:700;color:${T.primary};text-decoration:underline}
+[data-nurture-ui] .nn-nomkt{display:inline-flex;align-items:center;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid ${T.border};background:${T.muted};color:${T.mutedFg};white-space:nowrap}
+[data-nurture-ui] .nn-bulk{position:fixed;left:32px;right:32px;margin:0 auto;max-width:1088px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:${T.primary};color:${T.primaryFg};box-shadow:0 12px 30px -12px rgba(26,48,44,.5)}
+[data-nurture-ui] .nn-bulk b{font-size:14px;margin-right:4px}
+[data-nurture-ui] .nn-bulk select{min-height:40px;max-width:100%;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:color-mix(in oklab,${T.primaryFg} 12%,${T.primary});color:${T.primaryFg};padding:0 8px;font-family:inherit;font-size:13px!important}
+[data-nurture-ui] .nn-bulk select option{color:${T.primary};background:${T.card}}
+[data-nurture-ui] .nn-bulk button{min-height:40px;padding:0 12px;border-radius:8px;border:1px solid color-mix(in oklab,${T.primaryFg} 40%,transparent);background:transparent;color:${T.primaryFg};font-size:13px!important;font-weight:700}
+[data-nurture-ui] .nn-bulk button[data-primary]{background:${T.primaryFg};color:${T.primary};margin-left:auto}
+[data-nurture-ui] .nn-wrap[data-bulk-open]{padding-bottom:150px}
+@media (min-width:768px){ [data-nurture-ui] .nn-bulk{left:calc(var(--bee-rail-w,0px) + 32px)} }
+@media (max-width:600px){ [data-nurture-ui] .nn-bulk{left:16px;right:16px;bottom:calc(8px + env(safe-area-inset-bottom,0px))} [data-nurture-ui] .nn-bulk select{flex:1 1 40%} [data-nurture-ui] .nn-bulk button[data-primary]{margin-left:0;flex:1 1 auto} }
 [data-nurture-ui] .nn-mobile-only{display:none}
 @media (max-width:767px){
   [data-nurture-ui] .nn-wrap{padding:16px 16px 40px}
@@ -159,7 +186,7 @@ function rowSide(r) {
  *   fetchImpl     tests hand in a fake fetch
  *   isMobile      picks the starting page size (10 on a phone, 25 otherwise)
  */
-export default function NurturingScreen({ locationId, locationName = null, fetchImpl = null, isMobile = false, nowMs = undefined }) {
+export default function NurturingScreen({ locationId, locationName = null, fetchImpl = null, isMobile = false, nowMs = undefined, onOpenClient = null }) {
   const [q, setQ] = useState('')
   const [askedQ, setAskedQ] = useState('')
   const [needsOnly, setNeedsOnly] = useState(false)
@@ -170,6 +197,14 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState(null)
   const [openId, setOpenId] = useState(null)
+  // THE SELECTION: ticked ids, or "all matching" (every person the current search and filter find, on every page).
+  const [picked, setPicked] = useState(() => new Set())
+  const [allMatching, setAllMatching] = useState(false)
+  const [bulkAction, setBulkAction] = useState('tag_add')
+  const [bulkTag, setBulkTag] = useState('')
+  const [asking, setAsking] = useState(null) // the request the one confirmation is about
+  const [reloads, setReloads] = useState(0)
+  const clearPicks = () => { setPicked(new Set()); setAllMatching(false) }
   const top = useRef(null)
   const asked = useRef(0)
 
@@ -198,9 +233,11 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
       finally { if (mine === asked.current) setBusy(false) }
     })()
     return undefined
-  }, [locationId, page, size, sort, askedQ, needsOnly, fetchImpl])
+  }, [locationId, page, size, sort, askedQ, needsOnly, fetchImpl, reloads])
 
-  useEffect(() => { setData(null); setPage(0); setOpenId(null) }, [locationId])
+  useEffect(() => { setData(null); setPage(0); setOpenId(null); clearPicks() }, [locationId])
+  // A different search or filter is a different list: what was ticked no longer means the same people.
+  useEffect(() => { clearPicks() }, [askedQ, needsOnly])
 
   const goPage = (p) => { setPage(p); top.current?.scrollIntoView?.({ block: 'start' }) }
   const total = data?.total ?? 0
@@ -208,17 +245,33 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
   const current = data?.page ?? 0
   const counts = data?.counts
   const filterCount = needsOnly ? 1 : 0
+  const pageIds = (data?.rows || []).map((r) => r.id)
+  const pageAll = pageIds.length > 0 && (allMatching || pageIds.every((id) => picked.has(id)))
+  const pickedCount = allMatching ? total : picked.size
+  const flip = (id) => { setAllMatching(false); setPicked((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
+  const flipPage = () => {
+    if (allMatching) { setAllMatching(false); setPicked(new Set()); return }
+    setPicked((prev) => { const next = new Set(prev); pageIds.forEach((id) => (pageAll ? next.delete(id) : next.add(id))); return next })
+  }
+  const tags = data?.tags || []
+  const askBulk = () => {
+    if (!bulkTag || !pickedCount) return
+    setAsking({
+      location_id: locationId, action: bulkAction, tag_id: bulkTag,
+      selection: allMatching ? { all: true, q: askedQ, needs_contact: needsOnly } : { ids: [...picked] },
+    })
+  }
 
   return (
     <div data-nurture-ui>
       <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
       <style>{CSS}</style>
-      <div className="nn-wrap">
+      <div className="nn-wrap" data-bulk-open={pickedCount > 0 || undefined}>
         <p className="nn-eyebrow">Network &amp; Nurture</p>
         <h1 className="nn-title">Nurturing{locationId && locationName ? ` · ${locationName}` : ''}</h1>
         {/* The days come from the server, which reads the rule's one setting (lib/network/nurturing.ts). Never a number typed here. */}
         <p className="nn-lede" data-lede>Clients who showed interest but never started a job{data ? <>, and haven&rsquo;t had an assessment or quote in {data.quietDays} days</> : null}.</p>
-        <span className="nn-preview" data-preview-note>Preview, read only. Only super admins can see this; owners still see Network closed.</span>
+        <span className="nn-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
 
         {!locationId && <p className="nn-empty" data-pick-location style={{ marginTop: 20, border: `1px dashed ${T.border}`, borderRadius: 14 }}>Pick one location to see its Nurturing clients. A client belongs to one location, so this list is never built across all of them at once.</p>}
 
@@ -272,19 +325,35 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
             <Pager total={total} page={current} size={size} pages={pages} onPage={goPage} onSize={(s) => { setSize(s); setPage(0) }} needsOnly={needsOnly} q={askedQ} />
 
             <div className={`nn-list${busy ? ' nn-busy' : ''}`} aria-busy={busy || undefined} data-list>
-              {data.rows.map((r, i) => (
-                <button key={r.id} type="button" className="nn-row" data-even={i % 2 === 1 || undefined} onClick={() => setOpenId(r.id)}
+              {data.rows.length > 0 && (
+                <div className="nn-selectbar" data-selectbar>
+                  <label className="nn-selectpage"><input type="checkbox" checked={pageAll} onChange={flipPage} aria-label="Select this page" data-select-page />This page</label>
+                  {pickedCount > 0 && <span role="status" data-picked-count><b style={{ color: T.primary }}>{n(pickedCount)}</b> selected{allMatching ? ` (everyone ${askedQ || needsOnly ? 'matching' : 'here'})` : ''}</span>}
+                  {pageAll && !allMatching && total > pageIds.length && (
+                    <button type="button" onClick={() => { setAllMatching(true); setPicked(new Set()) }} data-select-all>Select all {n(total)} {askedQ || needsOnly ? 'matching' : 'here'}</button>
+                  )}
+                  {pickedCount > 0 && <button type="button" onClick={clearPicks} data-clear-picks>Clear</button>}
+                </div>
+              )}
+              {data.rows.map((r, i) => {
+                const on = allMatching || picked.has(r.id)
+                return (
+                <div key={r.id} className="nn-rowwrap" data-even={i % 2 === 1 || undefined} data-picked={on || undefined}>
+                  <label className="nn-check" title={`Select ${r.name}`}><input type="checkbox" checked={on} onChange={() => flip(r.id)} aria-label={`Select ${r.name}`} data-pick={r.id} /></label>
+                <button type="button" className="nn-row" onClick={() => setOpenId(r.id)}
                   aria-label={`Open ${r.name}`} aria-haspopup="dialog" data-row={r.id}>
                   <span className="nn-avatar" aria-hidden="true">{initials(r.name)}</span>
                   <span className="nn-main">
-                    <span className="nn-line"><span className="nn-name">{r.name}</span>{r.needsContactInfo && <span className="nn-flag" data-flag="needs-contact">Needs contact info</span>}</span>
+                    <span className="nn-line"><span className="nn-name">{r.name}</span>{r.needsContactInfo && <span className="nn-flag" data-flag="needs-contact">Needs contact info</span>}{r.noMarketing && <span className="nn-nomkt" data-flag="no-marketing">Said no to marketing</span>}</span>
                     <span className="nn-sub" style={{ display: 'block' }}>{[r.email, r.phone, [r.city, r.zip].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || 'No email, phone or address'}</span>
                     <span className="nn-sub" style={{ display: 'block' }}>Added {dayLabel(r.createdAt)}<span className="nn-mobile-only">{' · '}{rowSide(r)}</span></span>
                   </span>
                   <span className="nn-side">{rowSide(r)}</span>
                   <span className="nn-chev"><IconChevron /></span>
                 </button>
-              ))}
+                </div>
+                )
+              })}
               {!data.rows.length && (
                 <p className="nn-empty" data-empty>
                   {askedQ ? <>Nobody here matches &ldquo;{askedQ}&rdquo;{needsOnly ? ' among people who need contact info' : ''}.<button type="button" onClick={() => setQ('')} data-clear-search>Clear search</button></>
@@ -299,7 +368,24 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
           </>
         )}
       </div>
-      {openId && <NurtureSheet personId={openId} onClose={() => setOpenId(null)} fetchImpl={fetchImpl} nowMs={nowMs} />}
+      {pickedCount > 0 && data && (
+        <div className="nn-bulk" role="region" aria-label="Change the selected people" data-bulk-bar>
+          <b data-bulk-count>{n(pickedCount)} selected</b>
+          <select value={bulkAction} onChange={(e) => setBulkAction(e.target.value)} aria-label="What to do" data-bulk-action>
+            <option value="tag_add">Add a tag</option>
+            <option value="tag_remove">Take a tag off</option>
+          </select>
+          <select value={bulkTag} onChange={(e) => setBulkTag(e.target.value)} aria-label="Which tag" data-bulk-tag>
+            <option value="">Pick a tag…</option>
+            {tags.map((t) => <option key={t.id} value={t.id}>{t.icon ? `${t.icon} ` : ''}{t.label}</option>)}
+          </select>
+          <button type="button" data-primary disabled={!bulkTag} onClick={askBulk} data-bulk-go>Next</button>
+          <button type="button" onClick={clearPicks} aria-label="Clear the selection" data-bulk-clear>Clear</button>
+        </div>
+      )}
+      {asking && <NurtureBulkConfirm request={asking} fetchImpl={fetchImpl} onClose={(changed) => { setAsking(null); if (changed) { clearPicks(); setReloads((x) => x + 1) } }} />}
+      {openId && <NurtureSheet personId={openId} onClose={() => setOpenId(null)} fetchImpl={fetchImpl} nowMs={nowMs} tags={tags} locationId={locationId}
+        onOpenClient={onOpenClient ? (id) => { setOpenId(null); onOpenClient(id) } : null} />}
     </div>
   )
 }

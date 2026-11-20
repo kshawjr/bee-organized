@@ -16408,7 +16408,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{}, newList=false, locationName='' }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{}, newList=false, locationName='', onOpenClient=null }) {
   if (!partners) return null
   // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
   // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
@@ -16452,6 +16452,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           initialTagId={initialTagId}
           onInitialTagConsumed={onInitialTagConsumed}
           refreshKey={sheetSaves}
+          onOpenClient={onOpenClient}
         />
       ) : (
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -38051,7 +38052,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* locationRequired mirrors HiveScreen above: server truth
             (!!initialAllOverview), so Network prompts on 'all' exactly when
             the record lenses do — never for a franchise user. */}
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} newList={networkOpen} locationName={selectedLoc?.name || ''} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} newList={networkOpen} locationName={selectedLoc?.name || ''} onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} />
         {toast && <InlineToast {...toast} />}
       </div>
     )

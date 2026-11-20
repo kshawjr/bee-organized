@@ -1,8 +1,17 @@
 // components/network/NurtureSheet.jsx
 // ─────────────────────────────────────────────────────────────
 // WHAT OPENS WHEN A NURTURING ROW IS TAPPED (Network & Nurture redesign,
-// slice 7). READ-ONLY: it reads GET /api/network/nurturing/<id> and has no
-// control that sends anything. Every action is slice 8.
+// slice 7; actions slice 8). It reads GET /api/network/nurturing/<id>.
+// WHAT IT CAN DO (slice 8), and nothing else:
+//   · OPEN THE FULL CLIENT RECORD: hands the id to the host, which opens it
+//     the way a reminder does (/clients/<id>). No write.
+//   · TAGS: add one from the Clients tag groups, or take one off. It goes
+//     through the same server route as the bulk tag, with one person
+//     selected, so the same rules apply.
+//   · A FOLLOW-UP: a reminder, the same row the Reminders page shows
+//     (POST /api/network/nurturing/<id>/follow-up).
+// Someone who said no to marketing gets none of these but the record link:
+// the controls are off, and the server refuses anyway. Nothing sends email.
 //
 // A NURTURING PERSON IS A LEAD, NOT A PARTNER. The design opens Nurturing
 // rows in the same contact sheet as Network. That sheet (ContactSheet.jsx)
@@ -27,6 +36,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { T, NET, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { closedReasonLabel } from '@/components/hive/shared/engagementStatus'
+import { quickDates, todayYmd, fixedDateLabel, REMINDER_NOTE_MAX } from '@/lib/reminders'
 
 const CSS = `
 [data-nurture-sheet]{position:fixed;inset:0;z-index:400;display:flex;justify-content:flex-end;background:color-mix(in oklab,${T.primary} 30%,transparent);font-family:${FONT.ui};color:${T.foreground};animation:nu-fade 240ms ease-out both}
@@ -70,7 +80,21 @@ const CSS = `
 [data-nurture-sheet] .nu-chips{display:flex;flex-wrap:wrap;gap:6px}
 [data-nurture-sheet] .nu-chip{padding:1px 8px;border-radius:999px;font-size:12px;line-height:18px;font-weight:700;border:1px solid ${T.border};background:${T.muted};color:${T.primary}}
 [data-nurture-sheet] .nu-note{white-space:pre-wrap;font-size:14px;line-height:1.5;margin:0}
-[data-nurture-sheet] .nu-readonly{margin:0;padding:10px 12px;border:1px dashed ${T.input};border-radius:10px;font-size:12.5px;color:${T.mutedFg};background:${T.card}}
+[data-nurture-sheet] .nu-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:14px!important;font-weight:700;cursor:pointer}
+[data-nurture-sheet] .nu-btn[data-primary]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
+[data-nurture-sheet] .nu-btn:disabled{opacity:.45;cursor:not-allowed}
+[data-nurture-sheet] .nu-btn[aria-pressed="true"]{border-color:${T.primary};background:color-mix(in oklab,${T.primary} 10%,${T.card})}
+[data-nurture-sheet] .nu-open{margin-top:14px;width:100%}
+[data-nurture-sheet] .nu-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+[data-nurture-sheet] .nu-input{min-height:44px;border-radius:8px;border:1px solid ${T.input};background:${T.card};padding:0 10px;font-family:inherit;font-size:14px!important;color:${T.foreground};min-width:0}
+[data-nurture-sheet] select.nu-input{flex:1 1 180px}
+[data-nurture-sheet] textarea.nu-input{width:100%;min-height:72px;padding:8px 10px;resize:vertical}
+[data-nurture-sheet] .nu-chip button{margin-left:4px;padding:0 2px;font-size:13px;line-height:1;color:${T.mutedFg};cursor:pointer}
+[data-nurture-sheet] .nu-chip button:hover{color:${T.primary}}
+[data-nurture-sheet] .nu-msg{margin:8px 0 0;font-size:13px}
+[data-nurture-sheet] .nu-msg[data-tone="bad"]{color:${NET.warn}}
+[data-nurture-sheet] .nu-msg[data-tone="good"]{color:${T.primary};font-weight:700}
+[data-nurture-sheet] .nu-nomkt{margin:0 0 4px;padding:10px 12px;border-radius:10px;background:${T.muted};font-size:13px;line-height:1.5;color:${T.foreground}}
 @media (max-width:600px){ [data-nurture-sheet] .nu-top{padding:4px 16px} [data-nurture-sheet] .nu-mast{padding:8px 16px 16px} [data-nurture-sheet] .nu-body{padding:16px 16px 28px} [data-nurture-sheet] dl{grid-template-columns:1fr;gap:2px} [data-nurture-sheet] dd{margin-bottom:8px} }
 @media (prefers-reduced-motion:reduce){[data-nurture-sheet] *{animation:none!important}}
 `
@@ -106,10 +130,51 @@ const IconX = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" 
  *   fetchImpl   tests hand in a fake fetch
  *   nowMs       tests pin the clock
  */
-export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowMs = Date.now() }) {
+export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowMs = Date.now(), tags = [], locationId = null, onOpenClient = null }) {
   const [data, setData] = useState(null)
   const [problem, setProblem] = useState(null)
   const sheet = useRef(null)
+  const [reloads, setReloads] = useState(0)
+  const [addTag, setAddTag] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
+  const [tagMsg, setTagMsg] = useState(null)
+  const [due, setDue] = useState('')
+  const [note, setNote] = useState('')
+  const [fuBusy, setFuBusy] = useState(false)
+  const [fuMsg, setFuMsg] = useState(null)
+  const doFetch = (...a) => (fetchImpl || fetch)(...a)
+
+  // One person's tag, through the SAME route as a bulk tag (a selection of one).
+  const changeTag = async (action, tagId, label) => {
+    if (tagBusy || !locationId) return
+    setTagBusy(true); setTagMsg(null)
+    const body = { location_id: locationId, action, tag_id: tagId, selection: { ids: [personId] } }
+    try {
+      const dry = await doFetch('/api/network/nurturing/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, dry_run: true }) })
+      const dj = await dry.json().catch(() => ({}))
+      if (!dry.ok) { setTagMsg({ tone: 'bad', words: `That didn’t save (${dj?.error || dry.status}). Nothing was changed.` }); return }
+      if (dj.change !== 1) { setTagMsg({ tone: 'bad', words: dj.leftOut?.[0] || 'Nothing to change.' }); return }
+      const res = await doFetch('/api/network/nurturing/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, confirmed: true, expected: 1 }) })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || !j?.ok) { setTagMsg({ tone: 'bad', words: j?.words || `That didn’t save (${j?.error || res.status}). Nothing was changed.` }); return }
+      setTagMsg({ tone: 'good', words: action === 'tag_add' ? `Added “${label}”.` : `Took “${label}” off.` })
+      setAddTag(''); setReloads((x) => x + 1)
+    } catch { setTagMsg({ tone: 'bad', words: 'No connection. Nothing was changed.' }) }
+    finally { setTagBusy(false) }
+  }
+
+  const saveFollowUp = async () => {
+    if (fuBusy || !due || !note.trim()) return
+    setFuBusy(true); setFuMsg(null)
+    try {
+      const res = await doFetch(`/api/network/nurturing/${personId}/follow-up`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_on: due, note: note.trim() }) })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { setFuMsg({ tone: 'bad', words: j?.error === 'said_no_to_marketing' ? 'They said no to marketing, so no follow-up can be set here.' : `That didn’t save (${j?.error || res.status}). Your note is still here.` }); return }
+      setFuMsg({ tone: 'good', words: `Follow-up set for ${fixedDateLabel(due)}. It’s on your Reminders page.` })
+      setDue(''); setNote(''); setReloads((x) => x + 1)
+    } catch { setFuMsg({ tone: 'bad', words: 'No connection. Your note is still here.' }) }
+    finally { setFuBusy(false) }
+  }
 
   useEffect(() => {
     let live = true
@@ -124,15 +189,16 @@ export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowM
       } catch (e) { if (live) setProblem('no connection') }
     })()
     return () => { live = false }
-  }, [personId, fetchImpl])
+  }, [personId, fetchImpl, reloads])
 
   useEffect(() => { sheet.current?.focus() }, [])
-  // Escape closes, as every Network window does. A click outside never does.
+  // Escape closes, as every Network window does, but never over a typed
+  // follow-up note or while something is saving. A click outside never closes it.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e) => { if (e.key === 'Escape' && !note.trim() && !fuBusy && !tagBusy) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, note, fuBusy, tagBusy])
 
   const p = data?.person
   const v = data?.verdict
@@ -160,9 +226,10 @@ export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowM
                   {v?.nurturing ? <span className="nu-pill" data-tone="nurture" data-pill="nurturing">Nurturing</span>
                     : <span className="nu-pill" data-tone="quiet" data-pill="not-nurturing">No longer Nurturing: {WHY_NOT[v?.why] || 'changed'}</span>}
                   {p.needsContactInfo && <span className="nu-pill" data-tone="warn" data-pill="needs-contact">Needs contact info</span>}
-                  {p.marketing?.state === 'unsubscribed' && <span className="nu-pill" data-tone="quiet" data-pill="unsubscribed">Unsubscribed{p.marketing.at ? ` ${dayLabel(p.marketing.at)}` : ''}</span>}
-                  {p.marketing?.state === 'opted_out' && <span className="nu-pill" data-tone="quiet" data-pill="opted-out">No marketing emails</span>}
+                  {p.marketing?.state === 'unsubscribed' && <span className="nu-pill" data-tone="quiet" data-pill="unsubscribed">Said no to marketing: unsubscribed{p.marketing.at ? ` ${dayLabel(p.marketing.at)}` : ''}</span>}
+                  {p.marketing?.state === 'opted_out' && <span className="nu-pill" data-tone="quiet" data-pill="opted-out">Said no to marketing</span>}
                 </div>
+                {onOpenClient && <button type="button" className="nu-btn nu-open" onClick={() => onOpenClient(personId)} data-open-client={personId}>Open full client record</button>}
               </div>
             </div>
           )}
@@ -215,9 +282,51 @@ export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowM
               {(data.quotes.some((q) => !q.counts) || data.jobs.some((j) => !j.counts)) && <p className="nu-quiet" style={{ marginTop: 10 }}>Struck-through lines don&rsquo;t count: a draft quote was never sent, and a deleted job never happened.</p>}
             </section>
 
+            {p.noMarketing && <p className="nu-nomkt" data-no-marketing-line>{p.name} said no to marketing, so tags and follow-ups can&rsquo;t be set here. Nobody can change that from Nurturing.</p>}
+
             <section data-section="tags">
               <h3>Tags</h3>
-              {data.tags.length ? <div className="nu-chips">{data.tags.map((t) => <span key={t.id} className="nu-chip">{t.icon ? `${t.icon} ` : ''}{t.label}</span>)}</div> : <p className="nu-quiet">No tags.</p>}
+              {data.tags.length ? (
+                <div className="nu-chips">{data.tags.map((t) => (
+                  <span key={t.id} className="nu-chip" data-tag-chip={t.id}>{t.icon ? `${t.icon} ` : ''}{t.label}
+                    {!p.noMarketing && tags.some((x) => x.id === t.id) && <button type="button" aria-label={`Take ${t.label} off`} disabled={tagBusy} onClick={() => changeTag('tag_remove', t.id, t.label)} data-tag-remove={t.id}>×</button>}
+                  </span>
+                ))}</div>
+              ) : <p className="nu-quiet">No tags.</p>}
+              {!p.noMarketing && (
+                <div className="nu-row">
+                  <select className="nu-input" value={addTag} onChange={(e) => setAddTag(e.target.value)} aria-label="Tag to add" disabled={tagBusy} data-tag-pick>
+                    <option value="">Add a tag…</option>
+                    {tags.filter((t) => !data.tags.some((x) => x.id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.icon ? `${t.icon} ` : ''}{t.label}</option>)}
+                  </select>
+                  <button type="button" className="nu-btn" disabled={!addTag || tagBusy} onClick={() => changeTag('tag_add', addTag, tags.find((t) => t.id === addTag)?.label || '')} data-tag-add>{tagBusy ? 'Saving…' : 'Add'}</button>
+                </div>
+              )}
+              {tagMsg && <p className="nu-msg" data-tone={tagMsg.tone} role="status" data-tag-msg>{tagMsg.words}</p>}
+            </section>
+
+            <section data-section="follow-up">
+              <h3>Follow-up</h3>
+              {data.followUps?.length ? (
+                <ul className="nu-list">{data.followUps.map((f) => <li key={f.id} data-follow-up={f.id}><b>{f.note}</b><span>{fixedDateLabel(f.dueOn)}</span></li>)}</ul>
+              ) : <p className="nu-quiet">You have no follow-up on {p.name} yet.</p>}
+              {!p.noMarketing && (() => {
+                const q = quickDates(new Date(nowMs))
+                return (
+                  <form onSubmit={(e) => { e.preventDefault(); saveFollowUp() }} data-follow-up-form>
+                    <div className="nu-row">
+                      <button type="button" className="nu-btn" onClick={() => setDue(q.tomorrow)} aria-pressed={due === q.tomorrow} data-due="tomorrow">Tomorrow</button>
+                      <button type="button" className="nu-btn" onClick={() => setDue(q.nextWeek)} aria-pressed={due === q.nextWeek} data-due="week">Next week</button>
+                      <input className="nu-input" type="date" min={todayYmd(new Date(nowMs))} value={due} onChange={(e) => setDue(e.target.value)} aria-label="Follow-up date" data-due-input />
+                    </div>
+                    <div className="nu-row">
+                      <textarea className="nu-input" value={note} maxLength={REMINDER_NOTE_MAX} onChange={(e) => setNote(e.target.value)} placeholder="What to follow up about" aria-label="Follow-up note" data-follow-up-note />
+                    </div>
+                    <div className="nu-row"><button type="submit" className="nu-btn" data-primary disabled={!due || !note.trim() || fuBusy} data-follow-up-save>{fuBusy ? 'Saving…' : 'Set follow-up'}</button></div>
+                  </form>
+                )
+              })()}
+              {fuMsg && <p className="nu-msg" data-tone={fuMsg.tone} role="status" data-follow-up-msg>{fuMsg.words}</p>}
             </section>
 
             <section data-section="touches">
@@ -234,7 +343,6 @@ export default function NurtureSheet({ personId, onClose, fetchImpl = null, nowM
               </section>
             )}
 
-            <p className="nu-readonly" data-read-only-note>Read only for now. Emailing, tagging and editing Nurturing clients come in the next step of the build.</p>
           </div>
         )}
       </aside>

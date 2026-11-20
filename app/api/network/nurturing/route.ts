@@ -24,7 +24,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
 import { NURTURING_QUIET_DAYS, isNurtureSort, searchNurture, sortNurture } from '@/lib/network/nurturing'
-import { loadNurturingList, nurtureLocation } from '@/lib/network/nurturing-read'
+import { loadNurturingList, loadNurtureTags, nurtureLocation } from '@/lib/network/nurturing-read'
 import { PAGE_SIZES, clampPage } from '@/lib/network/paging'
 
 export const runtime = 'nodejs'
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
   try {
     const loc = await nurtureLocation(supabaseService, locationId)
     if (!loc) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
-    const list = await loadNurturingList(supabaseService, loc)
+    const [list, tags] = await Promise.all([loadNurturingList(supabaseService, loc), loadNurtureTags(supabaseService, loc.id)])
     let rows = needsOnly ? list.rows.filter((r) => r.needsContactInfo) : list.rows
     rows = sortNurture(searchNurture(rows, q), sort)
     const page = clampPage(Math.floor(Number(p.get('page')) || 0), rows.length, size)
@@ -63,6 +63,8 @@ export async function GET(request: NextRequest) {
       size,
       sort,
       rows: rows.slice(page * size, (page + 1) * size),
+      // slice 8: the tags these people can be given here (the Clients groups)
+      tags,
     })
   } catch (err: any) {
     console.error('[network nurturing] read failed', err)

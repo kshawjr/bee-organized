@@ -94,6 +94,7 @@ const REMINDER = { id: 'r1', user_id: 'me', partner_id: PAT.id, lead_id: null, e
 const answer = (url: string) => {
   if (url.startsWith('/api/network/list')) return { contacts: [{ id: PAT.id, locationId: KC, locationName: 'Kansas City', name: PAT.name, company: PAT.company, networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'New Contact', tagIds: ['t1'], lastContactedAt: null, isCustomer: false }], tags: [{ id: 't1', label: 'Realtor' }], followUps: {}, total: 1, truncated: false }
   if (url.startsWith('/api/network/summary')) return { referrers: [], totals: { count: 0, converted: 0, revenue: 0 } }
+  if (url === '/api/network/nurturing/n1') return { person: { id: 'n1', name: 'Nora Nurture', company: null, email: 'n@x.com', phone: null, address: null, cityLine: null, source: null, projectType: null, requestDetails: null, notes: null, createdAt: '2025-01-01T00:00:00Z', locationName: 'Kansas City', locationId: KC, preferredContact: null, marketing: { state: 'ok', at: null }, needsContactInfo: false, noMarketing: false }, verdict: { nurturing: true, why: null, needsContactInfo: false, lastActivity: null }, quietDays: 90, assessments: [], quotes: [], jobs: [], requests: [], engagements: [], touchpoints: [], tags: [], followUps: [] }
   if (url.startsWith('/api/network/nurturing?')) return { location: { id: KC, name: 'Kansas City' }, quietDays: 90, counts: { nurturing: 1, needsContactInfo: 0, hadQuoteOrAssessment: 0 }, total: 1, page: 0, size: 25, sort: 'az', rows: [{ id: 'n1', name: 'Nora Nurture', email: 'n@x.com', phone: null, city: null, zip: null, createdAt: '2025-01-01T00:00:00Z', needsContactInfo: false, lastActivity: null }] }
   if (url.startsWith('/api/network/contacts/')) return { contact: { id: PAT.id, locationId: KC, locationName: 'Kansas City', name: PAT.name, title: null, company: PAT.company, companyId: null, linkedCompany: null, phone: null, email: null, website: null, addresses: [], howWeMet: null, specialties: [], relationship: null, notes: [], nextSteps: [], activity: [], isCustomer: false, networkTypes: ['partner'], partnerLevel: 'referral', partnerStage: 'New Contact', birthday: null, birthdayReminder: false, createdAt: '2026-08-24T15:00:00Z', tagIds: ['t1'] }, tags: [{ id: 't1', label: 'Realtor', section: 'trade' }], touchpoints: [], followUps: [] }
   if (url.startsWith('/api/reminders')) return { reminders: [REMINDER] }
@@ -216,5 +217,22 @@ describe('slice 7 · the Nurturing tab', () => {
     expect(host.querySelector('[data-nurture-ui]')).toBeTruthy()
     expect(calls.find(c => c.url.startsWith('/api/network/nurturing?'))!.url).toContain(`location_id=${KC}`)
     expect(host.querySelector('[data-row="n1"]')!.textContent).toContain('Nora Nurture')
+  })
+})
+
+// SLICE 8: "Open full client record" reaches THIS person's record, by the door
+// a reminder uses (openReminderRecord → /clients/<id>).
+describe('slice 8 · the link to the full client record', () => {
+  it('super admin: Nurturing → a person → Open full client record lands on /clients/<their id>, on Clients', async () => {
+    await mount({ ...SUPER.props, initialRoute: 'network' })
+    await click(host.querySelector('[data-tab="nurture"]'))
+    await settle(4)
+    await click(host.querySelector('[data-row="n1"]'))
+    await settle(4)
+    await click(document.body.querySelector('[data-open-client="n1"]'))
+    await settle(4)
+    expect(window.location.pathname).toBe('/clients/n1')
+    expect(current()).toBe('hive')
+    expect(document.body.querySelector('[data-nurture-person]')).toBeNull()
   })
 })

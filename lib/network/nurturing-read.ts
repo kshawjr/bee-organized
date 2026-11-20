@@ -25,6 +25,8 @@
 // them again. Only one page of rows is ever sent to the browser.
 // ─────────────────────────────────────────────────────────────
 
+import { saidNoToMarketing } from './nurturing-actions'
+import { TAG_CATEGORY, tagShowsOn } from '../tags'
 import {
   NURTURING_QUIET_DAYS, NURTURING_EXCLUDED_LOCATIONS, foldActivity, needsContactInfo, nurtureName, nurturingCutoffs, nurturingVerdict, addressLine,
   quoteAt, assessmentAt, jobCounts,
@@ -35,7 +37,7 @@ const PAGE = 1000
 const PARALLEL = 6
 const CACHE_MS = 60_000
 
-export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk'
+export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at'
 
 export type NurtureLocation = { id: string; slug: string; name: string | null }
 export type NurtureList = { excluded?: boolean; rows: NurtureRow[]; counts: { nurturing: number; needsContactInfo: number; hadQuoteOrAssessment: number }; readMs: number; peopleRead: number }
@@ -137,6 +139,7 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
       id: p.id, name: nurtureName(p), email: p.email || null, phone: p.phone || null,
       city: p.city || null, zip: p.zip || null, createdAt: p.created_at,
       needsContactInfo: v.needsContactInfo, lastActivity: v.lastActivity,
+      noMarketing: saidNoToMarketing(p),
     })
   }
   const list: NurtureList = { rows, counts: { nurturing: rows.length, needsContactInfo: needs, hadQuoteOrAssessment: had }, readMs: Date.now() - started, peopleRead: people.length }
@@ -149,10 +152,24 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
 export const NURTURE_PERSON_COLS =
   'id, location_id, location_uuid, name, first_name, last_name, company, email, phone, address, street2, city, state, zip, ' +
   'source, project_type, request_details, notes, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, ' +
-  'mailchimp_status, preferred_contact, referred_by_kind'
+  'preferred_contact, referred_by_kind'
+
+/**
+ * The tags a Nurturing person can be given at this location: THE one tag list,
+ * the groups that show on Clients (Nurture shares the client groups, Kevin's
+ * tag ruling 2026-11-15), active, corporate or this location's own.
+ */
+export async function loadNurtureTags(db: Db, locationUuid: string) {
+  const { data, error } = await db.from('lookups').select('id, label, icon, category, location_id, is_active, attrs, sort_order').eq('category', TAG_CATEGORY)
+  if (error) throw new Error(`lookups: ${error.message}`)
+  return (data || [])
+    .filter((t: any) => t.is_active !== false && (!t.location_id || t.location_id === locationUuid) && tagShowsOn(t, 'clients'))
+    .sort((a: any, b: any) => String(a.label).localeCompare(String(b.label)))
+    .map((t: any) => ({ id: t.id as string, label: t.label as string, icon: (t.icon ?? null) as string | null, own: !!t.location_id }))
+}
 
 /** Everything the person view shows. SELECTs only. */
-export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; quietDays?: number } = {}) {
+export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; quietDays?: number; callerId?: string | null } = {}) {
   const now = opts.now ?? new Date()
   const quietDays = opts.quietDays ?? NURTURING_QUIET_DAYS
   const one = async (table: string, cols: string, order = 'created_at') => {
@@ -163,7 +180,7 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
   const { data: lead, error } = await db.from('leads').select(NURTURE_PERSON_COLS).eq('id', id).maybeSingle()
   if (error) throw new Error(`leads: ${error.message}`)
   if (!lead) return null
-  const [assessments, quotes, jobs, requests, engagements, tagLinks, touchpoints, loc] = await Promise.all([
+  const [assessments, quotes, jobs, requests, engagements, tagLinks, touchpoints, loc, followUps] = await Promise.all([
     one('assessments', 'id, status, scheduled_at, completed_at, created_at, assessment_type'),
     one('quotes', 'id, status, total, sent_at, approved_at, created_at'),
     one('jobs', 'id, status, title, total, created_at'),
@@ -183,6 +200,13 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
       const { data, error: e } = await db.from('locations').select('id, name').eq('id', lead.location_uuid).maybeSingle()
       if (e) throw new Error(`locations: ${e.message}`)
       return data
+    })(),
+    // The viewer's OWN open follow-ups on this person: reminders are personal, as everywhere.
+    (async () => {
+      if (!opts.callerId) return []
+      const { data, error: e } = await db.from('reminders').select('id, due_on, note').eq('lead_id', id).eq('user_id', opts.callerId).is('done_at', null).order('due_on', { ascending: true })
+      if (e) throw new Error(`reminders: ${e.message}`)
+      return data || []
     })(),
   ])
   const tagIds = tagLinks.map((t: any) => t.tag_lookup_id).filter(Boolean)
@@ -206,9 +230,10 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
       preferredContact: lead.preferred_contact || null,
       marketing: lead.marketing_unsubscribed_at ? { state: 'unsubscribed', at: lead.marketing_unsubscribed_at }
         : lead.marketing_opt_out ? { state: 'opted_out', at: null } : { state: 'ok', at: null },
-      mailchimpStatus: lead.mailchimp_status || null,
       needsContactInfo: needsContactInfo(lead),
+      noMarketing: saidNoToMarketing(lead),
     },
+    followUps: followUps.map((r: any) => ({ id: r.id, dueOn: r.due_on, note: r.note })),
     verdict,
     quietDays,
     assessments: assessments.map((a: any) => ({ id: a.id, status: a.status, type: a.assessment_type || null, at: assessmentAt(a) })),

@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'not_a_person_id' }, { status: 400 })
   }
   try {
-    const found = await loadNurturePerson(supabaseService, id)
+    const found = await loadNurturePerson(supabaseService, id, { callerId: caller.userId })
     if (!found) return NextResponse.json({ error: 'not_found' }, { status: 404 })
     return NextResponse.json(found)
   } catch (err: any) {

@@ -195,6 +195,8 @@ export type NurtureRow = {
   createdAt: string
   needsContactInfo: boolean
   lastActivity: LastActivity
+  /** said no to marketing (opted out or unsubscribed): left out of every action (slice 8) */
+  noMarketing: boolean
 }
 
 export const NURTURE_SORTS = [

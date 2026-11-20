@@ -30,7 +30,7 @@ const CSS = `
 
 const mobileNow = () => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 767px)').matches
 
-export default function NetworkTabs({ locationId, locationName, fetchImpl = null, ...networkProps }) {
+export default function NetworkTabs({ locationId, locationName, fetchImpl = null, onOpenClient = null, ...networkProps }) {
   const [tab, setTab] = useState('network')
   return (
     <div data-network-tabs>
@@ -43,7 +43,7 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
       </div>
       {tab === 'network'
         ? <NetworkListScreen locationId={locationId} locationName={locationName} {...(fetchImpl ? { fetchImpl } : {})} {...networkProps} />
-        : <NurturingScreen locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} />}
+        : <NurturingScreen locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
     </div>
   )
 }

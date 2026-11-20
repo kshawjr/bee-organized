@@ -7,8 +7,8 @@
 // the lines below. Those tests take these lines back out before comparing,
 // so ANY other change to either file still fails them.
 //
-// SLICE 7 (Nurturing tab, 2026-11-19) changed BeeHub.jsx by exactly two
-// lines too: the Network mount became NetworkTabs (Network & Partners |
+// SLICE 7 (Nurturing tab, 2026-11-19) and SLICE 8 (the client-record link,
+// 2026-11-20) changed BeeHub.jsx by exactly these lines too: the Network mount became NetworkTabs (Network & Partners |
 // Nurturing clients), handed the same props. They are put back the same way.
 //
 // Each piece must be present exactly once (or the stated number of times),
@@ -35,6 +35,11 @@ const HUB_PIECES: [string, string, number][] = [
   // slice 7: the two tabs mount where the new Network list mounted
   ['import NetworkTabs from "@/components/network/NetworkTabs"', 'import NetworkListScreen from "@/components/network/NetworkListScreen"', 1],
   ['        <NetworkTabs\n', '        <NetworkListScreen\n', 1],
+  // slice 8: the Nurturing person view's "Open full client record" reaches the
+  // client the way a reminder does (openReminderRecord → /clients/<id>)
+  [", onOpenClient=null }) {", " }) {", 1],
+  ["          onOpenClient={onOpenClient}\n", "", 1],
+  [" onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} />", " />", 1],
 ]
 
 const NETWORK_SCREEN_PIECES: [string, string, number][] = [
