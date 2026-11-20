@@ -43,7 +43,8 @@ vi.mock('next/navigation', () => ({
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
 
 import App from '@/components/BeeHub'
-import { RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY, APP_RAIL_CSS } from '@/components/design/AppRail'
+import { RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY, APP_RAIL_CSS, AppRail } from '@/components/design/AppRail'
+import { NavCountBadge } from '@/components/feedback/UnreadRepliesBadge'
 
 const read = (f: string) => readFileSync(join(process.cwd(), f), 'utf8')
 const HUB = read('components/BeeHub.jsx')
@@ -341,7 +342,7 @@ describe('…and cannot be opened by any road', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 4 · NARROWER, COLLAPSIBLE, REMEMBERED
 // ═══════════════════════════════════════════════════════════════════════════
-describe('192px wide, every label on one line', () => {
+describe('192px wide; a name that does not fit wraps, never cut off', () => {
   it('the column is 192px and the page beside it is told so', async () => {
     await mount(ROLES[4].props)
     expect([RAIL_W, RAIL_W_COLLAPSED]).toEqual([192, 80])
@@ -353,13 +354,67 @@ describe('192px wide, every label on one line', () => {
     expect(css).not.toContain('220px!important')
   })
 
-  it('no label can wrap: each is told to stay on one line', async () => {
+  // Until 2026-11-20 every label was held on one line and cut with "…"; that
+  // cut "Network & Nurture" to "Network & Nurt…" whenever it was the open page
+  // (bold text + the gold dot). Kevin: it goes onto a second line instead.
+  // Measured in Chromium at 1280 and 390, open and collapsed, selected and not.
+  it('a name wraps onto a second line and is never cut off', async () => {
     await mount(ROLES[4].props)
     for (const k of keys()) {
-      const name = Array.from(item(k).querySelectorAll('span')).filter(s => s.children.length === 0 && (s.textContent || '').trim() && !s.hasAttribute('aria-hidden')) as HTMLElement[]
-      expect(name.length, k).toBeGreaterThan(0)
-      for (const n of name) expect(n.style.whiteSpace, `${k}: "${n.textContent}"`).toBe('nowrap')
+      const name = Array.from(item(k).querySelectorAll('[data-rail-label]')) as HTMLElement[]
+      expect(name.length, k).toBe(1)
+      expect(name[0].style.whiteSpace, k).toBe('normal')
+      expect(name[0].style.overflowWrap, k).toBe('break-word')
+      expect(name[0].style.textOverflow, k).toBe('')
+      expect(name[0].style.overflow, k).toBe('')
     }
+    expect(item('partners').textContent).toContain('Network & Nurture')
+  })
+  it('the icon, the count badge and the gold dot line up with the FIRST line, and a one-line row is still 44px', async () => {
+    await mount(ROLES[4].props)
+    for (const k of keys()) {
+      const row = item(k)
+      if (row.tagName !== 'BUTTON') continue
+      expect(row.style.alignItems, k).toBe('flex-start')
+      expect(row.style.padding, k).toBe('11px 10px') // 1 + 11 + 20 + 11 + 1 = 44
+      expect((row.querySelector('[data-rail-icon]') as HTMLElement).style.height, k).toBe('20px')
+      expect((row.querySelector('[data-rail-label]') as HTMLElement).style.paddingTop, k).toBe('2px')
+      const dot = row.querySelector('[data-rail-active-dot]') as HTMLElement | null
+      if (dot) expect(dot.style.marginTop, k).toBe('7px')
+    }
+  })
+  it('the gold dot keeps its place in every row without a badge, shown only on the open page, so nothing jumps when you change page', async () => {
+    await mount(ROLES[4].props)
+    for (const k of keys()) {
+      const row = item(k)
+      if (row.tagName !== 'BUTTON') continue
+      const dot = row.querySelector('[data-rail-active-dot]') as HTMLElement | null
+      const hasBadge = !!row.querySelector('[data-nav-unread-badge]')
+      if (hasBadge && !row.hasAttribute('data-active')) { expect(dot, `${k}: the badge stays flush right`).toBeNull(); continue }
+      expect(dot, k).toBeTruthy()
+      expect(dot!.style.visibility, k).toBe(row.hasAttribute('data-active') ? 'visible' : 'hidden')
+    }
+  })
+  it('a count badge stays flush right: no dot place pushes it in, unless that row is the open page', async () => {
+    const box = document.createElement('div'); document.body.appendChild(box)
+    const r = createRoot(box)
+    const items = [{ key: 'reminders', label: 'Reminders', badge: 2 }, { key: 'home', label: 'Home' }]
+    const lower = [{ key: 'help', label: 'Help', badge: 3 }]
+    for (const active of ['home', 'help']) {
+      await act(async () => { r.render(React.createElement(AppRail as any, { items, lower, active, onPick: () => {}, Badge: NavCountBadge })) })
+      const row = (k: string) => box.querySelector(`aside [data-nav="${k}"]`) as HTMLElement
+      expect(row('reminders').querySelector('[data-nav-unread-badge]'), 'the badge is drawn').toBeTruthy()
+      expect(row('reminders').querySelector('[data-rail-active-dot]'), 'Reminders, not open: badge flush right').toBeNull()
+      expect(!!row('help').querySelector('[data-rail-active-dot]'), `Help, open=${active === 'help'}`).toBe(active === 'help')
+      expect(row('home').querySelector('[data-rail-active-dot]'), 'Home keeps its dot place').toBeTruthy()
+    }
+    act(() => r.unmount()); box.remove()
+  })
+  it('the closed (greyed) name wraps too, its note stays one line', async () => {
+    await mount(ROLES[0].props)
+    const n = item('partners').querySelector('[data-rail-label]') as HTMLElement
+    expect(n.style.whiteSpace).toBe('normal')
+    expect((item('partners').querySelector('[data-soon-chip]') as HTMLElement).style.whiteSpace).toBe('nowrap')
   })
 })
 

@@ -103,11 +103,19 @@ const rowBase = { display:'flex', alignItems:'center', width:'100%', minHeight:'
 // item: { key, label, badge?, locked?, soon?, note? }
 //   soon    closed (BeeHub's CLOSED_NAV): a <div>, greyed, never a button
 //   locked  the onboarding lock that was already there: dimmed, does nothing
+// A NAME THAT DOES NOT FIT WRAPS onto a second line (Kevin, 2026-11-20:
+// "Network & Nurture" was cut to "Network & Nurt…"). It is never cut off.
+// Everything else in the row lines up with the FIRST line of the name: the
+// row aligns to the top, and the icon, the count badge and the gold dot each
+// sit in a 20px "first line" (the badge's own height). A one-line row is
+// still exactly 44px tall with its icon where it always was: 1px border +
+// 11px padding + 20px + 11px + 1px.
+const FIRST_LINE = 20
 function RailItem({ item, active, compact, onPick, Badge }) {
   const Icon = iconFor(item.key)
-  const pad = compact ? { justifyContent:'center', padding:'8px 0' } : { justifyContent:'flex-start', gap:'10px', padding:'8px 10px' }
+  const pad = compact ? { justifyContent:'center', alignItems:'center', padding:'8px 0' } : { justifyContent:'flex-start', alignItems:'flex-start', gap:'10px', padding:'11px 10px' }
   const label = (
-    <span style={{ minWidth:0, flex:1, fontSize:'13px', lineHeight:'16px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{item.label}</span>
+    <span data-rail-label style={{ minWidth:0, flex:1, fontSize:'13px', lineHeight:'16px', paddingTop:`${(FIRST_LINE - 16) / 2}px`, whiteSpace:'normal', overflowWrap:'break-word' }}>{item.label}</span>
   )
 
   // CLOSED. The treatment Settings gives Tags and Text messaging: the name
@@ -116,11 +124,11 @@ function RailItem({ item, active, compact, onPick, Badge }) {
     return (
       <div data-rail-item data-nav={item.key} data-soon="" aria-disabled="true"
         title={item.note ? `${item.label} — ${item.note.toLowerCase()}` : `${item.label} — not available yet`}
-        style={{ ...rowBase, ...pad, cursor:'default' }}>
-        <span aria-hidden="true" style={{ display:'flex', opacity:0.4 }}><Icon /></span>
+        style={{ ...rowBase, ...pad, ...(compact ? null : { paddingTop:'8px', paddingBottom:'8px' }), cursor:'default' }}>
+        <span aria-hidden="true" style={{ display:'flex', alignItems:'center', height:`${FIRST_LINE}px`, opacity:0.4 }}><Icon /></span>
         {!compact && (
           <span style={{ minWidth:0, flex:1 }}>
-            <span style={{ display:'block', fontSize:'13px', lineHeight:'16px', whiteSpace:'nowrap', opacity:0.5 }}>{item.label}</span>
+            <span data-rail-label style={{ display:'block', fontSize:'13px', lineHeight:'16px', paddingTop:`${(FIRST_LINE - 16) / 2}px`, whiteSpace:'normal', overflowWrap:'break-word', opacity:0.5 }}>{item.label}</span>
             {item.note && <span data-soon-chip style={{ display:'block', marginTop:'3px', fontSize:'9px', lineHeight:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.12em', whiteSpace:'nowrap', color:T.railMuted }}>{item.note}</span>}
           </span>
         )}
@@ -134,14 +142,18 @@ function RailItem({ item, active, compact, onPick, Badge }) {
       onClick={() => { if (!item.locked) onPick(item.key) }}
       style={{ ...rowBase, ...pad, cursor: item.locked ? 'default' : 'pointer', opacity: item.locked ? 0.3 : 1,
         ...(active ? { background:alpha(T.gold, 0.1), borderColor:alpha(T.gold, 0.2), boxShadow:`inset 3px 0 ${T.gold}`, color:T.railFg, fontWeight:700 } : null) }}>
-      <span aria-hidden="true" style={{ display:'flex', position:'relative', color: active ? T.gold : 'inherit' }}>
+      <span aria-hidden="true" data-rail-icon style={{ display:'flex', alignItems:'center', height: compact ? undefined : `${FIRST_LINE}px`, flexShrink:0, position:'relative', color: active ? T.gold : 'inherit' }}>
         <Icon />
         {/* On the icon strip there is no room beside the name, so a count rides the icon. */}
         {compact && item.badge > 0 && <span data-rail-dot style={{ position:'absolute', top:'-3px', right:'-4px', width:'8px', height:'8px', borderRadius:R.full, background:T.gold }} />}
       </span>
       {!compact && label}
       {!compact && Badge && <Badge count={item.badge} />}
-      {!compact && active && <span aria-hidden="true" style={{ marginLeft: item.badge > 0 ? '6px' : 'auto', width:'6px', height:'6px', flexShrink:0, borderRadius:R.full, background:T.gold }} />}
+      {/* The gold dot's place is kept in every row WITHOUT a count badge, shown only on the
+          open page, so a name wraps the same way selected or not and nothing below jumps when
+          you change page. A row with a badge keeps the badge flush right, where it has always
+          been; its dot appears beside it only on the open page (those names are short). */}
+      {!compact && (active || !(item.badge > 0)) && <span aria-hidden="true" data-rail-active-dot style={{ marginLeft: item.badge > 0 ? '6px' : 'auto', marginTop:`${(FIRST_LINE - 6) / 2}px`, width:'6px', height:'6px', flexShrink:0, borderRadius:R.full, background:T.gold, visibility: active ? 'visible' : 'hidden' }} />}
     </button>
   )
 }
