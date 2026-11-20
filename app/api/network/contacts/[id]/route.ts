@@ -61,6 +61,8 @@ import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { mayReadNetworkLocation, networkWriteVerdict, READ_ONLY_ANSWER } from '@/lib/network/route-access'
+import type { Caller } from '@/lib/crm'
 import { planContactAdds, ADD_KEYS } from '@/lib/network/contact-adds'
 import { planContactSave } from '@/lib/network/contact-edit'
 
@@ -121,10 +123,14 @@ function toContact(row: any) {
   }
 }
 
-async function loadSheet(id: string, userId: string) {
+async function loadSheet(id: string, caller: Caller) {
+  const userId = caller.userId
   const { data: row, error } = await supabaseService.from('partners').select(SHEET_COLS).eq('id', id).maybeSingle()
   if (error) return { error: error.message, status: 500 as const }
   if (!row || (row as any).deleted_at) return { error: 'contact_not_found', status: 404 as const }
+  // The contact's OWN location decides. Another location's contact is
+  // answered exactly like one that does not exist, and nothing else is read.
+  if (!mayReadNetworkLocation(caller, (row as any).location_id)) return { error: 'contact_not_found', status: 404 as const }
   const r = row as any
 
   const tagIds: string[] = (r.partner_tags || []).map((t: any) => t.tag_lookup_id).filter(Boolean)
@@ -168,7 +174,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!caller) return refuse
   const { id } = await params
   if (!UUID.test(id)) return NextResponse.json({ error: 'contact_not_found' }, { status: 404 })
-  const sheet = await loadSheet(id, caller.userId)
+  const sheet = await loadSheet(id, caller)
   if (!sheet.body) return NextResponse.json({ error: sheet.error }, { status: sheet.status })
   return NextResponse.json(sheet.body)
 }
@@ -186,6 +192,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { data: stored, error: readErr } = await supabaseService.from('partners').select(EDIT_COLS).eq('id', id).maybeSingle()
   if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 })
   if (!stored || (stored as any).deleted_at) return NextResponse.json({ error: 'contact_not_found' }, { status: 404 })
+  // The contact's OWN location decides, never one sent by the screen.
+  const may = networkWriteVerdict(caller, (stored as any).location_id)
+  if (may === 'not_found') return NextResponse.json({ error: 'contact_not_found' }, { status: 404 })
+  if (may === 'read_only') return NextResponse.json({ ...READ_ONLY_ANSWER, written: [] }, { status: 403 })
 
   // A paused or inactive location is read-only, as on every other write.
   const blocked = await readOnlyWriteBlock({ role: caller.role }, (stored as any).location_id)
@@ -237,7 +247,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
   }
 
-  const sheet = await loadSheet(id, caller.userId)
+  const sheet = await loadSheet(id, caller)
   if (!sheet.body) return NextResponse.json({ error: sheet.error, written: plan.written }, { status: sheet.status })
   return NextResponse.json({ ...sheet.body, written: plan.written, notes: plan.notes })
 }

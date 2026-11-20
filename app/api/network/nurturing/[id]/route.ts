@@ -15,6 +15,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { mayReadNetworkLocation } from '@/lib/network/route-access'
 import { loadNurturePerson } from '@/lib/network/nurturing-read'
 
 export const runtime = 'nodejs'
@@ -29,7 +30,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'not_a_person_id' }, { status: 400 })
   }
   try {
-    const found = await loadNurturePerson(supabaseService, id, { callerId: caller.userId })
+    // The person's OWN location decides; another location's person is "not found".
+    const found = await loadNurturePerson(supabaseService, id, { callerId: caller.userId, mayRead: (loc) => mayReadNetworkLocation(caller, loc) })
     if (!found) return NextResponse.json({ error: 'not_found' }, { status: 404 })
     return NextResponse.json(found)
   } catch (err: any) {

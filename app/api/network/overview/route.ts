@@ -15,6 +15,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { maySeeAllNetworkLocations } from '@/lib/network/route-access'
 import { buildOverview } from '@/lib/network/overview'
 
 export const runtime = 'nodejs'
@@ -24,6 +25,8 @@ export async function GET() {
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Every location's numbers: never for an owner, manager or lite user.
+  if (!maySeeAllNetworkLocations(caller)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   try {
     const page = async (make: () => any, label: string) => {
       const out: any[] = []

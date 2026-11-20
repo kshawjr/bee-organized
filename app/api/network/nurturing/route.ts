@@ -23,6 +23,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { mayReadNetworkLocation } from '@/lib/network/route-access'
 import { NURTURING_QUIET_DAYS, isNurtureSort, searchNurture, sortNurture } from '@/lib/network/nurturing'
 import { loadNurturingList, loadNurtureTags, nurtureLocation } from '@/lib/network/nurturing-read'
 import { PAGE_SIZES, clampPage } from '@/lib/network/paging'
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locationId)) {
     return NextResponse.json({ error: 'location_id must be one location id' }, { status: 400 })
   }
+  if (!mayReadNetworkLocation(caller, locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   const sizeAsked = Number(p.get('size'))
   const size = (PAGE_SIZES as readonly number[]).includes(sizeAsked) ? sizeAsked : 25
   const sort = isNurtureSort(p.get('sort')) ? (p.get('sort') as any) : 'az'

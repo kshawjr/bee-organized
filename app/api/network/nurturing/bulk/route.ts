@@ -32,6 +32,8 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { networkWriteVerdict, READ_ONLY_ANSWER } from '@/lib/network/route-access'
 import { searchNurture } from '@/lib/network/nurturing'
 import { loadNurturingList, loadNurtureTags, nurtureLocation } from '@/lib/network/nurturing-read'
 import { bulkTagFailureWords, bulkTagLeftOut, bulkTagQuestion, isBulkTagAction, planBulkTag, runBulkTag, type LinkRow } from '@/lib/network/nurturing-actions'
@@ -49,6 +51,13 @@ export async function POST(request: NextRequest) {
   try { body = await request.json() } catch { return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 }) }
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   if (!uuid.test(String(body?.location_id || ''))) return NextResponse.json({ error: 'location_id must be one location id' }, { status: 400 })
+  // The location named is where the work is done; every person is then worked
+  // out again from THAT location's list, so an id from anywhere else is left out.
+  const may = networkWriteVerdict(caller, body.location_id)
+  if (may === 'not_found') return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
+  if (may === 'read_only') return NextResponse.json(READ_ONLY_ANSWER, { status: 403 })
+  const blocked = await readOnlyWriteBlock({ role: caller.role }, body.location_id)
+  if (blocked) return blocked
   if (!isBulkTagAction(body?.action)) return NextResponse.json({ error: 'action must be tag_add or tag_remove' }, { status: 400 })
   if (!uuid.test(String(body?.tag_id || ''))) return NextResponse.json({ error: 'tag_id required' }, { status: 400 })
   const sel = body?.selection

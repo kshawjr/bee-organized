@@ -171,7 +171,7 @@ export async function loadNurtureTags(db: Db, locationUuid: string) {
 }
 
 /** Everything the person view shows. SELECTs only. */
-export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; quietDays?: number; callerId?: string | null } = {}) {
+export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; quietDays?: number; callerId?: string | null; mayRead?: (locationUuid: string | null) => boolean } = {}) {
   const now = opts.now ?? new Date()
   const quietDays = opts.quietDays ?? NURTURING_QUIET_DAYS
   const one = async (table: string, cols: string, order = 'created_at') => {
@@ -182,6 +182,9 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
   const { data: lead, error } = await db.from('leads').select(NURTURE_PERSON_COLS).eq('id', id).maybeSingle()
   if (error) throw new Error(`leads: ${error.message}`)
   if (!lead) return null
+  // The route's location rule, asked about the person's OWN location before
+  // anything else is read: someone else's person is simply not found.
+  if (opts.mayRead && !opts.mayRead((lead as any).location_uuid ?? null)) return null
   const [assessments, quotes, jobs, requests, engagements, tagLinks, touchpoints, loc, followUps] = await Promise.all([
     one('assessments', 'id, status, scheduled_at, completed_at, created_at, assessment_type'),
     one('quotes', 'id, status, total, sent_at, approved_at, created_at'),

@@ -34,6 +34,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { mayReadNetworkLocation, maySeeAllNetworkLocations } from '@/lib/network/route-access'
 
 export const runtime = 'nodejs'
 
@@ -58,6 +59,14 @@ export async function GET(request: NextRequest) {
   const locationId = request.nextUrl.searchParams.get('location_id')
   if (locationId && !UUID.test(locationId)) {
     return NextResponse.json({ error: 'location_id must be a location id' }, { status: 400 })
+  }
+  // Every location at once is for people who may see every location; one
+  // location is for people who may read that one (lib/network/route-access).
+  if (!locationId && !maySeeAllNetworkLocations(caller)) {
+    return NextResponse.json({ error: 'all_locations_not_allowed' }, { status: 403 })
+  }
+  if (locationId && !mayReadNetworkLocation(caller, locationId)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
   // Short-page loop, like /api/partners: PostgREST's silent 1,000-row default

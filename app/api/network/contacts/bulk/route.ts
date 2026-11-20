@@ -23,6 +23,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { loadCaller } from '@/lib/crm'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { maySeeNewNetwork } from '@/lib/network/access'
+import { networkWriteVerdict, READ_ONLY_ANSWER } from '@/lib/network/route-access'
 import { checkBulkRequest, planBulk, type BulkLink, type BulkRow } from '@/lib/network/bulk'
 import { networkTagsFor } from '@/lib/network/contact-create'
 import { UUID_RE, readLocation, readLocationTags } from '@/lib/network/contact-reads'
@@ -39,6 +40,9 @@ export async function POST(request: NextRequest) {
   try { body = await request.json() } catch { return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 }) }
   const locationId = body?.location_id
   if (typeof locationId !== 'string' || !UUID_RE.test(locationId)) return NextResponse.json({ error: 'location_required' }, { status: 400 })
+  const may = networkWriteVerdict(caller, locationId)
+  if (may === 'not_found') return NextResponse.json({ error: 'location_not_found', changed: 0 }, { status: 404 })
+  if (may === 'read_only') return NextResponse.json({ ...READ_ONLY_ANSWER, changed: 0 }, { status: 403 })
   const req = checkBulkRequest(body)
   if (!req.ok) return NextResponse.json({ error: req.error, changed: 0 }, { status: req.status })
 
