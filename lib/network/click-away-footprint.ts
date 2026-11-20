@@ -16,6 +16,14 @@
 // ─────────────────────────────────────────────────────────────
 
 const HUB_PIECES: [string, string, number][] = [
+  // (taken off FIRST: slice 9 extended lines that the slice 8 pieces below then expect)
+  // slice 9: the Clients band follows the Network gate; "Open Nurturing clients" opens that tab
+  [", nurturingMoved=false, onOpenNurturing=null }) {", " }) {", 1],
+  ["          nurturingMoved={nurturingMoved}\n          onOpenNurturing={onOpenNurturing}\n", "", 1],
+  ["  // Clients' \"Open Nurturing clients\" → Network opens on the Nurturing tab (slice 9).\n  const [nurturingIntent, setNurturingIntent] = useState(false)\n", "", 1],
+  [" nurturingMoved={networkOpen} onOpenNurturing={()=>{ setNurturingIntent(true); nav('partners') }} />", " />", 1],
+  [", startOnNurturing=false, onStartConsumed=()=>{} }) {", " }) {", 1],
+  ["          startOnNurturing={startOnNurturing}\n          onStartConsumed={onStartConsumed}\n", "", 1],
   ['import { useClickAway } from "@/components/ui/useClickAway"\n', '', 1],
   ['          data-loc-picker-trigger\n', '', 2],
   ['<button data-loc-picker-trigger onClick={()=>setShowLocPicker(!showLocPicker)}', '<button onClick={()=>setShowLocPicker(!showLocPicker)}', 1],
@@ -39,7 +47,7 @@ const HUB_PIECES: [string, string, number][] = [
   // client the way a reminder does (openReminderRecord → /clients/<id>)
   [", onOpenClient=null }) {", " }) {", 1],
   ["          onOpenClient={onOpenClient}\n", "", 1],
-  [" onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} />", " />", 1],
+  [" onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} startOnNurturing={nurturingIntent} onStartConsumed={()=>setNurturingIntent(false)} />", " />", 1],
 ]
 
 const NETWORK_SCREEN_PIECES: [string, string, number][] = [

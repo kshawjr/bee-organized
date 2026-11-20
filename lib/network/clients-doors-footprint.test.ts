@@ -39,7 +39,10 @@ const AT_0C61AFC: Record<string, string> = {
   'components/hive/NetworkConvertSheet.jsx': '7ecca6bdca2358cfc3cb2adf2c512b5849c68b0365d2d72869b9d4cf1cf258dc',
   'components/hive/shared/ReferrerField.jsx': '48658165103606f2c4e4b932337848ea851d0d5b52afe4b1a8bdd97c45fa685d',
   'components/hive/NetworkAddSheet.jsx': 'f30532bdd360cbafb16b045ef54879dd7d9a03797b8c3d27015fc6fc7b5f03e7',
-  'lib/network/doors.test.tsx': 'a3ad747d9b3e5702f6d5acadd9cad170c028ecce972ba07648056dd8e85e09f6',
+  // Refreshed on purpose by Network & Nurture slice 9 (2026-11-20): the one
+  // gate test now counts networkOpen read four times (the Clients band follows
+  // it). Was a3ad747d9b3e5702f6d5acadd9cad170c028ecce972ba07648056dd8e85e09f6.
+  'lib/network/doors.test.tsx': '3f8204ecd1a121fa9e93f948ccb8a9468b9c4d49911ff1eedfb8c95425681d00',
 }
 
 describe('converting the Clients doors changed nothing else', () => {

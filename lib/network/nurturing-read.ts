@@ -37,7 +37,7 @@ const PAGE = 1000
 const PARALLEL = 6
 const CACHE_MS = 60_000
 
-export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at'
+export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, paid_amount, invoice_paid_at'
 
 export type NurtureLocation = { id: string; slug: string; name: string | null }
 export type NurtureList = { excluded?: boolean; rows: NurtureRow[]; counts: { nurturing: number; needsContactInfo: number; hadQuoteOrAssessment: number }; readMs: number; peopleRead: number }
@@ -97,15 +97,17 @@ async function readCandidates(db: Db, loc: NurtureLocation, createdBefore: strin
 }
 
 async function readActivity(db: Db, slug: string, uuid: string) {
-  const [assessments, quotes, jobs, cards] = await Promise.all([
+  const [assessments, quotes, jobs, openCards, wonCards] = await Promise.all([
     pageAll(() => db.from('assessments').select('id, lead_id, completed_at, scheduled_at, created_at').eq('location_id', slug).order('id'), 'assessments'),
     pageAll(() => db.from('quotes').select('id, lead_id, status, sent_at, created_at').eq('location_id', slug).order('id'), 'quotes'),
     pageAll(() => db.from('jobs').select('id, lead_id, status').eq('location_id', slug).order('id'), 'jobs'),
-    // Open cards only (2,285 across every location on 2026-11-20). Engagements
-    // carry the location uuid; every open card sits at its person's location.
-    pageAll(() => db.from('engagements').select('id, client_id, closed_at').eq('location_uuid', uuid).is('closed_at', null).order('id'), 'engagements'),
+    // Open cards (2,285 across every location on 2026-11-20) and won cards.
+    // Engagements carry the location uuid; every open card sits at its
+    // person's location.
+    pageAll(() => db.from('engagements').select('id, client_id, closed_at, stage').eq('location_uuid', uuid).is('closed_at', null).order('id'), 'engagements'),
+    pageAll(() => db.from('engagements').select('id, client_id, closed_at, stage').eq('location_uuid', uuid).eq('stage', 'Closed Won').order('id'), 'won engagements'),
   ])
-  return { assessments, quotes, jobs, cards }
+  return { assessments, quotes, jobs, cards: [...openCards, ...wonCards] }
 }
 
 const cache = new Map<string, { at: number; list: NurtureList }>()
@@ -151,7 +153,7 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
 
 export const NURTURE_PERSON_COLS =
   'id, location_id, location_uuid, name, first_name, last_name, company, email, phone, address, street2, city, state, zip, ' +
-  'source, project_type, request_details, notes, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, ' +
+  'source, project_type, request_details, notes, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, paid_amount, invoice_paid_at, ' +
   'preferred_contact, referred_by_kind'
 
 /**
@@ -216,7 +218,7 @@ export async function loadNurturePerson(db: Db, id: string, opts: { now?: Date; 
     if (e) throw new Error(`lookups: ${e.message}`)
     tags = (data || []).map((t: any) => ({ id: t.id, label: t.label, icon: t.icon ?? null }))
   }
-  const folded = foldActivity(assessments.map((a: any) => ({ ...a, lead_id: id })), quotes.map((q: any) => ({ ...q, lead_id: id })), jobs.map((j: any) => ({ ...j, lead_id: id })), engagements.map((e: any) => ({ client_id: id, closed_at: e.closed_at })))
+  const folded = foldActivity(assessments.map((a: any) => ({ ...a, lead_id: id })), quotes.map((q: any) => ({ ...q, lead_id: id })), jobs.map((j: any) => ({ ...j, lead_id: id })), engagements.map((e: any) => ({ client_id: id, closed_at: e.closed_at, stage: e.stage })))
   const verdict = nurturingVerdict(lead, folded, now, quietDays)
   return {
     person: {

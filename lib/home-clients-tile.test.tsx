@@ -136,6 +136,17 @@ describe('clicking it opens the full client list', () => {
       expect(window.location.pathname).toBe('/clients')
       // the Clients screen is showing its client list, not Inbox or Engagements
       expect(window.localStorage.getItem(LENS_KEY)).toBe('clients')
+      const moved = main().querySelector('[data-testid="clients-nurturing-moved"]')
+      // Network & Nurture slice 9 (2026-11-20): for whoever can open the new
+      // Nurturing tab (super admins, until the un-grey) the Nurturing band is
+      // replaced by a note pointing there. All three clients here are Nurturing,
+      // so a super admin sees the note and no band; everyone else, the band.
+      if (label === 'super_admin') {
+        expect(moved).toBeTruthy()
+        expect(bands().length).toBe(0)
+        return
+      }
+      expect(moved).toBeNull()
       expect(bands().length).toBeGreaterThan(0)
       // …and its groups add up to the three clients the tile counted
       const total = bands().reduce((n, h) => n + Number((h.textContent || '').split('·')[1].replace(/[^0-9]/g, '')), 0)
@@ -260,5 +271,25 @@ describe('nothing else on Home changed', () => {
     const menu = host.querySelector('aside.bee-sidebar') as HTMLElement
     expect(menu.textContent).not.toContain('Everyone')
     expect(menu.querySelectorAll('[data-nav="hive-clients"]').length).toBe(0)
+  })
+})
+
+// Network & Nurture slice 9: a super admin's "Open Nurturing clients" note on
+// Clients opens Network on its Nurturing tab. (Owners keep the band: above.)
+describe('slice 9 · the note on Clients opens Nurturing', () => {
+  it('super_admin: Clients → Open Nurturing clients → Network, Nurturing tab', async () => {
+    ;(globalThis as any).fetch = vi.fn(async (url: any) => {
+      const u = String(url)
+      if (u.startsWith('/api/network/nurturing?')) return { ok: true, status: 200, json: async () => ({ location: { id: KC, name: 'Kansas City' }, quietDays: 90, excluded: false, counts: { nurturing: 3, needsContactInfo: 0, hadQuoteOrAssessment: 0 }, total: 0, page: 0, size: 25, sort: 'az', rows: [], tags: [] }) }
+      if (u.startsWith('/api/network/list')) return { ok: true, status: 200, json: async () => ({ contacts: [], tags: [], followUps: {}, total: 0, truncated: false }) }
+      return { ok: true, status: 200, json: async () => ({}) }
+    })
+    await mount(ROLES[4].props)
+    await click(tile())
+    expect(main().querySelector('[data-testid="clients-nurturing-moved"]')).toBeTruthy()
+    await click(main().querySelector('[data-testid="clients-open-nurturing"]'))
+    expect(currentNav()).toBe('partners')
+    expect(host.querySelector('[data-tab="nurture"]')!.getAttribute('aria-selected')).toBe('true')
+    expect(host.querySelector('[data-nurture-ui]')).toBeTruthy()
   })
 })

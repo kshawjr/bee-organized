@@ -118,6 +118,7 @@ const WHY_NOT = {
   junk: 'marked junk',
   too_new: 'added in the last 30 days',
   had_job: 'had a job',
+  paid_or_won: 'has paid, or has a won card',
   recent_activity: 'had an assessment or quote recently',
 }
 

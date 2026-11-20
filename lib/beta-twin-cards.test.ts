@@ -583,6 +583,10 @@ describe('nothing else in the files this touched changed, by fingerprint (agains
   it('components/hive/HiveShell.jsx — one prop handed to the card', () => {
     const back = undo('components/hive/HiveShell.jsx', [
       ['          onOpenClient={openClient}\n          onOpenEngagement={openEngagement}\n          onChanged={applyEngagementPatch}\n', '          onOpenClient={openClient}\n          onChanged={applyEngagementPatch}\n'],
+      // Network & Nurture slice 9 (2026-11-20), on purpose: the shell hands the
+      // Client List the Network gate, so the Nurturing band follows it.
+      ['  nurturingMoved = false,\n  onOpenNurturing = null,\n', ''],
+      ['          nurturingMoved={nurturingMoved}\n          onOpenNurturing={onOpenNurturing}\n', ''],
     ])
     expect(sha(back)).toBe('71fdb20cd1fc04750cce7f21fe127067ee73b89a3f77877b418c902bd851875c')
   })

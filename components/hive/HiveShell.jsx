@@ -254,6 +254,8 @@ export default function HiveShell({
   // a notification, not control — so nothing here changes if the caller
   // ignores it, which every non-sidebar caller does.
   onLensChange = () => {},
+  nurturingMoved = false,
+  onOpenNurturing = null,
 }) {
   // Top-level tab — default 'inbox' (Kevin, 2026-10-21: a new owner should
   // land on the people waiting on them), hydrated from localStorage after
@@ -990,6 +992,8 @@ export default function HiveShell({
           browse={clientBrowse}
           onBrowseChange={setClientBrowse}
           searchLocationId={locFilter !== 'all' ? locFilter : (currentLocationUuid || null)}
+          nurturingMoved={nurturingMoved}
+          onOpenNurturing={onOpenNurturing}
         />
       ) : engView === 'list' ? (
         <EngagementGroupedList

@@ -152,7 +152,14 @@ const NO_REMOTE = { term: null, people: [], total: 0, capped: false, loading: fa
 // actually search for, so a reply can be matched to the box that asked.
 const serverTerm = (raw) => (raw || '').replace(/\*/g, ' ').trim().slice(0, 80)
 
-export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null, clientsCutoff = null, browse = null, onBrowseChange = null }) {
+// NURTURING HAS MOVED (Network & Nurture slice 9, Kevin 2026-11-20): when
+// `nurturingMoved` is true the Nurturing band is not drawn and Show more never
+// runs; a short note points to Network & Nurture › Nurturing clients instead.
+// The host passes it from THE SAME gate that opens Network (lib/network/
+// access.ts, for the role being acted as), so the band disappears for exactly
+// whoever can see the new tab. It defaults to false: anywhere that is not
+// told otherwise keeps the band, so no owner can lose it by accident.
+export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [], tags = [], initialTagId = null, onInitialTagConsumed = () => {}, leadsTruncated = false, searchLocationId = null, clientsCutoff = null, browse = null, onBrowseChange = null, nurturingMoved = false, onOpenNurturing = null }) {
   const [search, setSearch] = useState('')
   const [remote, setRemote] = useState(NO_REMOTE)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -188,7 +195,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   const browseState = heldBrowse.loc === browseKey ? heldBrowse : NO_CLIENT_BROWSE
   const setBrowse = (fn) => (onBrowseChange || setOwnBrowse)(prev =>
     fn(prev && prev.loc === browseKey ? prev : { ...NO_CLIENT_BROWSE, loc: browseKey }))
-  const canBrowse = !!leadsTruncated && typeof clientsCutoff?.notListed === 'number'
+  const canBrowse = !nurturingMoved && !!leadsTruncated && typeof clientsCutoff?.notListed === 'number'
     && clientsCutoff.notListed > 0 && !!clientsCutoff.loadedBackTo
   const browseDone = browseState.next === null
   const browsed = useMemo(() => {
@@ -298,7 +305,9 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
 
   // A search reveals its matches regardless of the saved collapse state.
   const isExpanded = (gid) => (q || tagFilter.length ? true : expandedMap[gid] === true)
-  const totalShown = visible.length
+  // The Nurturing people this list holds but does not draw when Nurturing has moved.
+  const movedCount = nurturingMoved ? (groups.get(BROWSE_BAND) || []).length : 0
+  const totalShown = visible.length - movedCount
 
   // Clients at this location that are not in the list. All Nurturing, and
   // only counted on the plain list: a search or tag filter shows its own
@@ -306,7 +315,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
   const plainList = !q && tagFilter.length === 0
   // Each client browsed in is one fewer not listed; at the end there are none,
   // whatever the page counted when it loaded.
-  const notListed = leadsTruncated && plainList && typeof clientsCutoff?.notListed === 'number'
+  const notListed = !nurturingMoved && leadsTruncated && plainList && typeof clientsCutoff?.notListed === 'number'
     ? (browseDone ? 0 : Math.max(0, clientsCutoff.notListed - browsed.length)) : 0
 
   // Fetch the next page of older clients. First call = the first page.
@@ -435,6 +444,23 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
       )}
 
       {CLIENT_STATUS_ORDER.map(statusKey => {
+        if (nurturingMoved && statusKey === BROWSE_BAND) {
+          return (
+            <div key="nurturing-moved" data-testid="clients-nurturing-moved" style={{ border: `1px dashed ${T.hairline.strong}`, borderRadius: T.radius.card, padding: '12px 14px', marginBottom: '12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 14px' }}>
+              <p style={{ margin: 0, flex: '1 1 260px', fontSize: '12.5px', lineHeight: 1.45, color: T.ink.muted }}>
+                <b style={{ color: T.ink.primary }}>Nurturing has moved.</b>{' '}
+                People who showed interest but never started a job are now in Network &amp; Nurture, under Nurturing clients.
+                {(q || tagFilter.length > 0) && movedCount > 0 && <> <span data-testid="clients-nurturing-moved-matches">{movedCount.toLocaleString()} who match {movedCount === 1 ? 'is' : 'are'} there.</span></>}
+              </p>
+              {onOpenNurturing && (
+                <button type="button" data-testid="clients-open-nurturing" onClick={onOpenNurturing}
+                  style={{ height: '36px', padding: '0 14px', borderRadius: T.radius.pill, border: T.border.thin, background: T.surface.raised, color: T.ink.primary, fontSize: '13px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+                  Open Nurturing clients
+                </button>
+              )}
+            </div>
+          )
+        }
         const listed = groups.get(statusKey) || []
         // Only Nurturing can have clients that are not listed (see header).
         const unlisted = statusKey === BROWSE_BAND ? notListed : 0

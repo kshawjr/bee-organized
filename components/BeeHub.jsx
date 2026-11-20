@@ -9813,7 +9813,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTruncated=false, clientsCutoff=null, locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onLensChange=()=>{}, onReportProblem=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTruncated=false, clientsCutoff=null, locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onLensChange=()=>{}, onReportProblem=()=>{}, nurturingMoved=false, onOpenNurturing=null }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -10121,6 +10121,8 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], leadsTru
           // Lens reported UP so the sidebar can mark its nested Client List
           // item. Notification only — the shell keeps ownership of the lens.
           onLensChange={onLensChange}
+          nurturingMoved={nurturingMoved}
+          onOpenNurturing={onOpenNurturing}
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
@@ -16408,7 +16410,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{}, newList=false, locationName='', onOpenClient=null }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false, initialTagId=null, onInitialTagConsumed=()=>{}, newList=false, locationName='', onOpenClient=null, startOnNurturing=false, onStartConsumed=()=>{} }) {
   if (!partners) return null
   // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
   // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
@@ -16453,6 +16455,8 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onInitialTagConsumed={onInitialTagConsumed}
           refreshKey={sheetSaves}
           onOpenClient={onOpenClient}
+          startOnNurturing={startOnNurturing}
+          onStartConsumed={onStartConsumed}
         />
       ) : (
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -37187,6 +37191,8 @@ export default function App({
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
   // ⌘K's "All N tagged …" line → the Network tab opens with that tag ticked.
   const [networkTagIntent, setNetworkTagIntent] = useState(null)
+  // Clients' "Open Nurturing clients" → Network opens on the Nurturing tab (slice 9).
+  const [nurturingIntent, setNurturingIntent] = useState(false)
   // Home "Needs attention" deep-link intent — a one-shot { tab, view?, group?,
   // section? } the Dashboard hands up (onOpenHive) to land the Clients shell on
   // the right tab + filtered/expanded target. Cleared when HiveShell consumes
@@ -38043,7 +38049,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* Sample-now/bulk-later gap state: the Clients surface must explain a
             partial book ("rest arrives tonight"), or it reads as data loss. */}
         <ImportGapBanner locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} />
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={!!initialLeadsTruncated} locationRequired={!!initialAllOverview} clientsCutoff={initialClientsCutoff||null} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onLensChange={setHiveLens} onReportProblem={openRecordReport} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} leadsTruncated={!!initialLeadsTruncated} locationRequired={!!initialAllOverview} clientsCutoff={initialClientsCutoff||null} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onLensChange={setHiveLens} onReportProblem={openRecordReport} nurturingMoved={networkOpen} onOpenNurturing={()=>{ setNurturingIntent(true); nav('partners') }} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -38052,7 +38058,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* locationRequired mirrors HiveScreen above: server truth
             (!!initialAllOverview), so Network prompts on 'all' exactly when
             the record lenses do — never for a franchise user. */}
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} newList={networkOpen} locationName={selectedLoc?.name || ''} onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} initialTagId={networkTagIntent} onInitialTagConsumed={()=>setNetworkTagIntent(null)} newList={networkOpen} locationName={selectedLoc?.name || ''} onOpenClient={(id)=>openReminderRecord({ record_type:'lead', lead_id:id })} startOnNurturing={nurturingIntent} onStartConsumed={()=>setNurturingIntent(false)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )

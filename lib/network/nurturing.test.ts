@@ -229,6 +229,36 @@ beforeEach(() => {
   )
 })
 
+describe('rule 7: anyone who has ever paid, or has a won card, is never Nurturing (Kevin, 2026-11-20)', () => {
+  it('paid_amount above 0 rules them out', () => {
+    expect(v(lead({ paid_amount: 14341.72 }))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
+    expect(v(lead({ paid_amount: '180' }))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
+    expect(v(lead({ paid_amount: 0 }))).toMatchObject({ nurturing: true })
+    expect(v(lead({ paid_amount: -50 }))).toMatchObject({ nurturing: true })
+  })
+  it('an invoice paid date rules them out, even with paid_amount empty', () => {
+    expect(v(lead({ paid_amount: null, invoice_paid_at: '2026-08-12T00:00:00Z' }))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
+  })
+  it('a won card rules them out, open or closed, with no job and nothing paid', () => {
+    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: '2026-08-12T00:00:00Z', stage: 'Closed Won' }]))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
+    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: '2026-08-12T00:00:00Z', stage: 'Closed Lost' }]))).toMatchObject({ nurturing: true })
+  })
+  it('the SQL carries all three checks', () => {
+    const s = nurturingSql()
+    expect(s).toContain('and coalesce(l.paid_amount, 0) <= 0')
+    expect(s).toContain('and l.invoice_paid_at is null')
+    expect(s).toContain("and not exists (select 1 from engagements e where e.client_id = l.id and e.stage = 'Closed Won')")
+  })
+  it('the list leaves out a won card at the location', async () => {
+    h.state.tables.engagements.push({ id: 'e-won', client_id: pid(7), location_uuid: PHILLY, stage: 'Closed Won', closed_at: '2026-08-12T00:00:00Z' })
+    h.state.tables.leads.find((l) => l.id === pid(8))!.paid_amount = 370
+    const j = await (await getList(`location_id=${PHILLY}&size=100`)).json()
+    const ids = j.rows.map((r: any) => r.id)
+    expect(ids).not.toContain(pid(7))
+    expect(ids).not.toContain(pid(8))
+  })
+})
+
 describe('Kevin\'s answers, 2026-11-20', () => {
   it('1. an open card wins: a person with an open engagement is not listed', async () => {
     const j = await (await getList(`location_id=${PHILLY}&size=100`)).json()
@@ -417,12 +447,14 @@ describe('the reads write nothing', () => {
   })
 })
 
-describe('the Clients Nurturing band is untouched', () => {
-  // Byte for byte what they were at 8fd6ba7, the tip this slice started on.
-  // Slice 9 removes the band; until then both places show these people.
+describe('who the Clients band calls Nurturing, and Show more, are untouched', () => {
+  // Byte for byte what they were at 8fd6ba7, the tip slice 7 started on: who
+  // the band calls Nurturing, and how Show more reaches 18,830 rows, never
+  // changed. (The list file itself changes on purpose in slice 9: it hides the
+  // band behind the Network gate; lib/network/slice9-band.test.tsx undoes
+  // exactly those lines and checks the rest is the same file.)
   const sha = (f: string) => require('node:crypto').createHash('sha256').update(readFileSync(join(process.cwd(), f))).digest('hex')
   it.each([
-    ['components/hive/ClientGroupedList.jsx', '1fc2b08317a73fbd5ed9c7e27c8905597e3d863de8b972694963d5db20904aae'],
     ['components/hive/shared/clientStatus.js', '07b76c1cbba5abed47b4fe22b738d8f14c355ad3b5ae2e625184ba53a14eb0d2'],
     ['app/api/clients/browse/route.ts', '83c87bc084c60b112796f26b0f9fabe71a172106924a00f970c3d3a03ae164ba'],
     ['lib/hub-working-clients.ts', '1f0256023aa65f756c11e86602f46242b848a65e53361abf99cae043cb05a5b1'],

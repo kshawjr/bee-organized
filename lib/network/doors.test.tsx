@@ -200,8 +200,11 @@ describe('the gate is one rule', () => {
     expect(HUB).toContain("const closedFor = key => (key === 'partners' && networkOpen ? null : (CLOSED_NAV[key] || null))")
     expect(HUB).toContain('soon: !!closedFor(item.key), note: closedFor(item.key)?.note,')
     expect(HUB).toContain('newList={networkOpen}')
-    // Defined once, read twice: by closedFor and by the screen it mounts.
-    expect(HUB.match(/networkOpen/g)!.length).toBe(3)
+    // Defined once, read three times: by closedFor, by the screen it mounts,
+    // and (Network & Nurture slice 9, 2026-11-20) by the Clients screen, whose
+    // Nurturing band follows the same gate.
+    expect(HUB.match(/networkOpen/g)!.length).toBe(4)
+    expect(HUB).toContain('nurturingMoved={networkOpen}')
   })
 })
 
