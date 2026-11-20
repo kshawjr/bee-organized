@@ -56,6 +56,7 @@
 'use client'
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { TYPE_META, LEVEL_META, PARTNER_LEVELS, PARTNER_STAGES, NET_TYPES, contactTypes, hasType, isOrganization, isReferralPartner, partnerLevel, partnerStage, money, talkedLabel, COLD_AFTER_DAYS } from '@/lib/network/types'
 import { contactSecondaryDetails } from '@/lib/network/filters'
@@ -246,10 +247,9 @@ const IconLast = () => <Svg><path d="M13 17l5-5-5-5M6 17l5-5-5-5" /></Svg>
  * it, on its trigger pressed again, on Escape, or on its own Done button.
  *
  * KEVIN'S RULING, 2026-11-19 (slice 6 feedback): "anywhere on the screen
- * should clear the prompt." That reverses, FOR THE NETWORK SCREENS ONLY, Bee
- * Hub's 2026-09-30 rule (75363e9: nothing closes on an outside click). Every
- * other menu in Bee Hub still follows the old rule until Kevin rules on them;
- * lib/beta-no-outside-close.test.tsx lets this one listener through by name.
+ * should clear the prompt." A menu like this holds no typing and no choice
+ * waiting to be confirmed, so it is on the click-away side of Bee Hub's line
+ * (components/ui/useClickAway.js); windows and sheets are not.
  *
  * Closing from outside CANCELS: it only closes. It picks nothing in the menu
  * and changes no filter. (A filter box applies each tick as it is ticked, as
@@ -263,14 +263,12 @@ function Menu({ trigger, children, className, anchorClass = '' }) {
   useEffect(() => {
     if (!open) return undefined
     const key = (e) => { if (e.key === 'Escape') setOpen(false) }
-    // Pointer down, in the capture phase, so nothing on the page can swallow
-    // it first. A press inside the anchor (the trigger or the menu) is left
-    // to them: the trigger toggles, a choice closes the way it always has.
-    const away = (e) => { if (anchor.current && !anchor.current.contains(e.target)) setOpen(false) }
     document.addEventListener('keydown', key)
-    document.addEventListener('pointerdown', away, true) // network-menu-click-away (Kevin, 2026-11-19)
-    return () => { document.removeEventListener('keydown', key); document.removeEventListener('pointerdown', away, true) }
+    return () => document.removeEventListener('keydown', key)
   }, [open])
+  // A press inside the anchor (the trigger or the menu) is left to them: the
+  // trigger toggles, a choice closes the way it always has.
+  useClickAway(open, () => setOpen(false), insideRefs(anchor))
   return (
     <div className={`nw-anchor ${anchorClass}`} ref={anchor}>
       {trigger(open, () => setOpen((v) => !v))}

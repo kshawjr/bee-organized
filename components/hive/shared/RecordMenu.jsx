@@ -9,7 +9,7 @@
 // (the overlay card) can never amputate it — the failure the inbox row
 // menus hit. It re-anchors on scroll (capture phase, so scrolling
 // ancestors count) + resize, flips ABOVE the trigger when the viewport
-// bottom would clip it, closes on a pick, the ··· again, or Esc (never an outside click), and only ever
+// bottom would clip it, closes on a pick, the ··· again, Esc, or a click away (2026-11-19), and only ever
 // shows ONE menu (self-contained open state).
 //
 // STACKING (why NOT the inbox's zIndex:80): unlike the inbox row (a
@@ -36,9 +36,11 @@ import React, { useRef, useState, useLayoutEffect, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { IconDots } from '@/components/ui/icons'
 import { T } from './tokens'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 
-function MenuPortal({ anchorRef, onClose, children }) {
-  const ref = useRef(null)
+function MenuPortal({ anchorRef, menuRef = null, onClose, children }) {
+  const own = useRef(null)
+  const ref = menuRef || own
   const [pos, setPos] = useState(null)
 
   // Fixed coords from the trigger rect, re-derived on scroll/resize.
@@ -95,8 +97,10 @@ export default function RecordMenu({ items = [], ariaLabel = 'Record actions' })
   const triggerRef = useRef(null)
   const rows = items.filter(Boolean)
 
-  // No outside-click close (Kevin, 2026-09-30): the menu closes by
-  // picking an item, pressing the ··· again, or Esc.
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  // Inside = the ··· and the menu (which lives in a portal under <body>).
+  const menuRef = useRef(null)
+  useClickAway(open, () => setOpen(false), insideRefs(triggerRef, menuRef))
 
   if (rows.length === 0) return null
 
@@ -119,7 +123,7 @@ export default function RecordMenu({ items = [], ariaLabel = 'Record actions' })
         <IconDots size={16} />
       </button>
       {open && (
-        <MenuPortal anchorRef={triggerRef} onClose={() => setOpen(false)}>
+        <MenuPortal anchorRef={triggerRef} menuRef={menuRef} onClose={() => setOpen(false)}>
           {rows.map(it => (
             <button
               key={it.key}

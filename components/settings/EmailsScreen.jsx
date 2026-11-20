@@ -12,6 +12,7 @@
 //
 // The colours are the export's oklch tokens, converted to hex once here.
 // ─────────────────────────────────────────────────────────────
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import React from 'react'
 import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
 import { escHtml } from '@/lib/email-escape'
@@ -175,8 +176,10 @@ const Check = () => (
 
 // The design's dropdown. A button that opens a listbox panel — a native
 // <select> opens the browser's own list, which can't take this shape.
-// Nothing closes on an outside click (Kevin, 2026-09-30): it closes by
-// picking, by its own button again, or by Escape / Tab.
+// It closes by picking, by its own button again, by Escape / Tab, or by a
+// click away (Kevin, 2026-11-19: a dropdown holds no typing; picking applies
+// at once, so a click away only closes the list). A window it sits in still
+// closes only by its own buttons.
 //   options [{ value, label }]   onChange(value)
 export function ESelect({ id, value, options, onChange, ariaLabel, disabled = false, placeholder = '', style = null, muted = false }) {
   const [open, setOpen] = React.useState(false)
@@ -185,6 +188,7 @@ export function ESelect({ id, value, options, onChange, ariaLabel, disabled = fa
   const list = React.useRef(null)
   const current = options.find(o => String(o.value) === String(value ?? ''))
   React.useEffect(() => { if (open && list.current) list.current.focus() }, [open])
+  useClickAway(open, () => setOpen(false), insideRefs(box))
   const show = () => {
     if (disabled) return
     setActive(Math.max(0, options.findIndex(o => String(o.value) === String(value ?? ''))))

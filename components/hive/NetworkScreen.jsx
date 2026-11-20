@@ -309,7 +309,7 @@ export default function NetworkScreen({
         />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={filterCount} open={filtersOpen} onToggle={() => setFiltersOpen(o => !o)} />
-          <FilterPopover open={filtersOpen} count={filterCount} onClear={clearFilters}>
+          <FilterPopover open={filtersOpen} count={filterCount} onClear={clearFilters} onClose={() => setFiltersOpen(false)}>
             <FilterSection label="Stage">
               <TogglePills options={PARTNER_STAGE_KEYS.map(k => ({ key: k, label: k }))} value={stageFilter} onChange={setStageFilter} />
             </FilterSection>

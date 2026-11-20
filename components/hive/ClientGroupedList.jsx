@@ -373,7 +373,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
         />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={tagFilter.length} open={filtersOpen} onToggle={() => setFiltersOpen(o => !o)} />
-          <FilterPopover open={filtersOpen} count={tagFilter.length} onClear={() => setTagFilter([])}>
+          <FilterPopover open={filtersOpen} count={tagFilter.length} onClear={() => setTagFilter([])} onClose={() => setFiltersOpen(false)}>
             <TagFilterSection tags={tags} rows={inHand} picked={tagFilter} onToggle={toggleTag}
               emptyNote="No one here is tagged yet — add tags from a client's record." testId="clients-tag-options" />
           </FilterPopover>

@@ -75,6 +75,7 @@ import NetworkConvertSheet from './NetworkConvertSheet'
 import CloseLostWizard from './shared/CloseLostWizard'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty, ClearAllButton } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import { useClickAway } from '@/components/ui/useClickAway'
 import TagFilterSection from './shared/TagFilterSection'
 import TagFilterChips from './shared/TagFilterChips'
 import { matchesTags, matchesTagSearch } from './shared/tagFilter'
@@ -597,8 +598,18 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     return m
   }, [locationUsers])
 
-  // No outside-click close (Kevin, 2026-09-30): the row ··· menu closes
-  // by picking an item, pressing its ··· again (or another row's), or Esc.
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  // The row ··· menu also closes by a pick, its ··· again (or another row's),
+  // or Esc. NOT while it is asking "are you sure?" (confirmFor), and never the
+  // Bin menu, which is nothing but that question: those close only by their
+  // own Yes or No. Every row's ··· counts as inside: its own click opens, moves
+  // or closes the menu, as before (closing on the press first would redraw the
+  // rows under the pointer and could send the click to the row instead).
+  useClickAway(
+    !!menuFor && !String(menuFor).startsWith('bin-') && !confirmFor,
+    () => setMenuFor(null),
+    (t) => !!t.closest?.('[data-bee-row-menu],[data-bee-menu-trigger]'),
+  )
 
   // The single mark-as-junk confirm is scoped to the open menu — any close
   // path (a pick, Escape, the ··· again, reopening another row) disarms it, so a
@@ -1700,7 +1711,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
-          <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
+          <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters} onClose={() => setFltOpen(false)}>
             <FilterSection label="Sort">
               <SortRows value={inboxSort} onChange={(v) => setSort({ key: v })} options={INBOX_SORTS} />
             </FilterSection>

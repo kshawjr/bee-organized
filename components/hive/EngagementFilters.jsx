@@ -44,7 +44,7 @@ export default function EngagementFilters({ engagements = [], filters, setFilter
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
       <FilterButton count={count} open={open} onToggle={() => setOpen(v => !v)} label={sortOptions ? 'Filter & sort' : 'Filters'} />
-      <FilterPopover open={open} count={count} onClear={onClear}>
+      <FilterPopover open={open} count={count} onClear={onClear} onClose={() => setOpen(false)}>
         {sortOptions && (
           <FilterSection label="Sort">
             <SortRows value={sortValue} onChange={onSortChange} options={sortOptions} />

@@ -11,7 +11,7 @@
 //   - a trigger click OPENS the menu and it STAYS open (not eaten by the
 //     document outside-click closer on the same opening click)
 //   - a menu-item click fires that item's handler and closes the menu
-//   - an outside click does NOT close it (Kevin, 2026-09-30); the ··· again does
+//   - a click away closes it and fires nothing (Kevin, 2026-11-19); the ··· again does
 //   - Esc closes
 //   - source/stacking guard: the portal outranks the overlay layer (10005)
 //     so a menu spawned from inside an overlay floats OVER it
@@ -31,6 +31,12 @@ const mount = async (ui: React.ReactElement) => {
   const root = createRoot(host)
   await act(async () => { root.render(ui) })
   return { host, unmount: async () => { await act(async () => root.unmount()); host.remove() } }
+}
+// A real press the way a browser delivers it: pointerdown, mousedown, click.
+// Each event in its own act(): a browser delivers them as separate tasks, so a
+// press on a menu's own button must not be batched into one React update.
+const press = async (el: Element) => {
+  for (const t of ['pointerdown', 'mousedown', 'click']) await act(async () => { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true })) })
 }
 const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
@@ -97,25 +103,27 @@ describe('item clicks fire handlers', () => {
 })
 
 describe('close behaviors', () => {
-  it('an outside click leaves it open; a click INSIDE fires nothing; the ··· again closes it', async () => {
+  it('a click away closes it and fires nothing; a press INSIDE fires nothing and keeps it; the ··· again closes it', async () => {
     const won = vi.fn(); const lost = vi.fn(); const reopen = vi.fn()
     const m = await mount(<RecordMenu items={items(won, lost, reopen)} />)
-    await click(trigger())
+    await press(trigger())
     const el = menu()!
 
     // inside the portal chrome (its padding, not a button) — stays open
-    await click(el)
+    await press(el)
     expect(menu()).toBeTruthy()
 
-    // genuinely outside — stays open, nothing fired
-    await click(document.body)
-    expect(menu()).toBeTruthy()
+    // genuinely outside — closes, nothing fired
+    await press(document.body)
+    expect(menu()).toBeFalsy()
     expect(won).not.toHaveBeenCalled()
     expect(lost).not.toHaveBeenCalled()
     expect(reopen).not.toHaveBeenCalled()
 
-    // its own control closes it
-    await click(trigger())
+    // its own control opens and closes it
+    await press(trigger())
+    expect(menu()).toBeTruthy()
+    await press(trigger())
     expect(menu()).toBeFalsy()
     await m.unmount()
   })

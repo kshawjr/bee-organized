@@ -13,7 +13,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { T } from './shared/tokens'
 
 export default function MetaSelect({ label, value, options = [], onPick, renderTrigger = null, readOnly = false }) {
@@ -24,6 +25,11 @@ export default function MetaSelect({ label, value, options = [], onPick, renderT
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  // A tap on an option saves it at once; nothing waits to be confirmed, so a
+  // click away only closes the list.
+  const box = useRef(null)
+  useClickAway(open, () => setOpen(false), insideRefs(box))
 
   const pill = value ? {
     padding: '4px 10px', borderRadius: T.radius.pill, border: T.border.thin,
@@ -47,7 +53,7 @@ export default function MetaSelect({ label, value, options = [], onPick, renderT
   }
 
   return (
-    <span style={{ position: 'relative', display: renderTrigger ? 'block' : 'inline-block' }}>
+    <span ref={box} style={{ position: 'relative', display: renderTrigger ? 'block' : 'inline-block' }}>
       {renderTrigger ? renderTrigger(toggle) : (
         <button onClick={toggle} style={pill}>
           {value ? <><span style={{ color: T.ink.muted }}>{label}: </span>{value}</> : `${label} · add`}
@@ -55,7 +61,7 @@ export default function MetaSelect({ label, value, options = [], onPick, renderT
       )}
       {open && (
         <>
-          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
+          {/* Closes on a pick, the chip again, Esc, or a click away (2026-11-19). */}
           <div className="bee-meta-pop" onClick={e => e.stopPropagation()}
             style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '8px 12px' }}>
             <style>{`.bee-meta-item:hover { background:${T.surface.hover} } .bee-meta-pop { max-height: 46vh; max-height: 46dvh; }`}</style>

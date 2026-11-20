@@ -40,7 +40,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { T } from './tokens'
 import MiniAvatar from './MiniAvatar'
 
@@ -69,6 +70,11 @@ export default function AssigneeCorner({
 }) {
   const [open, setOpen] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  // Each tick saves at once (and any error shows as a toast outside the
+  // picker), so nothing is waiting: a click away only closes it.
+  const box = useRef(null)
+  useClickAway(open, () => setOpen(false), insideRefs(box))
 
   useEffect(() => {
     if (!open) return
@@ -177,7 +183,7 @@ export default function AssigneeCorner({
   const triggerLabel = n === 0 ? 'Assign a team member' : `Assigned to ${allNames} — edit assignment`
 
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+    <span ref={box} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
       <button type="button" onClick={() => setOpen(v => !v)}
         aria-label={triggerLabel} aria-haspopup="true" aria-expanded={open}
         title={n === 0 ? 'Assign' : allNames}
@@ -189,7 +195,7 @@ export default function AssigneeCorner({
       </button>
       {open && (
         <>
-          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
+          {/* Closes on Done, the faces again, Esc, or a click away (2026-11-19). */}
           <div onClick={e => e.stopPropagation()}
             style={{
               position: 'absolute', [align]: 0, top: 'calc(100% + 6px)', zIndex: 10010,
@@ -217,7 +223,7 @@ export default function AssigneeCorner({
             {users.length === 0 && (
               <p style={{ fontSize: '11px', color: T.ink.quiet, padding: '4px 0' }}>No team members at this location</p>
             )}
-            {/* Multi-select, so a pick doesn't close it — Done does (no outside-click close). */}
+            {/* Multi-select, so a pick doesn't close it — Done (or a click away) does. */}
             <button type="button" onClick={() => setOpen(false)}
               style={{ display: 'block', width: '100%', marginTop: '6px', padding: '6px 8px', border: 'none', borderTop: T.border.thin, background: 'transparent', color: T.ink.muted, fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'right' }}>
               Done

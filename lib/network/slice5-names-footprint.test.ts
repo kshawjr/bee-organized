@@ -11,9 +11,11 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { withoutClickAway } from './click-away-footprint'
 import { join } from 'node:path'
 
-const sha256 = (p: string) => createHash('sha256').update(readFileSync(join(process.cwd(), p), 'utf8')).digest('hex')
+// BeeHub.jsx and hive/NetworkScreen.jsx: the click-away pass (2026-11-19) is taken back out first (click-away-footprint.ts).
+const sha256 = (p: string) => createHash('sha256').update(withoutClickAway(p, readFileSync(join(process.cwd(), p), 'utf8'))).digest('hex')
 
 const AT_EC19879: Record<string, string> = {
   'lib/lead-name.ts': '91605df028704d2bc96a818b702de2603cd34493159f0d74b9cc683f01c3c094',

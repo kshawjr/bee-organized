@@ -13,7 +13,8 @@
 //                   Clear all (the d710247 rule, on every surface)
 'use client'
 
-import React from 'react'
+import React, { useRef } from 'react'
+import { useClickAway } from '@/components/ui/useClickAway'
 import { IconChevronRight } from '@/components/ui/icons'
 import { HAIRLINE_BORDER, TEXT_SUCCESS, TEXT_MUTED } from '@/components/ui/tokens'
 import { T } from './tokens'
@@ -58,13 +59,19 @@ export function SortRows({ value, onChange, options }) {
   )
 }
 
-export function FilterPopover({ open, count = 0, onClear, children, width = 260 }) {
+// onClose: Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+// Every filter here applies the moment it is ticked (or typed, for min/max),
+// so closing loses nothing. Inside = this popover and its Filters button: the
+// two always share one positioned wrapper, so the wrapper is the boundary.
+export function FilterPopover({ open, count = 0, onClear, children, width = 260, onClose = null }) {
+  const box = useRef(null)
+  useClickAway(!!open && !!onClose, () => onClose?.(), (t) => !!box.current?.parentElement?.contains(t))
   if (!open) return null
   return (
     // Height cap in dvh (vh fallback) — iOS vh is the large viewport, so
     // a vh-capped popover could run past the visible bottom (OverlayShell
     // has the full story).
-    <div className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    <div ref={box} className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <style>{`.bee-filter-pop { max-height: 62vh; max-height: 62dvh; }`}</style>
       {children}
       {count > 0 && <ClearAllButton onClick={onClear} style={{ textAlign: 'left' }} />}

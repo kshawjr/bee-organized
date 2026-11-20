@@ -7,7 +7,8 @@
 //   - first AND last row: menu portaled out of the clipped card, all
 //     items present and interactable (a pick fires the row's PATCH)
 //   - only one menu at a time; re-click toggles closed
-//   - an outside click does NOT close it (2026-09-30); the ··· again does
+//   - a click away closes it and writes nothing (Kevin, 2026-11-19); the ··· again does;
+//     while it asks "are you sure?" a click away does NOT close it
 //   - Esc closes
 //   - source guards: cardStyle keeps overflow:hidden, the menu
 //     re-anchors on scroll (capture) + resize, and the mobile/desktop
@@ -63,6 +64,13 @@ const mount = async (ui: React.ReactElement) => {
 const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 })
+
+// A real press the way a browser delivers it: pointerdown, mousedown, click.
+// Each event in its own act(): a browser delivers them as separate tasks, so a
+// press on a menu's own button must not be batched into one React update.
+const press = async (el: Element) => {
+  for (const t of ['pointerdown', 'mousedown', 'click']) await act(async () => { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true })) })
+}
 
 const inbox = (people: any[], over: any = {}) => (
   <InboxScreen people={people} engagements={[]} locFilter="all" setToast={() => {}} {...over} />
@@ -149,23 +157,60 @@ describe('portal escapes the clipped card', () => {
 })
 
 describe('close behaviors', () => {
-  it('an outside click leaves it open; the ··· again closes it (Kevin, 2026-09-30)', async () => {
+  it('a click away closes it and writes nothing; a press inside does not; the ··· again closes it (Kevin, 2026-11-19)', async () => {
     const m = await mount(inbox([person()]))
-    await click(moreButtons(m.host)[0])
+    await press(moreButtons(m.host)[0])
     const menu = openMenu()!
 
     // inside the portal (non-button padding) — stays open
-    await click(menu)
+    await press(menu)
     expect(openMenu()).toBeTruthy()
 
-    // genuinely outside — stays open, and nothing was written
-    await click(document.body)
-    expect(openMenu()).toBeTruthy()
+    // genuinely outside — closes, and nothing was written
+    await press(document.body)
+    expect(openMenu()).toBeFalsy()
     expect(patches).toHaveLength(0)
 
-    // its own ··· closes it
-    await click(moreButtons(m.host)[0])
+    // its own ··· opens and closes it (a press on it is not a click away)
+    await press(moreButtons(m.host)[0])
+    expect(openMenu()).toBeTruthy()
+    await press(moreButtons(m.host)[0])
     expect(openMenu()).toBeFalsy()
+    await m.unmount()
+  })
+
+  it('another row’s ··· moves the menu to that row in one press', async () => {
+    const m = await mount(inbox([person(), person()]))
+    await press(moreButtons(m.host)[0])
+    await press(moreButtons(m.host)[1])
+    expect(document.querySelectorAll('[data-bee-row-menu]')).toHaveLength(1)
+    await m.unmount()
+  })
+
+  it('the Bin question is nothing but "are you sure?": a click away never closes it', async () => {
+    const m = await mount(inbox([person({ inboxDismissedAt: daysAgo(1) })]))
+    // The Bin button is on a dismissed row; open the Dismissed band the way a person does.
+    const band = m.host.querySelector('[aria-label="Dismissed group"]') as HTMLElement
+    expect(band, 'the Dismissed band').toBeTruthy()
+    await press(band)
+    const binBtn = m.host.querySelector('[data-testid^="bin-"]') as HTMLElement
+    expect(binBtn, 'the Bin button').toBeTruthy()
+    await press(binBtn)
+    expect(document.querySelector('[data-testid="menu-confirm-junk"]')).toBeTruthy()
+    await press(document.body)
+    expect(document.querySelector('[data-testid="menu-confirm-junk"]')).toBeTruthy()
+    expect(patches).toHaveLength(0)
+    await m.unmount()
+  })
+
+  it('while it asks "are you sure?", a click away does NOT close it and says no yes', async () => {
+    const m = await mount(inbox([person()]))
+    await press(moreButtons(m.host)[0])
+    await press(menuButton('Dismiss')!)
+    expect(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')).toBeTruthy()
+    await press(document.body)
+    expect(document.querySelector('[data-testid="menu-confirm-dismiss-yes"]')).toBeTruthy()
+    expect(patches).toHaveLength(0)
     await m.unmount()
   })
 

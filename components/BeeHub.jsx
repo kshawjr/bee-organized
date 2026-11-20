@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react"
+import { useClickAway } from "@/components/ui/useClickAway"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { useLocationBroadcast } from "@/lib/use-location-broadcast"
@@ -25607,6 +25608,7 @@ function DashboardScreen({ onOpenClientList = null, onNavigate, startNav='home',
         </div>
         <HomeGreeting ownerName={ownerName} ownerEmail={ownerEmail} />
         <button
+          data-loc-picker-trigger
           onClick={()=>{ if (onClickLocation) onClickLocation() }}
           onMouseEnter={()=>setLocIndicatorHover(true)}
           onMouseLeave={()=>setLocIndicatorHover(false)}
@@ -25654,6 +25656,7 @@ function DashboardScreen({ onOpenClientList = null, onNavigate, startNav='home',
 
         <HomeGreeting ownerName={ownerName} ownerEmail={ownerEmail} />
         <button
+          data-loc-picker-trigger
           onClick={()=>{ if (onClickLocation) onClickLocation() }}
           onMouseEnter={()=>setLocIndicatorHover(true)}
           onMouseLeave={()=>setLocIndicatorHover(false)}
@@ -37711,7 +37714,7 @@ if (Array.isArray(initialPeople)) return
     return (
       <div className="bee-loc-banner" style={{ position:'fixed', top:0, left:0, right:0, height:'36px', background:'#0f1f1c', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:10000, display:'flex', alignItems:'center', padding:'0 12px', gap:'8px' }}>
         <span style={{ fontSize:'11px', color:'rgba(168,201,196,0.5)' }}>📍</span>
-        <button onClick={()=>setShowLocPicker(!showLocPicker)} style={{ flex:1, display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', padding:0 }}>
+        <button data-loc-picker-trigger onClick={()=>setShowLocPicker(!showLocPicker)} style={{ flex:1, display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', padding:0 }}>
           <span style={{ fontSize:'12px', fontWeight:600, color:selectedLoc?'white':'rgba(168,201,196,0.8)' }}>
             {selectedLoc ? `${selectedLoc.name}, ${selectedLoc.state}` : 'All Locations'}
           </span>
@@ -37768,6 +37771,7 @@ if (Array.isArray(initialPeople)) return
           🔍
         </button>
         <button
+          data-mobile-profile-trigger
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, padding:0 }}>
@@ -37817,6 +37821,15 @@ if (Array.isArray(initialPeople)) return
   })()
 
   // ── Mobile profile menu (top-right popover) ────────────────────────────────
+  // The phone profile menu and the location picker close on a click away
+  // (Kevin, 2026-11-19): neither holds anything a person typed that matters
+  // (the picker's search box only narrows the list) and each tap applies at
+  // once, so a click away only closes them. Their buttons count as inside, so
+  // pressing a button again still toggles it shut. components/ui/useClickAway.js
+  useClickAway(showMobileProfile, () => setShowMobileProfile(false),
+    (t) => !!t.closest?.('[data-mobile-profile-menu],[data-mobile-profile-trigger]'))
+  useClickAway(showLocPicker, () => setShowLocPicker(false),
+    (t) => !!t.closest?.('[data-loc-picker],[data-loc-picker-trigger]'))
   const MobileProfileMenu = () => {
     if (!showMobileProfile) return null
     const profileName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
@@ -37832,7 +37845,7 @@ if (Array.isArray(initialPeople)) return
     const menuTop = LOC_BAR_H + 48 + 4
     return (
       <>
-        <div style={{ position:'fixed', top:`${menuTop}px`, right:'8px', zIndex:9002, width:'240px', background:'white', borderRadius:'12px', boxShadow:'0 10px 30px rgba(0,0,0,0.2)', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
+        <div data-mobile-profile-menu style={{ position:'fixed', top:`${menuTop}px`, right:'8px', zIndex:9002, width:'240px', background:'white', borderRadius:'12px', boxShadow:'0 10px 30px rgba(0,0,0,0.2)', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
           <div style={{ padding:'14px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profileName}</p>
             {profileEmail && <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profileEmail}</p>}
@@ -37898,7 +37911,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
 
     return (
       <>
-        <div style={{ position:'fixed', ...(isMobile
+        <div data-loc-picker style={{ position:'fixed', ...(isMobile
           ? { top:`${TOTAL_TOP}px`, left:0, right:0, borderBottom:'1px solid rgba(0,0,0,0.1)' }
           // Desktop: the trigger lives in the sidebar footer (lower left),
           // so the sheet anchors there as a popover instead of a top sheet.

@@ -26,7 +26,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { CHIP_STYLES } from './shared/stageConfig'
 import { IconMapPin, IconSelector, IconEye, IconLogout, IconChevronRight } from '@/components/ui/icons'
 import { T, sage } from './shared/tokens'
@@ -98,13 +99,16 @@ export default function IdentityScopeControl({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  const box = useRef(null)
+  useClickAway(open, () => setOpen(false), insideRefs(box))
 
   const impersonating = !!viewingAs
   const badge = roleBadgeTint === 'warning' ? CHIP_STYLES.amber : CHIP_STYLES.teal
   const pick = (fn) => () => { setOpen(false); fn() }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={box} style={{ position: 'relative' }}>
       {/* Trigger — closed-state scope line is REQUIRED; impersonation is
           loud here (ring + "Viewing as") even with the popover closed. */}
       <button
@@ -139,7 +143,7 @@ export default function IdentityScopeControl({
 
       {open && (
         <>
-          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
+          {/* Closes on a pick, its trigger again, Esc, or a click away (2026-11-19). */}
           <div
             role="menu"
             style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, width: '256px', zIndex: 10002, background: T.surface.raised, borderRadius: T.radius.inset, border: T.border.thin, boxShadow: T.shadow.drawer, overflow: 'hidden', paddingBottom: '4px' }}

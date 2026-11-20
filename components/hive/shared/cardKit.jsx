@@ -18,7 +18,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { IconDots } from '@/components/ui/icons'
 import { T } from './tokens'
 import { menuRowBox, menuLabelType, menuDescriptionType, menuHeadingType, menuConfirmPromptType } from './menuType'
@@ -185,9 +186,14 @@ export function CardMenu({ items = [], label = 'More' }) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
+  // Closes on a click away (Kevin, 2026-11-19): it holds no typing and no choice waiting to be confirmed (components/ui/useClickAway.js).
+  // NOT while it is asking "are you sure?" (an item armed): that step closes
+  // only by its own Yes or No, like every confirmation in Bee Hub.
+  const box = useRef(null)
+  useClickAway(open && !armed, () => setOpen(false), insideRefs(box))
   if (items.length === 0) return null
   return (
-    <div style={{ position: 'relative', flexShrink: 0 }}>
+    <div ref={box} style={{ position: 'relative', flexShrink: 0 }}>
       <button
         className="bee-ghost-btn" aria-label={label} title={label}
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
@@ -202,7 +208,7 @@ export function CardMenu({ items = [], label = 'More' }) {
       </button>
       {open && (
         <>
-          {/* No outside-click catcher: closes by its own control or Esc (Kevin, 2026-09-30). */}
+          {/* Closes on a pick, the ··· again, Esc, or a click away (not while asking "are you sure?"). */}
           <div style={{
             position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 10010,
             minWidth: '210px', background: T.surface.raised,

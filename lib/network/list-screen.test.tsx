@@ -324,11 +324,11 @@ describe('a menu closes on a click anywhere outside it, and applies nothing (Kev
     expect($('[data-tags-trigger]')!.getAttribute('aria-expanded')).toBe('false')
     expect($('[data-filters-trigger]')!.getAttribute('aria-expanded')).toBe('true')
   })
-  it('the only page listener on the screen is the menu’s one click-away, and it is taken off when the menu closes', async () => {
+  it('the screen adds no page listener of its own: the menu uses Bee Hub’s one click-away hook, taken off when the menu closes', async () => {
     const src = readFileSync(join(process.cwd(), 'components/network/NetworkListScreen.jsx'), 'utf8')
-    const adds = Array.from(src.matchAll(/addEventListener\(\s*['"](click|mousedown|pointerdown|touchstart)['"][^\n]*/g)).map((m) => m[0])
-    expect(adds).toHaveLength(1)
-    expect(adds[0]).toContain("'pointerdown', away, true")
+    expect(src).not.toMatch(/addEventListener\(\s*['"](click|mousedown|pointerdown|touchstart)['"]/)
+    expect(src.match(/useClickAway\(/g)).toHaveLength(1)
+    expect(src).toContain('useClickAway(open, () => setOpen(false), insideRefs(anchor))')
     const add = vi.spyOn(document, 'addEventListener'); const off = vi.spyOn(document, 'removeEventListener')
     await mount()
     await click($('[data-tags-trigger]'))

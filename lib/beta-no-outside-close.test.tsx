@@ -1,8 +1,25 @@
 // @vitest-environment happy-dom
 //
-// Nothing closes on an outside click, anywhere (Kevin, 2026-09-30 —
-// extends the 2026-09-29 overlay decision to every screen, menu, picker
-// and popover). Each one closes by its OWN control instead:
+// WHY THIS TEST EXISTS. On 2026-09-29 a stray click beside a record closed
+// it and dropped whatever was half-typed (a buzz note, a name edit, a call
+// note, a new-client form: 43e72f6). On 2026-09-30 Kevin extended that to
+// "nothing closes on an outside click, anywhere" (75363e9), so no window,
+// sheet, menu or picker could throw away a person's typing by accident.
+//
+// THE LINE SINCE 2026-11-19 (Kevin: "i wrote that rule because people were
+// clearing out. just leave everything else except filters and pop up"). The
+// reason still holds, so the rule is NARROWED, not retired:
+//   · CLOSES ON A CLICK AWAY: things that hold no typing and no choice
+//     waiting to be confirmed — filter menus, pickers where a tap applies at
+//     once, the ··· menus, the account / location / profile menus, the
+//     Settings dropdowns. They do it through ONE hook,
+//     components/ui/useClickAway.js, and only the components named in
+//     CLICK_AWAY_ALLOWED below may call it.
+//   · CLOSES ONLY BY ITS OWN BUTTONS: every pop-up window and sheet, anything
+//     holding typing, and every "are you sure?" step (even one shown inside a
+//     ··· menu). Section 1b pins that with a real pointer press.
+//
+// Before 2026-11-19 every menu here was: closes by its OWN control:
 //   · a menu — picking an item, or pressing its trigger (···) again
 //   · a picker — its own Done / Cancel
 //   · a popover or modal — its own ✕ / Close / Cancel
@@ -44,6 +61,9 @@ import IdentityScopeControl from '@/components/hive/IdentityScopeControl'
 import AssigneeCorner from '@/components/hive/shared/AssigneeCorner'
 import EngagementAssignees from '@/components/hive/shared/EngagementAssignees'
 import FeedbackModal from '@/components/feedback/FeedbackModal'
+import { FilterButton, FilterPopover, CheckRow } from '@/components/hive/shared/FilterPopover'
+import { ESelect, EDialog } from '@/components/settings/EmailsScreen'
+import OverlayShell from '@/components/hive/OverlayShell'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -57,9 +77,11 @@ const mount = async (ui: React.ReactElement) => {
 const fire = (el: Element, type: 'click' | 'mousedown') => act(async () => {
   el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }))
 })
-// An "outside click" the way a browser delivers it: mousedown then click,
-// on the page behind (document.body), not on anything the component owns.
+// An "outside click" the way a browser delivers it: pointerdown, mousedown,
+// then click, on the page behind (document.body) or a window's own dimmed
+// backdrop, not on anything the component owns.
 const clickOutside = async (target: Element = document.body) => {
+  await act(async () => { target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true })) })
   await fire(target, 'mousedown')
   await fire(target, 'click')
 }
@@ -79,13 +101,32 @@ beforeEach(() => {
 describe('card ··· menu (CardMenu)', () => {
   const items = (onPick = () => {}) => [{ key: 'a', label: 'Do a thing', onPick }]
 
-  it('an outside click leaves it open; the ··· again closes it', async () => {
-    const { host, unmount } = await mount(<CardMenu items={items()} />)
+  it('a click away closes it and picks nothing; the ··· again closes it too', async () => {
+    const onPick = vi.fn()
+    const { host, unmount } = await mount(<CardMenu items={items(onPick)} />)
     await click(host.querySelector('button[aria-label="More"]')!)
     await clickOutside()
+    expect(host.textContent).not.toContain('Do a thing')
+    expect(onPick).not.toHaveBeenCalled()
+    await click(host.querySelector('button[aria-label="More"]')!)
     expect(host.textContent).toContain('Do a thing')
     await click(host.querySelector('button[aria-label="More"]')!)
     expect(host.textContent).not.toContain('Do a thing')
+    await unmount()
+  })
+
+  it('while it asks "are you sure?", a click away does NOT close it and does not say yes', async () => {
+    const onPick = vi.fn()
+    const confirmItems = [{ key: 'del', label: 'Delete client', onPick, danger: true, confirm: { prompt: 'Delete Dana?', yes: 'Yes, delete', no: 'Keep' } }]
+    const { host, unmount } = await mount(<CardMenu items={confirmItems as any} />)
+    await click(host.querySelector('button[aria-label="More"]')!)
+    await click(btn(host, 'Delete client')!)
+    expect(host.textContent).toContain('Delete Dana?')
+    await clickOutside()
+    expect(host.textContent).toContain('Delete Dana?')
+    expect(onPick).not.toHaveBeenCalled()
+    await click(btn(host, 'Keep')!)
+    expect(onPick).not.toHaveBeenCalled()
     await unmount()
   })
 
@@ -137,13 +178,15 @@ describe('meta chip picker (MetaSelect)', () => {
   const OPTS = ['Referral', 'Google']
   const pop = (host: Element) => host.querySelector('.bee-meta-pop')
 
-  it('an outside click leaves it open; the chip again, a pick, or Esc closes it', async () => {
+  it('a click away closes it and saves nothing; the chip again, a pick, or Esc closes it', async () => {
     const onPick = vi.fn()
     const { host, unmount } = await mount(<MetaSelect label="Source" value="Referral" options={OPTS} onPick={onPick} />)
     const chip = host.querySelector('button')!
     await click(chip)
     await clickOutside()
-    expect(pop(host)).toBeTruthy()
+    expect(pop(host)).toBeNull()
+    expect(onPick).not.toHaveBeenCalled()
+    await click(chip)
     await click(chip)
     expect(pop(host)).toBeNull()
 
@@ -168,12 +211,19 @@ describe('account & scope popover (IdentityScopeControl)', () => {
   }
   const open = (host: Element) => host.querySelector('[data-section]')
 
-  it('an outside click leaves it open; its trigger again closes it; Esc still does', async () => {
-    const { host, unmount } = await mount(<IdentityScopeControl {...SUPER} />)
+  it('a click away closes it and opens nothing; its trigger again closes it; Esc still does', async () => {
+    const onOpenViewAs = vi.fn(); const onOpenLocationPicker = vi.fn()
+    const { host, unmount } = await mount(<IdentityScopeControl {...SUPER} onOpenViewAs={onOpenViewAs} onOpenLocationPicker={onOpenLocationPicker} />)
     const trigger = host.querySelector('button[aria-label="Account and scope"]')!
     await click(trigger)
     await clickOutside()
+    expect(open(host)).toBeNull()
+    expect(onOpenViewAs).not.toHaveBeenCalled()
+    expect(onOpenLocationPicker).not.toHaveBeenCalled()
+    await click(trigger)
     expect(open(host)).toBeTruthy()
+    await clickOutside(host.querySelector('[data-section]')!)
+    expect(open(host)).toBeTruthy() // a press inside the menu is not a click away
     await click(trigger)
     expect(open(host)).toBeNull()
     await click(trigger)
@@ -189,7 +239,7 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
     { id: 'u2', name: 'Wendy Ortiz', email: 'wendy@x.com', locationId: 'loc-1', jobberUserId: null },
   ]
 
-  it('AssigneeCorner: outside click leaves it open; Done closes; trigger again closes; Esc closes', async () => {
+  it('AssigneeCorner: a click away closes it and sends nothing; Done closes; trigger again closes; Esc closes', async () => {
     const { host, unmount } = await mount(
       <AssigneeCorner assignees={[]} users={USERS} endpoint="/api/leads/lead-9/assignees" mode="put" />
     )
@@ -197,7 +247,9 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
     const isOpen = () => host.textContent!.includes('Wendy Ortiz')
     await click(trigger)
     await clickOutside()
-    expect(isOpen()).toBe(true)
+    expect(isOpen()).toBe(false)
+    expect((globalThis as any).fetch).not.toHaveBeenCalled() // nobody assigned or unassigned
+    await click(trigger)
     await click(btn(host, 'Done')!)
     expect(isOpen()).toBe(false)
     await click(trigger); await click(trigger)
@@ -207,7 +259,7 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
     await unmount()
   })
 
-  it('EngagementAssignees: outside click leaves it open; Done closes; trigger again closes; Esc closes', async () => {
+  it('EngagementAssignees: a click away closes it and sends nothing; Done closes; trigger again closes; Esc closes', async () => {
     const { host, unmount } = await mount(
       <EngagementAssignees engagementId="eng-1" assignees={[]} users={USERS} jobberConnected onChange={() => {}} setToast={() => {}} />
     )
@@ -215,7 +267,9 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
     const isOpen = () => !!btn(host, 'Done')
     await click(trigger)
     await clickOutside()
-    expect(isOpen()).toBe(true)
+    expect(isOpen()).toBe(false)
+    expect((globalThis as any).fetch).not.toHaveBeenCalled()
+    await click(trigger)
     await click(btn(host, 'Done')!)
     expect(isOpen()).toBe(false)
     await click(trigger); await click(trigger)
@@ -226,15 +280,135 @@ describe('assignee pickers — multi-select, so they got a Done', () => {
   })
 })
 
+describe('filter menu (FilterPopover: Clients, Inbox, the board)', () => {
+  function Harness({ onTick }: { onTick: () => void }) {
+    const [open, setOpen] = React.useState(false)
+    return (
+      <div style={{ position: 'relative' }}>
+        <FilterButton count={0} open={open} onToggle={() => setOpen((v) => !v)} />
+        <FilterPopover open={open} count={0} onClear={() => {}} onClose={(() => setOpen(false)) as any}>
+          <CheckRow label="Has phone" checked={false} onToggle={onTick} />
+        </FilterPopover>
+      </div>
+    )
+  }
+  const pop = () => document.querySelector('.bee-filter-pop')
+  it('a click away closes it and ticks nothing; a press inside does not; its button toggles; Esc is not its job', async () => {
+    const onTick = vi.fn()
+    const { host, unmount } = await mount(<Harness onTick={onTick} />)
+    const button = btn(host, 'Filters')!
+    await click(button)
+    expect(pop()).toBeTruthy()
+    await clickOutside(pop()!)
+    expect(pop()).toBeTruthy()
+    await clickOutside()
+    expect(pop()).toBeNull()
+    expect(onTick).not.toHaveBeenCalled()
+    await clickOutside(button) // a real press on its own button opens it…
+    expect(pop()).toBeTruthy()
+    await clickOutside(button) // …and a second one closes it, not close-then-reopen
+    expect(pop()).toBeNull()
+    await unmount()
+  })
+  it('without an onClose (a caller that has not opted in) it does not close on a click away', async () => {
+    const { unmount } = await mount(<FilterPopover open count={0} onClear={() => {}}><span>x</span></FilterPopover>)
+    await clickOutside()
+    expect(pop()).toBeTruthy()
+    await unmount()
+  })
+})
+
+describe('Settings dropdown (ESelect)', () => {
+  const OPTS = [{ value: 'days', label: 'Days' }, { value: 'weeks', label: 'Weeks' }]
+  it('a click away closes the list and changes nothing; the button and Escape still close it', async () => {
+    const onChange = vi.fn()
+    const { host, unmount } = await mount(<ESelect id="wait-unit" ariaLabel="Wait measured in" value="days" options={OPTS} onChange={onChange} />)
+    const button = host.querySelector('button[role="combobox"]')!
+    const list = () => host.querySelector('[role="listbox"]')
+    await click(button)
+    expect(list()).toBeTruthy()
+    await clickOutside()
+    expect(list()).toBeNull()
+    expect(onChange).not.toHaveBeenCalled()
+    await click(button); await click(button)
+    expect(list()).toBeNull()
+    await click(button)
+    await act(async () => { list()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(list()).toBeNull()
+    await unmount()
+  })
+  it('inside a window: a click away closes only the list; the window and the choice in it stay', async () => {
+    const onClose = vi.fn()
+    function Win() {
+      const [unit, setUnit] = React.useState('weeks')
+      return <EDialog label="Timing" title="Change the wait" onClose={onClose}>
+        <ESelect id="wait-unit" ariaLabel="Wait measured in" value={unit} options={OPTS} onChange={setUnit} />
+      </EDialog>
+    }
+    const { host, unmount } = await mount(<Win />)
+    await click(host.querySelector('button[role="combobox"]')!)
+    await clickOutside()
+    expect(host.querySelector('[role="listbox"]')).toBeNull()
+    expect(host.querySelector('[data-edialog]')).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(host.querySelector('button[role="combobox"]')!.getAttribute('data-value')).toBe('weeks')
+    await unmount()
+  })
+})
+
+// ═══ 1b. windows and sheets: still closed ONLY by their own buttons ═════
+describe('pop-up windows and sheets ignore a click away, with a real pointer press', () => {
+  it('a record window (OverlayShell): a press on its backdrop and on the page leaves it open, typing intact', async () => {
+    const onClose = vi.fn()
+    function Rec() {
+      const [v, setV] = React.useState('')
+      return <OverlayShell onClose={onClose} isMobile={false}><input aria-label="note" value={v} onChange={(e) => setV(e.target.value)} /></OverlayShell>
+    }
+    const { host, unmount } = await mount(<Rec />)
+    const input = () => document.querySelector('input[aria-label="note"]') as HTMLInputElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input(), 'Gate code 4471')
+      input().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const backdrop = document.querySelector('[data-overlay-backdrop]')!
+    await clickOutside(backdrop)
+    await clickOutside()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(input().value).toBe('Gate code 4471')
+    void host
+    await unmount()
+  })
+  it('a Settings window (EDialog): a press on its dimmed layer leaves it open', async () => {
+    const onClose = vi.fn()
+    const { host, unmount } = await mount(<EDialog label="x" title="Edit" onClose={onClose}><input aria-label="body" /></EDialog>)
+    const layer = host.querySelector('[data-emails-ui] > div[aria-hidden]')!
+    await clickOutside(layer)
+    await clickOutside()
+    expect(onClose).not.toHaveBeenCalled()
+    await unmount()
+  })
+})
+
 // The Ask Bee Hub panel had its own block here; the panel was deleted on
 // 2026-11-13 with the rest of Ask Bee Hub.
 
 describe('feedback form (FeedbackModal)', () => {
-  it('a mousedown + click on its backdrop leaves it open; its ✕ closes it', async () => {
+  it('a press on its backdrop or the page leaves it open WITH the typing in it; its ✕ closes it', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(<FeedbackModal initialTab="submit" onClose={onClose} />)
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve() })
+    await click(host.querySelector('[data-intake-door]')!) // pick a kind of report: the form asks its first question
+    const field = () => host.querySelector('[data-feedback-modal] [data-intake-field], [data-feedback-modal] textarea, [data-feedback-modal] input:not([type="file"]):not([type="checkbox"]):not([type="radio"])') as HTMLInputElement | HTMLTextAreaElement | null
+    expect(field(), 'the feedback form has a text box').toBeTruthy()
+    const proto = field() instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(field(), 'The Send button does nothing')
+      field()!.dispatchEvent(new Event('input', { bubbles: true }))
+    })
     await clickOutside(host.querySelector('[data-feedback-modal]')!)
+    await clickOutside()
     expect(onClose).not.toHaveBeenCalled()
+    expect(field()!.value).toBe('The Send button does nothing')
     await click(host.querySelector('[data-feedback-modal] button[aria-label="Close"]')!)
     expect(onClose).toHaveBeenCalledTimes(1)
     await unmount()
@@ -247,20 +421,59 @@ const SOURCES = execSync('git ls-files components app', { encoding: 'utf8' })
   .filter(f => /\.(jsx|tsx|js)$/.test(f) && !f.includes('.test.'))
 const read = (f: string) => readFileSync(f, 'utf8')
 
-describe('codebase sweep: no outside-click closers left', () => {
-  it('no document/window click, mousedown, pointerdown or touchstart listener (but the Network menu, by ruling)', () => {
+describe('codebase sweep: outside-click closers only where Kevin drew the line', () => {
+  // The ONLY click-away in Bee Hub is the hook, and only these may call it.
+  // Each holds no typing and no choice waiting to be confirmed. Adding a
+  // window, a sheet or anything with a text box to this list is exactly the
+  // September accident (43e72f6) again: do not, unless Kevin says so.
+  const CLICK_AWAY_ALLOWED: Record<string, string> = {
+    'components/network/NetworkListScreen.jsx': 'Network menus: Tags, Filters, Add contacts, More',
+    'components/hive/shared/FilterPopover.jsx': 'filter menus on Clients, Inbox and the board (applied as ticked)',
+    'components/hive/shared/cardKit.jsx': 'client card ··· menu (not while asking "are you sure?")',
+    'components/hive/shared/RecordMenu.jsx': 'client record ··· menu',
+    'components/hive/InboxScreen.jsx': 'Inbox row ··· menu (not its "are you sure?" step, never the Bin question)',
+    'components/hive/MetaSelect.jsx': 'stage / source chips: a tap saves at once',
+    'components/hive/shared/AssigneeCorner.jsx': '"who\'s assigned" picker: each tick saves at once',
+    'components/hive/shared/EngagementAssignees.jsx': '"who\'s assigned" picker: each tick saves at once',
+    'components/hive/IdentityScopeControl.jsx': 'account and scope menu',
+    'components/settings/EmailsScreen.jsx': 'Settings dropdown (ESelect) only; EDialog is a window and does not',
+    'components/BeeHub.jsx': 'the location picker and the phone profile menu only',
+  }
+  it('no document/window click, mousedown, pointerdown or touchstart listener anywhere but the one click-away hook', () => {
     const hits: string[] = []
-    const allowed: string[] = []
     for (const f of SOURCES) {
       read(f).split('\n').forEach((l, i) => {
-        if (!/addEventListener\(\s*['"](mousedown|mouseup|click|pointerdown|pointerup|touchstart)['"]/.test(l)) return
-        // Kevin, 2026-11-19: the Network screens' menus close on a click outside.
-        if (f === 'components/network/NetworkListScreen.jsx' && l.includes('// network-menu-click-away (Kevin, 2026-11-19)')) allowed.push(f)
-        else hits.push(`${f}:${i + 1}`)
+        if (/addEventListener\(\s*['"](mousedown|mouseup|click|pointerdown|pointerup|touchstart)['"]/.test(l)) hits.push(`${f}:${i + 1}`)
       })
     }
-    expect(hits).toEqual([])
-    expect(allowed).toEqual(['components/network/NetworkListScreen.jsx']) // exactly one, so it cannot quietly spread
+    expect(hits.map((h) => h.replace(/:\d+$/, ''))).toEqual(['components/ui/useClickAway.js'])
+  })
+  it('only the components on the list call it, and none of them is a window or a sheet', () => {
+    const callers = SOURCES.filter((f) => f !== 'components/ui/useClickAway.js' && /\buseClickAway\(/.test(read(f))).sort()
+    expect(callers).toEqual(Object.keys(CLICK_AWAY_ALLOWED).sort())
+  })
+  it('the windows and sheets themselves never call it', () => {
+    const WINDOWS = [
+      'components/hive/OverlayShell.jsx', 'components/hive/shared/PickerModal.jsx', 'components/feedback/FeedbackModal.jsx',
+      'components/hive/shared/CloseWizardKit.jsx', 'components/network/ContactSheet.jsx', 'components/network/AddContactDialog.jsx',
+      'components/network/ImportDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/TagDialog.jsx',
+    ]
+    for (const f of WINDOWS) expect(read(f), f).not.toMatch(/useClickAway/)
+    // In the two files that hold both, the windows stay out: EDialog and the BeeHub modals.
+    const emails = read('components/settings/EmailsScreen.jsx')
+    const edialog = emails.slice(emails.indexOf('export function EDialog'), emails.indexOf('export function EDialog') + 2500)
+    expect(edialog).not.toMatch(/useClickAway/)
+    expect(read('components/BeeHub.jsx').match(/useClickAway\(/g)).toHaveLength(2)
+  })
+  it('the hook only closes: it is handed a close and nothing that saves, picks or clears', () => {
+    const hook = read('components/ui/useClickAway.js')
+    expect(hook).toMatch(/document\.addEventListener\('pointerdown', press, true\)/)
+    expect(hook).toMatch(/document\.removeEventListener\('pointerdown', press, true\)/)
+    for (const f of Object.keys(CLICK_AWAY_ALLOWED)) {
+      for (const m of Array.from(read(f).matchAll(/useClickAway\(([\s\S]*?)\n?\s*\)\s*$/gm))) {
+        expect(m[1], f).not.toMatch(/onPick|onChange|onSave|onConfirm|onClear|clear|save|setTagFilter|setFilters/i)
+      }
+    }
   })
 
   it('no "target === currentTarget" backdrop closer', () => {

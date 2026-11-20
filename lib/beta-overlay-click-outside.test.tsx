@@ -14,10 +14,11 @@
 //     half-typed buzz note still there; X → close
 //   · the close wizards (WizardShell): backdrop → no close; X and the
 //     wizard's own Cancel → close
-//   · the ··· menus inside the records (2026-09-30: nothing closes on an
-//     outside click anywhere — see beta-no-outside-close): an outside
-//     click leaves the menu AND the record open; the ··· again closes
-//     the menu, never the record.
+//   · the ··· menus inside the records (2026-11-19: a ··· menu holds no
+//     typing, so it closes on a click away — see beta-no-outside-close):
+//     a press on the dimmed backdrop closes the MENU only; the record and
+//     anything half-typed in it stay. Every press here is a real one
+//     (pointerdown, mousedown, click).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -39,6 +40,12 @@ const mount = async (ui: React.ReactElement) => {
 const click = (el: Element) => act(async () => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 })
+// A real press the way a browser delivers it: pointerdown, mousedown, click.
+// Each event in its own act(): a browser delivers them as separate tasks, so a
+// press on a menu's own button must not be batched into one React update.
+const press = async (el: Element) => {
+  for (const t of ['pointerdown', 'mousedown', 'click']) await act(async () => { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true })) })
+}
 const escape = () => act(async () => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
 })
@@ -167,7 +174,8 @@ describe('client card (ClientProfile)', () => {
     const note = () => host.querySelector('input[aria-label="Add buzz note"]') as HTMLInputElement | null
     await typeIn(note()!, 'Gate code is 4471')
 
-    await click(backdrop(host))
+    await press(backdrop(host))
+    await press(document.body)
     expect(onClose).not.toHaveBeenCalled()
     expect(note()?.value).toBe('Gate code is 4471')
 
@@ -179,7 +187,7 @@ describe('client card (ClientProfile)', () => {
     await unmount()
   })
 
-  it('the card ··· menu stays open on an outside click; the ··· again closes it — the card stays open throughout', async () => {
+  it('the card ··· menu closes on a press on the backdrop; the card, and a half-typed note in it, stay', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(
       <ClientProfile clientId="lead-9" people={[]} onClose={onClose} setToast={() => {}} />
@@ -187,13 +195,19 @@ describe('client card (ClientProfile)', () => {
     const menuBtn = host.querySelector('button[aria-label="More"]')
     expect(menuBtn, 'card ··· menu trigger').toBeTruthy()
     const menuOpen = () => menuBtn!.parentElement!.children.length > 1
-    await click(menuBtn!)
+    await click(btn(host, 'Add a note about this client')!)
+    const note = () => host.querySelector('input[aria-label="Add buzz note"]') as HTMLInputElement | null
+    await typeIn(note()!, 'Dog in the yard')
+    await press(menuBtn!)
     expect(menuOpen(), 'card ··· menu should be open').toBe(true)
-    await click(backdrop(host))
-    expect(menuOpen()).toBe(true)
-    await click(menuBtn!)
+    await press(backdrop(host))
     expect(menuOpen()).toBe(false)
     expect(onClose).not.toHaveBeenCalled()
+    expect(note()?.value).toBe('Dog in the yard')
+    await press(menuBtn!)
+    expect(menuOpen()).toBe(true)
+    await press(menuBtn!)
+    expect(menuOpen()).toBe(false)
     await unmount()
   })
 })
@@ -205,7 +219,8 @@ describe('engagement panel (EngagementPanel)', () => {
       <EngagementPanel engagementId="eng-1" onClose={onClose} setToast={() => {}} />
     )
     expect(host.textContent).toContain('Kitchen + Pantry')
-    await click(backdrop(host))
+    await press(backdrop(host))
+    await press(document.body)
     expect(onClose).not.toHaveBeenCalled()
     expect(host.textContent).toContain('Kitchen + Pantry')
     await click(closeX(host))
@@ -213,20 +228,22 @@ describe('engagement panel (EngagementPanel)', () => {
     await unmount()
   })
 
-  it('its ··· menu stays open on an outside click; the ··· again closes it — the panel stays open throughout', async () => {
+  it('its ··· menu closes on a press on the backdrop; the panel stays open throughout', async () => {
     const onClose = vi.fn()
     const { host, unmount } = await mount(
       <EngagementPanel engagementId="eng-1" onClose={onClose} setToast={() => {}} />
     )
     const trigger = host.querySelector('button[aria-label="Engagement actions"]')
     expect(trigger, 'engagement ··· menu trigger').toBeTruthy()
-    await click(trigger!)
+    await press(trigger!)
     expect(document.querySelector('[data-bee-record-menu]')).toBeTruthy()
-    await click(backdrop(host))
-    expect(document.querySelector('[data-bee-record-menu]')).toBeTruthy()
-    await click(trigger!)
+    await press(backdrop(host))
     expect(document.querySelector('[data-bee-record-menu]')).toBeNull()
     expect(onClose).not.toHaveBeenCalled()
+    await press(trigger!)
+    expect(document.querySelector('[data-bee-record-menu]')).toBeTruthy()
+    await press(trigger!)
+    expect(document.querySelector('[data-bee-record-menu]')).toBeNull()
     await unmount()
   })
 })
