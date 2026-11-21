@@ -89,6 +89,7 @@ import { canTransferLeads, transferBlockFor, TRANSFER_BLOCK_COPY } from '@/lib/l
 import { useLeadContactsRealtime } from '@/lib/use-lead-contacts-realtime'
 import { telHref } from '@/lib/phone'
 import DuplicateNotice from './shared/DuplicateNotice'
+import { NEW_JOB_NOTE } from '@/lib/live-job-on-closed-card'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -548,7 +549,9 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
     onLeadPatched(c.id, cols)
   }
 
-  const closedVisible = showClosed ? closed : closed.slice(0, 2)
+  // A card with a new job in Jobber (ruling 2, 2026-11-21) is never folded
+  // away under "Show more closed": it is the one row the owner must see.
+  const closedVisible = showClosed ? closed : closed.filter((e, i) => i < 2 || e.new_job_in_jobber)
 
   // Client-WIDE recent slice — job notes (client-level + engagement-
   // scoped, the latter tagged) + touchpoints (tagged when scoped).
@@ -785,7 +788,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
             const note = (e.closed_note || '').trim()
             return (
               <div key={e.id} onClick={() => onOpenEngagement(e)}
-                style={{ display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 12px', cursor: 'pointer', opacity: 0.65 }}>
+                style={{ display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 12px', cursor: 'pointer', opacity: e.new_job_in_jobber ? 1 : 0.65 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   <span style={{ color: won ? T.state.success.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
                     {won ? <IconCheck size={12} /> : writtenOff ? <IconCash size={12} /> : <IconX size={12} />}
@@ -812,12 +815,20 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
                     “{note}”
                   </span>
                 )}
+                {/* Ruling 2 (2026-11-21): a person closed this card and Jobber
+                    has a live job made after that. Bee Hub never reopens it on
+                    its own; the Reopen beside the row is the one tap. */}
+                {e.new_job_in_jobber && (
+                  <span data-new-job-note="1" role="status" style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg, paddingLeft: '20px' }}>
+                    {NEW_JOB_NOTE}{!readOnly ? ' Reopen the card if they are back.' : ''}
+                  </span>
+                )}
               </div>
             )
           })}
-          {closed.length > 2 && !showClosed && (
+          {closed.length > closedVisible.length && (
             <button className="bee-small-action" onClick={() => setShowClosed(true)} style={{ border: 'none', background: 'transparent', padding: '2px 12px', textAlign: 'left', fontSize: T.badge.actionFont, color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
-              Show {closed.length - 2} more closed
+              Show {closed.length - closedVisible.length} more closed
             </button>
           )}
         </div>

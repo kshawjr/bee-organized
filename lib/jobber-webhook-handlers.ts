@@ -159,6 +159,7 @@ import {
   maybeAdvanceEngagementStage,
   refreshEngagementMoney,
   reopenIfClosedByJobDeletion,
+  reopenIfMachineClosedForLiveJob,
 } from './engagements'
 import { readLeadMoneyTotals } from './lead-paid-total'
 import { deletedInvoicePatch, isDeletedInvoice } from '@/components/hive/shared/invoiceDeleted'
@@ -659,6 +660,10 @@ async function handleJobCore(
       // remade in Jobber — reopen it (engagements.ts reopenIfClosedByJobDeletion;
       // a no-op on every other deal).
       await reopenIfClosedByJobDeletion(engId)
+      // A live job on a card a machine closed (stale at import, quote
+      // archived): reopen it (Kevin, 2026-11-21). A person's close and a Won
+      // are never touched (lib/live-job-on-closed-card.ts).
+      await reopenIfMachineClosedForLiveJob(engId)
       await maybeAdvanceEngagementStage(engId)
       // Automatic job channel (lib/job-channel-auto.ts) — ONLY on the live
       // JOB_CREATE notice, only where the owner switched it on, only for a

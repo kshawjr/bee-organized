@@ -44,6 +44,7 @@ vi.mock('@/lib/jobber', () => ({
 vi.mock('@/lib/sync-log', () => ({ writeSyncLog: async (row: any) => { h.syncLog.push(row) } }))
 
 import * as handlers from '@/lib/jobber-webhook-handlers'
+import { withoutLiveJobReopen } from '@/lib/live-job-reopen-footprint'
 import { GET } from '@/app/api/engagements/[id]/route'
 import { POST as CLOSE_DUPLICATE } from '@/app/api/engagements/[id]/close-duplicate/route'
 import { createMemDb } from '@/lib/test-memdb'
@@ -578,7 +579,7 @@ describe('nothing else in the files this touched changed, by fingerprint (agains
   const undo = (file: string, steps: [string, string][]) => steps.reduce((s, [now, was]) => {
     expect(s.split(now).length - 1, `${file}: expected exactly once: ${now.slice(0, 60)}…`).toBe(1)
     return s.replace(now, was)
-  }, readFileSync(file, 'utf8'))
+  }, withoutLiveJobReopen(file, readFileSync(file, 'utf8'))) // the live-job reopen lines (2026-11-21) out first
 
   it('components/hive/HiveShell.jsx — one prop handed to the card', () => {
     const back = undo('components/hive/HiveShell.jsx', [
