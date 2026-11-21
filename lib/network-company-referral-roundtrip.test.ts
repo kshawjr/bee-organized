@@ -12,7 +12,7 @@
 //   B) direct and via-person rows stay DISJOINT: a lead referred by one of
 //      the company's people is attributed to the person, never double-
 //      bucketed as company-direct
-//   C) location scoping holds: non-admin at another location → 403
+//   C) location scoping holds: non-admin at another location → 404
 //
 // Queue-mock harness from network-reverse-referrals (per-table FIFO).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -113,11 +113,11 @@ describe('B) direct vs via-person stay disjoint', () => {
 })
 
 describe('C) scoping', () => {
-  it('non-admin at another location → 403', async () => {
+  it('non-admin at another location → 404, like a missing one (2026-11-21)', async () => {
     seedCaller('owner', 'loc-OTHER')
     h.enqueue('companies', COMPANY)
     const res = await run()
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it('unknown company → 404', async () => {

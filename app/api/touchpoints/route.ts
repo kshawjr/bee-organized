@@ -21,7 +21,9 @@
 //
 // Auth: must be a logged-in hub_user.
 // Scope: super_admin/admin can write anywhere. owner can only write to
-//        leads/partners in their location. lite_user blocked.
+//        leads/partners in their location. lite_user blocked. Anything the
+//        caller may not see answers 404, never 403 (2026-11-21). A card named
+//        in engagement_id must be the lead's own card at the lead's location.
 
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -147,13 +149,30 @@ export async function POST(req: Request) {
     subjectLocation = partner.location_id
   }
 
-  // Location scoping
+  // Location scoping. Another location's lead or partner answers exactly like
+  // one that does not exist (2026-11-21): a guessed id learns nothing, not
+  // even that it is real.
   if (!isAdmin(hubUser.role)) {
     if (hubUser.location_id !== subjectLocation) {
-      return NextResponse.json(
-        { error: 'forbidden_wrong_location' },
-        { status: 403 }
-      )
+      return NextResponse.json({ error: hasLead ? 'lead_not_found' : 'partner_not_found' }, { status: 404 })
+    }
+  }
+
+  // The card, when one is named, must be THIS client's card at THIS record's
+  // location (2026-11-21). The location comes from the records, never from
+  // what the browser sends: a card at another location, another client's
+  // card, or a card on a partner (partners have none) answers like a card
+  // that does not exist, and nothing is written.
+  const engagementId =
+    typeof body.engagement_id === 'string' && body.engagement_id ? body.engagement_id : null
+  if (engagementId) {
+    const { data: card } = await supabaseService
+      .from('engagements')
+      .select('id, client_id, location_uuid')
+      .eq('id', engagementId)
+      .maybeSingle()
+    if (!card || !hasLead || card.client_id !== lead_id || card.location_uuid !== subjectLocation) {
+      return NextResponse.json({ error: 'engagement_not_found' }, { status: 404 })
     }
   }
 
@@ -173,10 +192,7 @@ export async function POST(req: Request) {
     // Phase 1: touchpoints can carry engagement context (column exists
     // since the step-1 migration). Optional — client-level touchpoints
     // pass nothing and behave exactly as before.
-    engagement_id:
-      typeof body.engagement_id === 'string' && body.engagement_id
-        ? body.engagement_id
-        : null,
+    engagement_id: engagementId,
     label,
     method: method ?? null,
     status: status ?? null,

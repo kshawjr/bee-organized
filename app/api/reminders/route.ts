@@ -75,7 +75,9 @@ export async function POST(request: NextRequest) {
 
   const locationUuid = await loadRecordLocation(record)
   if (!locationUuid) return NextResponse.json({ error: 'record_not_found' }, { status: 404 })
-  if (!canReadLocation(caller, locationUuid)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
+  if (!canReadLocation(caller, locationUuid)) return NextResponse.json({ error: 'record_not_found' }, { status: 404 })
 
   const row = buildReminderInsert({
     setterId: caller.userId,

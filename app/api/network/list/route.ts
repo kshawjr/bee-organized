@@ -65,8 +65,10 @@ export async function GET(request: NextRequest) {
   if (!locationId && !maySeeAllNetworkLocations(caller)) {
     return NextResponse.json({ error: 'all_locations_not_allowed' }, { status: 403 })
   }
+  // Another location answers like one that does not exist, as every Network
+  // write route does (2026-11-21).
   if (locationId && !mayReadNetworkLocation(caller, locationId)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   }
 
   // Short-page loop, like /api/partners: PostgREST's silent 1,000-row default

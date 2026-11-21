@@ -241,9 +241,9 @@ describe('C) only the owner can finish, re-date or delete', () => {
 
 // ── D) access ────────────────────────────────────────────────
 describe('D) you can only set one on a record you can see', () => {
-  it('another location’s lead is refused', async () => {
+  it('another location’s lead is refused, answered like a missing one (2026-11-21)', async () => {
     signIn('u-lee')
-    expect((await setReminder({ lead_id: 'lead-new', due_on: '2026-10-06', note: 'x' })).status).toBe(403)
+    expect((await setReminder({ lead_id: 'lead-new', due_on: '2026-10-06', note: 'x' })).status).toBe(404)
     expect(db.reminders).toHaveLength(0)
   })
   it('a removed Network person is refused', async () => {

@@ -37,8 +37,10 @@ export async function GET(
   if (companyErr || !company) {
     return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
   if (!canReadLocation(caller, company.location_id)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
 
   // Live people at the company (company_id is the FK source of truth).

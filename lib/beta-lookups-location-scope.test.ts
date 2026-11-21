@@ -197,10 +197,10 @@ describe('/api/lookups POST — location tags and the near-match guard', () => {
     expect(insertCall()).toBeUndefined()
   })
 
-  it("owner creating for ANOTHER location is 403", async () => {
+  it("owner creating for ANOTHER location is 404, like a location that does not exist (2026-11-21)", async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
     const res = await lookupsPOST(postReq('/api/lookups', { category: 'tags', label: 'Organizer', location_id: LOC_B }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it('owner corporate tag create (no location_id) is 403 — admins only', async () => {
@@ -317,12 +317,12 @@ describe('/api/lookups/[id] — an owner renames or switches off their own tag',
     expect((await lookupPATCH(patchReq({ icon: '' }), { params: { id: 'o-org' } } as any)).status).toBe(200)
   })
 
-  it("an owner can't touch a corporate tag or another location's", async () => {
+  it("an owner can't touch a corporate tag (403: they can see it) or another location's (404: they cannot)", async () => {
     h.state.hubUser = { id: 'u1', role: 'owner', location_id: LOC_A }
     h.state.respond = scenario({ id: 'c-realtor', category: 'tags', label: 'Realtor', location_id: null })
     expect((await lookupPATCH(patchReq({ label: 'Agent' }), { params: { id: 'c-realtor' } } as any)).status).toBe(403)
     h.state.respond = scenario({ ...OWN, location_id: LOC_B })
-    expect((await lookupPATCH(patchReq({ is_active: false }), { params: { id: 'o-org' } } as any)).status).toBe(403)
+    expect((await lookupPATCH(patchReq({ is_active: false }), { params: { id: 'o-org' } } as any)).status).toBe(404)
     expect(updateCall()).toBeUndefined()
   })
 

@@ -119,11 +119,11 @@ describe('C) full count past the page cap', () => {
 })
 
 describe('D) auth + scoping', () => {
-  it('non-admin at another location → 403', async () => {
+  it('non-admin at another location → 404, like a missing one (2026-11-21)', async () => {
     seedCaller('owner', 'loc-OTHER')
     h.enqueue('partners', PARTNER)
     const res = await run()
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it('unknown partner → 404', async () => {

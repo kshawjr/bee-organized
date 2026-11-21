@@ -59,7 +59,9 @@ export async function GET(request: NextRequest) {
   if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   const locationId = request.nextUrl.searchParams.get('location_id') || ''
   if (!UUID_RE.test(locationId)) return NextResponse.json({ ok: false, reason: 'location_required' }, { status: 400 })
-  if (!mayReadNetworkLocation(caller, locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Another location answers like one that does not exist, as every Network
+  // write route does (2026-11-21).
+  if (!mayReadNetworkLocation(caller, locationId)) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   const read = await readImportMappings(supabaseService, locationId)
   return NextResponse.json({ ok: true, remembered: read.ok, mappings: read.mappings })
 }

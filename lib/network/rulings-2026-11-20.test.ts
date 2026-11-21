@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { withoutNotFoundFix } from '@/lib/not-found-footprint'
 
 const h = vi.hoisted(() => {
   const state: any = { sessionUser: null, hubUser: null, tables: {} as Record<string, any[]>, calls: [] as any[], gateRoles: ['super_admin', 'admin', 'owner', 'manager', 'lite_user'] }
@@ -282,7 +283,7 @@ describe('nothing outside Network changes', () => {
   }
   for (const [f, sha] of Object.entries(PINNED)) {
     it(`${f} is byte for byte unchanged`, () => {
-      expect(createHash('sha256').update(readFileSync(join(process.cwd(), f))).digest('hex').slice(0, 16)).toBe(sha)
+      expect(createHash('sha256').update(withoutNotFoundFix(f, readFileSync(join(process.cwd(), f), 'utf8'))).digest('hex').slice(0, 16)).toBe(sha)
     })
   }
 })

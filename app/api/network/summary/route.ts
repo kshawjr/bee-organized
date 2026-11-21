@@ -40,8 +40,9 @@ export async function GET(request: NextRequest) {
 
   const locationId = request.nextUrl.searchParams.get('location_id')
   if (locationId) {
+    // Another location answers like one that does not exist (2026-11-21).
     if (!canReadLocation(caller, locationId)) {
-      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+      return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
     }
   } else if (!isElevated(caller.role)) {
     // Tenant-wide ('all locations') is an elevated view only.

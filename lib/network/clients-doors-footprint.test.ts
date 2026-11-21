@@ -11,11 +11,12 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { withoutClickAway } from './click-away-footprint'
 import { withoutOwnerSafe } from './owner-safe-footprint'
+import { withoutNotFoundFix } from '@/lib/not-found-footprint'
 import { join } from 'node:path'
 
 // BeeHub.jsx and hive/NetworkScreen.jsx: the click-away pass (2026-11-19) is taken back out first (click-away-footprint.ts).
 // Three Network routes: the owner-safe location checks (2026-11-20) are taken back out first (owner-safe-footprint.ts).
-const sha256 = (p: string) => createHash('sha256').update(withoutOwnerSafe(p, withoutClickAway(p, readFileSync(join(process.cwd(), p), 'utf8')))).digest('hex')
+const sha256 = (p: string) => createHash('sha256').update(withoutOwnerSafe(p, withoutClickAway(p, withoutNotFoundFix(p, readFileSync(join(process.cwd(), p), 'utf8'))))).digest('hex')
 
 const AT_0C61AFC: Record<string, string> = {
   'components/BeeHub.jsx': '0b1e8e7b67d42aaf77075f0b480731fb4d82a2e60802a76d150ed0d25d4fce04',

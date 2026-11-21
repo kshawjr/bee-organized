@@ -38,8 +38,10 @@ export async function GET(request: NextRequest) {
   if (!locationId) {
     return NextResponse.json({ error: 'location_id query param required' }, { status: 400 })
   }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
   if (!canReadLocation(caller, locationId)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   }
 
   const rows: any[] = []
@@ -92,6 +94,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'name required' }, { status: 400 })
   }
 
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
+  if (!canReadLocation(caller, locationId)) {
+    return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
+  }
   if (!canWriteLocation(caller, locationId)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }

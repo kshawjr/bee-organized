@@ -67,11 +67,11 @@ async function checkLocationAccess(
     return { error: NextResponse.json({ error: 'partner_not_found' }, { status: 404 }) }
   }
 
+  // Another location's contact answers exactly like one that does not exist
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
   if (!isAdmin(hubUser.role)) {
     if (hubUser.location_id !== partner.location_id) {
-      return {
-        error: NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 }),
-      }
+      return { error: NextResponse.json({ error: 'partner_not_found' }, { status: 404 }) }
     }
   }
 
@@ -163,7 +163,12 @@ export async function POST(req: Request) {
     .eq('id', tag_lookup_id)
     .single()
 
-  if (tagDefError || !tagDef) {
+  // A tag the caller may not see (another location's own tag) answers exactly
+  // like a missing one, before anything else is said about it (2026-11-21).
+  if (
+    tagDefError || !tagDef ||
+    (!isAdmin(auth.hubUser.role) && tagDef.location_id && tagDef.location_id !== auth.hubUser.location_id)
+  ) {
     return NextResponse.json({ error: 'tag_lookup_not_found' }, { status: 404 })
   }
   // Any tag from THE one list (lib/tags.ts) — clients and Network people

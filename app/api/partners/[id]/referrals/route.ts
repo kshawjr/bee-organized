@@ -49,8 +49,10 @@ export async function GET(
   if (partnerErr || !partner) {
     return NextResponse.json({ error: 'partner_not_found' }, { status: 404 })
   }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
   if (!canReadLocation(caller, partner.location_id)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ error: 'partner_not_found' }, { status: 404 })
   }
 
   // Junk exclusion via .not(is,true) — NULL stays (same as the profile

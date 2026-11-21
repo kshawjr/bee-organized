@@ -41,7 +41,9 @@ export async function GET(request: NextRequest) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locationId)) {
     return NextResponse.json({ error: 'location_id must be one location id' }, { status: 400 })
   }
-  if (!mayReadNetworkLocation(caller, locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Another location answers like one that does not exist, as every Network
+  // write route does (2026-11-21).
+  if (!mayReadNetworkLocation(caller, locationId)) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   const sizeAsked = Number(p.get('size'))
   const size = (PAGE_SIZES as readonly number[]).includes(sizeAsked) ? sizeAsked : 25
   const sort = isNurtureSort(p.get('sort')) ? (p.get('sort') as any) : 'az'

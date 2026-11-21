@@ -164,8 +164,10 @@ export async function POST(req: NextRequest) {
       if (!LOCATION_SCOPED_CATEGORIES.has(category)) {
         return NextResponse.json({ error: 'category_not_location_scoped' }, { status: 400 })
       }
+      // Another location answers exactly like one that does not exist
+      // (2026-11-21): a guessed id learns nothing.
       if (!isAdmin(hubUser.role) && hubUser.location_id !== location_id) {
-        return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
+        return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
       }
       // Read-only staff apply nothing and create nothing.
       if (!isAdmin(hubUser.role) && !LOCATION_TAG_ROLES.has(String(hubUser.role))) {

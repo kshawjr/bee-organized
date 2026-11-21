@@ -106,11 +106,11 @@ describe('POST /api/partner-tags — corporate or the partner\'s own location, n
     expect(res.status).toBe(201)
   })
 
-  it("another location's tag is 403 tag_lookup_wrong_location — no junction write", async () => {
+  it("another location's tag answers like a missing tag (404, 2026-11-21) — no junction write", async () => {
     h.state.respond = scenario({ tagLocationId: LOC_B })
     const res = await POST(postReq({ partner_id: 'p-1', tag_lookup_id: 'tag-1' }))
-    expect(res.status).toBe(403)
-    expect((await res.json()).error).toBe('tag_lookup_wrong_location')
+    expect(res.status).toBe(404)
+    expect((await res.json()).error).toBe('tag_lookup_not_found')
     expect(h.state.calls.find((c: any) => c.table === 'partner_tags')).toBeUndefined()
   })
 
@@ -134,11 +134,11 @@ describe('POST /api/partner-tags — corporate or the partner\'s own location, n
     expect(h.state.calls.find((c: any) => c.table === 'partner_tags')).toBeUndefined()
   })
 
-  it("an owner from another location can't write this partner", async () => {
+  it("an owner from another location can't write this partner (it answers like a missing one, 2026-11-21)", async () => {
     h.state.respond = scenario({ callerLoc: LOC_B })
     const res = await POST(postReq({ partner_id: 'p-1', tag_lookup_id: 'tag-1' }))
-    expect(res.status).toBe(403)
-    expect((await res.json()).error).toBe('forbidden_wrong_location')
+    expect(res.status).toBe(404)
+    expect((await res.json()).error).toBe('partner_not_found')
   })
 
   it('lite_user cannot write', async () => {

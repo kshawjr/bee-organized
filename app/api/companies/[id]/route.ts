@@ -47,8 +47,10 @@ export async function GET(
   if (error || !data) {
     return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
   if (!canReadLocation(caller, (data as any).location_id)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
 
   return NextResponse.json(mapCompanyRow(data))
@@ -74,6 +76,11 @@ export async function PATCH(
 
   const existing = await loadRow(id)
   if (!existing) {
+    return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
+  }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
+  if (!canReadLocation(caller, existing.location_id)) {
     return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
   if (!canWriteLocation(caller, existing.location_id)) {
@@ -114,6 +121,11 @@ export async function DELETE(
 
   const existing = await loadRow(id)
   if (!existing) {
+    return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
+  }
+  // Anything the caller may not see answers exactly like a missing record
+  // (2026-11-21): a guessed id learns nothing, not even that it is real.
+  if (!canReadLocation(caller, existing.location_id)) {
     return NextResponse.json({ error: 'company_not_found' }, { status: 404 })
   }
   if (!canWriteLocation(caller, existing.location_id)) {

@@ -5,6 +5,11 @@ import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { isTagCategory, isAllowedTagIcon } from '@/lib/tags'
 import { canManageLocationTag, checkNearTag, nearMatchBody } from '@/lib/tag-guard'
 
+// Who may SEE a tag: corporate sees every one; anyone else sees corporate tags
+// (no location) and their own location's.
+const maySeeLookup = (hubUser: { role: string; location_id: string | null }, row: { location_id: string | null }) =>
+  hubUser.role === 'super_admin' || hubUser.role === 'admin' || !row.location_id || row.location_id === hubUser.location_id
+
 // PATCH /api/lookups/[id]
 // Body: any subset of { label, color, bg_color, icon, description, attrs, sort_order, is_active }
 //
@@ -33,9 +38,11 @@ export async function PATCH(
 
     const { data: row } = await supabaseService
       .from('lookups').select('id, category, label, location_id').eq('id', id).maybeSingle()
-    if (!row) return NextResponse.json({ error: 'Lookup not found' }, { status: 404 })
-
     const corporate = hubUser.role === 'super_admin' || hubUser.role === 'admin'
+    // Another location's own tag answers exactly like a missing one
+    // (2026-11-21): a guessed id learns nothing, not even that it is real.
+    if (!row || !maySeeLookup(hubUser as any, row as any)) return NextResponse.json({ error: 'Lookup not found' }, { status: 404 })
+
     const locationTagEditor = !corporate && canManageLocationTag(hubUser as any, row as any)
     if (!corporate && !locationTagEditor) {
       return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
@@ -148,7 +155,9 @@ export async function DELETE(
       // Same rule as PATCH: a location editor may switch off its own tag.
       const { data: row } = await supabaseService
         .from('lookups').select('id, category, location_id').eq('id', id).maybeSingle()
-      if (!row || !canManageLocationTag(hubUser as any, row as any)) {
+      // Missing, or another location's own tag: not found (2026-11-21).
+      if (!row || !maySeeLookup(hubUser as any, row as any)) return NextResponse.json({ error: 'Lookup not found' }, { status: 404 })
+      if (!canManageLocationTag(hubUser as any, row as any)) {
         return NextResponse.json({ error: 'Only super_admin or admin can manage lookups' }, { status: 403 })
       }
       const roBlock = await readOnlyWriteBlock(hubUser as any, (row as any).location_id)
