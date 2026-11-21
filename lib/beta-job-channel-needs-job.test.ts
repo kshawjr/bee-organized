@@ -146,6 +146,7 @@ vi.mock('@/lib/engagements', () => ({
   maybeAdvanceEngagementStage: async () => {},
   refreshEngagementMoney: async () => {},
   reopenIfClosedByJobDeletion: async () => {},
+  reopenIfMachineClosedForLiveJob: async () => ({ reopened: false }),
 }))
 
 const who = vi.hoisted(() => ({ user: { id: 'u-owner', role: 'owner', location_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } as any }))

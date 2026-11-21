@@ -26,6 +26,7 @@ import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components
 import { invoicesFullyPaid, describesTheWork, WORK_MIN_CHARS } from '@/components/hive/shared/engagementStatus'
 import { isDeletedInvoice, keepsCollectedMoney, invoicesForReasoning } from '@/components/hive/shared/invoiceDeleted'
 import { isDeletedJob } from '@/components/hive/shared/jobDeleted'
+import { isLiveJob, machineClosedForReopen, MACHINE_CLOSES_THAT_REOPEN } from './live-job-on-closed-card'
 
 export type EngagementStage =
   | 'Request'
@@ -1208,6 +1209,109 @@ export async function reopenIfClosedByJobDeletion(
     message: `[engagement:job_remade] a live job arrived on a deal closed by job deletion — reopened to ${derived.stage}`,
   })
   return { reopened: true, stage: derived.stage }
+}
+
+// ── a live job on a card a machine closed (Kevin, 2026-11-21) ──────────
+//
+// Ruling 1 (lib/live-job-on-closed-card.ts): a card closed stale at import or
+// because its quotes were archived in Jobber reopens when a job that is not
+// finished sits on it — the reason it was closed is no longer true. Re-derives
+// exactly like the manual Reopen (live mode, never auto-Won), so the next
+// webhook advance and the panel's drift recovery agree with it and cannot
+// close it again. A person's close and a Won are never touched here.
+//
+// Two callers: every job webhook (a job arriving or changing later), and the
+// Jobber client import, once per client after all its records are written
+// (a card judged stale before its live job attached in the same import).
+//
+// closedSinceIso (import only): a close made at or after this moment was made
+// by the same import a moment ago, so undoing it is not news — no touchpoint,
+// only the sync_log line. Anything older gets the "Reopened" touchpoint.
+export async function reopenIfMachineClosedForLiveJob(
+  engagementId: string,
+  opts: { closedSinceIso?: string } = {},
+): Promise<{ reopened: boolean; stage?: EngagementStage }> {
+  const { data: eng } = await supabaseService
+    .from('engagements')
+    .select('id, stage, closed_reason, closed_at, client_id, location_uuid')
+    .eq('id', engagementId)
+    .maybeSingle()
+  if (!eng || !machineClosedForReopen(eng)) return { reopened: false }
+
+  const [srRes, quotesRes, jobsRes, invoicesRes] = await Promise.all([
+    supabaseService.from('service_requests').select('requested_at, created_at').eq('engagement_id', engagementId).limit(1),
+    supabaseService.from('quotes').select('status, sent_at, approved_at, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('jobs').select('status, completed_at, scheduled_start, created_at').eq('engagement_id', engagementId),
+    supabaseService.from('invoices').select('status, total, paid_amount, balance_owing, paid_at, issued_at, created_at').eq('engagement_id', engagementId),
+  ])
+  const jobs = jobsRes.data ?? []
+  if (!jobs.some((j: any) => isLiveJob(j))) return { reopened: false }
+  const derived = deriveEngagementStage({
+    sr: srRes.data?.[0] ?? null, quotes: quotesRes.data ?? [], jobs, invoices: invoicesRes.data ?? [],
+  }, { mode: 'live', closeWonOnDone: false })
+  if (derived.stage === 'Closed Lost' || derived.stage === 'Closed Won') return { reopened: false }
+
+  const nowIso = new Date().toISOString()
+  const { data: written, error } = await supabaseService
+    .from('engagements')
+    .update({
+      stage: derived.stage,
+      stage_entered_at: nowIso,
+      closed_at: null,
+      closed_reason: null,
+      closed_note: null,
+      nurture_started_at: null,
+      ...rollUpInvoiceMoney(invoicesRes.data ?? []),
+      updated_at: nowIso,
+    })
+    .eq('id', engagementId)
+    .eq('stage', 'Closed Lost')
+    .eq('closed_reason', eng.closed_reason)
+    .select('id')
+  if (error || !(written as any)?.length) return { reopened: false }
+
+  const sameImport = !!opts.closedSinceIso && ts(eng.closed_at) >= ts(opts.closedSinceIso)
+  const why = eng.closed_reason === 'quote_archived' ? 'the quote was archived' : 'it was closed as stale at import'
+  if (!sameImport) {
+    await supabaseService.from('touchpoints').insert({
+      lead_id: eng.client_id,
+      location_uuid: eng.location_uuid,
+      engagement_id: engagementId,
+      kind: 'stage_change',
+      label: `Reopened: Closed Lost → ${derived.stage} (a job in Jobber is still to do; ${why})`,
+      occurred_at: nowIso,
+    })
+  }
+  await writeSyncLog({
+    location_id: 'unknown',
+    entity_id: engagementId,
+    entity_type: 'engagement',
+    status: 'success',
+    message: sameImport
+      ? `[engagement:live_job_reopen] the import closed this card ${eng.closed_reason} before its live job attached — kept open at ${derived.stage}`
+      : `[engagement:live_job_reopen] a live job is on a card closed ${eng.closed_reason} — reopened to ${derived.stage}`,
+  })
+  return { reopened: true, stage: derived.stage }
+}
+
+// The import's pass: every machine-closed card of this client that now holds
+// a live job. Run once per client after all its records are written, so a
+// later quote that re-judged the card stale in the same import is undone too.
+export async function reopenMachineClosedCardsForClient(
+  clientId: string,
+  opts: { closedSinceIso?: string } = {},
+): Promise<number> {
+  const { data } = await supabaseService
+    .from('engagements')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('stage', 'Closed Lost')
+    .in('closed_reason', Array.from(MACHINE_CLOSES_THAT_REOPEN))
+  let n = 0
+  for (const row of (data as any[]) ?? []) {
+    if ((await reopenIfMachineClosedForLiveJob(row.id, opts)).reopened) n++
+  }
+  return n
 }
 
 // ── drift recovery (panel-open re-derive) ─────────────────────────

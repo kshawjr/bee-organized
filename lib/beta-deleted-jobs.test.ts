@@ -413,7 +413,9 @@ describe('the race — Jobber sends the deletion before the replacement exists',
   it('the job webhook reopens before it re-derives, on every job create/update', () => {
     const src = readFileSync('lib/jobber-webhook-handlers.ts', 'utf8')
     const core = src.slice(src.indexOf('async function handleJobCore'), src.indexOf('// Lead-level: jobber_job_id'))
-    expect(core).toMatch(/await reopenIfClosedByJobDeletion\(engId\)\s*\n\s*await maybeAdvanceEngagementStage\(engId\)/)
+    // (2026-11-21) the machine-close reopen sits between them: both reopens
+    // run before the re-derive.
+    expect(core).toMatch(/await reopenIfClosedByJobDeletion\(engId\)\s*\n(\s*\/\/[^\n]*\n)*\s*await reopenIfMachineClosedForLiveJob\(engId\)\s*\n\s*await maybeAdvanceEngagementStage\(engId\)/)
   })
 })
 

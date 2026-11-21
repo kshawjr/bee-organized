@@ -82,6 +82,7 @@ import {
   resolveEngagementForChild,
   attachToEngagement,
   maybeAdvanceEngagementStage,
+  reopenMachineClosedCardsForClient,
 } from '@/lib/engagements'
 import {
   isJobParked,
@@ -915,6 +916,7 @@ export async function POST(req: NextRequest) {
           marked_junk: 0,      // no contact info + no history → is_junk
           auto_closed_won: 0,  // paid + complete, nothing pending after
           engagements_founded: 0,  // step-3 dual-write (additive)
+          engagements_kept_open_for_live_job: 0, // live job on a machine-closed card (2026-11-21)
           engagement_errors: 0,
           errors: [] as string[],
         }
@@ -952,6 +954,9 @@ export async function POST(req: NextRequest) {
           if (yieldNow.stop) { hitCap = true; yieldReason = yieldNow.reason; break }
           if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs))
 
+          // Any card this import closes from here on, for this client, was
+          // closed by this import (reopenMachineClosedCardsForClient below).
+          const clientStartedIso = new Date().toISOString()
           try {
             const { id: leadId, created } = await upsertLead(client, locSlug, locUuid, {
               importSource: 'jobber_initial',
@@ -1083,6 +1088,19 @@ export async function POST(req: NextRequest) {
                 stats.engagement_errors++
                 console.error('[engagements] requestless job dual-write failed', err?.message || err)
               }
+            }
+
+            // ─── a card must not stay closed as stale with a live job on it ──
+            // (Kevin, 2026-11-21). The import writes requests, then quotes,
+            // then jobs, so a card can be judged stale before its live job
+            // attaches. Once every record for this client is in, reopen any
+            // machine-closed card that holds a job Jobber has not finished.
+            // A person's close and a Won are never touched. Never throws.
+            try {
+              stats.engagements_kept_open_for_live_job += await reopenMachineClosedCardsForClient(leadId, { closedSinceIso: clientStartedIso })
+            } catch (err: any) {
+              stats.engagement_errors++
+              console.error('[engagements] live-job reopen failed', err?.message || err)
             }
 
             // ─── lead-level stage classification ──
@@ -1282,6 +1300,7 @@ export async function POST(req: NextRequest) {
             `Marked junk (no contact info): ${stats.marked_junk}; ` +
             `Auto-closed Won (paid + complete): ${stats.auto_closed_won}; ` +
             `Engagements founded: ${stats.engagements_founded} (${stats.engagement_errors} errors); ` +
+            `Kept open for a live job: ${stats.engagements_kept_open_for_live_job}; ` +
             `Errors: ${stats.errors.length}`,
         })
 

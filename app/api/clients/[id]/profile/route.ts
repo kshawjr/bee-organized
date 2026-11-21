@@ -20,6 +20,7 @@ import { isLocationSendSettingProblem } from '@/lib/sender-domain'
 import { DRIP_ENROL_KIND, isDripEnrolReason, type DripEnrolReason } from '@/lib/drip-enrol-outcome'
 import { resolveDripCategory } from '@/lib/stage-emails'
 import { duplicateIdsOf, resolveDuplicateOf } from '@/components/hive/shared/duplicateFlag'
+import { personClosed, personClosedCardHasNewJob } from '@/lib/live-job-on-closed-card'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
@@ -318,8 +319,21 @@ export async function GET(
     for (const [k, v] of Object.entries(group(srs.error ? null : srs.data))) srsByEng[k] = v.map((r: any) => ({ id: r.id }))
   }
 
+  // A card a PERSON closed with a live job made in Jobber after the close
+  // (Kevin, 2026-11-21, ruling 2): never reopened by the machine; the card's
+  // row says so and offers the ordinary Reopen. Read only.
+  const newJobOnClosed = new Set<string>()
+  const personClosedIds = engagements.filter(e => personClosed(e)).map(e => e.id)
+  if (personClosedIds.length > 0) {
+    const { data: closedJobs } = await supabaseService.from('jobs').select('engagement_id, status, completed_at, created_at').in('engagement_id', personClosedIds)
+    for (const e of engagements) {
+      if (personClosedIds.includes(e.id) && personClosedCardHasNewJob(e, (closedJobs ?? []).filter((j: any) => j.engagement_id === e.id))) newJobOnClosed.add(e.id)
+    }
+  }
+
   const withChildren = engagements.map(e => ({
     ...e,
+    ...(newJobOnClosed.has(e.id) ? { new_job_in_jobber: true } : {}),
     quotes: quotesByEng[e.id] ?? [],
     jobs: jobsByEng[e.id] ?? [],
     invoices: invoicesByEng[e.id] ?? [],

@@ -150,6 +150,7 @@ vi.mock('@/lib/engagements', () => ({
   maybeAdvanceEngagementStage: async () => {},
   refreshEngagementMoney: async () => {},
   reopenIfClosedByJobDeletion: async () => {},
+  reopenIfMachineClosedForLiveJob: async () => ({ reopened: false }),
 }))
 
 const who = vi.hoisted(() => ({ user: null as any }))

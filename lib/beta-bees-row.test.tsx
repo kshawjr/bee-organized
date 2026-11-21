@@ -25,6 +25,7 @@ import { FACE_OVERLAP } from '@/components/hive/shared/AssigneeCorner'
 import { assigneeSyncNote } from '@/components/hive/shared/AssigneeSyncStatus'
 import { beeSlackNote } from '@/components/hive/shared/BeeSlackStatus'
 import BeeRosterSettings from '@/components/hive/BeeRosterSettings'
+import { withoutLiveJobReopen } from '@/lib/live-job-reopen-footprint'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -838,7 +839,8 @@ describe('slice 1’s mirror is untouched, by fingerprint', () => {
   }
   for (const [file, sha] of Object.entries(PUSHED)) {
     it(`${file} is what was pushed`, () => {
-      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(sha)
+      // The live-job reopen lines (2026-11-21) come out first: lib/live-job-reopen-footprint.ts.
+      expect(createHash('sha256').update(withoutLiveJobReopen(file, readFileSync(file, 'utf8'))).digest('hex')).toBe(sha)
     })
   }
 })

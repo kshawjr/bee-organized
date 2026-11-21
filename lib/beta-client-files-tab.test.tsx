@@ -22,6 +22,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import ClientProfile from '@/components/hive/ClientProfile'
+import { withoutLiveJobReopen } from '@/lib/live-job-reopen-footprint'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 import { cardFingerprints, installCardFetch, FP_NOW } from '@/lib/card-files-fingerprint.test.harness'
 import BEFORE from '@/lib/__fixtures__/card-files.before.json'
@@ -350,7 +351,7 @@ describe('nothing outside the Files tab changed, by fingerprint', () => {
 
   it('source — the client card: five named changes, nothing else', () => {
     const p = 'components/hive/ClientProfile.jsx'
-    const back = undo(readFileSync(p, 'utf8'), [
+    const back = undo(withoutLiveJobReopen(p, readFileSync(p, 'utf8')), [ // the live-job note (2026-11-21) out first
       ["import FilesTab, { useClientFiles } from './shared/FilesTab'\n", ''],
       ['IconCheck, IconX, IconMapPin,', 'IconCheck, IconX, IconPaperclip, IconMapPin,'],
       ['  const clientFiles = useClientFiles({ leadId: c?.id || null })\n', ''],
