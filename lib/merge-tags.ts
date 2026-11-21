@@ -98,9 +98,9 @@ export const LEGACY_MERGE_TAGS: (Omit<MergeTag, 'group' | 'label'> & { why: stri
   { key: 'phone', source: 'locations.phone, else the primary owner’s phone',
     description: 'The location phone, or the owner’s if the location has none.',
     why: 'Older name. The current master wording uses {{location_phone}}; offering both read as two different numbers.' },
-  { key: 'partner_name', source: '(Partner Drip — Phase 2)',
-    description: 'Nothing yet.',
-    why: 'Declared in RenderContext but never filled — renders as empty. Not offered.' },
+  { key: 'partner_name', source: 'partner emails only — lib/partner-merge-tags.ts (lib/network/partner-greeting.ts)',
+    description: 'A referral partner’s greeting name, in partner emails.',
+    why: 'Partner emails only (lib/partner-merge-tags.ts PARTNER_MERGE_TAGS). No client sender fills it, so in a client email it renders as empty. Never offered for client emails.' },
 ]
 
 export const mergeTagToken = (key: string) => `{{${key}}}`
