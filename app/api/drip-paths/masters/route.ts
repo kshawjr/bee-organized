@@ -9,12 +9,20 @@
 //
 // Read-allowed to any authenticated hub_user. Editing master content
 // happens via PATCH /api/drip-path-steps/[stepId] (super_admin only).
+//
+// Partner emails (slice 2, 2026-11-22): the partner masters (path_key
+// "partner-…", lib/partner-sequences.ts) are LEFT OUT unless the caller asks
+// for them with ?audience=partner, and then only they come back. Every screen
+// above asks for nothing, so it gets the client masters exactly as before and
+// can never offer a partner sequence as a client's.
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { pathKeyFitsAudience, sequenceAudienceOf } from '@/lib/partner-sequences'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const audience = sequenceAudienceOf(req?.nextUrl?.searchParams?.get('audience'))
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -48,7 +56,7 @@ export async function GET() {
     return NextResponse.json({ error: 'steps_query_failed' }, { status: 500 })
   }
 
-  const masters = (pathsRes.data ?? []).map(p => ({
+  const masters = (pathsRes.data ?? []).filter(p => pathKeyFitsAudience(p.path_key, audience)).map(p => ({
     ...p,
     steps: (stepsRes.data ?? []).filter(s => s.drip_path_id === p.id),
   }))

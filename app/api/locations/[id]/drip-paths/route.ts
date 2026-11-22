@@ -22,6 +22,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { bodyFormatOf } from '@/lib/email-body-html'
 import { bodyForSave, bodyFormatIn } from '@/lib/email-body-save'
+import { isPartnerPathKey, pathKeyFitsAudience, sequenceAudienceOf } from '@/lib/partner-sequences'
 
 async function authForLocation(locId: string) {
   const supabase = await createServerSupabaseClient()
@@ -52,6 +53,10 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   const locId = params.id
+  // Partner emails (slice 2): a location's copy of a partner sequence is left
+  // out unless ?audience=partner asks for partner sequences only. Settings →
+  // Paths asks for nothing and sees exactly what it saw before.
+  const audience = sequenceAudienceOf(_req?.nextUrl?.searchParams?.get('audience'))
 
   // Read access: any hub_user from this location, plus admin/super_admin.
   const supabase = await createServerSupabaseClient()
@@ -96,7 +101,7 @@ export async function GET(
     return NextResponse.json({ error: 'steps_query_failed' }, { status: 500 })
   }
 
-  const paths = pathsRes.data ?? []
+  const paths = (pathsRes.data ?? []).filter(p => pathKeyFitsAudience(p.path_key, audience))
   const allSteps = stepsRes.data ?? []
   const pathIds = new Set(paths.map(p => p.id))
 
@@ -263,6 +268,12 @@ export async function PATCH(
   }
   if (Object.keys(patch).length === 1) {
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
+  }
+  // A partner sequence is never a location's CLIENT sequence: client enrolment
+  // reads exactly these two columns. The database refuses it too
+  // (locations_default_paths_not_partner, migrations/partner_emails.sql).
+  if (isPartnerPathKey(patch.default_drip_path) || isPartnerPathKey(patch.default_move_drip_path)) {
+    return NextResponse.json({ error: 'partner_sequence_not_allowed' }, { status: 400 })
   }
 
   const { data, error } = await supabaseService

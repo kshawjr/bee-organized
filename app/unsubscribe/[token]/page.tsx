@@ -34,6 +34,8 @@
 
 import { supabaseService } from '@/lib/supabase-service'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { consumePartnerUnsubscribeToken } from '@/lib/network/partner-unsubscribe'
+import { partnerGreetingName } from '@/lib/network/partner-greeting'
 
 export const runtime = 'nodejs'
 // Never statically render or cache: per-token state + (on the first visit)
@@ -72,6 +74,22 @@ export default async function UnsubscribePage({ params }: Props) {
   }
 
   const lead = await findByToken(token)
+
+  // Not a client's link → it may be a referral partner's (partner emails,
+  // slice 2). Everything a client's link does is above and below this block,
+  // unchanged; a partner's link is handled entirely here, in one database
+  // call (lib/network/partner-unsubscribe.ts).
+  if (!lead) {
+    const partner = await consumePartnerUnsubscribeToken(token)
+    if (partner.outcome === 'unsubscribed' || partner.outcome === 'already') {
+      return <Confirmation firstName={partnerGreetingName(partner.partner) || null} />
+    }
+    if (partner.outcome === 'failed') {
+      // The same honest state as a failed client write: never a false
+      // "you're unsubscribed".
+      return <Shell title="Something went wrong on our end" body={FAILED_BODY} />
+    }
+  }
 
   // Unknown token → a clean state, NOT an error: the honest reading is "this
   // link doesn't do anything any more".
@@ -113,7 +131,7 @@ export default async function UnsubscribePage({ params }: Props) {
     return (
       <Shell
         title="Something went wrong on our end"
-        body="We couldn't process your unsubscribe just now. Please reply to any email from us with the word “unsubscribe” and a person will take you off the list — or try this link again in a few minutes."
+        body={FAILED_BODY}
       />
     )
   }
@@ -160,6 +178,9 @@ function firstOf(lead: { first_name?: string | null; name?: string | null }): st
   if (full) return full.split(/\s+/)[0]
   return null
 }
+
+const FAILED_BODY =
+  "We couldn't process your unsubscribe just now. Please reply to any email from us with the word “unsubscribe” and a person will take you off the list — or try this link again in a few minutes."
 
 const INACTIVE_BODY =
   "We couldn't find anything to do with this link. If you were trying to unsubscribe, reply to any email from us with the word “unsubscribe” and a person will take you off the list."

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 import { safeHttpUrl } from '@/lib/email-signature'
+import { isPartnerPathKey } from '@/lib/partner-sequences'
 
 // POST /api/locations/[id]/paths
 // Body: { default_drip_path?, default_move_drip_path?, calendar_link?,
@@ -58,6 +59,13 @@ export async function POST(
         calendar_link?: string
         rate_per_hour?: string
       }
+
+    // A partner sequence is never a location's CLIENT sequence (partner
+    // emails, slice 2): client enrolment reads exactly these two columns. The
+    // database refuses it too (locations_default_paths_not_partner).
+    if (isPartnerPathKey(default_drip_path) || isPartnerPathKey(default_move_drip_path)) {
+      return NextResponse.json({ error: 'partner_sequence_not_allowed' }, { status: 400 })
+    }
 
     const patch: Record<string, any> = { updated_at: new Date().toISOString() }
     if (typeof default_drip_path === 'string' && default_drip_path) {
