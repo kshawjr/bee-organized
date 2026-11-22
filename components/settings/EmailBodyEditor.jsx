@@ -218,7 +218,7 @@ function Panel({ label, title, anchor, under = null, phone, onClose, children, n
 
 // onInsertTag: the dialog's chance to put a picked tag somewhere else first
 // (the Subject box, when the cursor was last there). True = it did.
-export default function EmailBodyEditor({ initialBody = '', initialFormat = 'plain', onChange, onReady = null, onFocus = null, onInsertTag = null, links = null, tags = OWNER_MERGE_TAGS }) {
+export default function EmailBodyEditor({ initialBody = '', initialFormat = 'plain', onChange, onReady = null, onFocus = null, onInsertTag = null, links = null, tags = OWNER_MERGE_TAGS, tagGroups = MERGE_TAG_GROUPS }) {
   const phone = usePhone()
   const areaRef = React.useRef(null)
   const barRef = React.useRef(null)
@@ -358,7 +358,7 @@ export default function EmailBodyEditor({ initialBody = '', initialFormat = 'pla
       {tagsOpen && (
         <Panel name="tags" label="Merge tags" title="Merge tags" anchor={areaRef} under={barRef} phone={phone} onClose={() => setTagsOpen(false)}>
           <p style={{ ...eHintStyle, margin: '0 0 10px' }}>Pick a detail. It goes in where your cursor is and is filled in for each client.</p>
-          {MERGE_TAG_GROUPS.map(g => {
+          {tagGroups.map(g => {
             const inGroup = tags.filter(t => t.group === g.id)
             if (!inGroup.length) return null
             return (

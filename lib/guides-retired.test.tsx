@@ -54,6 +54,7 @@ import { GET as guideGET, POST as guidePOST } from '@/app/api/guide-slides/route
 import { GET as manualGET, POST as manualPOST } from '@/app/api/manual-slides/route'
 import { buildPlacementIndex, placeFeedbackItem } from '@/lib/feedback-placement'
 import screenMap from '@/docs/screen-map.json'
+import { withoutPartnerEmailsSlice3 } from '@/lib/network/partner-emails-hub-footprint'
 
 const root0 = process.cwd()
 const read = (f: string) => readFileSync(join(root0, f), 'utf8')
@@ -174,7 +175,9 @@ describe('Admin › Content no longer edits the Guide or the Manual', () => {
   it('the three editors that are left are the code they were at 722aaa0', () => {
     const span = (src: string, name: string) => { const i = src.indexOf(`function ${name}(`); const j = src.indexOf('\nfunction ', i + 10); expect(i, name).toBeGreaterThan(0); return src.slice(i, j) }
     const before = atHead('components/BeeHub.jsx')
-    for (const name of ['MasterTemplatesEditor', 'MasterDripPathsEditor', 'VariableReference']) expect(span(HUB, name), name).toBe(span(before, name))
+    // Partner emails slice 3 (2026-11-22) added the partner masters to
+    // MasterDripPathsEditor on purpose; it is taken back out, exactly.
+    for (const name of ['MasterTemplatesEditor', 'MasterDripPathsEditor', 'VariableReference']) expect(span(withoutPartnerEmailsSlice3(HUB), name), name).toBe(span(before, name))
   })
 })
 

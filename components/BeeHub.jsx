@@ -18339,6 +18339,9 @@ import { RETURNING_PATH_KEYS, returningPathKeyFor } from '@/components/hive/shar
 import { telHref as phoneTelHref, displayPhone as phoneDisplay } from '@/lib/phone'
 import PhoneInput from '@/components/hive/shared/PhoneInput'
 import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS } from '@/lib/merge-tags'
+// Partner emails (slice 3): the partner sequences, and the partner set of tags.
+import { isPartnerPathKey, PARTNER_SEQUENCES } from '@/lib/partner-sequences'
+import { PARTNER_MERGE_TAGS, PARTNER_MERGE_TAG_GROUPS } from '@/lib/partner-merge-tags'
 import { safeHttpUrl } from '@/lib/email-signature'
 import { timingLabel, timingFromStored, timingToStored, formatTiming, TIMING_UNITS } from '@/lib/email-timing'
 import { slackCanManageChannels } from '@/lib/slack-scopes'
@@ -18462,11 +18465,12 @@ export function applyStepContentEdit(step, patch, templates) {
   }
 }
 
-export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null, returningPathKey = null }) {
-  // RAIL A — a path's email steps, inline-first. Used for the default
-  // organizing/moving path (group one) and for the fixed returning-client
-  // path (the "past client" group) — same row shape, same controls.
-  const dripRowsFor = (key) => {
+// RAIL A — a path's email steps, inline-first. Used for the default
+// organizing/moving path (group one), for the fixed returning-client path (the
+// "past client" group) and, since partner emails slice 3, for each partner
+// sequence — same row shape, same controls.
+export function dripEmailRows({ pathSteps = {}, templates = [], pathKey = null }) {
+    const key = pathKey
     const steps = (key && pathSteps[key]) || []
     return steps
       .filter(s => (s.type || 'email') === 'email')
@@ -18513,7 +18517,10 @@ export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null,
           contentMissing: !subject && !body,
         }
       })
-  }
+}
+
+export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null, returningPathKey = null }) {
+  const dripRowsFor = (key) => dripEmailRows({ pathSteps, templates, pathKey: key })
   const dripRows = dripRowsFor(pathKey)
 
   // The returning-client sequence — the "past client" group. The caller
@@ -18832,7 +18839,7 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
             style={{ ...eInputStyle, width:'80px', textAlign:'center', background:ET.card, ...(tooSoon ? { borderColor:ET.destructive } : null) }} />
           <ESelect value={unit} ariaLabel="Wait measured in" onChange={setUnit} style={{ width:'120px' }}
             options={TIMING_UNITS.map(u => ({ value: u.v, label: u.label }))} />
-          <span style={{ color:ET.mutedFg }}>after {row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
+          <span style={{ color:ET.mutedFg }}>after {isPartnerPathKey(row.pathKey) ? 'you start it' : row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
         </div>
         {valid && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.mutedFg }}>
           That’s day {n}.{formatTiming({ immediate:false, n:count, unit }) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
@@ -18971,7 +18978,7 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
           {onEditTiming && row.timingIsData && !timingLocked
             ? <button onClick={onEditTiming} title="Change when this goes out" data-ehover="muted" style={{ margin:'0 -4px', display:'inline-flex', alignItems:'center', gap:'4px', borderRadius:ER.md, padding:'0 4px', background:'none', border:'none', textAlign:'left', fontSize:'14px', fontWeight:600, color:gold, cursor:'pointer', fontFamily:'inherit' }}>{row.when} <svg aria-hidden width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity:0.4 }}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg></button>
             : <p style={{ margin:0, fontSize:'14px', fontWeight:600, color:gold }}>{row.when}</p>}
-          {timingLocked && <p style={{ margin:0, fontSize:'11px', color:muted }}>Fixed — automatic reply</p>}
+          {timingLocked && <p style={{ margin:0, fontSize:'11px', color:muted }}>{isPartnerPathKey(row.pathKey) ? 'Fixed — sends when you start it' : 'Fixed — automatic reply'}</p>}
           {!timingLocked && lockedReason && <p style={{ margin:0, fontSize:'11px', color:muted }}>Always sent</p>}
           {paused && <p style={{ margin:0, fontSize:'11px', fontWeight:600, color:muted }}>Paused</p>}
         </div>
@@ -18984,7 +18991,7 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
             {row.contentMissing ? <span style={{ color:ET.warning }}>We couldn't load this one's wording.</span> : row.firstLine}
           </p>
           {lockedReason && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>{lockedReason}</p>}
-          {paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Paused — no client gets this one until you start it again.</p>}
+          {paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Paused — no {isPartnerPathKey(row.pathKey) ? 'partner' : 'client'} gets this one until you start it again.</p>}
           {blockedReason && !paused && <p style={{ margin:'4px 0 0', fontSize:'11px', color:muted }}>Not sending — {blockedReason}.</p>}
           {waiting && (
             <button onClick={() => goToField(EMAIL_FIELD_ID[needs[0]])} style={{ marginTop:'8px', display:'inline-flex', alignItems:'center', gap:'6px', background:'none', border:'none', padding:0, fontSize:'12px', fontWeight:600, color:warn, textDecoration:'underline', textUnderlineOffset:'2px', cursor:'pointer', fontFamily:'inherit' }}>
@@ -19010,6 +19017,8 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
 // save route refuses it too (firstStepRemovalError). The welcome and the
 // closed-job pair are not sequence steps and never get this control.
 export const FIRST_EMAIL_ALWAYS_SENDS_NOTE = 'Can’t be removed — it’s every new client’s first hello from Bee Organized.'
+// The same rule for a partner sequence (the save route refuses it the same way).
+export const PARTNER_FIRST_EMAIL_NOTE = 'Can’t be removed — it’s the email a partner gets the moment you start them on it.'
 export function rowCanBeRemoved(row) {
   return row?.rail === 'drip' && Number(row.order) > 1
 }
@@ -19297,6 +19306,12 @@ const STEP_SAVE_PROBLEMS = {
 export function stepSaveProblemInWords(raw) {
   const msg = String(raw instanceof Error ? raw.message : (raw ?? '')).trim()
   if (STEP_SAVE_PROBLEMS[msg]) return STEP_SAVE_PROBLEMS[msg]
+  // The database refuses to throw away a location's copy of a partner sequence
+  // while a partner is partway through it (migrations/partner_emails.sql).
+  if (/partner_progress_active/.test(msg)) {
+    const n = Number((/partner_progress_active: (\d+)/.exec(msg) || [])[1])
+    return `${n > 1 ? `${n} partners are` : 'a partner is'} still partway through these emails, so your version can’t be thrown away yet. Once they’ve finished (or you’ve stopped them), you can go back to the Bee Organized wording. Nothing was changed.`
+  }
   if (/^forbidden(_[a-z0-9_]+)?$/.test(msg)) return 'you don’t have permission to change these emails.'
   if (!msg || /^[a-z0-9]+(_[a-z0-9]+)+$/.test(msg) || /^HTTP \d+$/.test(msg)) return 'something went wrong on our side and nothing was changed. Please try again.'
   return msg
@@ -19400,7 +19415,11 @@ function MovingClientsChoice({ moving, view, onView }) {
     </div>
   )
 }
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null, moving = null }) {
+// audience (partner emails, slice 3): 'client' (every caller before, and the
+// default) or 'partner' — the SAME list, rows, controls, Read dialog and
+// actions, showing the two partner sequences instead of the client groups.
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, view: viewProp = null, onViewChange = null, followupsOff = false, sending = true, locationId = null, preview = null, moving = null, audience = 'client' }) {
+  const partnerMode = audience === 'partner'
   const [open, setOpen] = React.useState(null)  // { group, index }
   // 2026-10-30 design: groups fold (only the first open at first), and show
   // three rows until "More" is pressed.
@@ -19445,15 +19464,31 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // carries no project type at intake.
   const returningPathKey = returningPathKeyFor(generalDefault)
   const { newLead, returning, afterJob } = React.useMemo(
-    () => buildEmailList({ pathSteps, templates, pathKey: activePathKey, returningPathKey }),
-    [pathSteps, templates, activePathKey, returningPathKey])
+    () => partnerMode
+      ? { newLead: [], returning: [], afterJob: [] }
+      : buildEmailList({ pathSteps, templates, pathKey: activePathKey, returningPathKey }),
+    [pathSteps, templates, activePathKey, returningPathKey, partnerMode])
+  // One group per partner sequence, each the same drip rows a client
+  // sequence has (dripEmailRows); the first email of each is "always first".
+  const partnerGroups = React.useMemo(
+    () => partnerMode
+      ? PARTNER_SEQUENCES.map(sq => ({
+          ...sq,
+          rows: dripEmailRows({ pathSteps, templates, pathKey: sq.pathKey })
+            .map((r, i) => ({ ...r, fixedNote: i === 0 ? 'always first' : null })),
+        }))
+      : [],
+    [pathSteps, templates, partnerMode])
 
   // Step 10 decides what is editable; nothing here is a control.
   const withNotes = newLead.map((r, i) => ({
     ...r,
     fixedNote: i === 0 ? 'always first' : (r.rail === 'welcome' ? 'always second' : null),
   }))
-  const groups = { new: withNotes, returning, job: afterJob }
+  const groups = partnerMode
+    ? Object.fromEntries(partnerGroups.map(g => [g.pathKey, g.rows]))
+    : { new: withNotes, returning, job: afterJob }
+  const firstGroupId = partnerMode ? PARTNER_SEQUENCES[0].pathKey : 'new'
   const openRows = open ? groups[open.group] : []
 
   // issue 240 step 8b — one reason string per path, shown on every row of
@@ -19482,7 +19517,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
 
   // Why a row can't be removed, in the owner's words (export LOCKED_REASON).
   const lockedReasonFor = (r, groupId) => {
-    if (r.rail === 'drip' && Number(r.order) === 1) return groupId === 'returning' ? 'Can’t be removed — it tells a returning client we got their message.' : FIRST_EMAIL_ALWAYS_SENDS_NOTE
+    if (r.rail === 'drip' && Number(r.order) === 1) return isPartnerPathKey(r.pathKey) ? PARTNER_FIRST_EMAIL_NOTE : groupId === 'returning' ? 'Can’t be removed — it tells a returning client we got their message.' : FIRST_EMAIL_ALWAYS_SENDS_NOTE
     if (r.rail === 'welcome') return 'Can’t be removed — every new client is welcomed to the Hive.'
     if (r.key === 'opp_closed_job_3mo') return 'Can’t be removed — it’s how Bee Organized collects reviews.'
     if (r.key === 'opp_closed_job_12mo') return 'Can’t be removed — the yearly check-in goes to every client.'
@@ -19490,7 +19525,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   }
   const SHOW = 3
   const Group = ({ id, title, count, note, rows, add = null }) => {
-    const groupOpen = collapsed[id] === undefined ? id === 'new' : !collapsed[id]
+    const groupOpen = collapsed[id] === undefined ? id === firstGroupId : !collapsed[id]
     const live = rows.filter(r => !r.removed)
     const removedRows = rows.filter(r => r.removed)
     const isOpen = !!expanded[id]
@@ -19565,8 +19600,34 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
     )
   }
 
-  const allRows = [...withNotes, ...returning, ...afterJob]
+  const allRows = partnerMode ? partnerGroups.flatMap(g => g.rows) : [...withNotes, ...returning, ...afterJob]
   const ownCount = allRows.filter(r => r.wording === 'yours').length
+  const readModal = open && (
+    <EmailReadModal rows={openRows} index={open.index}
+      onClose={() => setOpen(null)}
+      onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))}
+      onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
+      onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
+      resetBlockedReason={noCounterpartFor(openRows[open.index]) || resetBlockedFor(openRows[open.index])}
+      blockedReason={blockedFor(openRows[open.index])}
+      sending={sending} locationId={locationId} preview={preview} cfg={sendConfig} />
+  )
+  if (partnerMode) return (
+    <div data-partner-emails style={{ fontFamily:EF.ui }}>
+      <div style={{ marginBottom:'20px', display:'flex', flexWrap:'wrap', gap:'8px' }}>
+        <ETag tone="shared">🐝 {allRows.length - ownCount} use Bee Organized wording</ETag>
+        <ETag tone="own">{ownCount} in your own words</ETag>
+      </div>
+      {partnerGroups.map(g => (
+        <Group key={g.pathKey} id={g.pathKey} title={g.name}
+          count={g.rows.length}
+          note={PARTNER_GROUP_NOTES[g.pathKey]}
+          rows={g.rows}
+          add={actions && actions.add ? () => actions.add(g.pathKey) : null} />
+      ))}
+      {readModal}
+    </div>
+  )
   return (
     <div style={{ fontFamily:EF.ui }}>
       {/* Ownership summary (2026-10-30 design). */}
@@ -19600,18 +19661,15 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
         count={afterJob.length}
         note="Counted from the day the job closes, not from when they first got in touch."
         rows={afterJob} />
-      {open && (
-        <EmailReadModal rows={openRows} index={open.index}
-          onClose={() => setOpen(null)}
-          onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))}
-          onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
-          onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
-          resetBlockedReason={noCounterpartFor(openRows[open.index]) || resetBlockedFor(openRows[open.index])}
-          blockedReason={blockedFor(openRows[open.index])}
-          sending={sending} locationId={locationId} preview={preview} cfg={sendConfig} />
-      )}
+      {readModal}
     </div>
   )
+}
+
+// The words under each partner sequence's heading (partner emails, slice 3).
+export const PARTNER_GROUP_NOTES = {
+  'partner-introduction': 'Counted from the day you start a partner on it. Any partner can be started on it, whatever their level.',
+  'partner-power-introduction': 'Sent when you start a partner on it. Any partner can be started on it, whatever their level.',
 }
 
 export function TextsComingSoon() {
@@ -22640,10 +22698,21 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   async function loadLocationPaths() {
     if (!realLocId) return null
     try {
-      const r = await fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' })
+      // The client sequences, and (partner emails, slice 3) this location's
+      // own copies of the partner sequences — the same rows, asked for
+      // separately because every other screen gets client sequences only.
+      // A failed partner read never stops the client emails loading.
+      const [r, rp] = await Promise.all([
+        fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' }),
+        fetch(`/api/locations/${realLocId}/drip-paths?audience=partner`, { credentials: 'include' }).catch(() => null),
+      ])
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const j = await r.json()
-      const paths = Array.isArray(j?.paths) ? j.paths : []
+      const jp = rp && rp.ok ? await rp.json().catch(() => null) : null
+      const paths = [
+        ...(Array.isArray(j?.paths) ? j.paths : []),
+        ...(Array.isArray(jp?.paths) ? jp.paths.filter(p => isPartnerPathKey(p.path_key)) : []),
+      ]
       const newDbPaths = {}
       const newSteps = {}
       for (const p of paths) {
@@ -22700,11 +22769,21 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // rather than nothing. Read-allowed to any authenticated hub_user.
   useEffect(() => {
     let cancelled = false
-    fetch('/api/drip-paths/masters', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => {
+    // The client masters, plus (partner emails, slice 3) the partner masters —
+    // the same rows and steps, asked for separately (?audience=partner). A
+    // failed partner read leaves the client masters exactly as they were.
+    Promise.all([
+      fetch('/api/drip-paths/masters', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+      fetch('/api/drip-paths/masters?audience=partner', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ])
+      .then(([j, jp]) => {
         if (cancelled) return
-        const list = Array.isArray(j?.masters) ? j.masters : []
+        const list = [
+          ...(Array.isArray(j?.masters) ? j.masters : []),
+          ...(Array.isArray(jp?.masters) ? jp.masters.filter(m => isPartnerPathKey(m.path_key)) : []),
+        ]
         const map = {}
         for (const m of list) map[m.path_key] = m
         setDbMasters(map)
@@ -23187,11 +23266,32 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
   // What the editors' Preview and button pills need: the location's look,
   // the filled values, the signature, and which booking links are saved.
-  function emailsEditorProps() {
-    const es = emailSettings.settings
+  // A partner email's preview (partner emails, slice 3): the partner tags only,
+  // filled for a sample partner, as lib/partner-merge-tags.ts fills them for a
+  // send. Client tags in a partner email stay blank, as they would when sent.
+  function partnerPreviewValues() {
+    const ownerName = [settings.profile.firstName, settings.profile.lastName].filter(Boolean).join(' ')
     return {
+      partner_name: 'Taylor',
+      location_owner_name: ownerName,
+      location_name: settings.location.name,
+      location_phone: settings.location.phone,
+      service_area: [settings.location.city, settings.location.state].filter(Boolean).join(', '),
+      rate_per_hour: settings.location.ratePerHour,
+      reviews_link: settings.location.reviewsLink,
+    }
+  }
+
+  // pathKey: the sequence being edited — a partner sequence gets the partner
+  // tags, the partner preview and the partner wording; every other editor is
+  // exactly as before.
+  function emailsEditorProps(pathKey = null) {
+    const es = emailSettings.settings
+    const partner = isPartnerPathKey(pathKey)
+    return {
+      ...(partner ? { audience: 'partner' } : {}),
       // postalAddress: the foot of a commercial email (previewCardFooter).
-      preview: { style: es.style, values: emailsPreviewValues(), signature: signatureFromData(emailSig.data), postalAddress: emailSettings.postalAddress || null },
+      preview: { style: es.style, values: partner ? partnerPreviewValues() : emailsPreviewValues(), signature: signatureFromData(emailSig.data), postalAddress: emailSettings.postalAddress || null },
       links: { discovery: es.discoveryBookingLink, inHome: settings.location.bookingLink, video: es.virtualBookingLink },
       alignReady: emailSettings.ready.align === true,
       // The rich-text Message editor, once migrations/email_body_format.sql has run.
@@ -24553,6 +24653,27 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 />
               </ESection>
 
+              {/* ── Partner emails (slice 3, 2026-11-22). Kevin: treated exactly
+                  like every other email — the SAME list, rows, Read dialog,
+                  editor, Customize and put-the-wording-back, timing, add,
+                  remove, pause and "Send me a test" as the client emails
+                  above. Nothing here sends to a partner: a partner is only
+                  ever put on one by hand, from their contact (a later slice). */}
+              <ESection id="partner-emails" eyebrow="Partner emails" title="Emails to your referral partners"
+                intro="Two sequences you can start any partner on, from their contact. They go out on their own, in this order, counted from the day you start them.">
+                <EmailsList
+                  audience="partner"
+                  pathSteps={pathSteps}
+                  templates={templates}
+                  masterSteps={masterSteps}
+                  actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, remove: openRemoveEmail, restore: emailsRowRestore, pause: emailsRowPause } : null}
+                  sendConfig={sendCfg}
+                  sending={senderAddressSet}
+                  locationId={realLocId}
+                  preview={{ style: es.style, values: partnerPreviewValues(), signature: signatureFromData(emailSig.data), postalAddress: emailSettings.postalAddress || null }}
+                />
+              </ESection>
+
               {/* ── Corporate only: the wording every location starts with,
                   moved in from Admin → Content (where it also still lives —
                   same rows, same editor, same route). */}
@@ -24653,7 +24774,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       {/* issue 240 step 9b — append an email. */}
       {addEmailState && addEmailState.stage !== 'write' && (
         <AddEmailModal
-          templates={templates}
+          // A partner sequence is offered a blank email only: every ready-made
+          // template is written to a client.
+          templates={isPartnerPathKey(addEmailState.pathKey) ? [] : templates}
           steps={pathSteps[addEmailState.pathKey] || []}
           ownsPath={addEmailState.ownsPath}
           liveLeadCount={addEmailState.liveLeadCount}
@@ -24670,7 +24793,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         const pos = appendedStepPosition(pathSteps[addEmailState.pathKey] || [])
         return (
           <DripPathStepEditor
-            {...emailsEditorProps()}
+            {...emailsEditorProps(addEmailState.pathKey)}
             isNew
             step={{ step_order: pos.order, subject: '', body: '', delay_days: pos.delay_days, button_text: '', button_link: '', button_align: null }}
             onSave={saveNewEmail}
@@ -24707,7 +24830,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           edit, and the snapshot consequence is stated HERE, at the decision. */}
       {forkConfirm&&(
         <ForkConfirmModal
-          pathName={(PATH_STYLES.find(st => forkConfirm.pathId.endsWith(st.id.replace('path-',''))) || {}).label || 'these emails'}
+          pathName={isPartnerPathKey(forkConfirm.pathId)
+            ? ((PARTNER_SEQUENCES.find(sq => sq.pathKey === forkConfirm.pathId) || {}).name || 'these emails')
+            : (PATH_STYLES.find(st => forkConfirm.pathId.endsWith(st.id.replace('path-',''))) || {}).label || 'these emails'}
           onConfirm={confirmFork}
           onCancel={()=>{ const pending = forkConfirm; setForkConfirm(null); pending?.onCancel?.() }}
         />
@@ -24716,7 +24841,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           through commitSteps (the bulk replace) — never a per-step PATCH. */}
       {stepContentEditor&&(
         <DripPathStepEditor
-          {...emailsEditorProps()}
+          {...emailsEditorProps(stepContentEditor.pathId)}
           step={{
             step_order: stepContentEditor.step.order,
             // The step's own text, else its linked template's — a step whose
@@ -32943,13 +33068,22 @@ function MasterDripPathsEditor() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetch('/api/drip-paths/masters', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => {
+    // Partner emails (slice 3): the partner masters too, the same rows and the
+    // same editor, listed after the client ones.
+    Promise.all([
+      fetch('/api/drip-paths/masters', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+      fetch('/api/drip-paths/masters?audience=partner', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ])
+      .then(([j, jp]) => {
         if (cancelled) return
-        const list = Array.isArray(j?.masters) ? j.masters : []
-        // Sort: Organizing A→D, then Moving A→D, then Returning A→D
-        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d', ...RETURNING_PATH_KEYS]
+        const list = [
+          ...(Array.isArray(j?.masters) ? j.masters : []),
+          ...(Array.isArray(jp?.masters) ? jp.masters.filter(m => isPartnerPathKey(m.path_key)) : []),
+        ]
+        // Sort: Organizing A→D, then Moving A→D, then Returning A→D, then the partner sequences
+        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d', ...RETURNING_PATH_KEYS, ...PARTNER_SEQUENCES.map(sq => sq.pathKey)]
         list.sort((a,b) => order.indexOf(a.path_key) - order.indexOf(b.path_key))
         setMasters(list)
         setErr(null)
@@ -33009,7 +33143,7 @@ function MasterDripPathsEditor() {
               <div key={path.id} style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', overflow:'hidden' }}>
                 <div onClick={()=>setExpanded(isOpen ? null : path.id)}
                      style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
-                  <span style={{ fontSize:'18px' }}>{path.path_key.startsWith('moving') ? '📦' : '🏠'}</span>
+                  <span style={{ fontSize:'18px' }}>{isPartnerPathKey(path.path_key) ? '🤝' : path.path_key.startsWith('moving') ? '📦' : '🏠'}</span>
                   <div style={{ flex:1, minWidth:0 }}>
                     <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{prettyPathName(path.name, path.path_key)}</p>
                     <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{path.path_key} · {stepsSorted.length} email{stepsSorted.length===1?'':'s'}</p>
@@ -33023,7 +33157,7 @@ function MasterDripPathsEditor() {
                         <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
                           <span style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', background:'rgba(168,201,196,0.15)', padding:'2px 8px', borderRadius:'20px' }}>Step {step.step_order}</span>
                           <span style={{ fontSize:'11px', color:'#8a9e9a' }}>delay: {step.delay_days} day{step.delay_days===1?'':'s'}</span>
-                          <button onClick={()=>setEditing({ step })} style={{ marginLeft:'auto', padding:'4px 10px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Edit</button>
+                          <button onClick={()=>setEditing({ step, pathKey: path.path_key })} style={{ marginLeft:'auto', padding:'4px 10px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Edit</button>
                         </div>
                         {step.subject && <p style={{ fontSize:'12px', fontWeight:600, color:'#6366f1', marginBottom:'4px' }}>Subject: {step.subject}</p>}
                         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5, whiteSpace:'pre-wrap', maxHeight:'80px', overflow:'hidden' }}>
@@ -33046,6 +33180,8 @@ function MasterDripPathsEditor() {
           // details. The rows come from '*', so the column's presence is the
           // migration's.
           alignReady={'button_align' in editing.step}
+          // A partner master: the partner tags (slice 3).
+          audience={isPartnerPathKey(editing.pathKey) ? 'partner' : 'client'}
           onSave={(patch) => saveStep(editing.step, patch)}
           onClose={() => setEditing(null)}
         />
@@ -33092,7 +33228,12 @@ function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
 // yet (+ Add an email here → A blank email). Same two refusals — no subject,
 // no message — so the step is only ever created whole. Its day is fixed by
 // where it lands (appendedStepPosition), so the delay field is not offered.
-export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, bodyReady = false, preview = null, isNew = false, startButton = null }) {
+// audience (partner emails, slice 3): 'partner' offers the partner tags only
+// (lib/partner-merge-tags.ts) and words the hints for a partner; everything
+// else is this same editor.
+export function DripPathStepEditor({ step, onSave, onClose, links = null, alignReady = false, bodyReady = false, preview = null, isNew = false, startButton = null, audience = 'client' }) {
+  const forPartner = audience === 'partner'
+  const tagSet = forPartner ? { tags: PARTNER_MERGE_TAGS, groups: PARTNER_MERGE_TAG_GROUPS } : null
   const [subject, setSubject] = useState(step.subject || '')
   // The message: the rich-text editor once its migration has run, the plain
   // text box until then (useBodyDraft). `body` is what a save stores.
@@ -33169,26 +33310,26 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
         {localErr && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </> : <>
       {isNew && <p data-new-email-note style={{ ...eHintStyle, margin:'0 0 8px' }}>It’s added to the end of your emails when you press “Add this email” — it needs a subject and a message first. Cancel and nothing is added.</p>}
-      <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{'{{first_name}}'}</code>, are filled in for each client. {draft.rich ? 'Pick one from Merge tags, above the message.' : 'Pick one from the list under the message.'}</p>
+      <p style={{ ...eHintStyle, margin:'0 0 12px' }}>Details in double braces, like <code>{forPartner ? '{{partner_name}}' : '{{first_name}}'}</code>, are filled in for each {forPartner ? 'partner' : 'client'}. {draft.rich ? 'Pick one from Merge tags, above the message.' : 'Pick one from the list under the message.'}</p>
       <div style={{ display:'grid', gap:'12px' }}>
         <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Subject</span>
           <input type="text" value={subject} onChange={e=>setSubject(e.target.value)} {...tags.bind(() => subject, setSubject)} style={eInputStyle} />
         </label>
         {draft.rich ? (
-          <RichMessage {...draft.editor} links={links} onFocus={tags.clear} onInsertTag={t => tags.insert(t)} />
+          <RichMessage {...draft.editor} links={links} onFocus={tags.clear} onInsertTag={t => tags.insert(t)} {...(tagSet ? { tags: tagSet.tags, tagGroups: tagSet.groups } : {})} />
         ) : <>
         <label style={{ display:'block' }}>
           <span style={eLabelStyle}>Message</span>
           <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14} {...tags.bind(() => body, setBody)}
             style={{ ...eTextareaStyle, fontFamily:EF.body, color:ET.ink }} />
         </label>
-        <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} />
+        <MergeTagPicker onInsert={t => { if (!tags.insert(t)) setBody(b => b + t) }} {...(tagSet ? { tags: tagSet.tags, groups: tagSet.groups } : {})} />
         </>}
         {!isNew && <label style={{ display:'block' }}>
-          <span style={eLabelStyle}>Delay (days after the lead comes in)</span>
+          <span style={eLabelStyle}>{forPartner ? 'Delay (days after you start a partner on it)' : 'Delay (days after the lead comes in)'}</span>
           <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)} style={{ ...eInputStyle, width:'120px' }} />
-          <span style={eHintStyle}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</span>
+          <span style={eHintStyle}>{forPartner ? 'Step 1 is 0: it sends the moment you start a partner on it.' : 'Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.'}</span>
         </label>}
         {/* Renders nothing unless opened from "Which email?" — so the admin
             master editor, which shares this component, is exactly as it was. */}

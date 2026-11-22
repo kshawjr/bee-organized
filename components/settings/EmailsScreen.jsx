@@ -21,6 +21,8 @@ import { SIGNATURE_MARKER, SIGNATURE_ICON_PATHS, safeHttpUrl, linkedinFor, signa
 import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
 import { buildMarketingFooter, COMMERCIAL_EMAIL_AUDIENCE } from '@/lib/marketing-consent'
+import { isPartnerPathKey } from '@/lib/partner-sequences'
+import { buildPartnerFooter } from '@/lib/network/partner-footer'
 
 // ── Tokens (export src/styles.css :root) ──────────────────────────────────
 // Exact: the export's oklch values converted to hex (Kevin, 2026-10-30
@@ -751,9 +753,13 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false,
 // Drip emails carry no such block, so their previews were already complete.
 export const PREVIEW_UNSUBSCRIBE_PATH = '/unsubscribe/test-email'
 export function previewCardFooter(row, postalAddress = null) {
+  const origin = typeof window !== 'undefined' && window.location && /^https?:/.test(window.location.origin || '') ? window.location.origin : ''
+  // Partner emails (slice 3): every one carries the footer, always.
+  if (isPartnerPathKey(row?.pathKey)) {
+    return buildPartnerFooter({ unsubscribeUrl: `${origin}${PREVIEW_UNSUBSCRIBE_PATH}`, postalAddress: (postalAddress || '').trim() || '(your postal address)' })
+  }
   const audience = COMMERCIAL_EMAIL_AUDIENCE[row?.templateKey]
   if (!audience) return null
-  const origin = typeof window !== 'undefined' && window.location && /^https?:/.test(window.location.origin || '') ? window.location.origin : ''
   return buildMarketingFooter({
     unsubscribeUrl: `${origin}${PREVIEW_UNSUBSCRIBE_PATH}`,
     postalAddress: (postalAddress || '').trim() || '(your postal address)',
@@ -786,14 +792,18 @@ export function previewEmailHtml({ row, style, values, signature = null, postalA
 }
 
 // "Send me a test" (export, in the read dialog). POSTs to the real send path.
+// A partner sequence's email goes to its own test route (partner tags, a sample
+// partner, the partner footer); either way it only ever goes to the signed-in
+// person's own address.
 export function SendTestBar({ locationId, row, sending }) {
   const [state, setState] = React.useState(null)   // null | 'busy' | { to } | { err }
+  const partner = isPartnerPathKey(row?.pathKey)
   const target = row?.rail === 'drip' ? (row.stepId ? { stepId: row.stepId } : null) : (row?.templateKey ? { templateKey: row.templateKey } : null)
   const can = !!locationId && !!target && sending
   const send = async () => {
     setState('busy')
     try {
-      const r = await fetch('/api/emails/test-send', { method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ locationId, ...target }) })
+      const r = await fetch(partner ? '/api/emails/test-send-partner' : '/api/emails/test-send', { method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ locationId, ...target }) })
       const j = await r.json().catch(() => ({}))
       setState(r.ok ? { to: j.to } : { err: j.message || 'The test could not be sent. Try again.' })
     } catch {
@@ -809,7 +819,7 @@ export function SendTestBar({ locationId, row, sending }) {
           : state && state.err ? <span style={{ color:ET.destructive }}>{state.err}</span>
           : !sending ? 'Add a send-from address before you can send a test.'
           : !target ? 'Save this email once before sending yourself a test.'
-          : 'See it exactly as a client will, in your own inbox.'}
+          : partner ? 'See it exactly as a partner will, in your own inbox. It goes to you, never to a partner.' : 'See it exactly as a client will, in your own inbox.'}
       </span>
       <EBtn size="sm" disabled={!can || state === 'busy' || !!tested} onClick={send}>{tested ? 'Test sent' : state === 'busy' ? 'Sending…' : 'Send me a test'}</EBtn>
     </div>
@@ -1656,13 +1666,13 @@ export function useBodyDraft(initialBody, initialFormat, bodyReady) {
   }
 }
 
-export function MergeTagPicker({ onInsert, tags = OWNER_MERGE_TAGS }) {
+export function MergeTagPicker({ onInsert, tags = OWNER_MERGE_TAGS, groups = MERGE_TAG_GROUPS }) {
   const [hint, setHint] = React.useState(null)
   const [all, setAll] = React.useState(false)
   return (
     <div data-merge-tag-picker style={{ fontFamily:EF.ui }}>
       <p style={{ margin:'0 0 6px', fontSize:'14px', fontWeight:600, color:ET.foreground }}>Insert a detail <span style={{ fontSize:'12px', fontWeight:400, color:ET.mutedFg }}>· click where it should go, then pick one</span></p>
-      {MERGE_TAG_GROUPS.map(g => {
+      {groups.map(g => {
         const inGroup = tags.filter(t => t.group === g.id)
         if (!inGroup.length) return null
         return (

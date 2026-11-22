@@ -15,6 +15,8 @@
 // so this cannot quietly stop matching and hide a real change.
 // ─────────────────────────────────────────────────────────────
 
+import { withoutPartnerEmailsSlice3 } from './partner-emails-hub-footprint'
+
 const HUB_PIECES: [string, string, number][] = [
   // (taken off FIRST: slice 9 extended lines that the slice 8 pieces below then expect)
   // slice 9: the Clients band follows the Network gate; "Open Nurturing clients" opens that tab
@@ -65,8 +67,10 @@ function strip(src: string, pieces: [string, string, number][], file: string): s
 }
 
 /** The file as it was before the click-away pass, if that pass is all that changed in it. */
+// Partner emails slice 3 (2026-11-22) is taken back out of BeeHub.jsx first
+// (partner-emails-hub-footprint.ts), the same way.
 export function withoutClickAway(file: string, src: string): string {
-  if (file === 'components/BeeHub.jsx') return strip(src, HUB_PIECES, file)
+  if (file === 'components/BeeHub.jsx') return strip(withoutPartnerEmailsSlice3(src), HUB_PIECES, file)
   if (file === 'components/hive/NetworkScreen.jsx') return strip(src, NETWORK_SCREEN_PIECES, file)
   return src
 }

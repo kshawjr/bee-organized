@@ -14,10 +14,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { withoutPartnerEmailsSlice3 } from './partner-emails-hub-footprint'
 
 const ROOT = process.cwd()
 const TABLE = 'lead_' + 'drip_progress'
-const sha = (f: string) => createHash('sha256').update(readFileSync(join(ROOT, f))).digest('hex').slice(0, 16)
+// BeeHub.jsx names the table only in comments; partner emails slice 3 changed
+// it on purpose (the Emails screen), so it is compared with slice 3 taken
+// back out, exactly (lib/network/partner-emails-hub-footprint.ts).
+const sha = (f: string) => createHash('sha256').update(
+  f === 'components/BeeHub.jsx' ? withoutPartnerEmailsSlice3(readFileSync(join(ROOT, f), 'utf8')) : readFileSync(join(ROOT, f)),
+).digest('hex').slice(0, 16)
 
 // Every file under app/ lib/ components/ scripts/ migrations/ naming the
 // table on origin/main f115e0ee, and its fingerprint there.
@@ -99,6 +105,8 @@ const READERS_ON_MAIN: [string, string][] = [
 const SLICE2_TESTS = [
   'lib/network/partner-emails-client-drips-untouched.test.ts',
   'lib/network/partner-emails-migration.test.ts',
+  // slice 3's BeeHub pieces quote BeeHub lines that name it in comments
+  'lib/network/partner-emails-hub-footprint.ts',
 ]
 
 function walk(dir: string, out: string[] = []): string[] {
