@@ -29,7 +29,7 @@ import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
 import { isReturningPathKey } from '@/components/hive/shared/returningVariant'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
-import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, NO_FOOTER } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
 import { bodyFormatOf } from './email-body-html'
 import { resolveEmailSignature } from './email-signature-resolve'
@@ -451,8 +451,8 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     heading: rendered.subject,
     button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: stepExtras.buttonAlign } : null,
   }
-  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look, bodyFormat })
-  const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look, bodyFormat })
+  const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look, bodyFormat }, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
+  const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look, bodyFormat }, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
 
   // Per-project-type SENDER routing. If the location split senders by project
   // type, this drip sends AS the sender assigned to the lead's project_type;

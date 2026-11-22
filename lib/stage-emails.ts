@@ -26,6 +26,7 @@ import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-
 import {
   buildBrandedDripHtml,
   buildBrandedDripText,
+  NO_FOOTER,
   type BrandedEmailContext,
   type CardFooter,
 } from './drip-email-layout'
@@ -103,7 +104,7 @@ export function renderStageEmailContent(
   if (commercial && !canSpamFooter) {
     throw new Error(`stage email ${stageEmailKey} is commercial and needs its CAN-SPAM footer`)
   }
-  const footer = commercial ? canSpamFooter : null
+  const footer = commercial && canSpamFooter ? { footer: canSpamFooter } : NO_FOOTER('an estimate follow-up is transactional')
   return {
     html: buildBrandedDripHtml(renderedBody, brandCtx, footer),
     text: buildBrandedDripText(renderedBody, brandCtx, footer),

@@ -76,8 +76,8 @@ export function renderWelcomeEmailContent(
     throw new Error('the welcome email is commercial and needs its CAN-SPAM footer')
   }
   return {
-    html: buildBrandedDripHtml(renderedBody, brandCtx, canSpamFooter),
-    text: buildBrandedDripText(renderedBody, brandCtx, canSpamFooter),
+    html: buildBrandedDripHtml(renderedBody, brandCtx, { footer: canSpamFooter }),
+    text: buildBrandedDripText(renderedBody, brandCtx, { footer: canSpamFooter }),
   }
 }
 

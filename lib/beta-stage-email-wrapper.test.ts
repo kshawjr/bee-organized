@@ -76,8 +76,7 @@ import {
   DRIP_BRAND_TEAL,
   DRIP_WEBSITE_LABEL,
   DRIP_LOGO_PATH,
-  REVIEWS_LINE_TEXT,
-} from '@/lib/drip-email-layout'
+  REVIEWS_LINE_TEXT, NO_FOOTER } from '@/lib/drip-email-layout'
 
 // The logo + unsubscribe URLs are built from the app origin at render time —
 // pin one so the HTML is deterministic; restore afterward.
@@ -302,20 +301,21 @@ describe('drips are byte-identical to before the footer slot existed', () => {
     const body = 'Hi John,\n\nClick HERE (https://book.example.com/s?a=1&b=2) to book.\n\nThanks,\n\nSarah'
     const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: 'https://g.page/r' }
     const sha = (s: string) => createHash('sha256').update(noImgHeights(s)).digest('hex')
-    expect(sha(buildBrandedDripHtml(body, ctx))).toBe(
+    expect(sha(buildBrandedDripHtml(body, ctx, NO_FOOTER('test')))).toBe(
       '79c288b84e44173d315a43ea0f609c152953aa22ffa9ddb325059e0c8375da4c',
     )
-    expect(sha(buildBrandedDripText(body, ctx))).toBe(
+    expect(sha(buildBrandedDripText(body, ctx, NO_FOOTER('test')))).toBe(
       'fd66adda5b1ff3a4c0b5e9eb2c57246fcf78a9760d04f496de78dd352ae160d2',
     )
-    expect(buildBrandedDripHtml(body, ctx)).not.toContain('bo-card-footer')
+    expect(buildBrandedDripHtml(body, ctx, NO_FOOTER('test'))).not.toContain('bo-card-footer')
   })
 
   it('the drip send site passes no footer', () => {
     const src = readFileSync(join(__dirname, 'drip-send.ts'), 'utf8')
     // bodyFormat (2026-11-13, the body's shape) joined the context; still no third argument, so no footer.
-    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}\)/)
-    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}\)/)
+    // Since 2026-11-22 every caller must SAY "no footer" (lib/drip-email-layout.ts FooterIntent).
+    expect(src).toMatch(/buildBrandedDripHtml\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}, NO_FOOTER\('[^']+'\)\)/)
+    expect(src).toMatch(/buildBrandedDripText\(rendered\.body, \{ \.\.\.ctx, signature, \.\.\.look, bodyFormat \}, NO_FOOTER\('[^']+'\)\)/)
   })
 })
 
@@ -348,7 +348,7 @@ describe('welcome-email render path — branded layout, footer in the card', () 
 
   it('welcome-email.ts renders through the branded layout, not the plain bodyToHtml path', () => {
     expect(src).toMatch(/from '\.\/drip-email-layout'/)
-    expect(src).toMatch(/buildBrandedDripHtml\(renderedBody, brandCtx, canSpamFooter\)/)
+    expect(src).toMatch(/buildBrandedDripHtml\(renderedBody, brandCtx, \{ footer: canSpamFooter \}\)/)
     expect(/bodyToHtml\(/.test(src)).toBe(false)
   })
 

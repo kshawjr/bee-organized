@@ -49,7 +49,7 @@ vi.mock('@/lib/auth', () => ({ isAdmin: (r: string) => r === 'super_admin' || r 
 import * as BeeHubModule from '@/components/BeeHub'
 import * as EmailsScreenModule from '@/components/settings/EmailsScreen'
 import { blockedOnMissingBookingLink, missingBookingLinkMessage } from './booking-link'
-import { buildBrandedDripHtml, buildBrandedDripText, EMAIL_STYLES } from './drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, EMAIL_STYLES, NO_FOOTER } from './drip-email-layout'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 // Both are untyped JavaScript: taken as one value each so this file adds
@@ -461,7 +461,7 @@ describe('no master wording, drip step or email body changed', () => {
   it('an email with no button renders exactly as it did, in every look', () => {
     const body = 'Jordan,\n\nThank you for reaching out! Schedule here: (https://example.com/in-home)\n\nThank you,\nWhitney'
     const ctx = { location_name: 'Portland', location_phone: '(503) 555-0100', reviews_link: 'https://g.page/r/pdx', heading: 'Thank you for reaching out!' }
-    const out = EMAIL_STYLES.map(s => `${s.id}:${sha(buildBrandedDripHtml(body, { ...ctx, style: s.id } as any))}:${sha(buildBrandedDripText(body, { ...ctx, style: s.id } as any))}`)
+    const out = EMAIL_STYLES.map(s => `${s.id}:${sha(buildBrandedDripHtml(body, { ...ctx, style: s.id } as any, NO_FOOTER('test')))}:${sha(buildBrandedDripText(body, { ...ctx, style: s.id } as any, NO_FOOTER('test')))}`)
     expect(out).toEqual(RENDER_FINGERPRINTS)
   })
   it('the draft button is only ever handed to the two Emails editors', () => {

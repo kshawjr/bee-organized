@@ -31,7 +31,7 @@ import {
   bodyForEditor, sanitizeEmailHtml, plainBodyToHtml, mergeTagsIn, htmlBodyToText, bodyAsPlainText, mergeTagSpan, LARGE_PX,
 } from './email-body-html'
 import { bodyForSave } from './email-body-save'
-import { buildBrandedDripHtml } from './drip-email-layout'
+import { buildBrandedDripHtml, NO_FOOTER } from './drip-email-layout'
 import * as BeeHub from '@/components/BeeHub'
 const { DripPathStepEditor, EmailTemplateEditor, stepEditorContent, stepEditorFormat, applyStepContentEdit, buildEmailList } = BeeHub as any
 
@@ -157,7 +157,7 @@ describe('what the editor can make', () => {
       .toBe('<p>schf<span style="font-size:20px">ok</span></p>')
   })
   it('Large is sent at 20px with its own line height, inline', () => {
-    const out = buildBrandedDripHtml('<p>Hi <span style="font-size:20px">there</span></p>', { location_name: 'Denver', bodyFormat: 'html' })
+    const out = buildBrandedDripHtml('<p>Hi <span style="font-size:20px">there</span></p>', { location_name: 'Denver', bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(out).toContain('Hi <span style="font-size:20px;line-height:30px;">there</span></p>')
   })
   it('a link may be a full web address or one merge tag, and nothing else', () => {

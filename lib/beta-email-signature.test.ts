@@ -82,7 +82,7 @@ import {
   type SignatureCandidate,
 } from '@/lib/email-signature-resolve'
 import { renderTemplate } from '@/lib/resend'
-import { buildBrandedDripHtml, buildBrandedDripText, DRIP_WEBSITE_URL } from '@/lib/drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, DRIP_WEBSITE_URL, NO_FOOTER } from '@/lib/drip-email-layout'
 import { bodyToHtml } from '@/lib/drip-send'
 import { renderStageEmailContent } from '@/lib/stage-emails'
 
@@ -470,8 +470,8 @@ describe('both email layouts render it — where it was typed, once, and nowhere
   }
 
   it('branded layout (drips, estimate follow-ups): HTML and text', () => {
-    checkPlacement(buildBrandedDripHtml(body, brandCtx))
-    const text = buildBrandedDripText(body, brandCtx)
+    checkPlacement(buildBrandedDripHtml(body, brandCtx, NO_FOOTER('test')))
+    const text = buildBrandedDripText(body, brandCtx, NO_FOOTER('test'))
     expect(text).toContain('Thank you,\nJane Smith\nOwner & Lead Organizer\njane@beeorganized.com\nMobile: (303) 555-0147')
     expect(text).not.toContain(SIGNATURE_MARKER)
   })
@@ -495,11 +495,11 @@ describe('both email layouts render it — where it was typed, once, and nowhere
   it('no tag in the body → byte-identical to before (no signature, no stray marker)', () => {
     const plain = 'Hi John,\n\nThank you,\nJane'
     expect(bodyToHtml(plain, FULL)).toBe(bodyToHtml(plain))
-    expect(buildBrandedDripHtml(plain, brandCtx)).toBe(buildBrandedDripHtml(plain, { ...brandCtx, signature: null }))
+    expect(buildBrandedDripHtml(plain, brandCtx, NO_FOOTER('test'))).toBe(buildBrandedDripHtml(plain, { ...brandCtx, signature: null }, NO_FOOTER('test')))
   })
 
   it('a marker with no resolved signature is dropped, never shown', () => {
-    for (const h of [bodyToHtml(body, null), buildBrandedDripHtml(body, { ...brandCtx, signature: null }), buildBrandedDripText(body, { ...brandCtx, signature: null })]) {
+    for (const h of [bodyToHtml(body, null), buildBrandedDripHtml(body, { ...brandCtx, signature: null }, NO_FOOTER('test')), buildBrandedDripText(body, { ...brandCtx, signature: null }, NO_FOOTER('test'))]) {
       expect(h).not.toContain(SIGNATURE_MARKER)
       expect(h).not.toContain('')
       expect(h).toContain('Thank you,')
@@ -566,7 +566,7 @@ describe('nothing an owner typed is ever rendered as HTML', () => {
     ).body
     for (const out of [
       bodyToHtml(body, HOSTILE),
-      buildBrandedDripHtml(body, { location_name: 'Boulder', signature: HOSTILE }),
+      buildBrandedDripHtml(body, { location_name: 'Boulder', signature: HOSTILE }, NO_FOOTER('test')),
       renderStageEmailContent('opp_closed_job_3mo', body, { location_name: 'Boulder', signature: HOSTILE }, { html: '<p>unsubscribe</p>', text: 'unsubscribe' }).html,
     ]) {
       expect(out).not.toMatch(/<script/i)

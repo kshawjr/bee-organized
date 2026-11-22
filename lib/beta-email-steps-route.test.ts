@@ -89,8 +89,9 @@ describe('timing in months and years survives a save and a reload', () => {
     const fn = (name: string) => { const a = beehub.indexOf(name); return beehub.slice(a, beehub.indexOf('\n  }\n', a)) }
     expect(fn('async function loadLocationPaths()')).toContain('delayUnit: s.delay_unit ?? null,')
     expect(fn('async function commitSteps(')).toContain("delay_unit: s.delayUnit === 'months' || s.delayUnit === 'years' ? s.delayUnit : null,")
-    // 30 days is the case that tells them apart: "A month later" as the owner
-    // chose it, "Day 30" without the unit.
+    // 30 days is the case that tells them apart: "A month" as the owner
+    // chose it (the list drops "later" since 2026-11-22, Kevin), "Day 30"
+    // without the unit.
     const { newLead } = buildEmailList({
       pathSteps: { p: [
         { order: 1, type: 'email', delay_days: 0, subject: 'One', body: 'x' },
@@ -99,7 +100,7 @@ describe('timing in months and years survives a save and a reload', () => {
       ] },
       templates: [], pathKey: 'p',
     })
-    expect(newLead.map((r: any) => r.when)).toEqual(['Right away', 'A month later', 'Day 31'])
+    expect(newLead.map((r: any) => r.when)).toEqual(['Right away', 'A month', 'Day 31'])
   })
 })
 

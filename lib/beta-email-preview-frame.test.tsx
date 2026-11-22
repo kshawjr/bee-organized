@@ -20,6 +20,7 @@
 //    height; a band that does not load was drawn 600×600. They carry their
 //    height now. That is the ONLY change to anything that is sent, and it is
 //    pinned byte for byte against main (969a658).
+import { withoutFooterIntent } from '@/lib/network/footer-intent-footprint'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { readFileSync } from 'node:fs'
@@ -33,7 +34,7 @@ vi.mock('@/lib/supabase-server', () => ({ createServerSupabaseClient: () => ({ a
 vi.mock('@/lib/auth', () => ({ requireAuth: vi.fn(async () => ({ id: 'a1' })), getHubUser: vi.fn(async () => ({ id: 'u1', role: 'super_admin', location_id: 'loc' })), isAdmin: () => true }))
 
 import * as EmailsScreenModule from '@/components/settings/EmailsScreen'
-import { buildBrandedDripHtml, buildBrandedDripText, buildBrandedShellHtml, EMAIL_STYLES, EMAIL_HONEYCOMB_HEIGHT, DRIP_LOGO_HEIGHT } from './drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, buildBrandedShellHtml, EMAIL_STYLES, EMAIL_HONEYCOMB_HEIGHT, DRIP_LOGO_HEIGHT, NO_FOOTER } from './drip-email-layout'
 import { buildMarketingFooter, COMMERCIAL_EMAIL_AUDIENCE } from './marketing-consent'
 import { GET as emailSettingsGET } from '@/app/api/locations/[id]/email-settings/route'
 
@@ -235,10 +236,10 @@ const FOOTER = buildMarketingFooter({ unsubscribeUrl: 'https://beehive.beeorgani
 const sentCases = () => {
   const out: Record<string, string> = {}
   for (const s of EMAIL_STYLES.map((x: any) => x.id)) {
-    out[`${s}/drip`] = buildBrandedDripHtml(BODY, ctx(s) as any)
-    out[`${s}/commercial`] = buildBrandedDripHtml(BODY, ctx(s) as any, FOOTER)
-    out[`${s}/bare`] = buildBrandedDripHtml('Hi.', ctx(s, { heading: null, button: null, reviews_link: null, location_phone: null }) as any)
-    out[`${s}/shell`] = buildBrandedShellHtml('<p>New lead</p>', 'Bee Organized', '', { style: s, heading: 'New lead' })
+    out[`${s}/drip`] = buildBrandedDripHtml(BODY, ctx(s) as any, NO_FOOTER('test'))
+    out[`${s}/commercial`] = buildBrandedDripHtml(BODY, ctx(s) as any, { footer: FOOTER })
+    out[`${s}/bare`] = buildBrandedDripHtml('Hi.', ctx(s, { heading: null, button: null, reviews_link: null, location_phone: null }) as any, NO_FOOTER('test'))
+    out[`${s}/shell`] = buildBrandedShellHtml('<p>New lead</p>', 'Bee Organized', NO_FOOTER('test'), { style: s, heading: 'New lead' })
   }
   return out
 }
@@ -266,7 +267,7 @@ describe('the sent email is what it was on main, apart from three image heights'
     }
   })
   it('the plain-text half and the unsubscribe block are untouched', () => {
-    const texts = Object.fromEntries(EMAIL_STYLES.map((x: any) => [x.id, [buildBrandedDripText(BODY, ctx(x.id) as any), buildBrandedDripText(BODY, ctx(x.id) as any, FOOTER)]]))
+    const texts = Object.fromEntries(EMAIL_STYLES.map((x: any) => [x.id, [buildBrandedDripText(BODY, ctx(x.id) as any, NO_FOOTER('test')), buildBrandedDripText(BODY, ctx(x.id) as any, { footer: FOOTER })]]))
     expect(sha({ texts, FOOTER })).toBe('66b5f42b93ba0f31')   // from main 969a658, same script
   })
 })
@@ -274,7 +275,12 @@ describe('the sent email is what it was on main, apart from three image heights'
 describe('nothing about what is sent changes because of the preview', () => {
   it('the files that build and send an email are byte for byte main’s — all but the two this change names', () => {
     const files = ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'lib/marketing-unsubscribe.ts', 'lib/booking-link.ts', 'lib/rate-guard.ts', 'lib/email-signature.ts', 'lib/resend.ts', 'app/api/emails/test-send/route.ts', 'app/api/cron/send-drips/route.ts']
-    expect(sha(Object.fromEntries(files.map(f => [f, sha(read(f))])))).toBe('f142e503277a2308')   // was 33fa2be6cafc2c58 until 2026-11-13 (email body format, slice 2a of the rich-text editor): the four senders (drip-send, welcome-email, stage-emails, test-send) read the body's shape from the row the body came from and pass it to the merge fill and the layout, and lib/resend.ts escapes merge values when the body is html. A plain body takes the path it always took: every rendered-output fingerprint in this file, in beta-email-button-section and in beta-stage-email-wrapper is unchanged. Before that: was 45a3bbde79ea16f8 until 2026-11-13 (booking links): the held-email reason now names the box that is blank — lib/booking-link.ts swapped one fixed sentence for missingBookingLinkMessage(), and lib/drip-send.ts calls it with the same links the guard just read. Checked by diff: the guard, what is sent and when are unchanged; lib/booking-link.test.ts pins the new sentence. Before that: was 04070b0206a5984a on main 969a658. ONE sentence changed since, in lib/drip-send.ts (Settings slice 2, 2026-11-13): the held-email reason stopped sending owners to "Settings → New leads", a section that no longer exists. Checked by diff when it was made: that one line is the file's only difference.
+    // 2026-11-22: the layout's footer argument became required, so drip-send,
+    // welcome-email, stage-emails and the test send each SAY "no footer" or
+    // pass theirs. Exactly those edits are taken back out first
+    // (lib/network/footer-intent-footprint.ts); what is sent is pinned by
+    // output in lib/network/client-email-bytes.test.ts.
+    expect(sha(Object.fromEntries(files.map(f => [f, sha(withoutFooterIntent(f, read(f)))])))).toBe('f142e503277a2308')   // was 33fa2be6cafc2c58 until 2026-11-13 (email body format, slice 2a of the rich-text editor): the four senders (drip-send, welcome-email, stage-emails, test-send) read the body's shape from the row the body came from and pass it to the merge fill and the layout, and lib/resend.ts escapes merge values when the body is html. A plain body takes the path it always took: every rendered-output fingerprint in this file, in beta-email-button-section and in beta-stage-email-wrapper is unchanged. Before that: was 45a3bbde79ea16f8 until 2026-11-13 (booking links): the held-email reason now names the box that is blank — lib/booking-link.ts swapped one fixed sentence for missingBookingLinkMessage(), and lib/drip-send.ts calls it with the same links the guard just read. Checked by diff: the guard, what is sent and when are unchanged; lib/booking-link.test.ts pins the new sentence. Before that: was 04070b0206a5984a on main 969a658. ONE sentence changed since, in lib/drip-send.ts (Settings slice 2, 2026-11-13): the held-email reason stopped sending owners to "Settings → New leads", a section that no longer exists. Checked by diff when it was made: that one line is the file's only difference.
   })
   it('lib/marketing-consent.ts gained one list and lost nothing: with it taken out the file is main’s', () => {
     const src = read('lib/marketing-consent.ts')
@@ -283,7 +289,7 @@ describe('nothing about what is sent changes because of the preview', () => {
     expect(sha(src.slice(0, a) + src.slice(b))).toBe('fbe03e19bc7817eb')   // from main 969a658, same script
   })
   it('lib/drip-email-layout.ts: with the heights and their note taken out, the file is main’s', () => {
-    const src = read('lib/drip-email-layout.ts')
+    const src = withoutFooterIntent('lib/drip-email-layout.ts', read('lib/drip-email-layout.ts'))
     const a = src.indexOf('// IMAGE HEIGHTS, AS ATTRIBUTES'), b = src.indexOf('export const resolveHoneycombUrl')
     const back = (src.slice(0, a) + src.slice(b)).replace(/ height="\$\{EMAIL_HONEYCOMB_HEIGHT\}"/g, '').replace(' height="${DRIP_LOGO_HEIGHT}"', '')
     expect(sha(back)).toBe('1e8a938613e4cdc5')   // was 99cf207362394013 until 2026-11-13 (rich-text editor, slice 2b): the html-body path learned Large text (a 20px span, sent with its own line height) — one line in the html branch and one import; the plain path is untouched. Before that: was a082bf9c1e160398 (main 969a658) until 2026-11-13 (email body format, slice 2a): the layout gained the html-body path — bodyFormat on the context, the block renderer, and one branch ahead of the plain builder. Nothing in the plain path was edited; lib/beta-email-body-format.test.ts holds a plain body's output against itself with and without the new field, and the rendered-output fingerprints above still pass untouched
@@ -313,7 +319,7 @@ describe('the preview of a commercial email ends the way the sent one does', () 
       const html = previewEmailHtml({ row: r, style: 'soft', values, postalAddress: '123 Main St, Kansas City, MO 64111' })
       const footer = buildMarketingFooter({ unsubscribeUrl: previewCardFooter(r, 'x').html.match(/href="([^"]+)"/)![1], postalAddress: '123 Main St, Kansas City, MO 64111', audience: COMMERCIAL_EMAIL_AUDIENCE[key] })
       // exactly what a send builds for it: the same layout call, with the footer
-      expect(html).toBe(buildBrandedDripHtml('Hi Jordan,\n\nThanks for getting in touch.', { location_name: 'Central Denver', location_phone: '(303) 555-0142', reviews_link: null, signature: null, style: 'soft', heading: 'Welcome, Jordan', button: null } as any, footer))
+      expect(html).toBe(buildBrandedDripHtml('Hi Jordan,\n\nThanks for getting in touch.', { location_name: 'Central Denver', location_phone: '(303) 555-0142', reviews_link: null, signature: null, style: 'soft', heading: 'Welcome, Jordan', button: null } as any, { footer: footer }))
       expect(html).toContain('class="bo-card-footer')
       expect(html).toContain('>Unsubscribe</a> at any time')
       expect(html).toContain('Bee Organized &middot; 123 Main St, Kansas City, MO 64111')
@@ -348,7 +354,8 @@ describe('the preview of a commercial email ends the way the sent one does', () 
     const src = read('components/BeeHub.jsx')
     expect(src.split('templateKey: row.templateKey }} />').length - 1).toBe(1)
     expect(src).toContain('postalAddress: preview.postalAddress })} />')
-    expect(read('components/settings/EmailsScreen.jsx')).toContain('signature: ctx.signature, postalAddress: ctx.postalAddress })} />')
+    // (2026-11-22: the editor's audience rides along, so a partner email's Preview is built like its send)
+    expect(read('components/settings/EmailsScreen.jsx')).toContain('signature: ctx.signature, postalAddress: ctx.postalAddress, audience })} />')
   })
 
   describe('the address comes from the server, read-only', () => {

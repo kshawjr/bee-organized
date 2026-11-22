@@ -134,7 +134,7 @@ import {
   NO_LINKS_NOTE,
 } from '@/lib/email-signature-edit'
 import { buildSignatureHtml, buildSignatureText, SIGNATURE_PHOTO_ROUTE, SIGNATURE_MARKER } from '@/lib/email-signature'
-import { buildBrandedDripHtml, buildBrandedDripText } from '@/lib/drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, NO_FOOTER } from '@/lib/drip-email-layout'
 import { bodyToHtml } from '@/lib/drip-send'
 import { assembleSignature, NO_LINKS, resolveEmailSignature } from '@/lib/email-signature-resolve'
 import { signatureFromData } from '@/components/settings/EmailsScreen'
@@ -389,8 +389,8 @@ describe('the no-links note: in the preview, never in an email', () => {
     for (const out of [
       buildSignatureHtml(sig),
       buildSignatureText(sig),
-      buildBrandedDripHtml(body, { location_name: 'Boulder', signature: sig }),
-      buildBrandedDripText(body, { location_name: 'Boulder', signature: sig }),
+      buildBrandedDripHtml(body, { location_name: 'Boulder', signature: sig }, NO_FOOTER('test')),
+      buildBrandedDripText(body, { location_name: 'Boulder', signature: sig }, NO_FOOTER('test')),
       bodyToHtml(body, sig),
     ]) {
       expect(out).not.toContain('No website or social links')
@@ -431,7 +431,7 @@ describe('the screen’s preview and a sent email produce the same signature HTM
       expect(buildSignatureHtml(sent)).toBe(preview)
       // …and what lands in the email, through both body builders.
       const text = `Thank you,\n${SIGNATURE_MARKER}`
-      expect(buildBrandedDripHtml(text, { location_name: locName, signature: sent })).toContain(preview)
+      expect(buildBrandedDripHtml(text, { location_name: locName, signature: sent }, NO_FOOTER('test'))).toContain(preview)
       expect(bodyToHtml(text, sent)).toContain(preview)
     })
   }

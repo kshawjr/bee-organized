@@ -22,7 +22,7 @@ vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: () => { thro
 import { OWNER_MERGE_TAGS, LEGACY_MERGE_TAGS, insertAtCursor } from './merge-tags'
 import { renderTemplate } from './resend'
 import { SIGNATURE_MARKER } from './email-signature'
-import { buildBrandedDripHtml } from './drip-email-layout'
+import { buildBrandedDripHtml, NO_FOOTER } from './drip-email-layout'
 // BeeHub.jsx is untyped; a namespace import keeps that out of the type count.
 import * as BeeHub from '@/components/BeeHub'
 const { DripPathStepEditor, EmailTemplateEditor } = BeeHub as any
@@ -55,7 +55,7 @@ describe('every tag offered to an owner renders something', () => {
     const html = buildBrandedDripHtml(r.body, { location_name: 'KC', signature: {
       name: 'Lynette Ewy', title: null, email: 'l@x.com', mobile: null, photoPath: null,
       websiteUrl: null, facebookUrl: null, instagramUrl: null, linkedinUrl: null,
-    } })
+    } }, NO_FOOTER('test'))
     expect(html).toContain('Lynette Ewy</td>')
   })
 })

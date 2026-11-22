@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import React from 'react'
-import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle } from '@/lib/drip-email-layout'
+import { buildBrandedDripHtml, EMAIL_STYLES, normalizeEmailStyle, NO_FOOTER } from '@/lib/drip-email-layout'
 import { escHtml } from '@/lib/email-escape'
 import { htmlBodyToText, bodyAsPlainText } from '@/lib/email-body-html'
 import { SIGNATURE_MARKER, SIGNATURE_ICON_PATHS, safeHttpUrl, linkedinFor, signatureInitials } from '@/lib/email-signature'
@@ -22,7 +22,7 @@ import { uploadSignaturePhoto } from '@/lib/signature-photo'
 import { OWNER_MERGE_TAGS, MERGE_TAG_GROUPS, mergeTagToken, insertAtCursor } from '@/lib/merge-tags'
 import { buildMarketingFooter, COMMERCIAL_EMAIL_AUDIENCE } from '@/lib/marketing-consent'
 import { isPartnerPathKey } from '@/lib/partner-sequences'
-import { buildPartnerFooter } from '@/lib/network/partner-footer'
+import { buildPartnerEmail } from '@/lib/network/partner-email'
 
 // ── Tokens (export src/styles.css :root) ──────────────────────────────────
 // Exact: the export's oklch values converted to hex (Kevin, 2026-10-30
@@ -604,7 +604,7 @@ export function sampleEmailHtml(style) {
     style,
     heading: 'Thank you for reaching out!',
     button: { label: 'Book a Discovery Call', href: 'https://beeorganized.com' },
-  })
+  }, NO_FOOTER('a style sample, not an email anyone receives'))
 }
 
 // A real email in an iframe, scaled to the box (export ScaledFrame). The
@@ -752,21 +752,23 @@ export function EmailStyleSection({ style, onPick, ready = true, saving = false,
 //     send's does — never an invented address.
 // Drip emails carry no such block, so their previews were already complete.
 export const PREVIEW_UNSUBSCRIBE_PATH = '/unsubscribe/test-email'
+const previewOrigin = () => typeof window !== 'undefined' && window.location && /^https?:/.test(window.location.origin || '') ? window.location.origin : ''
+// A CLIENT email's footer, if it carries one. (A partner email's footer is
+// never built here: it comes with the whole email, from buildPartnerEmail.)
 export function previewCardFooter(row, postalAddress = null) {
-  const origin = typeof window !== 'undefined' && window.location && /^https?:/.test(window.location.origin || '') ? window.location.origin : ''
-  // Partner emails (slice 3): every one carries the footer, always.
-  if (isPartnerPathKey(row?.pathKey)) {
-    return buildPartnerFooter({ unsubscribeUrl: `${origin}${PREVIEW_UNSUBSCRIBE_PATH}`, postalAddress: (postalAddress || '').trim() || '(your postal address)' })
-  }
   const audience = COMMERCIAL_EMAIL_AUDIENCE[row?.templateKey]
   if (!audience) return null
+  const origin = previewOrigin()
   return buildMarketingFooter({
     unsubscribeUrl: `${origin}${PREVIEW_UNSUBSCRIBE_PATH}`,
     postalAddress: (postalAddress || '').trim() || '(your postal address)',
     audience,
   })
 }
-export function previewEmailHtml({ row, style, values, signature = null, postalAddress = null }) {
+// audience 'partner' (or a row of a partner sequence): the email is built by
+// buildPartnerEmail, the one path a partner email takes everywhere — so the
+// Preview, the Read window and the send can never differ about the footer.
+export function previewEmailHtml({ row, style, values, signature = null, postalAddress = null, audience = null }) {
   const sw = { subject: row?.subject ?? '', body: row?.body ?? '', buttonLink: row?.buttonLink || '' }
   // An html body (the rich editor's) has its values escaped as they go in,
   // exactly as the send does (lib/resend.ts), and the layout is told its shape.
@@ -779,7 +781,7 @@ export function previewEmailHtml({ row, style, values, signature = null, postalA
   const subject = fill(sw.subject, false)
   const body = fill(sw.body, true, html)
   const buttonLink = fill(sw.buttonLink, false)
-  return buildBrandedDripHtml(body, {
+  const brand = {
     location_name: values.location_name,
     location_phone: values.location_phone,
     reviews_link: values.reviews_link,
@@ -788,7 +790,16 @@ export function previewEmailHtml({ row, style, values, signature = null, postalA
     heading: subject,
     button: row?.buttonText && buttonLink ? { label: fill(row.buttonText, false), href: buttonLink, align: row.buttonAlign } : null,
     ...(html ? { bodyFormat: 'html' } : null),
-  }, previewCardFooter(row, postalAddress))
+  }
+  if (audience === 'partner' || isPartnerPathKey(row?.pathKey)) {
+    return buildPartnerEmail({
+      renderedBody: body, brand,
+      unsubscribeUrl: `${previewOrigin()}${PREVIEW_UNSUBSCRIBE_PATH}`,
+      postalAddress: (postalAddress || '').trim() || '(your postal address)',
+    }).html
+  }
+  const footer = previewCardFooter(row, postalAddress)
+  return buildBrandedDripHtml(body, brand, footer ? { footer } : NO_FOOTER('this client email carries no CAN-SPAM footer'))
 }
 
 // "Send me a test" (export, in the read dialog). POSTs to the real send path.
@@ -1448,7 +1459,11 @@ const ButtonIcon = ({ id, size = 18 }) => (
 // Kept from before, on purpose (the design drew none of them): the words stay
 // the owner's to change for every card; the left / centre / right position;
 // the amber "not set up" card and the held warning; and the no-links state.
-export function ButtonFields({ text, link, align = null, onText, onLink, onAlign = null, alignReady = false, links = null, labelStyle = null, inputStyle = null }) {
+// bookingLinks (partner emails, Kevin 2026-11-22): false on a partner email —
+// only None and Custom are offered; the three booking links are a client's.
+// (A step that somehow already points at one still shows that one card, so it
+// can be switched away from.)
+export function ButtonFields({ text, link, align = null, onText, onLink, onAlign = null, alignReady = false, links = null, labelStyle = null, inputStyle = null, bookingLinks = true }) {
   const lab = labelStyle || eLabelStyle
   const inp = inputStyle || eInputStyle
   const [touched, setTouched] = React.useState(false)
@@ -1456,7 +1471,7 @@ export function ButtonFields({ text, link, align = null, onText, onLink, onAlign
   const choice = buttonChoiceOf(link)
   const saved = (id) => !links || !blank(links[id])
   const noLinks = !!links && BUTTON_LINKS.every(l => blank(links[l.id]))
-  const shown = BUTTON_LINKS.filter(l => !noLinks || l.id === choice)
+  const shown = bookingLinks ? BUTTON_LINKS.filter(l => !noLinks || l.id === choice) : BUTTON_LINKS.filter(l => l.id === choice)
   const ids = ['none', ...shown.map(l => l.id), 'custom']
   const pick = (id) => {
     setTouched(false)
@@ -1517,7 +1532,7 @@ export function ButtonFields({ text, link, align = null, onText, onLink, onAlign
           {card('custom', 'Custom')}
         </div>
         <p data-button-caption aria-live="polite" style={{ ...eHintStyle, margin:'8px 0 0' }}>{buttonCaption(choice)}</p>
-        {noLinks && (
+        {noLinks && bookingLinks && (
           <p data-no-links style={{ ...eHintStyle, margin:'6px 0 0' }}>You haven’t saved any booking links yet. Add them in Your details, or use Custom for any web address.</p>
         )}
       </div>
@@ -1585,12 +1600,14 @@ export const SAMPLE_PREVIEW = {
     owner_booking_link: 'https://example.com/in-home', rate_per_hour: '$95',
   },
 }
-export function EditorPreview({ draft, preview }) {
+// audience: the editor's own ('partner' on a partner email), so its Preview is
+// built the same way as the Read window and the send.
+export function EditorPreview({ draft, preview, audience = null }) {
   const ctx = preview || SAMPLE_PREVIEW
   return (
     <div data-editor-preview>
       {!preview && <p style={{ ...eHintStyle, margin:'0 0 8px' }}>Shown with sample details.</p>}
-      <EmailFrame html={previewEmailHtml({ row: draft, style: ctx.style, values: ctx.values, signature: ctx.signature, postalAddress: ctx.postalAddress })} />
+      <EmailFrame html={previewEmailHtml({ row: draft, style: ctx.style, values: ctx.values, signature: ctx.signature, postalAddress: ctx.postalAddress, audience })} />
     </div>
   )
 }

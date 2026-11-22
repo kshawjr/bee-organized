@@ -15,8 +15,7 @@ import {
   DRIP_BRAND_TEAL,
   DRIP_WEBSITE_URL,
   DRIP_WEBSITE_LABEL,
-  REVIEWS_LINE_TEXT,
-} from './drip-email-layout'
+  REVIEWS_LINE_TEXT, NO_FOOTER } from './drip-email-layout'
 
 // The self-hosted logo URL is built from the app origin at render time. Pin a
 // known origin for the tests so the src is deterministic; restore afterwards.
@@ -61,7 +60,7 @@ Sarah Mitchell`
 
 describe('branded drip wrapper — chrome', () => {
   it('embeds the self-hosted logo as an absolute HTTPS URL off the app origin, real alt text (not a data URI / CDN hot-link)', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     const expectedUrl = `${APP_ORIGIN}${DRIP_LOGO_PATH}`
     expect(html).toContain(`src="${expectedUrl}"`)
     expect(expectedUrl.startsWith('https://')).toBe(true)
@@ -84,7 +83,7 @@ describe('branded drip wrapper — chrome', () => {
   })
 
   it('is table-based with the wordmark and a max-width single column', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).toContain('role="presentation"')
     expect(html).toContain('max-width:600px')
     expect(html).toContain('>Bee Organized</p>')
@@ -93,7 +92,7 @@ describe('branded drip wrapper — chrome', () => {
   })
 
   it('declares color-scheme + a dark-mode guard for the card and text', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).toContain('color-scheme')
     expect(html).toContain('prefers-color-scheme: dark')
     expect(html).toContain('.dm-card')
@@ -103,7 +102,7 @@ describe('branded drip wrapper — chrome', () => {
 
 describe('branded drip wrapper — the location line under the card', () => {
   it('renders "Bee Organized <name> | beeorganized.com | <phone>"', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).toContain('Bee Organized Boulder | ')
     expect(html).toContain('(303) 555-0147')
     // Website: shown without the scheme, linked to the full URL, hardcoded.
@@ -112,7 +111,7 @@ describe('branded drip wrapper — the location line under the card', () => {
   })
 
   it('the teal band is gone (2026-10-30): no teal fill, no white text', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).not.toContain(`bgcolor="${DRIP_BRAND_TEAL}"`)
     expect(html).not.toMatch(/[^-]color:#ffffff/i)   // text colour, not the card background
   })
@@ -120,7 +119,7 @@ describe('branded drip wrapper — the location line under the card', () => {
 
 describe('branded drip wrapper — links', () => {
   it('renders the booking CTA as a working link on the word, URL hidden, & encoded', () => {
-    const html = buildBrandedDripHtml(BODY_WITH_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_WITH_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).toContain(
       '<a href="https://book.example.com/sarah?ref=a&amp;b=2"',
     )
@@ -130,21 +129,21 @@ describe('branded drip wrapper — links', () => {
   })
 
   it('renders the reviews line as a working link', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     expect(html).toContain(
       `<a href="${ctx.reviews_link}" style="color:#60625F;text-decoration:underline;">${REVIEWS_LINE_TEXT}</a>`,
     )
   })
 
   it('does NOT duplicate the reviews line when the body already carries it', () => {
-    const html = buildBrandedDripHtml(BODY_WITH_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_WITH_REVIEWS, ctx, NO_FOOTER('test'))
     // Exactly one anchor points at the reviews link.
     const occurrences = html.split(`href="${ctx.reviews_link}"`).length - 1
     expect(occurrences).toBe(1)
   })
 
   it('injects the reviews line when the body lacks it', () => {
-    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
+    const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     const occurrences = html.split(`href="${ctx.reviews_link}"`).length - 1
     expect(occurrences).toBe(1)
   })
@@ -171,7 +170,7 @@ describe('branded drip wrapper — token safety & degradation', () => {
       'Call (303) 555-0147.', // location_phone
       'Thank you, Sarah Mitchell', // owner_name
     ].join('\n\n')
-    const html = buildBrandedDripHtml(body, ctx)
+    const html = buildBrandedDripHtml(body, ctx, NO_FOOTER('test'))
     for (const needle of ['John', '$95 per hour', 'Sarah Mitchell', 'Book']) {
       expect(html).toContain(needle)
     }
@@ -184,7 +183,7 @@ describe('branded drip wrapper — token safety & degradation', () => {
       location_name: 'Boulder',
       location_phone: null,
       reviews_link: null,
-    })
+    }, NO_FOOTER('test'))
     expect(html).not.toMatch(/\{\{[a-z_]+\}\}/)
     // No reviews_link → no injected reviews line, no broken anchor.
     expect(html).not.toContain('href=""')
@@ -196,7 +195,7 @@ describe('branded drip wrapper — token safety & degradation', () => {
       location_name: null,
       location_phone: null,
       reviews_link: null,
-    })
+    }, NO_FOOTER('test'))
     // Just "Bee Organized | beeorganized.com" — the separator precedes the
     // website link, and there is no doubled/trailing separator (no empty
     // name or phone segment).
@@ -209,7 +208,7 @@ describe('branded drip wrapper — token safety & degradation', () => {
 
 describe('branded drip wrapper — plain text alternative', () => {
   it('is present, matches, and carries the footer band', () => {
-    const text = buildBrandedDripText(BODY_WITH_REVIEWS, ctx)
+    const text = buildBrandedDripText(BODY_WITH_REVIEWS, ctx, NO_FOOTER('test'))
     expect(text.startsWith('BEE ORGANIZED\n\n')).toBe(true)
     expect(text).toContain('Bee Organized Boulder | beeorganized.com | (303) 555-0147')
     // Body copy survives verbatim (plain text keeps visible URLs).
@@ -219,14 +218,14 @@ describe('branded drip wrapper — plain text alternative', () => {
   })
 
   it('injects the reviews line in text when the body lacks it, once', () => {
-    const text = buildBrandedDripText(BODY_NO_REVIEWS, ctx)
+    const text = buildBrandedDripText(BODY_NO_REVIEWS, ctx, NO_FOOTER('test'))
     const occurrences = text.split(REVIEWS_LINE_TEXT).length - 1
     expect(occurrences).toBe(1)
     expect(text).toContain(`${REVIEWS_LINE_TEXT} (${ctx.reviews_link})`)
   })
 
   it('does not duplicate the reviews line in text when the body already carries it', () => {
-    const text = buildBrandedDripText(BODY_WITH_REVIEWS, ctx)
+    const text = buildBrandedDripText(BODY_WITH_REVIEWS, ctx, NO_FOOTER('test'))
     const occurrences = text.split(REVIEWS_LINE_TEXT).length - 1
     expect(occurrences).toBe(1)
   })

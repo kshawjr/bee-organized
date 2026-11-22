@@ -65,7 +65,7 @@ import { appendCanSpamFooter } from '@/lib/marketing-unsubscribe'
 import { buildMarketingFooter } from '@/lib/marketing-consent'
 import { sendWelcomeEmail } from '@/lib/welcome-email'
 import { sendStageEmail, renderStageEmailContent } from '@/lib/stage-emails'
-import { buildBrandedDripHtml } from '@/lib/drip-email-layout'
+import { buildBrandedDripHtml, NO_FOOTER } from '@/lib/drip-email-layout'
 
 // ── env: the footer needs a postal address + an absolute app origin. Pin both;
 //    restore whatever the runner had afterward.
@@ -286,7 +286,7 @@ describe('transactional content stays footer-less', () => {
   })
 
   it('the drip branded wrapper carries no CAN-SPAM footer (drips are transactional)', () => {
-    const html = buildBrandedDripHtml('Body of a drip step', brandCtx)
+    const html = buildBrandedDripHtml('Body of a drip step', brandCtx, NO_FOOTER('test'))
     expect(html.toLowerCase()).not.toContain('unsubscribe')
   })
 })

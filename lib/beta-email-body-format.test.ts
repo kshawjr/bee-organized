@@ -54,7 +54,7 @@ import {
   sanitizeEmailHtml, plainBodyToHtml, htmlBodyToText, parseEmailHtml, mergeTagsIn, bodyFormatOf, allowedHref,
 } from './email-body-html'
 import { bodyForSave, isMissingBodyFormatColumn } from './email-body-save'
-import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, NO_FOOTER } from './drip-email-layout'
 import { SIGNATURE_MARKER } from './email-signature'
 import { renderTemplate } from './resend'
 import { parseStepExtras, extrasNeedingMissingColumns, stepExtrasForInsert, stepExtrasFromRow, STEP_EXTRA_COLUMNS } from './drip-step-extras'
@@ -112,8 +112,8 @@ function bothWays(body: string, ctx: any) {
   const c = { ...base, ...ctx }
   return {
     saved: saved.body,
-    plainHtml: buildBrandedDripHtml(plain.body, c), plainText: buildBrandedDripText(plain.body, c),
-    htmlHtml: buildBrandedDripHtml(html.body, { ...c, bodyFormat: 'html' }), htmlText: buildBrandedDripText(html.body, { ...c, bodyFormat: 'html' }),
+    plainHtml: buildBrandedDripHtml(plain.body, c, NO_FOOTER('test')), plainText: buildBrandedDripText(plain.body, c, NO_FOOTER('test')),
+    htmlHtml: buildBrandedDripHtml(html.body, { ...c, bodyFormat: 'html' }, NO_FOOTER('test')), htmlText: buildBrandedDripText(html.body, { ...c, bodyFormat: 'html' }, NO_FOOTER('test')),
   }
 }
 // What a body's text is once runs of blank lines are one blank line — the
@@ -164,10 +164,10 @@ describe('a plain body is sent exactly as before', () => {
   const BODY = 'Hi {{first_name}},\n\nClick HERE ({{book_assessment_link}}) to book, or see https://beeorganized.com\nSecond line & more <3\n\nThank you,\n{{signature}}\n\nP.S. Be sure to look.'
   it('bodyFormat absent, null and "plain" are the same email', () => {
     const r = renderTemplate({ subject: 'S', body: BODY }, VALUES as any, { signatureMarker: true })
-    const a = buildBrandedDripHtml(r.body, { ...base, signature: SIG })
-    expect(buildBrandedDripHtml(r.body, { ...base, signature: SIG, bodyFormat: null })).toBe(a)
-    expect(buildBrandedDripHtml(r.body, { ...base, signature: SIG, bodyFormat: 'plain' })).toBe(a)
-    expect(buildBrandedDripText(r.body, { ...base, signature: SIG, bodyFormat: 'plain' })).toBe(buildBrandedDripText(r.body, { ...base, signature: SIG }))
+    const a = buildBrandedDripHtml(r.body, { ...base, signature: SIG }, NO_FOOTER('test'))
+    expect(buildBrandedDripHtml(r.body, { ...base, signature: SIG, bodyFormat: null }, NO_FOOTER('test'))).toBe(a)
+    expect(buildBrandedDripHtml(r.body, { ...base, signature: SIG, bodyFormat: 'plain' }, NO_FOOTER('test'))).toBe(a)
+    expect(buildBrandedDripText(r.body, { ...base, signature: SIG, bodyFormat: 'plain' }, NO_FOOTER('test'))).toBe(buildBrandedDripText(r.body, { ...base, signature: SIG }, NO_FOOTER('test')))
     expect(a).toContain('Second line &amp; more &lt;3')
   })
   it('renderTemplate without the option fills values unescaped, as it always did', () => {
@@ -189,7 +189,7 @@ describe('a merge tag that fills in as nothing leaves no hole', () => {
   const run = (values: any) => {
     const plain = renderTemplate({ subject: 'S', body: BODY }, values, { signatureMarker: true })
     const html = renderTemplate({ subject: 'S', body: bodyForSave(plainBodyToHtml(BODY), 'html').body }, values, { signatureMarker: true, bodyFormat: 'html' })
-    return [buildBrandedDripHtml(plain.body, base), buildBrandedDripHtml(html.body, { ...base, bodyFormat: 'html' })]
+    return [buildBrandedDripHtml(plain.body, base, NO_FOOTER('test')), buildBrandedDripHtml(html.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))]
   }
   it('a paragraph that is only a blank tag is not sent as an empty paragraph, and a blank line inside one is not a dangling break — same as plain', () => {
     const [plain, html] = run({ first_name: 'Jordan', location_name: 'Denver' })
@@ -204,11 +204,11 @@ describe('a merge tag that fills in as nothing leaves no hole', () => {
     expect(html).toContain('>Thank you,<br />Lynette Ewy<br />Bee Organized Denver</p>')
   })
   it('blank lines at the end of a body are not sent (the plain path sends an empty paragraph there)', () => {
-    const plain = buildBrandedDripHtml('Hello\n\n', base)
-    const html = buildBrandedDripHtml(plainBodyToHtml('Hello\n\n'), { ...base, bodyFormat: 'html' })
+    const plain = buildBrandedDripHtml('Hello\n\n', base, NO_FOOTER('test'))
+    const html = buildBrandedDripHtml(plainBodyToHtml('Hello\n\n'), { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(plain).toMatch(/>Hello<\/p>\n<p [^>]*><\/p>/)
     expect(html).not.toMatch(/<p [^>]*><\/p>/)
-    expect(html).toBe(buildBrandedDripHtml('Hello', base))
+    expect(html).toBe(buildBrandedDripHtml('Hello', base, NO_FOOTER('test')))
   })
 })
 
@@ -216,7 +216,7 @@ describe('a body that is already html is not processed twice', () => {
   const HTML = '<p>Hi {{first_name}},</p><h2>What we do</h2><ul><li>One <strong>bold</strong></li><li>Two</li></ul><ol><li>First</li></ol><p style="text-align:center">See <a href="{{discovery_booking_link}}">my <em>calendar</em></a> &amp; <u>more</u></p>'
   const sent = (body: string, ctx: any = {}) => {
     const r = renderTemplate({ subject: 'S', body }, VALUES as any, { signatureMarker: true, bodyFormat: 'html' })
-    return buildBrandedDripHtml(r.body, { ...base, ...ctx, bodyFormat: 'html' })
+    return buildBrandedDripHtml(r.body, { ...base, ...ctx, bodyFormat: 'html' }, NO_FOOTER('test'))
   }
   it('its tags reach the email as tags, never as escaped text', () => {
     const out = sent(HTML)
@@ -235,15 +235,15 @@ describe('a body that is already html is not processed twice', () => {
   })
   it('the same row read as plain WOULD show its tags — which is why the format is a column, not a guess', () => {
     const r = renderTemplate({ subject: 'S', body: HTML }, VALUES as any, { signatureMarker: true })
-    expect(buildBrandedDripHtml(r.body, base)).toContain('&lt;strong&gt;bold&lt;/strong&gt;')
+    expect(buildBrandedDripHtml(r.body, base, NO_FOOTER('test'))).toContain('&lt;strong&gt;bold&lt;/strong&gt;')
   })
   it('a plain body with a "<" in it stays text: "a < b" is not markup', () => {
     const r = renderTemplate({ subject: 'S', body: 'If a < b and <b>c</b>' }, VALUES as any, { signatureMarker: true })
-    expect(buildBrandedDripHtml(r.body, base)).toContain('If a &lt; b and &lt;b&gt;c&lt;/b&gt;')
+    expect(buildBrandedDripHtml(r.body, base, NO_FOOTER('test'))).toContain('If a &lt; b and &lt;b&gt;c&lt;/b&gt;')
   })
   it('the text half reads as text: lists, links as "words (address)", no tags', () => {
     const r = renderTemplate({ subject: 'S', body: HTML }, VALUES as any, { signatureMarker: true, bodyFormat: 'html' })
-    const text = buildBrandedDripText(r.body, { ...base, bodyFormat: 'html' })
+    const text = buildBrandedDripText(r.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(text).not.toMatch(/<\/?[a-z]/)
     expect(text).toContain('- One bold\n- Two')
     expect(text).toContain('1. First')
@@ -273,24 +273,24 @@ describe('merge values dropped into an html body are escaped', () => {
     const r = renderTemplate({ subject: 'Hi {{first_name}}', body: '<p>Hi {{first_name}}</p>' }, v, { bodyFormat: 'html' })
     expect(r.body).toBe('<p>Hi Tom &lt;b&gt;&amp;&lt;/b&gt; &quot;Jerry&quot;</p>')
     expect(r.subject).toBe('Hi Tom <b>&</b> "Jerry"')   // a subject is always text
-    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' })
+    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(out).toContain('Hi Tom &lt;b&gt;&amp;&lt;/b&gt; &quot;Jerry&quot;</p>')
     expect(out).not.toContain('<b>')
   })
   it('a link value cannot break out of its href', () => {
     const r = renderTemplate({ subject: 'S', body: '<p><a href="{{discovery_booking_link}}">Book</a></p>' }, v, { bodyFormat: 'html' })
-    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' })
+    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(out).not.toMatch(/href="[^"]*"2"/)
     expect(out).not.toMatch(/<a href="[^"]*" [^s]/)
   })
   it('an address typed as the words of a link is one link, not a link inside a link', () => {
     const r = renderTemplate({ subject: 'S', body: '<p><a href="https://one.example.com/x">https://one.example.com/x</a></p>' }, {} as any, { bodyFormat: 'html' })
-    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' })
+    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(out.split('<a href="https://one.example.com/x"').length).toBe(2)
   })
   it('a saved link with no https:// is shown as words and its address, not dropped and not made a dead link', () => {
     const r = renderTemplate({ subject: 'S', body: '<p>Click <a href="{{discovery_booking_link}}">HERE</a></p>' }, { discovery_booking_link: 'calendly.com/kc' } as any, { bodyFormat: 'html' })
-    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' })
+    const out = buildBrandedDripHtml(r.body, { ...base, bodyFormat: 'html' }, NO_FOOTER('test'))
     expect(out).toContain('Click HERE (calendly.com/kc)</p>')
     expect(out).not.toContain('href="calendly.com/kc"')
   })

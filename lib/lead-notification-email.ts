@@ -61,7 +61,7 @@ import { logNotification } from './notification-log'
 import { displayPhone } from './phone'
 import { resolveNotificationsLive } from './notifications-live'
 import { formatLeadAddressLabeled } from './lead-address'
-import { buildBrandedShellHtml, EMAIL_TEXT } from './drip-email-layout'
+import { buildBrandedShellHtml, EMAIL_TEXT, NO_FOOTER } from './drip-email-layout'
 
 // The plain-text wordmark line — the text alternative's echo of the shell's
 // gold-logo + wordmark header. Same string buildBrandedDripText uses, so a
@@ -297,7 +297,7 @@ function buildLeadNotificationEmail(args: {
   const footerBandHtml = `${hasHubAccess ? `<div style="margin:0 0 8px;font-size:13px;line-height:1.6;color:${EMAIL_TEXT};">${escapeHtml(NO_ACCESS_FOOTER)}</div>
                     ` : ''}<div style="margin:0;font-size:12px;line-height:1.6;color:${EMAIL_TEXT};">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</div>`
 
-  const html = buildBrandedShellHtml(cardContentHtml, footerBandHtml)
+  const html = buildBrandedShellHtml(cardContentHtml, footerBandHtml, NO_FOOTER('an internal new-lead notification'))
 
   const textIntro = resubmission
     ? 'A client already in your list just submitted the website form again:'

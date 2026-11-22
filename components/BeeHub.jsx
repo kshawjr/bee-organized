@@ -18465,6 +18465,12 @@ export function applyStepContentEdit(step, patch, templates) {
   }
 }
 
+// The list's short form of a months/years label: "3 months later" → "3 months",
+// "A year later" → "A year". Anything else ("Right away", "Day 5") as it is.
+export function listWhen(label) {
+  return String(label || '').replace(/^(.*\b(?:months?|years?)) later$/i, '$1')
+}
+
 // RAIL A — a path's email steps, inline-first. Used for the default
 // organizing/moving path (group one), for the fixed returning-client path (the
 // "past client" group) and, since partner emails slice 3, for each partner
@@ -18490,9 +18496,12 @@ export function dripEmailRows({ pathSteps = {}, templates = [], pathKey = null }
           order: Number(s.order ?? 0),
           days: Number(s.delay_days ?? 0),
           // A months/years timing reads as the owner chose it; days as before.
-          when: s.delayUnit === 'months' || s.delayUnit === 'years'
+          // Kevin, 2026-11-22: in this list a months/years label drops its
+          // "later" ("3 months later" → "3 months") so it fits the column on
+          // one line with its clock; day labels are unchanged.
+          when: listWhen(s.delayUnit === 'months' || s.delayUnit === 'years'
             ? timingLabel(s.delay_days ?? 0, s.delayUnit)
-            : whenLabelForDays(s.delay_days ?? 0),
+            : whenLabelForDays(s.delay_days ?? 0)),
           timingIsData: true,
           subject, body, bodyFormat,
           firstLine: firstMeaningfulLine(bodyAsPlainText(body, bodyFormat)),
@@ -18842,7 +18851,7 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
           <span style={{ color:ET.mutedFg }}>after {isPartnerPathKey(row.pathKey) ? 'you start it' : row.pathKey && RETURNING_PATH_KEYS.includes(row.pathKey) ? 'they get back in touch' : 'their enquiry arrives'}</span>
         </div>
         {valid && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.mutedFg }}>
-          That’s day {n}.{formatTiming({ immediate:false, n:count, unit }) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
+          That’s day {n}.{listWhen(formatTiming({ immediate:false, n:count, unit })) !== row.when && <> Right now it is <b>{row.when}</b>.</>}
         </p>}
         {tooSoon && (
           <p style={{ fontSize:'12px', color:ET.destructive, margin:'8px 0 0', lineHeight:1.55 }}>
@@ -18862,8 +18871,10 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
       <ENote tone="warning" style={{ marginTop:'16px' }}>
         {ownsPath ? (
           liveLeadCount > 0
-            ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. The email each of them is already waiting for keeps the date it was given — this changes the timing of the ones after that.</>
-            : <>Nobody is partway through this sequence at the moment, so this affects people who come in from now on.</>
+            ? <>Right now <b>{liveLeadCount} {partwayWho(liveLeadCount, isPartnerPathKey(row.pathKey))}</b> partway through this sequence. The email each of them is already waiting for keeps the date it was given — this changes the timing of the ones after that.</>
+            : isPartnerPathKey(row.pathKey)
+              ? <>Nobody is partway through this sequence at the moment, so this affects the partners you start on it from now on.</>
+              : <>Nobody is partway through this sequence at the moment, so this affects people who come in from now on.</>
         ) : (
           <>Nobody partway through this sequence is affected — they finish on the shared version they started on.
           <br /><br />
@@ -18892,7 +18903,7 @@ export function TimingEditModal({ row, steps, ownsPath, liveLeadCount, busy, err
 //                shared version stay on it. And adding forks the path, which
 //                stops corp's future wording changes flowing through —
 //                permanently.
-export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
+export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm, partner = false }) {
   const [pick, setPick] = React.useState('blank')
   const offerable = React.useMemo(() => offerableStartingTemplates(templates), [templates])
   const pos = appendedStepPosition(steps)
@@ -18941,8 +18952,10 @@ export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy,
       <ENote tone="warning" style={{ marginTop:'16px' }}>
         {ownsPath ? (
           liveLeadCount > 0
-            ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. They’ll get this new email too, when they reach the end.</>
-            : <>Nobody is partway through this sequence at the moment, so this will only go to people who come in from now on.</>
+            ? <>Right now <b>{liveLeadCount} {partwayWho(liveLeadCount, partner)}</b> partway through this sequence. They’ll get this new email too, when they reach the end.</>
+            : partner
+              ? <>Nobody is partway through this sequence at the moment, so this will only go to the partners you start on it from now on.</>
+              : <>Nobody is partway through this sequence at the moment, so this will only go to people who come in from now on.</>
         ) : (
           <>Nobody partway through this sequence will get this one — they’ll finish on the shared version they started on.
           <br /><br />
@@ -19016,6 +19029,9 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
 // Step 1 is Kevin's rule — a new client's first hello always goes — and the
 // save route refuses it too (firstStepRemovalError). The welcome and the
 // closed-job pair are not sequence steps and never get this control.
+// "3 people are" / "1 partner is" partway through a sequence (partner emails slice 3).
+export const partwayWho = (n, partner = false) => partner ? (n === 1 ? 'partner is' : 'partners are') : (n === 1 ? 'person is' : 'people are')
+
 export const FIRST_EMAIL_ALWAYS_SENDS_NOTE = 'Can’t be removed — it’s every new client’s first hello from Bee Organized.'
 // The same rule for a partner sequence (the save route refuses it the same way).
 export const PARTNER_FIRST_EMAIL_NOTE = 'Can’t be removed — it’s the email a partner gets the moment you start them on it.'
@@ -19093,7 +19109,7 @@ export function RemoveEmailModal({ row, ownsPath, liveLeadCount, busy, err, onCa
       </p>
       <ENote tone="warning" style={{ marginTop:'12px' }}>
         {ownsPath && liveLeadCount > 0
-          ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>
+          ? <>Right now <b>{liveLeadCount} {partwayWho(liveLeadCount, isPartnerPathKey(row.pathKey))}</b> partway through this sequence. Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>
           : <>Anyone who hasn’t reached this email yet skips it and gets the next one on its usual day.</>}
       </ENote>
       {err && <p style={{ margin:'10px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {err}</p>}
@@ -24777,6 +24793,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // A partner sequence is offered a blank email only: every ready-made
           // template is written to a client.
           templates={isPartnerPathKey(addEmailState.pathKey) ? [] : templates}
+          partner={isPartnerPathKey(addEmailState.pathKey)}
           steps={pathSteps[addEmailState.pathKey] || []}
           ownsPath={addEmailState.ownsPath}
           liveLeadCount={addEmailState.liveLeadCount}
@@ -33306,7 +33323,7 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
         <EBtn variant="primary" onClick={handleSave} disabled={saving}>{saving ? (isNew ? 'Adding…' : 'Saving…') : (isNew ? 'Add this email' : 'Save')}</EBtn>
       </>}>
       {previewing ? <>
-        <EditorPreview preview={preview} draft={{ subject, body, bodyFormat: draft.format, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
+        <EditorPreview preview={preview} audience={audience} draft={{ subject, body, bodyFormat: draft.format, ...buttonDraft(buttonText, buttonLink, buttonAlign) }} />
         {localErr && <p style={{ margin:'8px 0 0', fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </> : <>
       {isNew && <p data-new-email-note style={{ ...eHintStyle, margin:'0 0 8px' }}>It’s added to the end of your emails when you press “Add this email” — it needs a subject and a message first. Cancel and nothing is added.</p>}
@@ -33335,7 +33352,7 @@ export function DripPathStepEditor({ step, onSave, onClose, links = null, alignR
             master editor, which shares this component, is exactly as it was. */}
         <StartButtonNote startButton={startButton} picked={start.picked} hadButton={!!(step.button_link || '').trim()} />
         <ButtonFields text={buttonText} link={buttonLink} align={buttonAlign} onText={setButtonText} onLink={setButtonLink} onAlign={setButtonAlign}
-          alignReady={alignReady} links={links} />
+          alignReady={alignReady} links={links} bookingLinks={!forPartner} />
         {localErr && <p style={{ margin:0, fontSize:'12px', color:ET.destructive }}>⚠ {localErr}</p>}
       </div>
       </>}

@@ -144,8 +144,10 @@ describe('source: the address comes from the session, nowhere else', () => {
 
 // ── the client senders, the client tags and the client test send are main's ──
 import { createHash } from 'node:crypto'
+import { withoutFooterIntent } from './footer-intent-footprint'
 describe('client emails are untouched by slice 3 (fingerprint against origin/main f115e0ee)', () => {
-  const sha = (f: string) => createHash('sha256').update(readFileSync(join(process.cwd(), f))).digest('hex').slice(0, 16)
+  // The footer-intent edits (2026-11-22) taken back out, exactly (footer-intent-footprint.ts).
+  const sha = (f: string) => createHash('sha256').update(withoutFooterIntent(f, readFileSync(join(process.cwd(), f), 'utf8'))).digest('hex').slice(0, 16)
   const MAIN: [string, string][] = [
     ['lib/drip-send.ts', 'a8a833d4e2fae092'],
     ['app/api/cron/send-drips/route.ts', '578c105a680e7a82'],

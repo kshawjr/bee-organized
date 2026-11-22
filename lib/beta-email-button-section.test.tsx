@@ -50,7 +50,7 @@ vi.mock('@/lib/supabase-server', () => ({
   }),
 }))
 
-import { buildBrandedDripHtml, buildBrandedDripText, buildButtonHtml, EMAIL_STYLES } from './drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, buildButtonHtml, EMAIL_STYLES, NO_FOOTER } from './drip-email-layout'
 import { SIGNATURE_MARKER } from './email-signature'
 import { extrasFromRow } from './email-send-options'
 import { extrasNeedingMissingColumns, stepExtrasForInsert, parseStepExtras, STEP_EXTRA_COLUMNS } from './drip-step-extras'
@@ -121,14 +121,14 @@ const CENTRE = { label: 'Book Your Assessment', href: 'https://cal.example.com/k
 describe('an email with no button renders byte-identically to main', () => {
   for (const st of [...EMAIL_STYLES.map(e => e.id), null]) {
     it(`look ${st ?? '(default)'}`, () => {
-      expect(sha(buildBrandedDripHtml(BODY, base(st)))).toBe(MAIN[`none:${st}`])
-      expect(sha(buildBrandedDripText(BODY, base(st)))).toBe(MAIN[`none-text:${st}`])
-      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: null }))).toBe(MAIN[`nullbutton:${st}`])
-      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: { label: 'Book', href: '' } }))).toBe(MAIN[`halfbutton:${st}`])
+      expect(sha(buildBrandedDripHtml(BODY, base(st), NO_FOOTER('test')))).toBe(MAIN[`none:${st}`])
+      expect(sha(buildBrandedDripText(BODY, base(st), NO_FOOTER('test')))).toBe(MAIN[`none-text:${st}`])
+      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: null }, NO_FOOTER('test')))).toBe(MAIN[`nullbutton:${st}`])
+      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: { label: 'Book', href: '' } }, NO_FOOTER('test')))).toBe(MAIN[`halfbutton:${st}`])
       // …and a button with no alignment is main's centred button, byte for byte.
-      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: CENTRE }))).toBe(MAIN[`centre:${st}`])
-      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: { ...CENTRE, align: null } }))).toBe(MAIN[`centre:${st}`])
-      expect(sha(buildBrandedDripText(BODY, { ...base(st), button: CENTRE }))).toBe(MAIN[`centre-text:${st}`])
+      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: CENTRE }, NO_FOOTER('test')))).toBe(MAIN[`centre:${st}`])
+      expect(sha(buildBrandedDripHtml(BODY, { ...base(st), button: { ...CENTRE, align: null } }, NO_FOOTER('test')))).toBe(MAIN[`centre:${st}`])
+      expect(sha(buildBrandedDripText(BODY, { ...base(st), button: CENTRE }, NO_FOOTER('test')))).toBe(MAIN[`centre-text:${st}`])
     })
   }
 })
@@ -150,7 +150,7 @@ describe('alignment renders left, centre and right; null renders centre', () => 
     for (const a of ['center', null, undefined, 'middle']) expect(buildButtonHtml('soft', { ...CENTRE, align: a as any })).toBe(centre)
   })
   it('the whole email carries it, and the senders read it from the row', () => {
-    const html = buildBrandedDripHtml(BODY, { ...base('soft'), button: { ...CENTRE, align: 'right' } })
+    const html = buildBrandedDripHtml(BODY, { ...base('soft'), button: { ...CENTRE, align: 'right' } }, NO_FOOTER('test'))
     expect(cellAlign(html)).toBe('right')
     expect(extrasFromRow({ button_text: 'x', button_link: 'y', button_align: 'left' }).buttonAlign).toBe('left')
     expect(extrasFromRow({ button_text: 'x', button_link: 'y' }).buttonAlign).toBeNull()        // column absent
@@ -387,7 +387,7 @@ describe('Preview', () => {
     const expected = buildBrandedDripHtml(`Hello Jordan\n\nThank you,\n${SIGNATURE_MARKER}`, {
       location_name: 'Kansas City', location_phone: undefined, reviews_link: undefined, signature: SIG, style: 'bold', heading: 'A new subject',
       button: { label: 'Book a video assessment', href: 'https://cal.example.com/video', align: 'right' },
-    })
+    }, NO_FOOTER('test'))
     expect(html).toBe(expected)
     expect(html).toContain('Lynette Ewy</td>')
     // "Back to editing" loses nothing.
@@ -411,6 +411,6 @@ describe('Preview', () => {
     // previewEmailHtml is the layout's own output, unchanged in between.
     const row = { subject: 'S', body: 'B', buttonText: 'Go', buttonLink: '{{x}}', buttonAlign: 'left' }
     expect(previewEmailHtml({ row, style: 'soft', values: { x: 'https://a.example' } })).toBe(
-      buildBrandedDripHtml('B', { location_name: undefined, location_phone: undefined, reviews_link: undefined, signature: null, style: 'soft', heading: 'S', button: { label: 'Go', href: 'https://a.example', align: 'left' } }))
+      buildBrandedDripHtml('B', { location_name: undefined, location_phone: undefined, reviews_link: undefined, signature: null, style: 'soft', heading: 'S', button: { label: 'Go', href: 'https://a.example', align: 'left' } }, NO_FOOTER('test')))
   })
 })

@@ -16,9 +16,19 @@
 //
 // COMPLIANCE SLOT: a commercial email's CAN-SPAM footer (unsubscribe + postal
 // address) must sit INSIDE the white card, as its last row. Appending it to
-// the finished document would land it after </html>, outside the frame. The
-// caller passes it as `cardFooterHtml`; with no footer passed there is no
-// such row (drips never pass one).
+// the finished document would land it after </html>, outside the frame.
+//
+// EVERY CALLER MUST SAY WHICH (2026-11-22, partner emails slice 3 fixes). The
+// footer used to be optional and default to nothing, so a caller that forgot
+// it got a finished-looking email with no unsubscribe link (the partner
+// editor's Preview did exactly that). Now the argument is REQUIRED and is one
+// of two things, so forgetting fails the build (and, for a JS caller, throws):
+//   { footer: CardFooter }               this email carries this footer
+//   NO_FOOTER('why this email has none') this email has none, and why
+// Client callers say what they always meant: drips, estimate follow-ups,
+// notifications and replies NO_FOOTER; the welcome and the job follow-ups
+// their footer. Nothing a client receives changed by one byte
+// (lib/network/client-email-bytes.test.ts).
 //
 // EMAIL-CLIENT CONSTRAINTS (not optional): table-based layout, every style
 // inline (Gmail strips <style>), no flexbox/grid (Outlook). A single <style>
@@ -466,9 +476,10 @@ export type ShellOptions = { style?: EmailStyle | string | null; heading?: strin
 export function buildBrandedShellHtml(
   cardContentHtml: string,
   footerBandHtml: string,
-  cardFooterHtml = '',
+  cardFooter: FooterIntent,
   opts: ShellOptions = {},
 ): string {
+  const cardFooterHtml = footerOf(cardFooter)?.html ?? ''
   const style = normalizeEmailStyle(opts.style)
   const logoUrl = resolveDripLogoUrl()
   const heading = opts.heading?.trim() || ''
@@ -598,12 +609,33 @@ export function splitForButton(body: string): [string, string] {
 // footer slot; text goes after the body in the plain-text alternative.
 export type CardFooter = { html: string; text: string }
 
+// What a caller must pass: the footer, or an explicit "none" with a reason.
+export type FooterIntent =
+  | { footer: CardFooter }
+  | { footer: 'none'; reason: string }
+export function NO_FOOTER(reason: string): FooterIntent {
+  return { footer: 'none', reason }
+}
+// The footer's html/text, or '' for an explicit none. Anything else — nothing
+// passed (a JS caller the build cannot check), a bare footer, a "none" with no
+// reason — throws rather than build an email that silently lacks its footer.
+function footerOf(intent: FooterIntent): CardFooter | null {
+  const f = (intent as { footer?: unknown } | null | undefined)?.footer
+  if (f === 'none') {
+    if (!String((intent as { reason?: unknown }).reason || '').trim()) throw new Error('email footer: NO_FOOTER needs a reason')
+    return null
+  }
+  if (f && typeof (f as CardFooter).html === 'string' && typeof (f as CardFooter).text === 'string') return f as CardFooter
+  throw new Error('email footer: say { footer } or NO_FOOTER(reason) — it cannot be left out')
+}
+
 // ── HTML ──────────────────────────────────────────────────────────────────
 export function buildBrandedDripHtml(
   renderedBody: string,
   ctx: BrandedEmailContext,
-  cardFooter?: CardFooter | null,
+  cardFooter: FooterIntent,
 ): string {
+  footerOf(cardFooter) // checked before anything is built
   const reviewsLink = ctx.reviews_link?.trim() || null
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(bodyAsText(renderedBody, ctx), reviewsLink)
 
@@ -649,7 +681,7 @@ export function buildBrandedDripHtml(
     contentHtml = htmlWithSignature(renderedBody, bodyParagraphsHtml, ctx.signature)
   }
   return buildBrandedShellHtml(`${contentHtml}
-              ${reviewsHtml}`, footerInner, cardFooter?.html ?? '', { style: ctx.style, heading: ctx.heading })
+              ${reviewsHtml}`, footerInner, cardFooter, { style: ctx.style, heading: ctx.heading })
 }
 
 // ── Plain text ────────────────────────────────────────────────────────────
@@ -660,8 +692,9 @@ export function buildBrandedDripHtml(
 export function buildBrandedDripText(
   renderedBody: string,
   ctx: BrandedEmailContext,
-  cardFooter?: CardFooter | null,
+  cardFooter: FooterIntent,
 ): string {
+  const footer = footerOf(cardFooter)
   // An html body is read back as text first; from there on the text half is
   // built exactly as a plain body's is.
   renderedBody = bodyAsText(renderedBody, ctx)
@@ -687,7 +720,7 @@ export function buildBrandedDripText(
     parts.push('', `${REVIEWS_LINE_TEXT} (${reviewsLink})`)
   }
   // Same order as the HTML: the compliance footer closes the card, then the band.
-  if (cardFooter?.text) parts.push('', cardFooter.text)
+  if (footer?.text) parts.push('', footer.text)
   parts.push('', '—', footerLine)
   return parts.join('\n')
 }

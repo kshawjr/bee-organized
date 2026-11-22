@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { withoutPartnerEmailsSlice3 } from './partner-emails-hub-footprint'
+import { withoutFooterIntent } from './footer-intent-footprint'
 
 const ROOT = process.cwd()
 const TABLE = 'lead_' + 'drip_progress'
@@ -22,7 +23,9 @@ const TABLE = 'lead_' + 'drip_progress'
 // it on purpose (the Emails screen), so it is compared with slice 3 taken
 // back out, exactly (lib/network/partner-emails-hub-footprint.ts).
 const sha = (f: string) => createHash('sha256').update(
-  f === 'components/BeeHub.jsx' ? withoutPartnerEmailsSlice3(readFileSync(join(ROOT, f), 'utf8')) : readFileSync(join(ROOT, f)),
+  f === 'components/BeeHub.jsx' ? withoutPartnerEmailsSlice3(readFileSync(join(ROOT, f), 'utf8'))
+    // the footer-intent edits (2026-11-22) to the senders, taken back out exactly
+    : withoutFooterIntent(f, readFileSync(join(ROOT, f), 'utf8')),
 ).digest('hex').slice(0, 16)
 
 // Every file under app/ lib/ components/ scripts/ migrations/ naming the
@@ -107,6 +110,8 @@ const SLICE2_TESTS = [
   'lib/network/partner-emails-migration.test.ts',
   // slice 3's BeeHub pieces quote BeeHub lines that name it in comments
   'lib/network/partner-emails-hub-footprint.ts',
+  // the footer-intent pieces quote drip-send.ts lines that name it
+  'lib/network/footer-intent-footprint.ts',
 ]
 
 function walk(dir: string, out: string[] = []): string[] {

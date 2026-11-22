@@ -45,7 +45,7 @@ import { blockedOnMissingRate } from '@/lib/rate-guard'
 import { blockedOnMissingBookingLink, resolveOwnerBookingLink } from '@/lib/booking-link'
 import { extrasFromRow, locationEmailOptionsFromRow } from '@/lib/email-send-options'
 import { bodyFormatOf, type BodyFormat } from '@/lib/email-body-html'
-import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from '@/lib/drip-email-layout'
+import { buildBrandedDripHtml, buildBrandedDripText, NO_FOOTER, type BrandedEmailContext } from '@/lib/drip-email-layout'
 import { hasSignatureTag } from '@/lib/email-signature'
 import { resolveEmailSignature } from '@/lib/email-signature-resolve'
 import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
@@ -224,8 +224,8 @@ export async function POST(req: NextRequest) {
   let html: string
   let text: string
   if (source.render === 'drip') {
-    html = buildBrandedDripHtml(rendered.body, brandCtx)
-    text = buildBrandedDripText(rendered.body, brandCtx)
+    html = buildBrandedDripHtml(rendered.body, brandCtx, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
+    text = buildBrandedDripText(rendered.body, brandCtx, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
   } else {
     const commercial = COMMERCIAL_TEMPLATE_KEYS.has(source.templateKey ?? '')
     const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')

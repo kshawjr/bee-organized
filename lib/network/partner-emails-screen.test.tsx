@@ -25,7 +25,7 @@ import { OWNER_MERGE_TAGS } from '../merge-tags'
 import { PARTNER_FOOTER_REASON } from './partner-footer'
 
 const { SendTestBar, MergeTagPicker, previewCardFooter, previewEmailHtml } = EmailsScreen as any
-const { EmailsList, DripPathStepEditor, TimingEditModal, stepSaveProblemInWords, PARTNER_FIRST_EMAIL_NOTE, dripEmailRows, buildEmailList } = BeeHub as any
+const { EmailsList, DripPathStepEditor, TimingEditModal, AddEmailModal, RemoveEmailModal, stepSaveProblemInWords, PARTNER_FIRST_EMAIL_NOTE, dripEmailRows, buildEmailList } = BeeHub as any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 const ROOT = process.cwd()
@@ -66,7 +66,8 @@ describe('the Partner emails group shows the two partner sequences', () => {
     expect(rowEl(K1).textContent).toContain('Great to meet you')
     expect(rowEl(K1).textContent).toContain('Right away')
     expect(rowEl(K2).textContent).toContain('Thinking of you and your clients')
-    expect(rowEl(K2).textContent).toContain('3 months later')
+    // the label as rendered, beside its clock: "3 months", no "later" (Kevin)
+    expect((rowEl(K2).querySelector('button[title="Change when this goes out"]') as HTMLElement).textContent!.trim()).toBe('3 months')
     expect(rowEl(KP).textContent).toContain('Great to meet you')
     // the first email of each says how it goes, in partner words
     expect(rowEl(K1).textContent).toContain('Fixed — sends when you start it')
@@ -77,11 +78,26 @@ describe('the Partner emails group shows the two partner sequences', () => {
     expect(container.textContent).not.toContain('CLIENT')
     expect(container.querySelectorAll('[data-email-row]')).toHaveLength(3)
   })
-  it('the client list, with no audience, is exactly as before: it never shows a partner sequence', async () => {
+  // Compares what actually RENDERS — every row and every group on screen —
+  // not a heading. Adding a partner sequence to the client list fails it.
+  it('the client list renders exactly the client rows and groups, and no partner one', async () => {
+    const client = { 'organizing-a': [mstep(1, 'Hi', 0, null, 'x'), mstep(2, 'Again', 5, null, 'y')], 'returning-a': [mstep(1, 'Back', 0, null, 'z')] }
+    await act(async () => { root.render(<EmailsList pathSteps={{ ...PARTNER_STEPS, ...client }} masterSteps={{ ...PARTNER_STEPS, ...client }} templates={[]} generalDefault="organizing-a" actions={spyActions()} />) })
+    await expandAllEmailGroups(container, act as any)
+    const rows = Array.from(container.querySelectorAll('[data-email-row]')).map(e => e.getAttribute('data-email-row')).sort()
+    expect(rows).toEqual(['step-organizing-a-1', 'step-organizing-a-2', 'step-returning-a-1'])
+    const groups = Array.from(container.querySelectorAll('[data-fold-header]')).map(e => e.getAttribute('aria-controls')).sort()
+    expect(groups).toEqual(['email-group-job', 'email-group-new', 'email-group-returning'])
+  })
+  it('handed a partner key as its default, the client list still renders no partner row', async () => {
     await act(async () => { root.render(<EmailsList pathSteps={{ ...PARTNER_STEPS }} templates={[]} generalDefault="partner-introduction" />) })
-    // even handed a partner key as its default, the client list's groups are the client ones
-    expect(container.textContent).toContain('When someone new gets in touch')
-    expect(container.textContent).not.toContain('Power Partner introduction')
+    await expandAllEmailGroups(container, act as any)
+    const rows = Array.from(container.querySelectorAll('[data-email-row]')).map(e => e.getAttribute('data-email-row'))
+    // buildEmailList shows whatever key it is given as "new"; the guard is the
+    // database (a location's default can never be a partner key). This pins
+    // that the partner list's OWN groups are never added on top.
+    expect(Array.from(container.querySelectorAll('[data-fold-header]')).map(e => e.getAttribute('aria-controls')).sort()).toEqual(['email-group-job', 'email-group-new'])
+    expect(rows.filter(r => r!.includes('partner-power-introduction'))).toEqual([])
   })
   it('the rows are the very same rows a client sequence makes (one row builder)', () => {
     const viaShared = dripEmailRows({ pathSteps: PARTNER_STEPS, templates: [], pathKey: 'partner-introduction' })
@@ -125,6 +141,30 @@ describe('every owner action on a client sequence works on a partner sequence', 
     await act(async () => { root.render(<TimingEditModal row={row} steps={PARTNER_STEPS['partner-introduction']} ownsPath={false} liveLeadCount={0} busy={false} err="" onCancel={() => {}} onConfirm={() => {}} />) })
     expect(document.body.textContent).toContain('after you start it')
     expect(document.body.textContent).not.toContain('enquiry')
+  })
+  it('the partway notes are about partners on a partner sequence (timing, add, remove), and as before on a client one', async () => {
+    const prow = dripEmailRows({ pathSteps: PARTNER_STEPS, templates: [], pathKey: 'partner-introduction' })[1]
+    const crow = { ...prow, pathKey: 'organizing-a', key: 'c' }
+    const text = async (el: any) => { await act(async () => { root.render(el) }); const t = document.body.textContent || ''; return t }
+    const noop = () => {}
+    const timing = (row: any, n: number) => <TimingEditModal row={row} steps={PARTNER_STEPS['partner-introduction']} ownsPath liveLeadCount={n} busy={false} err="" onCancel={noop} onConfirm={noop} />
+    let t = await text(timing(prow, 0))
+    expect(t).toContain('so this affects the partners you start on it from now on.')
+    expect(t).not.toContain('come in')
+    // nothing changed yet, so it must not claim "Right now it is 3 months" (the short list label)
+    expect(t).toContain('That’s day 90.')
+    expect(t).not.toContain('Right now it is')
+    t = await text(timing(prow, 2)); expect(t).toContain('2 partners are partway')
+    t = await text(timing(prow, 1)); expect(t).toContain('1 partner is partway')
+    t = await text(timing(crow, 0)); expect(t).toContain('so this affects people who come in from now on.')
+    t = await text(timing(crow, 3)); expect(t).toContain('3 people are partway')
+    const add = (partner: boolean, n: number) => <AddEmailModal templates={[]} steps={PARTNER_STEPS['partner-introduction']} ownsPath liveLeadCount={n} busy={false} err="" onCancel={noop} onConfirm={noop} partner={partner} />
+    t = await text(add(true, 0)); expect(t).toContain('so this will only go to the partners you start on it from now on.'); expect(t).not.toContain('come in')
+    t = await text(add(true, 4)); expect(t).toContain('4 partners are partway')
+    t = await text(add(false, 0)); expect(t).toContain('so this will only go to people who come in from now on.')
+    const rem = (row: any, n: number) => <RemoveEmailModal row={row} ownsPath liveLeadCount={n} busy={false} err="" onCancel={noop} onConfirm={noop} />
+    t = await text(rem(prow, 2)); expect(t).toContain('2 partners are partway')
+    t = await text(rem(crow, 2)); expect(t).toContain('2 people are partway')
   })
   it('Add an email: on each partner sequence, with that sequence', async () => {
     const a = await mount()
@@ -174,15 +214,10 @@ describe('every owner action on a client sequence works on a partner sequence', 
     await act(async () => { buttonIn(container, 'Send me a test')!.click() })
     expect(fetchMock.mock.calls[0][0]).toBe('/api/emails/test-send')
   })
-  it('the preview of a partner email carries the partner unsubscribe footer; a client drip email still carries none', () => {
-    const row = dripEmailRows({ pathSteps: PARTNER_STEPS, templates: [], pathKey: 'partner-introduction' })[0]
-    const f = previewCardFooter(row, '123 Main St, Kansas City, MO')
-    expect(f.html).toContain('referral partners')
-    expect(f.html).toContain('123 Main St')
+  it('a client drip email\'s preview still carries no footer (unchanged)', () => {
     expect(previewCardFooter({ rail: 'drip', pathKey: 'organizing-a' }, 'x')).toBeNull()
-    const html = previewEmailHtml({ row, style: 'soft', values: { partner_name: 'Taylor', location_name: 'Kansas City' }, signature: null, postalAddress: '123 Main St' })
-    expect(html).toContain('Hi Taylor,')
-    expect(html).toContain('referral partners')
+    const html = previewEmailHtml({ row: { rail: 'drip', pathKey: 'organizing-a', subject: 'Hi', body: 'Hello' }, style: 'soft', values: {}, signature: null, postalAddress: 'x' })
+    expect(html).not.toContain('bo-card-footer')
   })
 })
 
@@ -231,8 +266,8 @@ describe('the Settings screen wires the partner sequences into the same actions 
     expect(HUB).toContain('{...emailsEditorProps(stepContentEditor.pathId)}')
     expect(HUB).toContain('{...emailsEditorProps(addEmailState.pathKey)}')
   })
-  it('a partner sequence is offered a blank email, not the client templates', () => {
-    expect(HUB).toContain('templates={isPartnerPathKey(addEmailState.pathKey) ? [] : templates}')
+  it('a partner sequence is offered a blank email, not the client templates, and its note is about partners', () => {
+    expect(HUB).toContain('templates={isPartnerPathKey(addEmailState.pathKey) ? [] : templates}\n          partner={isPartnerPathKey(addEmailState.pathKey)}')
   })
   it('corporate edits the partner masters in the same master editor, with the partner tags', () => {
     expect(HUB).toContain("audience={isPartnerPathKey(editing.pathKey) ? 'partner' : 'client'}")

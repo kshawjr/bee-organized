@@ -42,13 +42,14 @@ import { renderTemplate, sendEmail } from '@/lib/resend'
 import { blockedOnMissingRate } from '@/lib/rate-guard'
 import { extrasFromRow, locationEmailOptionsFromRow } from '@/lib/email-send-options'
 import { bodyFormatOf } from '@/lib/email-body-html'
-import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from '@/lib/drip-email-layout'
+import { type BrandedEmailContext } from '@/lib/drip-email-layout'
 import { hasSignatureTag } from '@/lib/email-signature'
 import { resolveEmailSignature } from '@/lib/email-signature-resolve'
 import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
 import { partnerRenderContext } from '@/lib/partner-merge-tags'
 import { isPartnerPathKey } from '@/lib/partner-sequences'
-import { buildPartnerFooter, TEST_UNSUBSCRIBE_PATH, TEST_SAMPLE_PARTNER } from '@/lib/network/partner-footer'
+import { TEST_UNSUBSCRIBE_PATH, TEST_SAMPLE_PARTNER } from '@/lib/network/partner-footer'
+import { buildPartnerEmail, partnerButtonIsClientBooking } from '@/lib/network/partner-email'
 
 export const runtime = 'nodejs'
 
@@ -105,6 +106,9 @@ export async function POST(req: NextRequest) {
   const bodyFormat = bodyFormatOf(s as Record<string, unknown>)
   const guardBody = extras.buttonLink ? `${text0}\n${extras.buttonLink}` : text0
 
+  if (partnerButtonIsClientBooking(extras.buttonLink)) {
+    return refuse('held', 'This email’s button points at a client booking link, which a partner email can’t use. Edit it and choose Custom or None.')
+  }
   const l = loc as any
   if (blockedOnMissingRate({ subject, body: guardBody }, l.rate_per_hour)) {
     return refuse('held', 'This email is waiting on your hourly rate, so no partner gets it yet. Add it under Your details.')
@@ -139,7 +143,10 @@ export async function POST(req: NextRequest) {
     bodyFormat,
   }
   const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')
-  const footer = buildPartnerFooter({
+  // The one path every partner email takes (body + signature + layout + footer).
+  const email = buildPartnerEmail({
+    renderedBody: rendered.body,
+    brand: brandCtx,
     unsubscribeUrl: `${base}${TEST_UNSUBSCRIBE_PATH}`,
     postalAddress: (process.env.MARKETING_POSTAL_ADDRESS || '').trim() || '(your postal address)',
   })
@@ -148,8 +155,8 @@ export async function POST(req: NextRequest) {
     locationId,
     to,
     subject: `[Test] ${rendered.subject}`,
-    html: buildBrandedDripHtml(rendered.body, brandCtx, footer),
-    text: buildBrandedDripText(rendered.body, brandCtx, footer),
+    html: email.html,
+    text: email.text,
     email_kind: 'test',
   })
   if (!result.success) {

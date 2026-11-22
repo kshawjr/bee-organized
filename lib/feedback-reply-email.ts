@@ -46,6 +46,7 @@ import { sendEmailDirect } from './resend'
 import type { SendResult } from './resend'
 import {
   buildBrandedShellHtml,
+  NO_FOOTER,
   escHtml,
   escAttr,
   DRIP_BRAND_TEAL,
@@ -229,7 +230,7 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
   // 2026-10-30 layout; it was white on the old teal band).
   const footerInner = `Bee Organized&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${DRIP_WEBSITE_URL}" style="color:${EMAIL_TEXT};text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
 
-  const html = buildBrandedShellHtml(cardContentHtml, footerInner)
+  const html = buildBrandedShellHtml(cardContentHtml, footerInner, NO_FOOTER('a reply to an owner about their feedback'))
 
   // ── plain text ──────────────────────────────────────────────────
   const text = [

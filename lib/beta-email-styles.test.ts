@@ -12,8 +12,7 @@ vi.mock('@/lib/resend', () => ({ sendEmail: vi.fn(), renderTemplate: vi.fn() }))
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  buildBrandedDripHtml, buildBrandedDripText, buildBrandedShellHtml, EMAIL_STYLES, normalizeEmailStyle,
-} from './drip-email-layout'
+  buildBrandedDripHtml, buildBrandedDripText, buildBrandedShellHtml, EMAIL_STYLES, normalizeEmailStyle, NO_FOOTER } from './drip-email-layout'
 import { renderWelcomeEmailContent } from './welcome-email'
 import { renderStageEmailContent } from './stage-emails'
 import { timingFromStored, timingToStored, formatTiming, timingLabel } from './email-timing'
@@ -25,7 +24,7 @@ afterEach(() => { process.env.NEXT_PUBLIC_APP_URL = saved.app; process.env.NEXT_
 
 const ctx = { location_name: 'Boulder', location_phone: '(303) 555-0147', reviews_link: null, heading: 'Thank you for reaching out!', button: { label: 'Book a Discovery Call', href: 'https://cal.example.com/x' } }
 const BODY = 'Jordan,\n\nThank you for reaching out!'
-const html = (style?: string | null) => buildBrandedDripHtml(BODY, { ...ctx, style })
+const html = (style?: string | null) => buildBrandedDripHtml(BODY, { ...ctx, style }, NO_FOOTER('test'))
 const buttonCell = (h: string) => h.slice(h.indexOf('<tr><td align="center" bgcolor='), h.indexOf('</a>', h.indexOf('<tr><td align="center" bgcolor=')))
 
 describe('Soft is everyone’s look until they pick another (Kevin, 2026-10-30)', () => {
@@ -124,7 +123,7 @@ describe('the style applies to every client email type, not only drips', () => {
     expect(src('stage-emails.ts')).toMatch(/style: emailOptions\.style,\s*heading: rendered\.subject,/)
   })
   it('owner-facing mail shares the same shell (one layout, never forked)', () => {
-    const h = buildBrandedShellHtml('<p>x</p>', 'Bee Organized')
+    const h = buildBrandedShellHtml('<p>x</p>', 'Bee Organized', NO_FOOTER('test'))
     expect(h).toContain('email-honeycomb-header.png')
     expect(h).not.toContain('<h1')
   })
@@ -132,12 +131,12 @@ describe('the style applies to every client email type, not only drips', () => {
 
 describe('the text half matches the HTML', () => {
   it('heading and button appear in the plain-text alternative', () => {
-    const t = buildBrandedDripText(BODY, { ...ctx, style: 'soft' })
+    const t = buildBrandedDripText(BODY, { ...ctx, style: 'soft' }, NO_FOOTER('test'))
     expect(t.startsWith('BEE ORGANIZED\n\nThank you for reaching out!\n\n')).toBe(true)
     expect(t).toContain('BOOK A DISCOVERY CALL:\nhttps://cal.example.com/x')
   })
   it('a non-web button link is dropped, never rendered', () => {
-    const h = buildBrandedDripHtml(BODY, { ...ctx, button: { label: 'x', href: 'javascript:alert(1)' } })
+    const h = buildBrandedDripHtml(BODY, { ...ctx, button: { label: 'x', href: 'javascript:alert(1)' } }, NO_FOOTER('test'))
     expect(h).not.toContain('javascript:')
     expect(h).not.toContain('target="_blank"')
   })
