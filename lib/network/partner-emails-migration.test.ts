@@ -6,8 +6,7 @@
 //   · each body is Kevin's text exactly (lib/network/__fixtures__/
 //     partner-emails-copy.md, his words with the copy file's line wraps
 //     joined), {{partner_name}} first and {{signature}} last, plain format
-//   · no subject was invented: all three are NULL, and the header says not to
-//     run it until Kevin gives them
+//   · the subjects are exactly the three Kevin approved (2026-11-22)
 //   · the keys and names agree with lib/partner-sequences.ts
 //   · "Customize" (the clone route) and "Reset to master" (the reset route)
 //     accept a partner master exactly like a client one, with no list of
@@ -15,7 +14,7 @@
 //     partner is active reaches the owner as the route's existing error
 //
 // The rules the migration adds are proven on a running copy of the database
-// by the dry run (97 checks, 13 deliberate breaks); this file pins the text.
+// by the dry run (131 checks, 19 deliberate breaks); this file pins the text.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -72,10 +71,11 @@ describe('the migration file', () => {
   })
   it('and exactly three steps: 500 at the start, 501 three months later, 502 at the start', () => {
     expect(code(MIG).match(/INSERT INTO public\.drip_path_steps\b/g)).toHaveLength(1)
-    expect(MIG).toContain(`('partner-introduction', 1, 0, NULL,\n$email500$`)
-    expect(MIG).toContain(`('partner-introduction', 2, 90, 'months',\n$email501$`)
-    expect(MIG).toContain(`('partner-power-introduction', 1, 0, NULL,\n$email502$`)
-    expect(MIG).toMatch(/SELECT paths\.id, s\.step_order, s\.delay_days, s\.delay_unit, 'email', NULL, s\.body, 'plain',\s+NULL, true, false, 'master', NULL, NULL, NULL/)
+    expect(MIG).toContain(`('partner-introduction', 1, 0, NULL, 'Great to meet you',\n$email500$`)
+    expect(MIG).toContain(`('partner-introduction', 2, 90, 'months', 'Thinking of you and your clients',\n$email501$`)
+    expect(MIG).toContain(`('partner-power-introduction', 1, 0, NULL, 'Great to meet you',\n$email502$`)
+    expect(MIG).toMatch(/SELECT paths\.id, s\.step_order, s\.delay_days, s\.delay_unit, 'email', s\.subject, s\.body, 'plain',\s+NULL, true, false, 'master', NULL, NULL, NULL/)
+    expect(MIG).toContain(`) AS s (path_key, step_order, delay_days, delay_unit, subject, body) ON s.path_key = paths.path_key;`)
   })
   it('agrees with lib/partner-sequences.ts', () => {
     expect(PARTNER_SEQUENCES.map(s => [s.pathKey, s.name])).toEqual([
@@ -104,28 +104,32 @@ describe("Kevin's words, exactly", () => {
       expect(b.match(/\{\{\w+\}\}/g)).toEqual(['{{partner_name}}', '{{signature}}'])
     })
   }
-  it('no subject was invented: all three are NULL, and the header says not to run it without them', () => {
-    expect(MIG).not.toMatch(/SUBJECT NEEDED/)
-    expect(MIG).toMatch(/'email', NULL, s\.body/)
-    expect(MIG).toMatch(/DO NOT RUN THIS until Kevin has\s+-- given the three subjects/)
+  it("the subjects are exactly Kevin's three, and nothing says to wait for them any more", () => {
+    const subjects = Array.from(MIG.matchAll(/^  \('partner-[a-z-]+', \d, \d+, (?:NULL|'months'), '([^']*)',$/gm)).map(m => m[1])
+    expect(subjects).toEqual(['Great to meet you', 'Thinking of you and your clients', 'Great to meet you'])
+    expect(MIG).not.toMatch(/SUBJECT NEEDED|DO NOT RUN THIS|none yet/)
   })
 })
 
 describe('the rules are in the migration (proven live by the dry run)', () => {
   const c = code(MIG)
   it.each([
-    ['an unsubscribe cannot be cleared or changed', /CREATE TRIGGER trg_partners_unsubscribe_is_final\s+BEFORE INSERT OR UPDATE ON public\.partners/],
-    ['unsubscribing stops active sequences and records the address', /CREATE TRIGGER trg_partners_after_unsubscribe\s+AFTER INSERT OR UPDATE OF unsubscribed_at, email ON public\.partners/],
-    ['the permanent record cannot be deleted or reopened', /CREATE TRIGGER trg_partner_unsubscribes_is_final\s+BEFORE UPDATE OR DELETE ON public\.partner_unsubscribes/],
-    ['purging a contact keeps the record', /partner_id\s+uuid UNIQUE REFERENCES public\.partners\(id\) ON DELETE SET NULL/],
+    ['only the functions may write an unsubscribe on the contact; a partner\'s own is final', /CREATE TRIGGER trg_partners_unsubscribe_guard\s+BEFORE INSERT OR UPDATE ON public\.partners/],
+    ['a new address on an unsubscribed contact is recorded too', /CREATE TRIGGER trg_partners_after_email_change\s+AFTER UPDATE OF email ON public\.partners/],
+    ['the history cannot be deleted, forged or changed', /CREATE TRIGGER trg_partner_unsubscribes_guard\s+BEFORE INSERT OR UPDATE OR DELETE ON public\.partner_unsubscribes/],
+    ['link keys cannot be deleted or changed', /CREATE TRIGGER trg_partner_unsubscribe_links_guard\s+BEFORE UPDATE OR DELETE ON public\.partner_unsubscribe_links/],
+    ['purging a contact keeps the history', /  partner_id       uuid REFERENCES public\.partners\(id\) ON DELETE SET NULL,\n  location_id      uuid REFERENCES public\.locations\(id\) ON DELETE SET NULL,\n  email_normalized text,                 -- the address that is unsubscribed/],
+    ['the two kinds, told apart', /CHECK \(unsubscribe_source IS NULL OR unsubscribe_source IN \('link', 'owner'\)\)/],
+    ['opening the link only reads (STABLE)', /CREATE FUNCTION public\.partner_unsubscribe_status\(p_token text\)[\s\S]{0,200}LANGUAGE sql STABLE SECURITY DEFINER/],
+    ['reversal is for super admins only, and never a partner\'s own', /WHERE h\.id = p_by AND h\.role = 'super_admin'\) THEN[\s\S]*IF v_partner\.unsubscribe_source = 'link' THEN\s+RETURN QUERY SELECT 'partner_unsubscribed_themselves'/],
     ['every active partner row is checked', /CREATE TRIGGER trg_partner_drip_progress_guard\s+BEFORE INSERT OR UPDATE ON public\.partner_drip_progress/],
     ['no reset while a partner is active', /CREATE TRIGGER trg_drip_paths_keep_active_partners\s+BEFORE DELETE ON public\.drip_paths/],
-    ['link keys unreadable by the browser roles', /REVOKE ALL ON public\.partner_unsubscribes FROM anon, authenticated;/],
+    ['link keys unreadable by the browser roles', /REVOKE ALL ON public\.partner_unsubscribe_links FROM anon, authenticated;/],
+    ['history unreadable by the browser roles', /REVOKE ALL ON public\.partner_unsubscribes FROM anon, authenticated;/],
     ['server-only tracking table, like the client drip tables', /ALTER TABLE public\.partner_drip_progress ENABLE ROW LEVEL SECURITY;/],
   ])('%s', (_name, re) => expect(c).toMatch(re))
-  it('the three functions are taken back from the browser roles', () => {
-    for (const fn of ['partner_send_block_reason(uuid)', 'partner_unsubscribe_token(uuid)', 'partner_unsubscribe(text)']) {
-      expect(c).toContain(`REVOKE ALL ON FUNCTION public.${fn}`)
+  it('the six functions are taken back from the browser roles', () => {
+    for (const fn of ['partner_send_block_reason(uuid)', 'partner_unsubscribe_token(uuid)', 'partner_unsubscribe_status(text)', 'partner_unsubscribe(text)', 'partner_mark_unsubscribed(uuid, uuid)', 'partner_reverse_unsubscribe(uuid, uuid)']) {
       expect(c).toMatch(new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn.replace(/[()]/g, '\\$&')}\\s+FROM PUBLIC, anon, authenticated;`))
     }
   })

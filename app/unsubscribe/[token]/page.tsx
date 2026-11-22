@@ -34,15 +34,16 @@
 
 import { supabaseService } from '@/lib/supabase-service'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
-import { consumePartnerUnsubscribeToken } from '@/lib/network/partner-unsubscribe'
+import { partnerUnsubscribeStatus } from '@/lib/network/partner-unsubscribe'
 import { partnerGreetingName } from '@/lib/network/partner-greeting'
+import type { ReactNode } from 'react'
 
 export const runtime = 'nodejs'
 // Never statically render or cache: per-token state + (on the first visit)
 // the withdrawal write.
 export const dynamic = 'force-dynamic'
 
-type Props = { params: { token: string } }
+type Props = { params: { token: string }; searchParams?: { error?: string } }
 
 // Any lookup failure — unknown token, or the columns not existing yet because
 // migrations/marketing_unsubscribe.sql is still held — resolves to "no row",
@@ -66,7 +67,7 @@ async function findByToken(token: string) {
   }
 }
 
-export default async function UnsubscribePage({ params }: Props) {
+export default async function UnsubscribePage({ params, searchParams }: Props) {
   const token = params?.token || ''
 
   if (!token) {
@@ -77,16 +78,23 @@ export default async function UnsubscribePage({ params }: Props) {
 
   // Not a client's link → it may be a referral partner's (partner emails,
   // slice 2). Everything a client's link does is above and below this block,
-  // unchanged; a partner's link is handled entirely here, in one database
-  // call (lib/network/partner-unsubscribe.ts).
+  // unchanged.
+  //
+  // A PARTNER'S LINK ONLY LOOKS. Opening it — by the partner, a mail
+  // program's link scanner, a link preview, a prefetch, a HEAD request —
+  // changes nothing: partnerUnsubscribeStatus is a read (a database function
+  // Postgres itself holds read-only). The page asks "Stop receiving these
+  // emails?", and only the button, a POST to ./confirm
+  // (app/unsubscribe/[token]/confirm/route.ts), unsubscribes.
   if (!lead) {
-    const partner = await consumePartnerUnsubscribeToken(token)
-    if (partner.outcome === 'unsubscribed' || partner.outcome === 'already') {
-      return <Confirmation firstName={partnerGreetingName(partner.partner) || null} />
+    const partner = await partnerUnsubscribeStatus(token)
+    if (partner.outcome === 'already') {
+      return <PartnerConfirmation firstName={partnerGreetingName(partner.partner) || null} />
+    }
+    if (partner.outcome === 'pending') {
+      return <PartnerStopForm token={token} firstName={partnerGreetingName(partner.partner) || null} failed={searchParams?.error === '1'} />
     }
     if (partner.outcome === 'failed') {
-      // The same honest state as a failed client write: never a false
-      // "you're unsubscribed".
       return <Shell title="Something went wrong on our end" body={FAILED_BODY} />
     }
   }
@@ -196,15 +204,54 @@ function Confirmation({ firstName }: { firstName: string | null }) {
   )
 }
 
+// ── A referral partner's two states (partner emails, slice 2) ──────────────
+// The question, with the one button that unsubscribes. A plain HTML form: it
+// works with no JavaScript, and a scanner that only opens links never sends
+// it. The token travels in the address the form posts to, nowhere else.
+function PartnerStopForm({ token, firstName, failed }: { token: string; firstName: string | null; failed: boolean }) {
+  return (
+    <Shell
+      title="Stop receiving these emails?"
+      body={failed
+        ? "We couldn't process that just now. Please press the button again, or reply to any email from us with the word “unsubscribe” and a person will take you off the list."
+        : `${firstName ? `${firstName}, press` : 'Press'} the button below and Bee Organized will stop sending you these emails.`}
+    >
+      <form method="post" action={`/unsubscribe/${encodeURIComponent(token)}/confirm`} style={{ marginBottom: '20px' }}>
+        <input type="hidden" name="confirm" value="yes" />
+        <button
+          type="submit"
+          style={{ background: '#054E4A', color: 'white', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '15px', cursor: 'pointer' }}
+        >
+          Unsubscribe me
+        </button>
+      </form>
+    </Shell>
+  )
+}
+
+// After the button. A partner's own unsubscribe is permanent, so — unlike the
+// client page — it does not offer to add them back.
+function PartnerConfirmation({ firstName }: { firstName: string | null }) {
+  return (
+    <Shell
+      title={firstName ? `You're unsubscribed, ${firstName}` : "You're unsubscribed"}
+      body="You won't get any more of these emails from Bee Organized."
+    />
+  )
+}
+
 // The opt-in page's Shell, verbatim: a branded, centered, single-card message.
 // Duplicated rather than extracted so this build doesn't touch the live
 // opt-in flow.
 function Shell({
   title,
   body,
+  children,
 }: {
   title: string
   body: string
+  // Only the partner question passes anything here (its button).
+  children?: ReactNode
 }) {
   return (
     <div
@@ -233,6 +280,7 @@ function Shell({
         <p style={{ fontSize: '14px', color: '#4a5e5a', lineHeight: 1.6, marginBottom: '20px' }}>
           {body}
         </p>
+        {children}
         <p style={{ fontSize: '12px', color: '#8a9e9a' }}>Bee Organized</p>
       </div>
     </div>
