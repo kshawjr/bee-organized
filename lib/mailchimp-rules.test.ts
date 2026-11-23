@@ -3,9 +3,11 @@ import { readFileSync } from 'fs'
 import { describe, expect, it } from 'vitest'
 import {
   INELIGIBLE_WORDS,
+  archivedLine,
   buildMatchIndex,
   emailKey,
   mailchimpEligibility,
+  mailchimpIncluded,
   matchContact,
   matchPhoneKey,
 } from './mailchimp-rules'
@@ -39,7 +41,7 @@ describe('mailchimpEligibility — everyone with an email, by default', () => {
 
   it('lets in anyone with a usable email, whatever their source or consent stamp', () => {
     // No source, no marketing_consented_at: Kevin's rule is everyone by default.
-    expect(mailchimpEligibility(base)).toEqual({ eligible: true, emailKey: 'pat@example.com' })
+    expect(mailchimpEligibility(base)).toEqual({ eligible: true, emailKey: 'pat@example.com', tickedByDefault: true, archivedAt: null })
   })
 
   it('keeps out each excluded case, with its reason', () => {
@@ -48,7 +50,6 @@ describe('mailchimpEligibility — everyone with an email, by default', () => {
     expect(mailchimpEligibility({ ...base, marketing_opt_out: true })).toEqual({ eligible: false, reason: 'opted_out' })
     expect(mailchimpEligibility({ ...base, marketing_unsubscribed_at: '2026-11-01T00:00:00Z' }))
       .toEqual({ eligible: false, reason: 'unsubscribed' })
-    expect(mailchimpEligibility(base, { leftOut: true })).toEqual({ eligible: false, reason: 'left_out' })
   })
 
   it('an unsubscribe at ANY location keeps them out here, by email, any casing', () => {
@@ -59,14 +60,19 @@ describe('mailchimpEligibility — everyone with an email, by default', () => {
 
   it("the person's unsubscribe outranks the owner's tick", () => {
     const suppressed = new Set(['pat@example.com'])
-    expect(mailchimpEligibility(base, { suppressed, leftOut: false }))
-      .toEqual({ eligible: false, reason: 'unsubscribed_elsewhere' })
-    expect(mailchimpEligibility(base, { suppressed, leftOut: true }))
-      .toEqual({ eligible: false, reason: 'unsubscribed_elsewhere' })
+    expect(mailchimpIncluded(base, { suppressed, ownerChoice: 'in' })).toBe(false)
+    expect(mailchimpIncluded({ ...base, marketing_opt_out: true }, { ownerChoice: 'in' })).toBe(false)
+    expect(mailchimpIncluded({ ...base, is_junk: true }, { ownerChoice: 'in' })).toBe(false)
   })
 
   it('false flags do not exclude', () => {
-    expect(mailchimpEligibility({ ...base, is_junk: false, marketing_opt_out: false, marketing_unsubscribed_at: null }, { leftOut: false }).eligible).toBe(true)
+    expect(mailchimpEligibility({ ...base, is_junk: false, marketing_opt_out: false, marketing_unsubscribed_at: null, archived_at: null }).eligible).toBe(true)
+  })
+
+  it('everyone not archived starts ticked; the owner can untick', () => {
+    expect(mailchimpIncluded(base)).toBe(true)
+    expect(mailchimpIncluded(base, { ownerChoice: null })).toBe(true)
+    expect(mailchimpIncluded(base, { ownerChoice: 'out' })).toBe(false)
   })
 
   it('every reason has plain owner words', () => {
@@ -74,6 +80,45 @@ describe('mailchimpEligibility — everyone with an email, by default', () => {
       expect(w).toMatch(/^[A-Z][A-Za-z ]+[a-z]$/)
       expect(w).not.toMatch(/opt|suppress|consent|junk/i)
     }
+  })
+})
+
+describe('archived people — the owner\'s call (Kevin, 2026-11-23)', () => {
+  const archived = { email: 'arch@example.com', archived_at: '2026-11-20T03:49:12Z' }
+
+  it('are eligible, so they appear in the review list', () => {
+    expect(mailchimpEligibility(archived)).toEqual({
+      eligible: true, emailKey: 'arch@example.com', tickedByDefault: false, archivedAt: '2026-11-20T03:49:12Z',
+    })
+  })
+
+  it('start UNTICKED, and go in only when the owner ticks them', () => {
+    expect(mailchimpIncluded(archived)).toBe(false)
+    expect(mailchimpIncluded(archived, { ownerChoice: null })).toBe(false)
+    expect(mailchimpIncluded(archived, { ownerChoice: 'in' })).toBe(true)
+    expect(mailchimpIncluded(archived, { ownerChoice: 'out' })).toBe(false)
+  })
+
+  it('archived is not the Recycle Bin: junk stays out even if also archived', () => {
+    expect(mailchimpEligibility({ ...archived, is_junk: true })).toEqual({ eligible: false, reason: 'junk' })
+  })
+
+  it("an archived person's own no-marketing choice still wins", () => {
+    expect(mailchimpEligibility({ ...archived, marketing_opt_out: true })).toEqual({ eligible: false, reason: 'opted_out' })
+    expect(mailchimpEligibility(archived, { suppressed: new Set(['arch@example.com']) }))
+      .toEqual({ eligible: false, reason: 'unsubscribed_elsewhere' })
+  })
+
+  it('the review line says archived and when, in the location\'s time zone', () => {
+    // 03:49 UTC on 20 Nov is still 19 Nov in Chattanooga (Eastern) and Austin (Central).
+    expect(archivedLine(archived.archived_at, 'America/New_York')).toBe('Archived on Nov 19, 2026. Tick to add them to Mailchimp.')
+    expect(archivedLine(archived.archived_at, 'UTC')).toBe('Archived on Nov 20, 2026. Tick to add them to Mailchimp.')
+  })
+
+  it('the line never says Invalid Date, and is absent when not archived', () => {
+    expect(archivedLine('not a date', 'America/New_York')).toBe('Archived. Tick to add them to Mailchimp.')
+    expect(archivedLine('2026-11-20T03:49:12Z', 'Not/AZone')).toBe('Archived on Nov 20, 2026. Tick to add them to Mailchimp.')
+    expect(archivedLine(null, 'UTC')).toBeNull()
   })
 })
 

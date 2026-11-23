@@ -10,8 +10,9 @@
 //   WHO — everyone with an email, by default. NOT "website leads only" (that
 //   is today's Sync now engine, which stays untouched until the slice that
 //   replaces it, and which this file does not import). Out: no usable email, in the Recycle Bin,
-//   "no marketing emails" (opted out or unsubscribed), on the shared
-//   unsubscribe list, or left out by the owner.
+//   "no marketing emails" (opted out or unsubscribed), or on the shared
+//   unsubscribe list. Archived people are in, but start unticked. The owner
+//   can untick anyone.
 //
 //   UNSUBSCRIBE COUNTS EVERYWHERE — an unsubscribe at one location stops
 //   marketing at EVERY location, by email address, across owners' accounts.
@@ -72,23 +73,48 @@ export type MailchimpLeadFields = {
   is_junk?: boolean | null
   marketing_opt_out?: boolean | null
   marketing_unsubscribed_at?: string | null
+  archived_at?: string | null
 }
 
+// Ineligible = never offered, not even unticked. The owner cannot tick
+// these people in: either there is nothing to send to, the record is being
+// deleted, or the PERSON said no.
 export type MailchimpIneligibleReason =
   | 'no_email'          // blank or not a usable address
   | 'junk'              // in the Recycle Bin
   | 'opted_out'         // "no marketing emails" set on this record
   | 'unsubscribed'      // unsubscribed via a Bee Hub email
   | 'unsubscribed_elsewhere' // on the shared unsubscribe list (any location)
-  | 'left_out'          // the owner unticked them
 
+// Eligible = offered to the owner. `tickedByDefault` is what the review list
+// starts with; the owner's tick or untick is a separate input (see
+// mailchimpIncluded). Archived people are eligible but start UNTICKED —
+// Kevin's ruling 2026-11-23, see ARCHIVED below.
 export type MailchimpEligibility =
-  | { eligible: true; emailKey: string }
+  | { eligible: true; emailKey: string; tickedByDefault: boolean; archivedAt: string | null }
   | { eligible: false; reason: MailchimpIneligibleReason }
+
+// ── ARCHIVED (Kevin, 2026-11-23) — note for the slice 5 review screen ──────
+// Archived (leads.archived_at) is NOT the Recycle Bin (is_junk). The Recycle
+// Bin stays out outright. Archived people are the OWNER's call:
+//   • they ARE in the first-connect review list,
+//   • shown UNTICKED by default, unlike everyone else,
+//   • with one short line saying they were archived and when
+//     (archivedLine() below),
+//   • and the owner ticks them if they want them in Mailchimp.
+// 319 people are affected today across 14 locations. About 50 of those were
+// archived in a bulk cleanup by Kevin, NOT by their owner, so the owner has
+// no idea they were set aside — which is why the line must say so plainly
+// and the person must not be hidden behind a filter. The data cannot tell
+// Kevin's cleanup from an owner's own archive (there is no "archived by"
+// column), so the line shows the date only.
+//
+// An archived person's own "no marketing emails" or unsubscribe still wins:
+// those checks run first, so an archived opt-out is ineligible, not unticked.
 
 export function mailchimpEligibility(
   lead: MailchimpLeadFields,
-  opts: { suppressed?: ReadonlySet<string> | null; leftOut?: boolean | null } = {},
+  opts: { suppressed?: ReadonlySet<string> | null } = {},
 ): MailchimpEligibility {
   const key = emailKey(lead.email)
   if (!key) return { eligible: false, reason: 'no_email' }
@@ -96,11 +122,26 @@ export function mailchimpEligibility(
   if (lead.marketing_opt_out === true) return { eligible: false, reason: 'opted_out' }
   if (lead.marketing_unsubscribed_at) return { eligible: false, reason: 'unsubscribed' }
   // Checked after the record's own flags so the reason names the stronger,
-  // local fact when both are true — but checked BEFORE leftOut, because an
-  // unsubscribe is the person's choice and outranks the owner's.
+  // local fact when both are true.
   if (opts.suppressed?.has(key)) return { eligible: false, reason: 'unsubscribed_elsewhere' }
-  if (opts.leftOut === true) return { eligible: false, reason: 'left_out' }
-  return { eligible: true, emailKey: key }
+  const archivedAt = lead.archived_at || null
+  return { eligible: true, emailKey: key, tickedByDefault: !archivedAt, archivedAt }
+}
+
+// The owner's tick, if they made one: 'in' (ticked), 'out' (unticked), or
+// null (untouched — the default applies). An owner can never tick in someone
+// who is ineligible: a person's unsubscribe outranks the owner's tick.
+export type OwnerChoice = 'in' | 'out' | null | undefined
+
+export function mailchimpIncluded(
+  lead: MailchimpLeadFields,
+  opts: { suppressed?: ReadonlySet<string> | null; ownerChoice?: OwnerChoice } = {},
+): boolean {
+  const e = mailchimpEligibility(lead, opts)
+  if (!e.eligible) return false
+  if (opts.ownerChoice === 'in') return true
+  if (opts.ownerChoice === 'out') return false
+  return e.tickedByDefault
 }
 
 // Owner words for each reason, for the review list and the client-record
@@ -111,7 +152,23 @@ export const INELIGIBLE_WORDS: Record<MailchimpIneligibleReason, string> = {
   opted_out: 'No marketing emails',
   unsubscribed: 'No marketing emails',
   unsubscribed_elsewhere: 'No marketing emails',
-  left_out: 'Left out of Mailchimp',
+}
+
+// The one short line under an archived person in the review list. The date
+// is shown in the LOCATION's time zone (the caller passes it — a UTC date
+// can be a day off for an evening archive). Bad or missing dates fall back
+// to the line without a date rather than "Invalid Date".
+export function archivedLine(archivedAt: string | null | undefined, timeZone: string): string | null {
+  if (!archivedAt) return null
+  const d = new Date(archivedAt)
+  if (Number.isNaN(d.getTime())) return 'Archived. Tick to add them to Mailchimp.'
+  let when: string
+  try {
+    when = d.toLocaleDateString('en-US', { timeZone, month: 'short', day: 'numeric', year: 'numeric' })
+  } catch {
+    when = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  return `Archived on ${when}. Tick to add them to Mailchimp.`
 }
 
 // ── Matching ─────────────────────────────────────────────────
