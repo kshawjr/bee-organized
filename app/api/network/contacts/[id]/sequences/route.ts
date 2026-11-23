@@ -35,6 +35,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 // A stale "not unsubscribed" must never be read from Next's Data Cache.
 export const fetchCache = 'force-no-store'
+// Start sends the first email inline. Kept far under Stop's in-flight
+// window (lib/network/partner-sequence-start.ts STOP_IN_FLIGHT_MINUTES).
+export const maxDuration = 60
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const notFound = () => NextResponse.json({ error: 'contact_not_found' }, { status: 404 })
@@ -103,7 +106,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!w.caller) return w.refuse
   const r = await stopPartnerSequence({ partnerId: id, pathKey: w.body?.pathKey })
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status })
-  // lastEmailInFlight: the last email was being sent as Stop was pressed; it
-  // may still arrive, and nothing after it will.
-  return NextResponse.json({ stopped: true, lastEmailInFlight: r.lastEmailInFlight })
+  // emailInFlight: an email of it went out (or was going out) moments before
+  // Stop; it may still arrive, nothing after it will. lastEmailInFlight: that
+  // email was the sequence's last.
+  return NextResponse.json({ stopped: true, emailInFlight: r.emailInFlight, lastEmailInFlight: r.lastEmailInFlight })
 }

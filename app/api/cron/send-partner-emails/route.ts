@@ -22,6 +22,11 @@ export const dynamic = 'force-dynamic'
 // Same reason as send-drips (#95/#96): supabase-js reads must never be
 // answered from Next's Data Cache, or a stale "not unsubscribed" could be read.
 export const fetchCache = 'force-no-store'
+// A run never outlives Stop's in-flight window (15 minutes,
+// lib/network/partner-sequence-start.ts STOP_IN_FLIGHT_MINUTES): the platform
+// ends it at 5 minutes. A claim cut off there loses that one email rather
+// than sending it twice.
+export const maxDuration = 300
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET

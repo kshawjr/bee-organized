@@ -110,9 +110,19 @@ describe('on a sequence: which one, how far, and Stop', () => {
 describe('Stop pressed while the last email is being sent', () => {
   it('the screen says the truth: it may still arrive, nothing more will', async () => {
     await mount(view({ progress: [{ ...ACTIVE, step: 1, sent: 0, total: 1, pathKey: 'partner-power-introduction', name: 'Power Partner introduction' }] }),
-      { DELETE: { status: 200, json: { stopped: true, lastEmailInFlight: true }, next: view() } })
+      { DELETE: { status: 200, json: { stopped: true, emailInFlight: true, lastEmailInFlight: true }, next: view() } })
     await click($('[data-stop]')); await click($('[data-confirm-yes]'))
     expect($('[data-partner-emails-note]')?.textContent).toBe('Stopped. The last email of Power Partner introduction was already being sent as you pressed Stop, so it may still reach Taylor. Nothing more will.')
+  })
+  it('a NON-last email sent or being sent just before Stop: the screen says it may still arrive', async () => {
+    await mount(view({ progress: [ACTIVE] }), { DELETE: { status: 200, json: { stopped: true, emailInFlight: true, lastEmailInFlight: false }, next: view() } })
+    await click($('[data-stop]')); await click($('[data-confirm-yes]'))
+    expect($('[data-partner-emails-note]')?.textContent).toBe('Stopped. An email of Partner introduction was sent or being sent just before you pressed Stop, so it may still reach Taylor. Nothing more will.')
+  })
+  it('nothing in flight: no more emails, plainly', async () => {
+    await mount(view({ progress: [ACTIVE] }), { DELETE: { status: 200, json: { stopped: true, emailInFlight: false, lastEmailInFlight: false }, next: view() } })
+    await click($('[data-stop]')); await click($('[data-confirm-yes]'))
+    expect($('[data-partner-emails-note]')?.textContent).toBe('Stopped. Taylor gets no more emails from Partner introduction.')
   })
   it('a real 409 is not dressed up as stopped', async () => {
     await mount(view({ progress: [ACTIVE] }), { DELETE: { status: 409, json: { error: 'not_on_sequence' } } })

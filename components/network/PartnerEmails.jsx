@@ -266,6 +266,7 @@ export default function PartnerEmails({ contactId, name, first, fetchImpl = null
       if (!res.ok && json?.error !== 'not_on_sequence') { setError(json?.error === 'forbidden_read_only' ? START_ERRORS.forbidden_read_only : 'That didn’t go through. Nothing was stopped.'); return }
       setNote(!res.ok ? 'It had already finished or stopped, so nothing was changed.'
         : json?.lastEmailInFlight ? `Stopped. The last email of ${stopping.name} was already being sent as you pressed Stop, so it may still reach ${first}. Nothing more will.`
+        : json?.emailInFlight ? `Stopped. An email of ${stopping.name} was sent or being sent just before you pressed Stop, so it may still reach ${first}. Nothing more will.`
         : `Stopped. ${first} gets no more emails from ${stopping.name}.`)
       setStopping(null)
       await load()

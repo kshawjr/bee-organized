@@ -23,7 +23,19 @@ const h = vi.hoisted(() => {
     pathOverride: null as any,
     seq: 0,
   }
-  const match = (row: any, f: any[]) => f.every(([op, c, v]) => {
+  // PostgREST or=(…), just the shapes the route sends: "a.eq.x,and(b.eq.y,c.gte.z)".
+  const split = (s: string) => { const out: string[] = []; let d = 0, cur = ''; for (const ch of s) { if (ch === '(') d++; if (ch === ')') d--; if (ch === ',' && !d) { out.push(cur); cur = '' } else cur += ch } out.push(cur); return out }
+  const orMatch = (row: any, expr: string, all = false): boolean => {
+    const parts = split(expr).map((it) => {
+      const m = /^(and|or)\(([\s\S]*)\)$/.exec(it)
+      if (m) return orMatch(row, m[2], m[1] === 'and')
+      const [c, op, ...rest] = it.split('.'); const v = rest.join('.')
+      return match(row, [[op, c, v]])
+    })
+    return all ? parts.every(Boolean) : parts.some(Boolean)
+  }
+  const match = (row: any, f: any[]): boolean => f.every(([op, c, v]) => {
+    if (op === 'or') return orMatch(row, c)
     const x = row[c]
     if (op === 'eq') return v === null ? x == null : x === v
     if (op === 'lt') return x != null && x < v
@@ -38,6 +50,7 @@ const h = vi.hoisted(() => {
     const b: any = {}
     b.select = (_s: string, o?: any) => { if (o?.head) head = true; return b }
     for (const m of ['eq', 'lt', 'lte', 'gte', 'is']) b[m] = (c: string, v: any) => { f.push([m, c, v]); return b }
+    b.or = (expr: string) => { f.push(['or', expr]); return b }
     b.order = (c: string, o: any) => { order = [c, o?.ascending !== false]; return b }
     b.limit = (n: number) => { lim = n; return b }
     b.update = (p: any) => { op = 'update'; patch = p; return b }
@@ -64,7 +77,7 @@ const h = vi.hoisted(() => {
           if (table === 'partner_drip_progress' && patch.drip_path_id) r.path_key = st.tables.drip_paths.find((x) => x.id === patch.drip_path_id)?.path_key
         }
         st.writes.push({ table, op, patch, filters: f, matched: hit.length })
-        return { data: hit.map((r) => ({ id: r.id })), error: null }
+        return { data: hit.map((r) => ({ ...r })), error: null }
       }
       if (head) return { count: hit.length, data: null, error: null }
       if (order) hit = [...hit].sort((a, z) => (a[order[0]] < z[order[0]] ? -1 : 1) * (order[1] ? 1 : -1))
@@ -302,16 +315,30 @@ describe('who may start or stop: someone with access to the PARTNER’s location
 describe('Stop', () => {
   it('ends the sequence for that partner: stopped, no next send, only an active row matched', async () => {
     rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-intro', path_key: 'partner-introduction', status: 'active', current_step: 2, next_send_at: '2027-02-21T15:00:00Z' })
-    expect(await del({ pathKey: 'partner-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, lastEmailInFlight: false } })
+    expect(await del({ pathKey: 'partner-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, emailInFlight: false, lastEmailInFlight: false } })
     expect(rows()[0]).toMatchObject({ status: 'stopped', stopped_reason: 'owner_stopped', next_send_at: null, stopped_at: '2026-11-23T15:30:00.000Z' })
-    expect(progressWrites()[0].filters).toEqual([['eq', 'partner_id', PA], ['eq', 'path_key', 'partner-introduction'], ['eq', 'status', 'active']])
+    // ONE update: active, or completed within the window. No gap between two.
+    expect(progressWrites()).toHaveLength(1)
+    expect(progressWrites()[0].filters).toEqual([['eq', 'partner_id', PA], ['eq', 'path_key', 'partner-introduction'],
+      ['or', 'status.eq.active,and(status.eq.completed,completed_at.gte.2026-11-23T15:15:00.000Z)']])
   })
   it('the last email in flight (claimed "completed" moments ago): Stop still stops it, and says so', async () => {
     rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-power', path_key: 'partner-power-introduction', status: 'completed', current_step: 1,
       completed_at: '2026-11-23T15:29:58.000Z', last_sent_at: '2026-11-23T15:29:58.000Z', next_send_at: null })
-    expect(await del({ pathKey: 'partner-power-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, lastEmailInFlight: true } })
+    expect(await del({ pathKey: 'partner-power-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, emailInFlight: true, lastEmailInFlight: true } })
     expect(rows()[0]).toMatchObject({ status: 'stopped', stopped_reason: 'owner_stopped', next_send_at: null })
-    expect(progressWrites()[1].filters).toEqual([['eq', 'partner_id', PA], ['eq', 'path_key', 'partner-power-introduction'], ['eq', 'status', 'completed'], ['gte', 'completed_at', '2026-11-23T15:15:00.000Z']])
+    expect(progressWrites()).toHaveLength(1)
+  })
+  it('a NON-last email sent or being sent moments ago (the row claimed for the next one): stopped, and says one may still arrive', async () => {
+    rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-intro', path_key: 'partner-introduction', status: 'active', current_step: 2,
+      completed_at: null, last_sent_at: '2026-11-23T15:29:58.000Z', next_send_at: '2027-02-21T15:00:00.000Z' })
+    expect(await del({ pathKey: 'partner-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, emailInFlight: true, lastEmailInFlight: false } })
+    expect(rows()[0].status).toBe('stopped')
+  })
+  it('the last email sent long ago: nothing in flight', async () => {
+    rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-intro', path_key: 'partner-introduction', status: 'active', current_step: 2,
+      completed_at: null, last_sent_at: '2026-11-01T15:00:00.000Z', next_send_at: '2027-01-30T15:00:00.000Z' })
+    expect((await del({ pathKey: 'partner-introduction', confirmed: true })).json).toEqual({ stopped: true, emailInFlight: false, lastEmailInFlight: false })
   })
   it('a sequence that really finished (completed more than 15 minutes ago): not changed, 409', async () => {
     rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-power', path_key: 'partner-power-introduction', status: 'completed', current_step: 1,
@@ -323,6 +350,21 @@ describe('Stop', () => {
     expect((await del({ pathKey: 'partner-introduction', confirmed: true })).json.error).toBe('not_on_sequence')
     expect((await del({ pathKey: 'organizing-a', confirmed: true })).json.error).toBe('not_a_partner_sequence')
     expect((await del({ pathKey: 'partner-introduction' })).json.error).toBe('confirmation_required')
+  })
+})
+
+describe('no send outlives Stop’s in-flight window', () => {
+  it('the partner cron and the Start route set a time limit far under STOP_IN_FLIGHT_MINUTES; the client cron is not touched', async () => {
+    const { STOP_IN_FLIGHT_MINUTES } = await import('./partner-sequence-start')
+    const seq = await import('@/app/api/network/contacts/[id]/sequences/route')
+    expect((seq as any).maxDuration).toBe(60)
+    const { readFileSync } = await import('node:fs')
+    const cron = readFileSync('app/api/cron/send-partner-emails/route.ts', 'utf8')
+    const m = /^export const maxDuration = (\d+)$/m.exec(cron)
+    expect(Number(m?.[1])).toBe(300)
+    expect(Number(m?.[1])).toBeLessThan(STOP_IN_FLIGHT_MINUTES * 60 / 2)
+    expect(readFileSync('app/api/cron/send-drips/route.ts', 'utf8')).not.toMatch(/maxDuration/)
+    expect(JSON.parse(readFileSync('vercel.json', 'utf8')).functions).toEqual({ 'app/api/import/jobber-clients/route.ts': { maxDuration: 800 } })
   })
 })
 
