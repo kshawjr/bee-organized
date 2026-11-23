@@ -37847,7 +37847,7 @@ if (Array.isArray(initialPeople)) return
   // closed exactly as above. `role` is the role being ACTED as, so view-as
   // shows what that person sees. closedFor() is the only thing the menu and
   // the page ask; CLOSED_NAV itself is unchanged.
-  const networkOpen = maySeeNewNetwork(role)
+  const networkOpen = maySeeNewNetwork(role, currentLocation?.id)
   const closedFor = key => (key === 'partners' && networkOpen ? null : (CLOSED_NAV[key] || null))
   const railRow = item => ({
     key: item.key, label: item.label, badge: item.badge,

@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!maySeeNewNetwork(caller.role)) {
+  if (!maySeeNewNetwork(caller.role, caller.locationId)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 

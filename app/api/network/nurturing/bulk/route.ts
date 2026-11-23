@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  if (!maySeeNewNetwork(caller.role, caller.locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
   let body: any
   try { body = await request.json() } catch { return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 }) }

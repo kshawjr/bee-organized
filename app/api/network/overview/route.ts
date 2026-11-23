@@ -24,7 +24,7 @@ export async function GET() {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  if (!maySeeNewNetwork(caller.role, caller.locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   // Every location's numbers: never for an owner, manager or lite user.
   if (!maySeeAllNetworkLocations(caller)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   try {

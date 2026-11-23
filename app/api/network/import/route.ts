@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  if (!maySeeNewNetwork(caller.role, caller.locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   const locationId = request.nextUrl.searchParams.get('location_id') || ''
   if (!UUID_RE.test(locationId)) return NextResponse.json({ ok: false, reason: 'location_required' }, { status: 400 })
   // Another location answers like one that does not exist, as every Network
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
   if (!caller) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  if (!maySeeNewNetwork(caller.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  if (!maySeeNewNetwork(caller.role, caller.locationId)) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
   const raw = await request.text()
   if (raw.length > IMPORT_MAX_CHARS + 2000) return NextResponse.json({ ok: false, reason: 'too_big' }, { status: 413 })
