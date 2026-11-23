@@ -115,6 +115,9 @@ export function progressWords(p) {
   }
   if (p.status === 'completed') return `Finished${dayLabel(p.completedAt) ? ` ${dayLabel(p.completedAt)}` : ''} · all ${p.total} sent.`
   if (p.status === 'unsubscribed') return `Ended: they unsubscribed${dayLabel(p.stoppedAt) ? ` ${dayLabel(p.stoppedAt)}` : ''} · ${p.sent} of ${p.total} sent.`
+  // Stopped while its last email was being sent (lib/network/partner-sequence-start.ts
+  // STOP_IN_FLIGHT_MINUTES): whether that one went is not known here.
+  if (p.stoppedReason === 'owner_stopped' && p.completedAt) return `Stopped${dayLabel(p.stoppedAt) ? ` ${dayLabel(p.stoppedAt)}` : ''} while its last email was being sent; that email may have gone. Nothing more will.`
   const why = p.stoppedReason === 'owner_stopped' ? 'Stopped' : p.stoppedReason === 'invalid_recipient' ? 'Stopped: the email address bounced' : 'Stopped'
   return `${why}${dayLabel(p.stoppedAt) ? ` ${dayLabel(p.stoppedAt)}` : ''} · ${p.sent} of ${p.total} sent.`
 }
@@ -261,7 +264,9 @@ export default function PartnerEmails({ contactId, name, first, fetchImpl = null
     try {
       const { res, json } = await send('DELETE', { pathKey: stopping.pathKey, confirmed: true })
       if (!res.ok && json?.error !== 'not_on_sequence') { setError(json?.error === 'forbidden_read_only' ? START_ERRORS.forbidden_read_only : 'That didn’t go through. Nothing was stopped.'); return }
-      setNote(res.ok ? `Stopped. ${first} gets no more emails from ${stopping.name}.` : 'It had already finished or stopped.')
+      setNote(!res.ok ? 'It had already finished or stopped, so nothing was changed.'
+        : json?.lastEmailInFlight ? `Stopped. The last email of ${stopping.name} was already being sent as you pressed Stop, so it may still reach ${first}. Nothing more will.`
+        : `Stopped. ${first} gets no more emails from ${stopping.name}.`)
       setStopping(null)
       await load()
     } catch { setError('That didn’t go through. Nothing was stopped.') } finally { setBusy(false) }

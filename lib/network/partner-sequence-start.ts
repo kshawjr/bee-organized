@@ -197,18 +197,46 @@ function dbRefusal(err: { message?: string; code?: string }): StartResult {
   return { ok: false, status: 500, error: 'start_failed' }
 }
 
-export type StopResult = { ok: true } | { ok: false; status: number; error: 'not_a_partner_sequence' | 'not_on_sequence' | 'stop_failed' }
+export type StopResult =
+  | { ok: true; lastEmailInFlight: boolean }
+  | { ok: false; status: number; error: 'not_a_partner_sequence' | 'not_on_sequence' | 'stop_failed' }
 
-/** Stop `partnerId` on the sequence named `pathKey`: nothing more is sent. */
+// THE LAST EMAIL IN FLIGHT. While the sender sends a sequence's LAST email it
+// has already claimed the row as "completed" (lib/network/partner-drip-send.ts
+// claimRow). If that send then fails, the claim is handed back as "active"
+// and the next run tries again. So a row that turned "completed" moments ago
+// may not be finished at all. Stop therefore also takes a row completed in
+// the last STOP_IN_FLIGHT_MINUTES: it becomes "stopped", the hand-back no
+// longer matches (it needs the row exactly as claimed), and nothing more is
+// sent. If that last send in fact succeeded, the one email has gone (it was
+// already with Resend) and the row still ends stopped, never active.
+// A send takes seconds; Resend's own timeout is well under a minute.
+export const STOP_IN_FLIGHT_MINUTES = 15
+
+/**
+ * Stop `partnerId` on the sequence named `pathKey`: nothing more is sent.
+ * Works at any moment, also while an email of it is being sent (see above).
+ */
 export async function stopPartnerSequence(args: { partnerId: string; pathKey: unknown }): Promise<StopResult> {
   if (typeof args.pathKey !== 'string' || !isPartnerPathKey(args.pathKey)) return { ok: false, status: 400, error: 'not_a_partner_sequence' }
-  const { data, error } = await supabaseService.from(PARTNER_PROGRESS_TABLE)
-    .update({ status: 'stopped', stopped_at: new Date().toISOString(), stopped_reason: 'owner_stopped', next_send_at: null })
+  const now = new Date()
+  const stopped = { status: 'stopped', stopped_at: now.toISOString(), stopped_reason: 'owner_stopped', next_send_at: null }
+  // 1. On it now (including a row claimed for its next email, which stays "active").
+  const a = await supabaseService.from(PARTNER_PROGRESS_TABLE)
+    .update(stopped)
     .eq('partner_id', args.partnerId).eq('path_key', args.pathKey).eq('status', 'active')
     .select('id')
-  if (error) { console.error('[partner-sequence] stop failed', error.message); return { ok: false, status: 500, error: 'stop_failed' } }
-  if (!Array.isArray(data) || data.length === 0) return { ok: false, status: 409, error: 'not_on_sequence' }
-  return { ok: true }
+  if (a.error) { console.error('[partner-sequence] stop failed', a.error.message); return { ok: false, status: 500, error: 'stop_failed' } }
+  if (Array.isArray(a.data) && a.data.length > 0) return { ok: true, lastEmailInFlight: false }
+  // 2. Its last email may be in flight: claimed as completed moments ago.
+  const since = new Date(now.getTime() - STOP_IN_FLIGHT_MINUTES * 60_000).toISOString()
+  const b = await supabaseService.from(PARTNER_PROGRESS_TABLE)
+    .update(stopped)
+    .eq('partner_id', args.partnerId).eq('path_key', args.pathKey).eq('status', 'completed').gte('completed_at', since)
+    .select('id')
+  if (b.error) { console.error('[partner-sequence] stop failed', b.error.message); return { ok: false, status: 500, error: 'stop_failed' } }
+  if (Array.isArray(b.data) && b.data.length > 0) return { ok: true, lastEmailInFlight: true }
+  return { ok: false, status: 409, error: 'not_on_sequence' }
 }
 
 /** What the contact sheet shows: the sequences that can be started, and where this partner is on each. */

@@ -107,6 +107,20 @@ describe('on a sequence: which one, how far, and Stop', () => {
   })
 })
 
+describe('Stop pressed while the last email is being sent', () => {
+  it('the screen says the truth: it may still arrive, nothing more will', async () => {
+    await mount(view({ progress: [{ ...ACTIVE, step: 1, sent: 0, total: 1, pathKey: 'partner-power-introduction', name: 'Power Partner introduction' }] }),
+      { DELETE: { status: 200, json: { stopped: true, lastEmailInFlight: true }, next: view() } })
+    await click($('[data-stop]')); await click($('[data-confirm-yes]'))
+    expect($('[data-partner-emails-note]')?.textContent).toBe('Stopped. The last email of Power Partner introduction was already being sent as you pressed Stop, so it may still reach Taylor. Nothing more will.')
+  })
+  it('a real 409 is not dressed up as stopped', async () => {
+    await mount(view({ progress: [ACTIVE] }), { DELETE: { status: 409, json: { error: 'not_on_sequence' } } })
+    await click($('[data-stop]')); await click($('[data-confirm-yes]'))
+    expect($('[data-partner-emails-note]')?.textContent).toBe('It had already finished or stopped, so nothing was changed.')
+  })
+})
+
 describe('cannot be emailed: a quiet line, never a dead button', () => {
   for (const [reason, words] of [
     ['no_email', 'Add an email address for Taylor to start partner emails.'],
@@ -128,6 +142,10 @@ describe('cannot be emailed: a quiet line, never a dead button', () => {
 })
 
 describe('the words', () => {
+  it('stopped while the last email was being sent: says it may have gone', () => {
+    expect(progressWords({ ...ACTIVE, status: 'stopped', stoppedReason: 'owner_stopped', stoppedAt: '2026-11-23T16:00:00Z', completedAt: '2026-11-23T16:00:00Z' }))
+      .toBe('Stopped Nov 23, 2026 while its last email was being sent; that email may have gone. Nothing more will.')
+  })
   it('progress', () => {
     expect(progressWords({ ...ACTIVE, step: 1, sent: 0 })).toBe('Email 1 of 2 is next · goes Feb 21, 2027. 0 of 2 sent so far.')
     expect(progressWords({ ...ACTIVE, status: 'completed', completedAt: '2027-02-21T15:30:00Z', sent: 2 })).toBe('Finished Feb 21, 2027 · all 2 sent.')

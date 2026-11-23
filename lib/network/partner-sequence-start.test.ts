@@ -20,6 +20,7 @@ const h = vi.hoisted(() => {
     inlineSends: [] as string[],
     writes: [] as any[],
     reads: [] as string[],
+    pathOverride: null as any,
     seq: 0,
   }
   const match = (row: any, f: any[]) => f.every(([op, c, v]) => {
@@ -27,6 +28,7 @@ const h = vi.hoisted(() => {
     if (op === 'eq') return v === null ? x == null : x === v
     if (op === 'lt') return x != null && x < v
     if (op === 'lte') return x != null && x <= v
+    if (op === 'gte') return x != null && x >= v
     if (op === 'is') return v === null ? x == null : x === v
     throw new Error('fake db: ' + op)
   })
@@ -35,7 +37,7 @@ const h = vi.hoisted(() => {
     let op = 'select'; let patch: any = null; let head = false; let order: any = null; let lim: number | null = null
     const b: any = {}
     b.select = (_s: string, o?: any) => { if (o?.head) head = true; return b }
-    for (const m of ['eq', 'lt', 'lte', 'is']) b[m] = (c: string, v: any) => { f.push([m, c, v]); return b }
+    for (const m of ['eq', 'lt', 'lte', 'gte', 'is']) b[m] = (c: string, v: any) => { f.push([m, c, v]); return b }
     b.order = (c: string, o: any) => { order = [c, o?.ascending !== false]; return b }
     b.limit = (n: number) => { lim = n; return b }
     b.update = (p: any) => { op = 'update'; patch = p; return b }
@@ -53,6 +55,8 @@ const h = vi.hoisted(() => {
         return { data: [{ id: row.id }], error: null }
       }
       if (op === 'select') st.reads.push(table)
+      // A lookup that lies (to reach Start's second lock on its own).
+      if (op === 'select' && single && table === 'drip_paths' && st.pathOverride) return { data: { ...st.pathOverride }, error: null }
       let hit = rows.filter((r) => match(r, f))
       if (op === 'update') {
         for (const r of hit) {
@@ -114,7 +118,7 @@ beforeEach(() => {
     ],
     partner_drip_progress: [],
   }
-  h.st.block = {}; h.st.blockError = false; h.st.inlineSends = []; h.st.writes = []; h.st.reads = []
+  h.st.block = {}; h.st.blockError = false; h.st.inlineSends = []; h.st.writes = []; h.st.reads = []; h.st.pathOverride = null
   h.st.hubUser = { id: 'u-own', role: 'super_admin', location_id: 'loc-1' }
   h.st.gateRoles = ['super_admin']
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -180,6 +184,11 @@ describe('Start refuses, at the route, and writes nothing', () => {
     h.st.tables.drip_paths = h.st.tables.drip_paths.filter((p) => p.id !== 'm-intro')
     h.st.tables.drip_paths.push({ id: 'l2-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-2', is_master: false, is_active: true })
     await refused(await start('partner-introduction', { dripPathId: 'l2-intro' }), 409, 'sequence_not_found')
+  })
+  it('the second lock: a lookup that hands back ANOTHER location’s copy is refused', async () => {
+    h.st.pathOverride = { id: 'l2-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-2', is_master: false, is_active: true }
+    h.st.tables.drip_path_steps.push(...steps('l2-intro', [1, 0, null, 'Denver']))
+    await refused(await start(), 409, 'sequence_wrong_location')
   })
   it('a paused sequence (the master switched off, no copy)', async () => {
     h.st.tables.drip_paths.find((p) => p.id === 'm-intro').is_active = false
@@ -293,9 +302,22 @@ describe('who may start or stop: someone with access to the PARTNER’s location
 describe('Stop', () => {
   it('ends the sequence for that partner: stopped, no next send, only an active row matched', async () => {
     rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-intro', path_key: 'partner-introduction', status: 'active', current_step: 2, next_send_at: '2027-02-21T15:00:00Z' })
-    expect(await del({ pathKey: 'partner-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true } })
+    expect(await del({ pathKey: 'partner-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, lastEmailInFlight: false } })
     expect(rows()[0]).toMatchObject({ status: 'stopped', stopped_reason: 'owner_stopped', next_send_at: null, stopped_at: '2026-11-23T15:30:00.000Z' })
     expect(progressWrites()[0].filters).toEqual([['eq', 'partner_id', PA], ['eq', 'path_key', 'partner-introduction'], ['eq', 'status', 'active']])
+  })
+  it('the last email in flight (claimed "completed" moments ago): Stop still stops it, and says so', async () => {
+    rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-power', path_key: 'partner-power-introduction', status: 'completed', current_step: 1,
+      completed_at: '2026-11-23T15:29:58.000Z', last_sent_at: '2026-11-23T15:29:58.000Z', next_send_at: null })
+    expect(await del({ pathKey: 'partner-power-introduction', confirmed: true })).toEqual({ status: 200, json: { stopped: true, lastEmailInFlight: true } })
+    expect(rows()[0]).toMatchObject({ status: 'stopped', stopped_reason: 'owner_stopped', next_send_at: null })
+    expect(progressWrites()[1].filters).toEqual([['eq', 'partner_id', PA], ['eq', 'path_key', 'partner-power-introduction'], ['eq', 'status', 'completed'], ['gte', 'completed_at', '2026-11-23T15:15:00.000Z']])
+  })
+  it('a sequence that really finished (completed more than 15 minutes ago): not changed, 409', async () => {
+    rows().push({ id: 'pdp-1', partner_id: PA, drip_path_id: 'm-power', path_key: 'partner-power-introduction', status: 'completed', current_step: 1,
+      completed_at: '2026-11-23T15:14:00.000Z', last_sent_at: '2026-11-23T15:14:00.000Z', next_send_at: null })
+    expect((await del({ pathKey: 'partner-power-introduction', confirmed: true })).json.error).toBe('not_on_sequence')
+    expect(rows()[0].status).toBe('completed')
   })
   it('nothing to stop: 409, and a client key is refused', async () => {
     expect((await del({ pathKey: 'partner-introduction', confirmed: true })).json.error).toBe('not_on_sequence')

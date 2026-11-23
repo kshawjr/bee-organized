@@ -103,5 +103,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!w.caller) return w.refuse
   const r = await stopPartnerSequence({ partnerId: id, pathKey: w.body?.pathKey })
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status })
-  return NextResponse.json({ stopped: true })
+  // lastEmailInFlight: the last email was being sent as Stop was pressed; it
+  // may still arrive, and nothing after it will.
+  return NextResponse.json({ stopped: true, lastEmailInFlight: r.lastEmailInFlight })
 }
