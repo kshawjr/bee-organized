@@ -41,6 +41,7 @@ import * as add from '@/app/api/network/contacts/route'
 import * as contact from '@/app/api/network/contacts/[id]/route'
 import * as contactBulk from '@/app/api/network/contacts/bulk/route'
 import * as importRoute from '@/app/api/network/import/route'
+import * as sequences from '@/app/api/network/contacts/[id]/sequences/route'
 
 const LOC = 'a0000000-0000-4000-8000-000000000001'
 const ID = 'a1000000-0000-4000-8000-0000000000c1'
@@ -56,6 +57,10 @@ const HANDLERS: [string, () => Promise<Response>][] = [
   ['POST contacts', () => add.POST(req('/x', { location_id: LOC, name: 'X' }))],
   ['GET contacts/[id]', () => contact.GET(req('/x'), p)],
   ['PATCH contacts/[id]', () => contact.PATCH(req('/x', { changes: {} }), p)],
+  // Partner emails slice 5: a partner's sequences (start / stop).
+  ['GET contacts/[id]/sequences', () => sequences.GET(req('/x'), p)],
+  ['POST contacts/[id]/sequences', () => sequences.POST(req('/x', { pathKey: 'partner-introduction', confirmed: true }), p)],
+  ['DELETE contacts/[id]/sequences', () => sequences.DELETE(req('/x', { pathKey: 'partner-introduction', confirmed: true }), p)],
   ['POST contacts/bulk', () => contactBulk.POST(req('/x', { location_id: LOC, ids: [ID], action: 'level', value: 'power', confirmed: true }))],
   ['GET import', () => importRoute.GET(req(`/x?location_id=${LOC}`))],
   ['POST import', () => importRoute.POST(req('/x', { location_id: LOC, csv: 'Name\nX\n', mode: 'check' }))],
@@ -84,10 +89,11 @@ describe('every Network route asks the gate first, then the location rule', () =
   const files: string[] = []
   const walk = (d: string) => { for (const f of readdirSync(d)) { const x = join(d, f); statSync(x).isDirectory() ? walk(x) : f === 'route.ts' && files.push(x) } }
   walk(root)
-  it('there are 11 route files, 13 handlers', () => {
-    expect(files.length).toBe(11)
+  // Partner emails slice 5 added contacts/[id]/sequences (GET, POST, DELETE).
+  it('there are 12 route files, 16 handlers', () => {
+    expect(files.length).toBe(12)
     const handlers = files.flatMap((f) => readFileSync(f, 'utf8').match(/export async function (GET|POST|PATCH|PUT|DELETE)\b/g) || [])
-    expect(handlers.length).toBe(13)
+    expect(handlers.length).toBe(16)
   })
   for (const f of files) {
     const rel = f.slice(root.length + 1)

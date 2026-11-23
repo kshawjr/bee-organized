@@ -60,6 +60,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { TYPE_META, LEVEL_META, PARTNER_LEVELS, PARTNER_STAGES, normalizeTypes, partnerLevel, partnerStage, money } from '@/lib/network/types'
 import ConfirmChange from './ConfirmChange'
+import PartnerEmails from './PartnerEmails'
 import { changesBetween, saveErrorWords } from '@/lib/network/contact-edit'
 import {
   ADD_ERROR_WORDS, ADDRESS_MAX, ADDRESS_TYPES, NOTE_MAX, TOUCH_TYPE_CATEGORY,
@@ -848,6 +849,13 @@ export default function ContactSheet({ contactId, onClose, onSaved = () => {}, f
                       })}
                     </div>
                     <p className="ns-quiet" style={{ marginTop: '8px' }} data-level-stage-note>Now at <b style={{ color: T.primary }}>{stage}</b>. Tap a level or stage to change it; you&rsquo;ll be asked to confirm.</p>
+                  </Card>
+                )}
+
+                {/* Partner emails, slice 5: start / stop their email sequences. */}
+                {isPartner && (
+                  <Card title="Partner emails" tone="partner" testId="partner-emails">
+                    <PartnerEmails contactId={contactId} name={c.name} first={firstName(c.name)} fetchImpl={doFetch} />
                   </Card>
                 )}
 

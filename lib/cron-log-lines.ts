@@ -25,6 +25,14 @@ export function sendPartnerEmailsLine(r: { considered: number; sent: number; ski
   return `[cron send-partner-emails] ${r.sent} sent / ${r.skipped} skipped / ${r.held} held / ${r.failed} failed of ${r.considered}`
 }
 
+// Partner emails, slice 5: active partner sequences whose next email is more
+// than OVERDUE_MARGIN_HOURS late (held, failing, or never picked up), on every
+// run, zero included, so a stuck one is never silent.
+export function partnerOverdueLine(r: { count: number; oldestDue: string | null } | { error: string }): string {
+  if ('error' in r) return `[cron send-partner-emails] overdue count failed: ${r.error}`
+  return `[cron send-partner-emails] ${r.count} overdue${r.oldestDue ? ` (oldest due ${r.oldestDue})` : ''}`
+}
+
 export function gmailSyncLine(r: { accountsEnabled: number; accountsSynced: number; accountsFailed: unknown[]; circuitOpen: unknown[]; skippedForTime: unknown[]; elapsedMs: number }): string {
   return `[cron gmail-sync] accounts ${r.accountsEnabled}, synced ${r.accountsSynced}, failed ${r.accountsFailed.length}, ` +
     `circuit open ${r.circuitOpen.length}, out of time ${r.skippedForTime.length}, ${r.elapsedMs}ms`

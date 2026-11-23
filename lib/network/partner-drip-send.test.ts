@@ -15,13 +15,13 @@ const h = vi.hoisted(() => {
     partner: null as any, loc: null as any, step: null as any, path: null as any, owner: null as any,
     nextStep: null as any, block: null as any, blockError: false, token: 'a'.repeat(64) as string | null,
     claimRows: 1, claimError: null as any, resend: null as any, hubUser: { id: 'u1', role: 'owner', location_id: 'loc-1' } as any,
-    routeStep: null as any, counts: { lead: 2, partner: 3 } as any, due: [] as any[],
+    routeStep: null as any, counts: { lead: 2, partner: 3 } as any, due: [] as any[], overdue: [] as any[],
   }
   const from = (table: string) => {
     const chain: any[] = []
     let op = 'select'; let sel = ''; let opts: any = {}
     const b: any = {}
-    for (const m of ['eq', 'is', 'in', 'not', 'lte', 'gte', 'order', 'limit', 'neq']) b[m] = (...a: any[]) => { chain.push([m, ...a]); return b }
+    for (const m of ['eq', 'is', 'in', 'not', 'lte', 'gte', 'lt', 'order', 'limit', 'neq']) b[m] = (...a: any[]) => { chain.push([m, ...a]); return b }
     b.select = (s: string, o?: any) => { chain.push(['select', s]); if (op === 'select') { sel = s; opts = o || {} } return b }
     for (const m of ['update', 'insert', 'upsert', 'delete']) b[m] = (a: any) => { op = m; chain.push([m, a]); return b }
     const respond = (): any => {
@@ -32,7 +32,8 @@ const h = vi.hoisted(() => {
         return { data: null, error: null }
       }
       if (op !== 'select') return { data: null, error: null }
-      if (opts.head) return { count: table === 'partner_drip_progress' ? st.counts.partner : st.counts.lead, data: null, error: null }
+      const late = chain.some((c) => c[0] === 'lt')
+      if (opts.head) return { count: table === 'partner_drip_progress' ? (late ? st.overdue.length : st.counts.partner) : st.counts.lead, data: null, error: null }
       switch (table) {
         case 'drip_paths': return single(st.path)
         case 'partners': return single(st.partner)
@@ -45,7 +46,7 @@ const h = vi.hoisted(() => {
           return single(st.routeStep)
         case 'hub_users': return single(st.owner)
         case 'subscription_seats': return sel === 'location_id' ? { data: [], error: null } : single(null)
-        case 'partner_drip_progress': return { data: st.due, error: null }
+        case 'partner_drip_progress': return { data: late ? st.overdue.slice(0, 1) : st.due, error: null }
         default: return single(null)
       }
     }
@@ -91,7 +92,7 @@ beforeEach(() => {
       is_active: true, is_paused: false, button_text: null, button_link: null, button_align: null, templates: null },
     owner: { id: 'u-own', full_name: 'Lynette Ewy', email: 'lyn@beeorganized.com', phone: '1', is_active: true, disabled_at: null, location_id: 'loc-1' },
     nextStep: { step_order: 2, delay_days: 90 },
-    hubUser: { id: 'u1', role: 'owner', location_id: 'loc-1' }, counts: { lead: 2, partner: 3 }, due: [],
+    hubUser: { id: 'u1', role: 'owner', location_id: 'loc-1' }, counts: { lead: 2, partner: 3 }, due: [], overdue: [],
   })
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-11-23T15:30:00.000Z'))
@@ -150,14 +151,42 @@ describe('a partner email goes with its footer, signed by the owner, and moves t
   it('a refused send hands the claim back (due again), a bad address stops it', async () => {
     h.st.resend = { data: null, error: { name: 'internal_server_error', message: 'down', statusCode: 500 } }
     expect((await sendPartnerDripStepForRow(ROW)).error).toBe('send: down')
+    // Handed back ONLY if the row is still exactly as the claim left it
+    // (slice 5): still active, on the claimed next step, due when the claim
+    // said, with the claim's own time. A row Stop has touched matches none.
     expect(progressWrites()[1]).toEqual([
       ['update', { status: 'active', current_step: 1, completed_at: null, last_sent_at: null, next_send_at: '2026-11-23T15:30:00.000Z' }],
       ['eq', 'id', 'pdp-1'], ['eq', 'last_sent_at', '2026-11-23T15:30:00.000Z'],
+      ['eq', 'status', 'active'], ['eq', 'current_step', 2], ['eq', 'next_send_at', '2027-02-21T15:00:00.000Z'],
     ])
     h.st.calls = []
     h.st.resend = { data: null, error: { name: 'validation_error', message: 'Invalid `to` field.', statusCode: 422 } }
     expect((await sendPartnerDripStepForRow(ROW)).error).toBe('invalid_recipient')
     expect(progressWrites()[1][0][1]).toMatchObject({ status: 'stopped', stopped_reason: 'invalid_recipient', current_step: 1 })
+    expect(progressWrites()[1].slice(1)).toEqual([['eq', 'id', 'pdp-1'], ['eq', 'last_sent_at', '2026-11-23T15:30:00.000Z'],
+      ['eq', 'status', 'active'], ['eq', 'current_step', 2], ['eq', 'next_send_at', '2027-02-21T15:00:00.000Z']])
+  })
+  it('the last email: handed back only if still exactly completed by this claim', async () => {
+    h.st.nextStep = null
+    h.st.resend = { data: null, error: { name: 'internal_server_error', message: 'down', statusCode: 500 } }
+    await sendPartnerDripStepForRow(ROW)
+    expect(progressWrites()[1].slice(1)).toEqual([['eq', 'id', 'pdp-1'], ['eq', 'last_sent_at', '2026-11-23T15:30:00.000Z'],
+      ['eq', 'status', 'completed'], ['eq', 'completed_at', '2026-11-23T15:30:00.000Z']])
+  })
+})
+
+describe('a paused sequence sends nothing (the second lock, behind Start)', () => {
+  it('the sequence is switched off: held, nothing sent, nothing claimed', async () => {
+    h.st.path = { ...h.st.path, is_active: false }
+    expect(await sendPartnerDripStepForRow(ROW)).toEqual({ sent: false, error: 'sequence_paused' })
+    expect([h.st.sent, progressWrites()]).toEqual([[], []])
+    const pathRead = h.st.calls.find((c) => c.table === 'drip_paths')
+    expect(pathRead.chain[0]).toEqual(['select', 'id, path_key, location_uuid, is_active'])
+  })
+  it('counted as held by the job, not failed', async () => {
+    h.st.due = [ROW]; h.st.path = { ...h.st.path, is_active: false }
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(await runPartnerDripBatch()).toMatchObject({ considered: 1, sent: 0, held: 1, failed: 0 })
   })
 })
 
@@ -296,9 +325,17 @@ describe('the "partway through" count', () => {
 })
 
 describe('the cron', () => {
-  it('refuses without the secret, and with no secret set', async () => {
+  it('refuses without the secret, with a WRONG secret, and with no secret set', async () => {
     process.env.CRON_SECRET = 'cs'
     expect((await cronGET(new NextRequest('http://x/api/cron/send-partner-emails'))).status).toBe(401)
+    // A wrong password, by header and by ?secret= — a check that took any
+    // non-empty password would let these through.
+    for (const bad of [{ headers: { authorization: 'Bearer wrong' } }, { headers: { authorization: 'Bearer c' } }, { headers: { authorization: 'cs' } }]) {
+      expect((await cronGET(new NextRequest('http://x/api/cron/send-partner-emails', bad))).status).toBe(401)
+    }
+    expect((await cronGET(new NextRequest('http://x/api/cron/send-partner-emails?secret=wrong'))).status).toBe(401)
+    expect((await cronGET(new NextRequest('http://x/api/cron/send-partner-emails?secret=cs'))).status).toBe(200)
+    expect(h.st.sent).toEqual([])
     delete process.env.CRON_SECRET
     expect((await cronGET(new NextRequest('http://x/api/cron/send-partner-emails'))).status).toBe(500)
   })
@@ -309,6 +346,7 @@ describe('the cron', () => {
     const res = await cronGET(new NextRequest('http://x/api/cron/send-partner-emails', { headers: { authorization: 'Bearer cs' } }))
     expect((await res.json()).partners).toEqual({ sent: 1, skipped: 0, held: 0, failed: 0, considered: 1 })
     expect(log.mock.calls.map((c) => c[0])).toContain('[cron send-partner-emails] 1 sent / 0 skipped / 0 held / 0 failed of 1')
+    expect(log.mock.calls.map((c) => c[0])).toContain('[cron send-partner-emails] 0 overdue')
     log.mockRestore()
     const due = h.st.calls.find((c) => c.table === 'partner_drip_progress' && c.op === 'select')
     expect(due.chain).toContainEqual(['limit', 100])
@@ -319,6 +357,28 @@ describe('the cron', () => {
     const crons = JSON.parse(readFileSync('vercel.json', 'utf8')).crons.map((c: any) => [c.path, c.schedule])
     expect(crons).toContainEqual(['/api/cron/send-partner-emails', '30 * * * *'])
     expect(crons).toContainEqual(['/api/cron/send-drips', '0 * * * *'])
+  })
+})
+
+describe('stuck sequences are not silent', () => {
+  it('a HELD email (no postal address) that is past due shows in the overdue line and the answer', async () => {
+    process.env.CRON_SECRET = 'cs'
+    const late = { ...ROW, next_send_at: '2026-11-23T10:00:00+00:00' } // 5h30 late
+    h.st.due = [late]; h.st.overdue = [late]
+    process.env.MARKETING_POSTAL_ADDRESS = ''
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const res = await cronGET(new NextRequest('http://x/api/cron/send-partner-emails', { headers: { authorization: 'Bearer cs' } }))
+    const j = await res.json()
+    expect(j.partners).toMatchObject({ held: 1, sent: 0 })
+    expect(j.overdue).toEqual({ count: 1, oldestDue: '2026-11-23T10:00:00+00:00', marginHours: 2 })
+    expect(log.mock.calls.map((c) => c[0])).toContain('[cron send-partner-emails] 1 overdue (oldest due 2026-11-23T10:00:00+00:00)')
+    log.mockRestore()
+    // The count asks by next_send_at alone: active and more than 2 hours late.
+    const q = h.st.calls.filter((c) => c.table === 'partner_drip_progress' && c.chain.some((x: any[]) => x[0] === 'lt'))
+    expect(q).toHaveLength(2)
+    for (const c of q) expect(c.chain).toContainEqual(['lt', 'next_send_at', '2026-11-23T13:30:00.000Z'])
+    for (const c of q) expect(c.chain).toContainEqual(['eq', 'status', 'active'])
   })
 })
 

@@ -156,7 +156,7 @@ export async function runPartnerDripBatch(limit = PARTNER_BATCH_LIMIT): Promise<
   }
   return out
 }
-const HELD = new Set(['missing_rate', 'missing_subject', 'no_partner_name', 'client_booking_button', 'client_booking_tag',
+const HELD = new Set(['sequence_paused', 'missing_rate', 'missing_subject', 'no_partner_name', 'client_booking_button', 'client_booking_tag',
   'no_postal_address', 'no_app_url', 'no_unsubscribe_link', 'location_not_active', 'sender_config_missing'])
 
 /** May this partner be emailed now? The gate, and the reason for the log. */
@@ -172,13 +172,21 @@ export async function sendPartnerDripStepForRow(row: PartnerProgressRow): Promis
   // The sequence: a partner sequence only, never a client one.
   const { data: path, error: pathErr } = await supabaseService
     .from('drip_paths')
-    .select('id, path_key, location_uuid')
+    .select('id, path_key, location_uuid, is_active')
     .eq('id', row.drip_path_id)
     .maybeSingle()
   if (pathErr || !path) return { sent: false, error: `path_lookup: ${pathErr?.message ?? 'missing'}` }
   if (!isPartnerPathKey(path.path_key)) {
     log('refused: not a partner sequence', { progressId: row.id, pathKey: path.path_key })
     return { sent: false, error: 'not_a_partner_sequence' }
+  }
+  // A PAUSED SEQUENCE (switched off) sends nothing: HELD, row untouched, so it
+  // carries on by itself when switched back on. The second lock behind Start,
+  // which refuses a paused sequence (slice 5). Only an explicit false holds;
+  // a sequence row always has the column.
+  if ((path as { is_active?: boolean | null }).is_active === false) {
+    log('held: the sequence is paused', { progressId: row.id, pathId: path.id })
+    return { sent: false, error: 'sequence_paused' }
   }
 
   // The partner.
@@ -335,15 +343,14 @@ export async function sendPartnerDripStepForRow(row: PartnerProgressRow): Promis
     const failure = classifySendFailure(result)
     log('send refused', { progressId: row.id, kind: failure.kind, error: failure.ownerMessage })
     if (failure.kind === 'terminal') {
-      await supabaseService
+      await onlyOurClaim(supabaseService
         .from(PARTNER_PROGRESS_TABLE)
         .update({ status: 'stopped', stopped_at: new Date().toISOString(), stopped_reason: 'invalid_recipient',
                   current_step: row.current_step, completed_at: null, last_sent_at: row.last_sent_at, next_send_at: null })
-        .eq('id', row.id)
-        .eq('last_sent_at', claimedAt)
+        .eq('id', row.id), plan, claimedAt)
       return { sent: false, error: 'invalid_recipient' }
     }
-    await releaseClaim(row, claimedAt)
+    await releaseClaim(row, plan, claimedAt)
     if (failure.kind === 'sender_domain') return { sent: false, error: 'location_sender_domain_unverified' }
     if (failure.kind === 'reply_to') return { sent: false, error: 'location_reply_to_invalid' }
     if (failure.kind === 'sender_config_missing') return { sent: false, error: 'sender_config_missing' }
@@ -388,16 +395,28 @@ async function claimRow(
 }
 
 // Hand the claim back after a refused send: the same step, due again now (so
-// the next run retries it). Matches only our own claim (its last_sent_at), and
-// the due time it gives back is not the one any other run read, so a run still
-// holding the old row can never match it.
-async function releaseClaim(row: PartnerProgressRow, claimedAt: string): Promise<void> {
-  const { error } = await supabaseService
+// the next run retries it). Matches only a row STILL EXACTLY IN OUR CLAIMED
+// STATE (onlyOurClaim): if anything moved it since — the owner pressed Stop
+// while Resend was answering, the partner unsubscribed — nothing matches and
+// the row stays as they left it. Stop can never be undone by a failing send.
+// The due time it gives back is not the one any other run read, so a run
+// still holding the old row can never match it.
+type ClaimPlan = { kind: 'last' } | { kind: 'next'; stepOrder: number; sendAt: Date }
+async function releaseClaim(row: PartnerProgressRow, plan: ClaimPlan, claimedAt: string): Promise<void> {
+  const { error } = await onlyOurClaim(supabaseService
     .from(PARTNER_PROGRESS_TABLE)
     .update({ status: 'active', current_step: row.current_step, completed_at: null, last_sent_at: row.last_sent_at, next_send_at: claimedAt })
-    .eq('id', row.id)
-    .eq('last_sent_at', claimedAt)
+    .eq('id', row.id), plan, claimedAt)
   if (error) log('could not hand the claim back', { progressId: row.id, error: error.message })
+}
+
+// The row exactly as claimRow left it: its status, step, due time and the
+// claim's own time. Any other state (stopped, unsubscribed, moved on) is not ours.
+function onlyOurClaim<Q extends { eq: (c: string, v: unknown) => Q }>(q: Q, plan: ClaimPlan, claimedAt: string): Q {
+  const ours = q.eq('last_sent_at', claimedAt)
+  return plan.kind === 'next'
+    ? ours.eq('status', 'active').eq('current_step', plan.stepOrder).eq('next_send_at', plan.sendAt.toISOString())
+    : ours.eq('status', 'completed').eq('completed_at', claimedAt)
 }
 
 // Removed / paused / not an email: move on without sending, through the same

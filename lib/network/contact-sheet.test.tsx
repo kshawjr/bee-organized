@@ -360,11 +360,12 @@ describe('a save sends only what the person changed', () => {
     expect(patches()).toEqual([])
     expect(value('phone')).toBe('(303) 555-0142')
   })
-  it('only ever talks to its own contact: two reads, and saves to the same address', async () => {
+  it('only ever talks to its own contact: three reads, and saves to the same address', async () => {
     await mount({ sheet: FULL, patch: () => edited({ phone: '(720) 555-0199' }) })
     await click($('[data-edit="essentials"]')); await type('[data-field="phone"]', '720-555-0199'); await submit()
+    // Partner emails slice 5: a partner's sheet also reads their sequences.
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      `GET /api/network/contacts/${ID}`, `GET /api/partners/${ID}/referrals`, `PATCH /api/network/contacts/${ID}`,
+      `GET /api/network/contacts/${ID}`, `GET /api/partners/${ID}/referrals`, `GET /api/network/contacts/${ID}/sequences`, `PATCH /api/network/contacts/${ID}`,
     ])
   })
 })

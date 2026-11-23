@@ -119,6 +119,10 @@ export const PARTNER_EMAILS_SLICE3_HUB_PIECES: [string, string][] = [
    "export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null, returningPathKey = null }) {\n  // RAIL A — a path's email steps, inline-first. Used for the default\n  // organizing/moving path (group one) and for the fixed returning-client\n  // path (the \"past client\" group) — same row shape, same controls.\n  const dripRowsFor = (key) => {\n"],
   ["// Partner emails (slice 3): the partner sequences, and the partner set of tags.\nimport { isPartnerPathKey, PARTNER_SEQUENCES } from '@/lib/partner-sequences'\nimport { PARTNER_MERGE_TAGS, PARTNER_MERGE_TAG_GROUPS } from '@/lib/partner-merge-tags'\n",
    ""],
+  // Partner emails slice 5 (2026-11-23): the Emails screen row's buttons wrap
+  // inside the card at phone width (Remove no longer spills past it).
+  ["        <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap', maxWidth:'100%' }}>\n",
+   "        <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap' }}>\n"],
 ]
 
 /** BeeHub.jsx with partner emails slice 3 taken back out. Throws if a piece is missing or doubled. */

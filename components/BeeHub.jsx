@@ -19012,7 +19012,7 @@ function EmailRow({ row, onRead, onEdit, onEditTiming, blockedReason = null, nee
             </button>
           )}
         </div>
-        <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', flexShrink:0, gap:'6px', alignSelf:'flex-start', flexWrap:'wrap', maxWidth:'100%' }}>
           <EBtn size="sm" onClick={onRead}>Read</EBtn>
           {onEdit && <EBtn size="sm" onClick={onEdit}>Edit</EBtn>}
           {onPause && <EBtn size="sm" variant="ghost" onClick={onPause} aria-label={paused ? 'Start again' : 'Pause'}>{paused ? '▶ Start' : '⏸ Pause'}</EBtn>}

@@ -154,6 +154,12 @@ const SCENARIOS: Sc[] = [
   S('style-unset', { loc: { ...LOC, email_style: null } }),
   S('by-lead-due', { byLead: true, dueRow: ROW() }),
   S('by-lead-nothing-due', { byLead: true, dueRow: null }),
+  // Slice 5: a step whose subject is BLANK TEXT ('' or spaces), not missing,
+  // over a template that has one. The step's '' wins (??, not ||), so the
+  // email is held for a blank subject; it never falls back to the template's.
+  S('blank-step-subject-over-template', { step: STEP({ subject: '', master_template_id: 't1', templates: { id: 't1', subject: 'From the template, {{first_name}}', body: 'Template body', body_format: 'plain' } }) }),
+  S('spaces-step-subject-over-template', { step: STEP({ subject: '   ', master_template_id: 't1', templates: { id: 't1', subject: 'From the template, {{first_name}}', body: 'Template body', body_format: 'plain' } }) }),
+  S('blank-step-body-over-template', { step: STEP({ body: '', master_template_id: 't1', templates: { id: 't1', subject: 'T', body: 'Template body {{location_name}}', body_format: 'plain' } }) }),
 ]
 
 async function runAll(): Promise<Record<string, string>> {
@@ -217,6 +223,10 @@ const BEFORE: Record<string, string> = {
   "style-unset": "8f19d16e01151530",
   "by-lead-due": "ed0c2df5a75dbfd2",
   "by-lead-nothing-due": "ce470d039a235b87",
+  // Slice 5: recorded on af902cb, on f115e0e and on this code (all equal).
+  "blank-step-subject-over-template": "65dc4a3de05be35b",
+  "spaces-step-subject-over-template": "65dc4a3de05be35b",
+  "blank-step-body-over-template": "9581f78121d3b02e",
 }
 
 beforeAll(() => {

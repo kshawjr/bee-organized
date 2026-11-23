@@ -15,7 +15,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runPartnerDripBatch } from '@/lib/network/partner-drip-send'
-import { sendPartnerEmailsLine } from '@/lib/cron-log-lines'
+import { sendPartnerEmailsLine, partnerOverdueLine } from '@/lib/cron-log-lines'
+import { overduePartnerSequences, OVERDUE_MARGIN_HOURS } from '@/lib/network/partner-sequence-start'
 
 export const dynamic = 'force-dynamic'
 // Same reason as send-drips (#95/#96): supabase-js reads must never be
@@ -42,8 +43,14 @@ export async function GET(req: NextRequest) {
   }
   // One line on EVERY run, even all zeros (lib/cron-log-lines).
   console.log(sendPartnerEmailsLine(r))
+  // Slice 5: STUCK IS NEVER SILENT. Counted after the run, so it is what is
+  // still late once this run has done what it can: by next_send_at alone,
+  // whatever the reason (held, failing, never picked up).
+  const overdue = await overduePartnerSequences()
+  console.log(partnerOverdueLine(overdue))
   return NextResponse.json({
     partners: { sent: r.sent, skipped: r.skipped, held: r.held, failed: r.failed, considered: r.considered },
+    overdue: 'error' in overdue ? { error: overdue.error, marginHours: OVERDUE_MARGIN_HOURS } : { ...overdue, marginHours: OVERDUE_MARGIN_HOURS },
     errors: r.errors.slice(0, 20),
   })
 }

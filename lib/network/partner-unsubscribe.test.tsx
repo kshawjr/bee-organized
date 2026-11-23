@@ -468,6 +468,7 @@ describe('nothing in this slice can send an email (fingerprint)', () => {
     for (const d of ['app', 'lib', 'components', 'scripts']) walk(d)
     // Slice 4 (2026-11-22) is the sender: it, its cron and the partway count are the
     // only new readers.
-    expect(users.sort()).toEqual(['app/api/cron/send-partner-emails/route.ts', 'app/api/drip-paths/[id]/active-lead-count/route.ts', 'lib/network/partner-drip-send.ts', 'lib/network/partner-email-eligibility.ts', 'lib/network/partner-unsubscribe.ts'])
+    // Slice 5 (2026-11-23): Start / Stop (lib/network/partner-sequence-start.ts).
+    expect(users.sort()).toEqual(['app/api/cron/send-partner-emails/route.ts', 'app/api/drip-paths/[id]/active-lead-count/route.ts', 'lib/network/partner-drip-send.ts', 'lib/network/partner-email-eligibility.ts', 'lib/network/partner-sequence-start.ts', 'lib/network/partner-unsubscribe.ts'])
   })
 })

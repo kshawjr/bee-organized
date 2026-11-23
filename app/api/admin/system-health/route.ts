@@ -36,6 +36,7 @@ import { fetchBookingLinkHealth } from '@/lib/booking-link-health'
 import { fetchLatestDigestRun, DIGEST_STALE_MS } from '@/lib/digest-runs'
 import { isJobParked } from '@/lib/import-phase'
 import { LOC_OTHER_SLUG } from '@/lib/hub-scope'
+import { overduePartnerSequences, OVERDUE_MARGIN_HOURS } from '@/lib/network/partner-sequence-start'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -482,6 +483,8 @@ export async function GET(req: NextRequest) {
     cautions.push(`the Slack digest hasn't run in ${hours}h — likely a stale-deployment cron`)
   }
 
+  const partnerOverdue = await safe('partner emails overdue', () => overduePartnerSequences(new Date(nowMs)))
+
   const level: 'green' | 'amber' | 'red' =
     problems.length > 0 ? 'red' : needsALook.length > 0 || cautions.length > 0 ? 'amber' : 'green'
 
@@ -523,5 +526,9 @@ export async function GET(req: NextRequest) {
         }
       : null,
     feedback,
+    // Partner emails slice 5: active partner sequences more than
+    // OVERDUE_MARGIN_HOURS late, whatever the reason. Read-only; null if the
+    // count could not be made.
+    partnerEmailsOverdue: partnerOverdue && !('error' in partnerOverdue) ? { ...partnerOverdue, marginHours: OVERDUE_MARGIN_HOURS } : null,
   })
 }
