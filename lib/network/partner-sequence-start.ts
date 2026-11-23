@@ -14,7 +14,10 @@
 // START REFUSES (each one asked here, on the server, before anything is written):
 //   not_a_partner_sequence       a client sequence key, or anything that is not "partner-…"
 //   sequence_not_found           no copy and no master of that key (removed)
-//   sequence_paused              the only copy there is, is switched off
+//   own_copy_paused              the location's OWN copy is switched off (FL-69,
+//                                Kevin 2026-11-23): refused, never the master
+//                                instead. OWN_COPY_PAUSED_MESSAGE is the words.
+//   sequence_paused              no copy of its own, and the master is switched off
 //   sequence_has_no_first_email  the sequence has no emails
 //   sequence_wrong_location      the chosen copy belongs to another location
 //                                (cannot be chosen by the lookup; second lock,
@@ -46,7 +49,7 @@ import { partnerCanReceive, partnerSendBlockReason } from './partner-email-eligi
 import { sendPartnerDripStep, PARTNER_PROGRESS_TABLE, type PartnerSendResult } from './partner-drip-send'
 
 export const START_REFUSALS = [
-  'not_a_partner_sequence', 'sequence_not_found', 'sequence_paused', 'sequence_has_no_first_email',
+  'not_a_partner_sequence', 'sequence_not_found', 'sequence_paused', 'own_copy_paused', 'sequence_has_no_first_email',
   'sequence_wrong_location', 'partner_cannot_receive', 'already_on_sequence', 'location_not_active', 'not_a_referral_partner',
 ] as const
 export type StartRefusal = (typeof START_REFUSALS)[number]
@@ -62,30 +65,35 @@ type StepRow = { step_order: number; delay_days: number | null; delay_unit?: str
 
 const PATH_COLS = 'id, path_key, name, location_uuid, is_master, is_active'
 
+// Kevin's words for a location that switched off its own copy (FL-69).
+export const OWN_COPY_PAUSED_MESSAGE = "You've paused this sequence. Unpause it to start partners on it."
+
 /**
  * Which copy of `pathKey` a partner at `locationId` is put on: the location's
- * own copy if it has one switched on, else the master switched on — exactly
- * lib/drip-lifecycle.ts startDrip's two reads. When neither is on, says
- * whether one exists switched off (paused) or none exists (removed).
+ * own copy if it has one; else the master. PARTNERS ONLY — client enrolment
+ * (lib/drip-lifecycle.ts startDrip) has its own lookup and is not changed.
+ * Unlike a client, a partner is never put on the master because the
+ * location's own copy is switched off (FL-69): that is own_copy_paused.
  */
 export async function choosePartnerPath(locationId: string, pathKey: string):
-  Promise<{ ok: true; path: PathRow } | { ok: false; error: 'sequence_not_found' | 'sequence_paused' | 'lookup_failed' }> {
-  const copy = await supabaseService.from('drip_paths').select(PATH_COLS)
-    .eq('location_uuid', locationId).eq('path_key', pathKey).eq('is_active', true).maybeSingle()
-  if (copy.error) return { ok: false, error: 'lookup_failed' }
-  if (copy.data) return { ok: true, path: copy.data as PathRow }
+  Promise<{ ok: true; path: PathRow } | { ok: false; error: 'sequence_not_found' | 'sequence_paused' | 'own_copy_paused' | 'lookup_failed' }> {
+  // The location's own copies of this key, switched on or off.
+  const copies = await supabaseService.from('drip_paths').select(PATH_COLS)
+    .eq('location_uuid', locationId).eq('path_key', pathKey)
+  if (copies.error) return { ok: false, error: 'lookup_failed' }
+  const own = (Array.isArray(copies.data) ? copies.data : copies.data ? [copies.data] : []) as PathRow[]
+  const ownOn = own.find((p) => p.is_active === true)
+  if (ownOn) return { ok: true, path: ownOn }
+  if (own.length > 0) return { ok: false, error: 'own_copy_paused' }
+  // No copy of its own: the master, as before.
   const master = await supabaseService.from('drip_paths').select(PATH_COLS)
     .eq('is_master', true).eq('path_key', pathKey).eq('is_active', true).maybeSingle()
   if (master.error) return { ok: false, error: 'lookup_failed' }
   if (master.data) return { ok: true, path: master.data as PathRow }
-  // Neither is on. Is there one switched off (here or the master)?
-  const [offCopy, offMaster] = await Promise.all([
-    supabaseService.from('drip_paths').select('id').eq('location_uuid', locationId).eq('path_key', pathKey).eq('is_active', false).limit(1),
-    supabaseService.from('drip_paths').select('id').eq('is_master', true).eq('path_key', pathKey).eq('is_active', false).limit(1),
-  ])
-  if (offCopy.error || offMaster.error) return { ok: false, error: 'lookup_failed' }
-  const any = (r: { data: unknown }) => Array.isArray(r.data) ? r.data.length > 0 : !!r.data
-  return { ok: false, error: any(offCopy) || any(offMaster) ? 'sequence_paused' : 'sequence_not_found' }
+  const offMaster = await supabaseService.from('drip_paths').select('id').eq('is_master', true).eq('path_key', pathKey).eq('is_active', false).limit(1)
+  if (offMaster.error) return { ok: false, error: 'lookup_failed' }
+  const any = Array.isArray(offMaster.data) ? offMaster.data.length > 0 : !!offMaster.data
+  return { ok: false, error: any ? 'sequence_paused' : 'sequence_not_found' }
 }
 
 async function stepsOf(pathId: string) {
@@ -97,7 +105,7 @@ async function stepsOf(pathId: string) {
 
 export type StartResult =
   | { ok: true; progressId: string; pathId: string; usedCopy: 'location' | 'master'; restarted: boolean; firstEmail: PartnerSendResult | null }
-  | { ok: false; status: number; error: StartRefusal | 'contact_not_found' | 'lookup_failed' | 'start_failed'; reason?: string | null }
+  | { ok: false; status: number; error: StartRefusal | 'contact_not_found' | 'lookup_failed' | 'start_failed'; reason?: string | null; message?: string }
 
 /**
  * Start `partnerId` on the sequence named `pathKey`. The caller (the route)
@@ -131,7 +139,9 @@ export async function startPartnerSequence(args: { partnerId: string; pathKey: u
   const chosen = await choosePartnerPath(locationId, pathKey)
   if (!chosen.ok) return chosen.error === 'lookup_failed'
     ? { ok: false, status: 500, error: 'lookup_failed' }
-    : { ok: false, status: 409, error: chosen.error }
+    : chosen.error === 'own_copy_paused'
+      ? { ok: false, status: 409, error: 'own_copy_paused', message: OWN_COPY_PAUSED_MESSAGE }
+      : { ok: false, status: 409, error: chosen.error }
   const path = chosen.path
   // Second lock (the lookup cannot pick it; the database refuses it too).
   if (!isPartnerPathKey(path.path_key)) return { ok: false, status: 400, error: 'not_a_partner_sequence' }
@@ -254,7 +264,8 @@ export async function partnerSequencesView(partnerId: string, locationId: string
   const sequences = []
   for (const s of PARTNER_SEQUENCES) {
     const chosen = await choosePartnerPath(locationId, s.pathKey)
-    if (!chosen.ok) { sequences.push({ pathKey: s.pathKey, name: s.name, description: SEQUENCE_DESCRIPTIONS[s.pathKey] ?? '', available: false, why: chosen.error, emails: [] }); continue }
+    if (!chosen.ok) { sequences.push({ pathKey: s.pathKey, name: s.name, description: SEQUENCE_DESCRIPTIONS[s.pathKey] ?? '', available: false, why: chosen.error,
+      message: chosen.error === 'own_copy_paused' ? OWN_COPY_PAUSED_MESSAGE : null, emails: [] }); continue }
     const { data: steps } = await stepsOf(chosen.path.id)
     sequences.push({
       pathKey: s.pathKey, name: chosen.path.name || s.name, description: SEQUENCE_DESCRIPTIONS[s.pathKey] ?? '', available: true, why: null,

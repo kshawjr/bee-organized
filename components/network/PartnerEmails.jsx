@@ -155,7 +155,7 @@ export function SequencePicker({ name, sequences, progress, onClose, onContinue 
               return (
                 <button key={s.pathKey} type="button" className="pm-choice" aria-pressed={selected === s.pathKey} disabled={off} onClick={() => setSelected(s.pathKey)} data-sequence-choice={s.pathKey}>
                   <MailIcon />
-                  <span><strong>{s.name}</strong><small>{on ? `${name} is on this one now.` : !s.available ? (s.why === 'sequence_paused' ? 'Paused on the Emails screen.' : 'Not available.') : s.description}</small></span>
+                  <span><strong>{s.name}</strong><small>{on ? `${name} is on this one now.` : !s.available ? (s.message || (s.why === 'sequence_paused' ? 'Paused on the Emails screen.' : 'Not available.')) : s.description}</small></span>
                   {selected === s.pathKey && <Check />}
                 </button>
               )
@@ -208,6 +208,7 @@ const START_ERRORS = {
   partner_cannot_receive: 'This partner can’t be emailed (no address, or they unsubscribed). Nothing was started.',
   already_on_sequence: 'They’re already on this workflow. Nothing was changed.',
   sequence_paused: 'That workflow is paused on the Emails screen. Nothing was started.',
+  own_copy_paused: "You've paused this sequence. Unpause it to start partners on it.",
   sequence_not_found: 'That workflow isn’t there any more. Nothing was started.',
   sequence_has_no_first_email: 'That workflow has no emails. Nothing was started.',
   location_not_active: 'This location isn’t active on Bee Hub, so nothing can be started.',
@@ -253,7 +254,7 @@ export default function PartnerEmails({ contactId, name, first, fetchImpl = null
     setBusy(true); setError(null)
     try {
       const { res, json } = await send('POST', { pathKey: confirming.pathKey, confirmed: true })
-      if (!res.ok) { setError(startErrorWords(json?.error)); return }
+      if (!res.ok) { setError(json?.message || startErrorWords(json?.error)); return }
       setNote(json.firstEmail?.sent ? `Started. The first email went to ${first}.` : `Started. The first email goes out within the hour.`)
       setConfirming(null)
       await load()

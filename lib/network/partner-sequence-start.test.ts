@@ -207,10 +207,26 @@ describe('Start refuses, at the route, and writes nothing', () => {
     h.st.tables.drip_paths.find((p) => p.id === 'm-intro').is_active = false
     await refused(await start(), 409, 'sequence_paused')
   })
-  it('a paused copy with no master to fall back to', async () => {
+  it('FL-69: the location paused its OWN copy (an active master exists): refused with Kevin’s words, never the master', async () => {
+    h.st.tables.drip_paths.push({ id: 'l1-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-1', is_master: false, is_active: false })
+    h.st.tables.drip_path_steps.push(...steps('l1-intro', [1, 0, null, 'Own words']))
+    const r = await start()
+    await refused(r, 409, 'own_copy_paused')
+    expect(r.json.message).toBe("You've paused this sequence. Unpause it to start partners on it.")
+  })
+  it('FL-69: a paused own copy with no master at all: the same refusal', async () => {
     h.st.tables.drip_paths = h.st.tables.drip_paths.filter((p) => p.id !== 'm-intro')
     h.st.tables.drip_paths.push({ id: 'l1-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-1', is_master: false, is_active: false })
-    await refused(await start(), 409, 'sequence_paused')
+    await refused(await start(), 409, 'own_copy_paused')
+  })
+  it('FL-69: the picker shows Kevin’s words for that sequence, not the master’s emails', async () => {
+    h.st.tables.drip_paths.push({ id: 'l1-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-1', is_master: false, is_active: false })
+    const seq = (await get()).json.sequences.find((x: any) => x.pathKey === 'partner-introduction')
+    expect(seq).toMatchObject({ available: false, why: 'own_copy_paused', message: "You've paused this sequence. Unpause it to start partners on it.", emails: [] })
+  })
+  it('FL-69: another location’s paused copy does not affect this one (master used)', async () => {
+    h.st.tables.drip_paths.push({ id: 'l2-intro', path_key: 'partner-introduction', name: 'x', location_uuid: 'loc-2', is_master: false, is_active: false })
+    expect((await start()).json.usedCopy).toBe('master')
   })
   it('a removed sequence (no copy, no master)', async () => {
     h.st.tables.drip_paths = h.st.tables.drip_paths.filter((p) => p.id !== 'm-intro')

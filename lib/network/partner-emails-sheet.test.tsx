@@ -86,6 +86,21 @@ describe('start: pick, see the emails and timing, confirm — then and only then
     expect($('[data-start-error]')?.textContent).toBe('They’re already on this workflow. Nothing was changed.')
     expect($('[data-progress]')).toBeNull()
   })
+  it('FL-69: a sequence whose own copy is paused shows Kevin’s words in the picker and cannot be picked', async () => {
+    const MSG = "You've paused this sequence. Unpause it to start partners on it."
+    await mount(view({ sequences: [{ ...SEQS[0], available: false, why: 'own_copy_paused', message: MSG, emails: [] }, SEQS[1]] }))
+    await click($('[data-start-workflow]'))
+    const choice = $('[data-sequence-choice="partner-introduction"]') as HTMLButtonElement
+    expect(choice.disabled).toBe(true)
+    expect(choice.textContent).toContain(MSG)
+    expect($('[data-picker-emails]')?.textContent).not.toContain('Thinking of you and your clients')
+  })
+  it('FL-69: a refusal carrying the server’s message shows those words', async () => {
+    const MSG = "You've paused this sequence. Unpause it to start partners on it."
+    await mount(view(), { POST: { status: 409, json: { error: 'own_copy_paused', message: MSG } } })
+    await click($('[data-start-workflow]')); await click($('[data-picker-continue]')); await click($('[data-confirm-start]'))
+    expect($('[data-start-error]')?.textContent).toBe(MSG)
+  })
   it('a sequence the partner is on now cannot be picked again', async () => {
     await mount(view({ progress: [ACTIVE] }))
     expect($('[data-start-workflow]')?.textContent).toBe('Start another email workflow')

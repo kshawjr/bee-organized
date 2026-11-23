@@ -96,7 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!w.caller) return w.refuse
   // Only the key is read from the body: an id sent with it is ignored.
   const r = await startPartnerSequence({ partnerId: id, pathKey: w.body?.pathKey, startedBy: w.caller.userId })
-  if (!r.ok) return NextResponse.json({ error: r.error, reason: r.reason ?? null }, { status: r.status })
+  if (!r.ok) return NextResponse.json({ error: r.error, reason: r.reason ?? null, ...(r.message ? { message: r.message } : {}) }, { status: r.status })
   return NextResponse.json({ started: true, restarted: r.restarted, usedCopy: r.usedCopy, firstEmail: r.firstEmail })
 }
 
