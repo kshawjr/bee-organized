@@ -33,7 +33,7 @@ const sha = (f: string) => createHash('sha256').update(
 const READERS_ON_MAIN: [string, string][] = [
   ['app/api/clients/[id]/profile/route.ts', '4a47ac4eb2f683fc'],
   ['app/api/cron/send-drips/route.ts', '578c105a680e7a82'],
-  ['app/api/drip-paths/[id]/active-lead-count/route.ts', 'da565643377fe6d4'],
+  ['app/api/drip-paths/[id]/active-lead-count/route.ts', '056cb018b12b8cb3'], // was da565643377fe6d4 until partner emails slice 4 (2026-11-22): on a PARTNER sequence the count adds its active partners; a client sequence counts exactly as before with no second read (lib/network/partner-drip-send.test.ts)
   ['app/api/drip-paths/[id]/steps/route.ts', 'c533d59d49988555'],
   ['app/api/engagements/[id]/route.ts', '6c8e7223f7175b7f'],
   ['app/api/leads/[id]/drip-pause/route.ts', '6dce28d9869a4fc3'],
@@ -72,7 +72,7 @@ const READERS_ON_MAIN: [string, string][] = [
   ['lib/drip-interface-active-gate.test.ts', '0fae95ada939aa00'],
   ['lib/drip-lifecycle.ts', '925f6146f4b30a72'],
   ['lib/drip-send-visibility.test.ts', '14008bc553ba3726'],
-  ['lib/drip-send.ts', 'a8a833d4e2fae092'],
+  ['lib/drip-send.ts', 'abc8ee5ebb0319ef'], // was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
   ['lib/drip-terminal-failure.test.ts', '49237effee21311e'],
   ['lib/email-send-integrity.test.ts', 'e33633a1976c8871'],
   ['lib/enquiry-resubmission.ts', '0d8017c3ef522e4b'],

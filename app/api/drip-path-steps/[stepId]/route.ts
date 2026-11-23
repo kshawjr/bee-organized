@@ -15,6 +15,8 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { buttonAlignIn } from '@/lib/drip-step-extras'
 import { bodyForSave, isMissingBodyFormatColumn, BODY_FORMAT_MIGRATION } from '@/lib/email-body-save'
+import { isPartnerPathKey } from '@/lib/partner-sequences'
+import { partnerButtonIsClientBooking } from '@/lib/network/partner-email'
 
 export async function PATCH(
   req: NextRequest,
@@ -39,7 +41,7 @@ export async function PATCH(
   // Load step + the path it belongs to, so we can authorize.
   const { data: step, error: stepErr } = await supabaseService
     .from('drip_path_steps')
-    .select('id, drip_path_id, channel, master_template_id, drip_paths!inner(id, is_master, location_uuid)')
+    .select('id, drip_path_id, channel, master_template_id, drip_paths!inner(id, is_master, location_uuid, path_key)')
     .eq('id', params.stepId)
     .maybeSingle()
 
@@ -107,6 +109,22 @@ export async function PATCH(
   // centre. Before that migration runs, a centred button needs no column and
   // is simply left out; only left / right are refused (below).
   if ('button_align' in body) patch.button_align = buttonAlignIn(body.button_align)
+
+  // Partner emails, slice 4 (2026-11-22): a PARTNER email's button may only
+  // be None or Custom. A client booking link (Discovery call, In-home, Video,
+  // the owner's booking link) is refused here, the first of two locks; the
+  // partner sender refuses it again (lib/network/partner-drip-send.ts). The
+  // same tags in the wording are refused too: a partner email fills no
+  // booking link. Nothing is written. Client emails are not affected.
+  if (isPartnerPathKey(dp.path_key)) {
+    const saving = ['button_link', 'subject', 'body'].filter((f) => f in body).map((f) => String(patch[f] ?? ''))
+    if (saving.some((v) => partnerButtonIsClientBooking(v))) {
+      return NextResponse.json({
+        error: 'partner_client_booking_link',
+        message: 'A partner email can’t use a client booking link (Discovery call, In-home or Video). Choose Custom or None for the button.',
+      }, { status: 400 })
+    }
+  }
 
   // issue 316, server side — a subject edit on an EMAIL step must not leave
   // it with no subject from any source. The sender resolves

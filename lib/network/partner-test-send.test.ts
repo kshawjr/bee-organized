@@ -149,11 +149,11 @@ describe('client emails are untouched by slice 3 (fingerprint against origin/mai
   // The footer-intent edits (2026-11-22) taken back out, exactly (footer-intent-footprint.ts).
   const sha = (f: string) => createHash('sha256').update(withoutFooterIntent(f, readFileSync(join(process.cwd(), f), 'utf8'))).digest('hex').slice(0, 16)
   const MAIN: [string, string][] = [
-    ['lib/drip-send.ts', 'a8a833d4e2fae092'],
+    ['lib/drip-send.ts', 'abc8ee5ebb0319ef'],   // was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
     ['app/api/cron/send-drips/route.ts', '578c105a680e7a82'],
     ['app/api/emails/test-send/route.ts', 'b9a621dce5327f45'],
     ['lib/merge-tags.ts', '4740d372d4eecc71'],
-    ['lib/resend.ts', '54a3332a2fa7fc36'],
+    ['lib/resend.ts', '87416e6398e3e10c'],   // was 54a3332a2fa7fc36 until partner emails slice 4 (2026-11-22): ONE comment changed — the {{partner_name}} line no longer says it does nothing. No code changed (git diff af902cb -- lib/resend.ts)
     ['lib/marketing-consent.ts', '5f63f5b6bc50f8e2'],
     ['lib/welcome-email.ts', '54f7f0fe8ed1f1ca'],
     ['lib/stage-emails.ts', 'f599a27fb53be364'],

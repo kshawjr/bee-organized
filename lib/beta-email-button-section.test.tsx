@@ -154,7 +154,9 @@ describe('alignment renders left, centre and right; null renders centre', () => 
     expect(cellAlign(html)).toBe('right')
     expect(extrasFromRow({ button_text: 'x', button_link: 'y', button_align: 'left' }).buttonAlign).toBe('left')
     expect(extrasFromRow({ button_text: 'x', button_link: 'y' }).buttonAlign).toBeNull()        // column absent
-    for (const f of ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'app/api/emails/test-send/route.ts']) {
+    // lib/drip-send.ts builds its look with emailLook in lib/drip-send-shared.ts
+    // (shared with the partner sender, partner emails slice 4).
+    for (const f of ['lib/drip-send-shared.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'app/api/emails/test-send/route.ts']) {
       expect(readFileSync(join(process.cwd(), f), 'utf8'), f).toMatch(/href: renderedButton\.body, align: \w+\.buttonAlign \}/)
     }
   })

@@ -111,7 +111,9 @@ interface SendEmailDirectArgs extends NotificationContext {
 //   location_phone       location.phone (no fallback — alias used by new templates)
 //   book_assessment_link location.calendar_link (alias used by new templates)
 //   reviews_link         location.reviews_link
-//   partner_name         (Partner Drip — Phase 2, currently no-op)
+//   partner_name         a referral partner's greeting name (lib/network/partner-greeting.ts),
+//                        filled only for PARTNER emails (lib/partner-merge-tags.ts
+//                        partnerRenderContext); a client email never fills it
 //   discovery_booking_link  location.discovery_booking_link
 //   virtual_booking_link    location.virtual_booking_link
 export interface RenderContext {

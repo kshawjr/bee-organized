@@ -20,6 +20,11 @@ export function sendDripsLine(r: { drips: SendCounts; welcome: SendCounts; stage
   return `[cron send-drips] ${part('drips', r.drips)}; ${part('welcome', r.welcome)}; ${part('stage', r.stage)}; held ${r.held}`
 }
 
+// Partner emails, slice 4 (2026-11-22): app/api/cron/send-partner-emails.
+export function sendPartnerEmailsLine(r: { considered: number; sent: number; skipped: number; held: number; failed: number }): string {
+  return `[cron send-partner-emails] ${r.sent} sent / ${r.skipped} skipped / ${r.held} held / ${r.failed} failed of ${r.considered}`
+}
+
 export function gmailSyncLine(r: { accountsEnabled: number; accountsSynced: number; accountsFailed: unknown[]; circuitOpen: unknown[]; skippedForTime: unknown[]; elapsedMs: number }): string {
   return `[cron gmail-sync] accounts ${r.accountsEnabled}, synced ${r.accountsSynced}, failed ${r.accountsFailed.length}, ` +
     `circuit open ${r.circuitOpen.length}, out of time ${r.skippedForTime.length}, ${r.elapsedMs}ms`

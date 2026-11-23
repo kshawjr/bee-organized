@@ -561,20 +561,24 @@ describe('the column-missing check', () => {
 
 describe('the senders read the format from the row the body came from', () => {
   it('each sender passes it to the merge fill AND to the layout', () => {
+    // lib/drip-send.ts is read together with lib/drip-send-shared.ts, the parts
+    // it gave the partner sender (partner emails slice 4, 2026-11-22).
+    const sender = (f: string) => f === 'lib/drip-send.ts' ? read(f) + read('lib/drip-send-shared.ts') : read(f)
     for (const f of ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'app/api/emails/test-send/route.ts']) {
-      const src = read(f)
+      const src = sender(f)
       expect(src, f).toMatch(/bodyFormatOf\(/)
       expect(src, f).toMatch(/signatureMarker: true, bodyFormat/)
       expect((src.match(/\bbodyFormat\b/g) || []).length, f).toBeGreaterThanOrEqual(3)
     }
-    expect(read('lib/drip-send.ts')).toContain('bodyFormatOf((step.body != null ? step : linkedTpl)')
+    expect(sender('lib/drip-send.ts')).toContain('bodyFormatOf((step.body != null ? step : linkedTpl)')
     expect(read('lib/welcome-email.ts')).toContain('bodyFormatOf((fork?.body != null ? fork : master)')
     expect(read('lib/stage-emails.ts')).toContain('bodyFormatOf((fork?.body != null ? fork : master)')
   })
   it('the linked template is read with every column, so the format comes along once it exists and is absent before', () => {
-    expect(read('lib/drip-send.ts')).toContain('templates:master_template_id ( * )')
+    // (moved with the step read to lib/drip-send-shared.ts, partner emails slice 4)
+    expect(read('lib/drip-send.ts') + read('lib/drip-send-shared.ts')).toContain('templates:master_template_id ( * )')
     expect(read('app/api/emails/test-send/route.ts')).toContain('templates:master_template_id ( * )')
-    for (const f of ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'app/api/emails/test-send/route.ts', 'lib/template-fork.ts', 'lib/email-send-options.ts']) {
+    for (const f of ['lib/drip-send.ts', 'lib/drip-send-shared.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts', 'app/api/emails/test-send/route.ts', 'lib/template-fork.ts', 'lib/email-send-options.ts']) {
       expect(read(f), f).not.toMatch(/select\([^)]*body_format/)
     }
   })

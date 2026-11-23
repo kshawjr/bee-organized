@@ -466,6 +466,8 @@ describe('nothing in this slice can send an email (fingerprint)', () => {
       }
     }
     for (const d of ['app', 'lib', 'components', 'scripts']) walk(d)
-    expect(users.sort()).toEqual(['lib/network/partner-email-eligibility.ts', 'lib/network/partner-unsubscribe.ts'])
+    // Slice 4 (2026-11-22) is the sender: it, its cron and the partway count are the
+    // only new readers.
+    expect(users.sort()).toEqual(['app/api/cron/send-partner-emails/route.ts', 'app/api/drip-paths/[id]/active-lead-count/route.ts', 'lib/network/partner-drip-send.ts', 'lib/network/partner-email-eligibility.ts', 'lib/network/partner-unsubscribe.ts'])
   })
 })

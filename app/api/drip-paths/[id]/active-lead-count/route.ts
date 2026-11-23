@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { isPartnerPathKey } from '@/lib/partner-sequences'
 
 export const runtime = 'nodejs'
 
@@ -49,7 +50,7 @@ export async function GET(
 
   const { data: path } = await supabaseService
     .from('drip_paths')
-    .select('id, location_uuid, is_master')
+    .select('id, location_uuid, is_master, path_key')
     .eq('id', params.id)
     .maybeSingle()
   if (!path) return NextResponse.json({ error: 'path_not_found' }, { status: 404 })
@@ -69,6 +70,23 @@ export async function GET(
   if (error) {
     console.error('[/api/drip-paths/[id]/active-lead-count] error:', error.message)
     return NextResponse.json({ error: 'count_failed' }, { status: 500 })
+  }
+
+  // Partner emails, slice 4 (2026-11-22): on a PARTNER sequence the people
+  // partway through are partners (partner_drip_progress, its own table): the
+  // active ones on this same row, added to the count. A client sequence
+  // counts exactly as before and makes no second read.
+  if (isPartnerPathKey(path.path_key)) {
+    const { count: partners, error: pErr } = await supabaseService
+      .from('partner_drip_progress')
+      .select('id', { count: 'exact', head: true })
+      .eq('drip_path_id', path.id)
+      .eq('status', 'active')
+    if (pErr) {
+      console.error('[/api/drip-paths/[id]/active-lead-count] partner count error:', pErr.message)
+      return NextResponse.json({ error: 'count_failed' }, { status: 500 })
+    }
+    return NextResponse.json({ count: (count ?? 0) + (partners ?? 0) })
   }
 
   return NextResponse.json({ count: count ?? 0 })

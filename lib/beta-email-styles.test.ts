@@ -118,7 +118,10 @@ describe('the style applies to every client email type, not only drips', () => {
   })
   it('all three senders hand the location’s style and the subject heading to the layout', () => {
     const src = (f: string) => readFileSync(join(process.cwd(), 'lib', f), 'utf8')
-    expect(src('drip-send.ts')).toMatch(/style: emailOptions\.style,\s*heading: rendered\.subject,/)
+    // drip-send.ts hands it over through emailLook (lib/drip-send-shared.ts,
+    // partner emails slice 4).
+    expect(src('drip-send.ts')).toContain('emailLook(emailOptions, rendered, renderedButton, stepExtras)')
+    expect(src('drip-send-shared.ts')).toMatch(/style: emailOptions\.style,\s*heading: rendered\.subject,/)
     expect(src('welcome-email.ts')).toMatch(/style: emailOptions\.style,\s*heading: rendered\.subject,/)
     expect(src('stage-emails.ts')).toMatch(/style: emailOptions\.style,\s*heading: rendered\.subject,/)
   })

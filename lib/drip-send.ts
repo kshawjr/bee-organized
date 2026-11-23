@@ -12,27 +12,34 @@
 
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
-import { LOCATION_REPLY_TO_BROKEN, REPLY_TO_INVALID, isReplyToRejection } from './reply-to'
-import {
-  LOCATION_SENDER_NOT_SET_UP,
-  SENDER_DOMAIN_PREFIX,
-  SENDER_DOMAIN_UNVERIFIED,
-  isSenderDomainRejection,
-} from './sender-domain'
+import { LOCATION_REPLY_TO_BROKEN } from './reply-to'
 import { blockedOnMissingRate } from './rate-guard'
 import {
   resolveOwnerBookingLink,
   blockedOnMissingBookingLink,
   missingBookingLinkMessage,
 } from './booking-link'
-import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
 import { isReturningPathKey } from '@/components/hive/shared/returningVariant'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { buildBrandedDripHtml, buildBrandedDripText, NO_FOOTER } from './drip-email-layout'
 import { hasSignatureTag, htmlWithSignature, type EmailSignature } from './email-signature'
-import { bodyFormatOf } from './email-body-html'
 import { resolveEmailSignature } from './email-signature-resolve'
+// The parts the partner sender shares (partner emails slice 4, 2026-11-22):
+// moved out of this file, not copied. Pinned byte for byte by output in
+// lib/network/client-drip-send-bytes.test.ts.
+import {
+  classifySendFailure,
+  emailLook,
+  guardBodyOf,
+  loadSendLocation,
+  loadSequenceStep,
+  locationCanSend,
+  planNextStep,
+  renderStepButton,
+  stepContent,
+} from './drip-send-shared'
+export { isTerminalSendFailure, isLocationSenderDomainFailure, isLocationReplyToFailure } from './drip-send-shared'
 import {
   FOLLOWUPS_OFF_REASON,
   dripStepDecision,
@@ -58,43 +65,8 @@ export type SendDripResult = {
 // failure always stops first, so it never masks a classification gap.
 export const MAX_CONSECUTIVE_SEND_FAILURES = 5
 
-// TERMINAL vs TRANSIENT (#73). Terminal = Resend rejected the request itself
-// and an identical retry yields the identical rejection forever. The only such
-// failure the SYNCHRONOUS send path sees is name='validation_error' (422) — an
-// invalid / malformed recipient, i.e. a client who mistyped their email. (True
-// hard bounces to a valid-looking address are ACCEPTED by Resend at send time
-// and bounce later via webhook — they never reach this path.) Everything else
-// is treated as transient and keeps retrying: 429 rate limits, 5xx server
-// errors, and — deliberately — auth/config errors (401/403) and un-typed
-// network throws, because those are system-wide and self-heal, so they must
-// never stop a single lead's drip.
-//
-// NOT the reply-to (Dallas, 2026-09). Resend refuses a bad reply-to with the
-// SAME validation_error a bad recipient gets, but the reply-to is the
-// LOCATION's setting: every lead there fails identically and every one of them
-// has a fine address. lib/resend.ts re-labels those as REPLY_TO_INVALID; the
-// message check here is the second lock, so a reply-to rejection can never be
-// read as the client's fault even if the label is lost on the way.
-//
-// NOT the sender's domain either (Test Location, 2026-09-27): Resend refuses a
-// From on an unverified domain ("The gmail.com domain is not verified…") as a
-// validation error too. lib/resend.ts re-labels it SENDER_DOMAIN_UNVERIFIED;
-// the message check is again the second lock.
-export function isTerminalSendFailure(errorName?: string | null, message?: string | null): boolean {
-  if (errorName === REPLY_TO_INVALID || isReplyToRejection(message)) return false
-  if (isLocationSenderDomainFailure(errorName, message)) return false
-  return errorName === 'validation_error'
-}
-
-// A send refused because the FROM address's domain isn't one we can send from.
-export function isLocationSenderDomainFailure(errorName?: string | null, message?: string | null): boolean {
-  return errorName === SENDER_DOMAIN_UNVERIFIED || isSenderDomainRejection(message)
-}
-
-// A send refused on the location's reply-to (see isTerminalSendFailure).
-export function isLocationReplyToFailure(errorName?: string | null, message?: string | null): boolean {
-  return errorName === REPLY_TO_INVALID || isReplyToRejection(message)
-}
+// isTerminalSendFailure / isLocationSenderDomainFailure / isLocationReplyToFailure
+// and their reasoning moved to lib/drip-send-shared.ts (re-exported above).
 
 export async function sendDripStep(leadId: string): Promise<SendDripResult> {
   const nowIso = new Date().toISOString()
@@ -146,17 +118,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   if (!path) return { sent: false, error: 'no_path_join' }
 
   // Step + linked template
-  const { data: step, error: stepErr } = await supabaseService
-    .from('drip_path_steps')
-    .select(
-      `
-      *,
-      templates:master_template_id ( * )
-      `,
-    )
-    .eq('drip_path_id', path.id)
-    .eq('step_order', row.current_step)
-    .maybeSingle()
+  const { data: step, error: stepErr } = await loadSequenceStep(path.id, row.current_step)
 
   if (stepErr || !step) {
     return { sent: false, error: `step_lookup: ${stepErr?.message ?? 'missing'}` }
@@ -208,15 +170,8 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Location (sender context + tz for scheduling next step). rate_per_hour
   // and reviews_link are new variables exposed to render context for the
   // 8 master path templates + opp-stage emails.
-  const { data: loc, error: locErr } = await supabaseService
-    .from('locations')
-    // '*', not a column list: the Settings → Emails columns (email_style and
-    // the two new booking links) arrive
-    // in migrations run after this ships, and a named missing column would
-    // fail the whole read. Missing → today's behaviour (lib/email-send-options).
-    .select('*')
-    .eq('id', lead.location_uuid)
-    .maybeSingle()
+  // '*' — see loadSendLocation (lib/drip-send-shared.ts).
+  const { data: loc, error: locErr } = await loadSendLocation(lead.location_uuid)
 
   if (locErr || !loc) {
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
@@ -232,7 +187,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // resumes on the next cron tick if the location reactivates. Reuses the
   // same lifecycle_status === 'active' condition as enrollment; the cron
   // treats 'location_not_active' as an expected skip. B2 is unaffected.
-  if (loc.lifecycle_status !== 'active') {
+  if (!locationCanSend(loc)) {
     return { sent: false, error: 'location_not_active' }
   }
 
@@ -307,18 +262,9 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     locationCalendarLink: loc.calendar_link,
   })
 
-  // Subject/body: step override > linked template
-  const linkedTpl = (Array.isArray((step as any).templates)
-    ? (step as any).templates[0]
-    : (step as any).templates) as { subject: string | null; body: string } | null
-
-  const subjectSource = step.subject ?? linkedTpl?.subject ?? null
-  const bodySource = step.body ?? linkedTpl?.body ?? null
-  // The shape of the body is a fact about the ROW IT CAME FROM (body_format,
-  // lib/email-body-html.ts): the step's own wording, or the linked template's.
-  // The join reads the template with '*' so the column rides along once its
-  // migration has run and is simply absent — plain — before.
-  const bodyFormat = bodyFormatOf((step.body != null ? step : linkedTpl) as Record<string, unknown> | null)
+  // Subject/body: step override > linked template, and the body's shape from
+  // the row it came from (stepContent, lib/drip-send-shared.ts).
+  const { subjectSource, bodySource, bodyFormat } = stepContent(step as Record<string, unknown>)
 
   if (!bodySource) {
     return { sent: false, error: 'no_body_source' }
@@ -326,8 +272,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   // The button's link is checked by the same guards as the wording: a button
   // pointing at a blank booking link holds the email like the sentence would.
-  const buttonLinkSource = stepExtras.buttonLink
-  const guardBody = buttonLinkSource ? `${bodySource}\n${buttonLinkSource}` : bodySource
+  const guardBody = guardBodyOf(bodySource, stepExtras.buttonLink)
 
   // RATE GUARD: this template quotes {{rate_per_hour}} but the location has
   // no rate set. HOLD — row untouched, retried next tick, so the drip resumes
@@ -404,9 +349,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx, { signatureMarker: true, bodyFormat })
   // The button's text and link, through the same tags as the wording.
-  const renderedButton = stepExtras.buttonText && buttonLinkSource
-    ? renderTemplate({ subject: stepExtras.buttonText, body: buttonLinkSource }, ctx)
-    : null
+  const renderedButton = renderStepButton(stepExtras, ctx)
 
   // SUBJECT GUARD (issue 316): the resolved subject is blank — the step /
   // template subject is NULL/empty, or it renders to nothing. HOLD exactly
@@ -446,11 +389,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     : null
   // The location's style, the subject as the heading, and the button
   // (2026-10-30 layout).
-  const look = {
-    style: emailOptions.style,
-    heading: rendered.subject,
-    button: renderedButton ? { label: renderedButton.subject, href: renderedButton.body, align: stepExtras.buttonAlign } : null,
-  }
+  const look = emailLook(emailOptions, rendered, renderedButton, stepExtras)
   const html = buildBrandedDripHtml(rendered.body, { ...ctx, signature, ...look, bodyFormat }, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
   const text = buildBrandedDripText(rendered.body, { ...ctx, signature, ...look, bodyFormat }, NO_FOOTER('a drip step carries no CAN-SPAM footer'))
 
@@ -475,34 +414,20 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   })
 
   if (!result.success) {
-    // sendEmail returns this exact error string when the location's sender
-    // config (send_from_email/sender_name/reply_to_email) is NULL — that's a
-    // setup gap, not a transient send failure, so we record it as 'no_email'
-    // with owner-actionable copy. Anything else is a real Resend failure.
-    const senderConfigMissing = (result.error ?? '').includes('missing sender config')
-    // The location's reply-to is broken (two addresses, a typo). Like a
-    // missing sender config it is the LOCATION's setup, not this lead: hold,
-    // never stop, never count, and say whose setting it is.
-    const replyToBroken = !senderConfigMissing && isLocationReplyToFailure(result.errorName, result.error)
-    // The FROM address is on a domain we can't send from (a Gmail address as a
-    // job type's sender). Same shape as the reply-to: the location's setting.
-    // The message is sendEmail's owner wording, which names the address and
-    // the Settings screen; if the label was lost on the way, say it plainly.
-    const senderDomainBroken = !senderConfigMissing && !replyToBroken &&
-      isLocationSenderDomainFailure(result.errorName, result.error)
-    const senderDomainMessage = senderDomainBroken
-      ? ((result.error ?? '').startsWith(SENDER_DOMAIN_PREFIX)
-          ? result.error!
-          : `${SENDER_DOMAIN_PREFIX} this location’s sender address — Bee Organized can’t send from its domain. Check Settings → Emails, under Who your emails come from. Emails resume on their own once it’s fixed.`)
-      : null
+    // What the refusal means and whose fix it is (classifySendFailure,
+    // lib/drip-send-shared.ts). A missing sender config is a setup gap, not a
+    // transient send failure, so it is recorded as 'no_email' with
+    // owner-actionable copy. A broken reply-to or sender domain is the
+    // LOCATION's setting, not this lead: hold, never stop, never count, and
+    // say whose setting it is. Anything else is a real Resend failure.
+    const failure = classifySendFailure(result)
+    const senderConfigMissing = failure.kind === 'sender_config_missing'
+    const replyToBroken = failure.kind === 'reply_to'
+    const senderDomainMessage = failure.senderDomainMessage
     await recordDripSendStatus(row.lead_id, {
       status: senderConfigMissing ? 'no_email' : 'failed',
       step: row.current_step,
-      error: senderConfigMissing
-        ? LOCATION_SENDER_NOT_SET_UP
-        : replyToBroken
-          ? LOCATION_REPLY_TO_BROKEN
-          : senderDomainMessage ?? result.error ?? 'unknown send error',
+      error: failure.ownerMessage,
     })
 
     if (senderDomainMessage) {
@@ -551,7 +476,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     // noise, so STOP this lead's drip and record why. The full Resend message
     // is already on the lead (drip_last_send_error above), so the record shows
     // a bad address, not a system fault.
-    if (isTerminalSendFailure(result.errorName, result.error)) {
+    if (failure.kind === 'terminal') {
       await supabaseService
         .from('lead_drip_progress')
         .update({ stopped_at: new Date().toISOString(), stopped_reason: 'invalid_recipient' })
@@ -775,21 +700,18 @@ export async function advanceOrComplete(
   currentStepOrder: number,
   tz: string | null,
 ): Promise<number | undefined> {
-  const { data: nextStep, error: nextErr } = await supabaseService
-    .from('drip_path_steps')
-    .select('step_order, delay_days')
-    .eq('drip_path_id', dripPathId)
-    .eq('step_order', currentStepOrder + 1)
-    .maybeSingle()
+  // Which step is next and when (planNextStep, lib/drip-send-shared.ts:
+  // delay_days is absolute-from-start; the gap is the diff vs this step's).
+  const plan = await planNextStep(dripPathId, currentStepOrder, tz)
 
   const nowIso = new Date().toISOString()
 
-  if (nextErr) {
-    console.error('[drip-send] next-step lookup failed', { progressId, nextErr })
+  if (plan.kind === 'lookup_failed') {
+    console.error('[drip-send] next-step lookup failed', { progressId, nextErr: plan.error })
     return undefined
   }
 
-  if (!nextStep) {
+  if (plan.kind === 'last') {
     await supabaseService
       .from('lead_drip_progress')
       .update({ completed_at: nowIso, last_sent_at: nowIso })
@@ -797,30 +719,16 @@ export async function advanceOrComplete(
     return undefined
   }
 
-  // step.delay_days is absolute-from-start; the *gap* to the next send
-  // is the diff vs the current step's delay_days.
-  const { data: currentStep } = await supabaseService
-    .from('drip_path_steps')
-    .select('delay_days')
-    .eq('drip_path_id', dripPathId)
-    .eq('step_order', currentStepOrder)
-    .maybeSingle()
-
-  const currentDelay = currentStep?.delay_days ?? 0
-  const gap = Math.max(0, (nextStep.delay_days ?? 0) - currentDelay)
-
-  const next = nextSendAt({ from: new Date(), tz: tz ?? 'UTC', delayDays: gap })
-
   await supabaseService
     .from('lead_drip_progress')
     .update({
-      current_step: nextStep.step_order,
+      current_step: plan.stepOrder,
       last_sent_at: nowIso,
-      next_send_at: next.toISOString(),
+      next_send_at: plan.sendAt.toISOString(),
     })
     .eq('id', progressId)
 
-  return nextStep.step_order
+  return plan.stepOrder
 }
 
 // Minimal text→HTML: escape, then turn paragraph breaks into <p>.
