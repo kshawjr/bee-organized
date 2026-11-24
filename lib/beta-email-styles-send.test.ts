@@ -40,7 +40,7 @@ const h = vi.hoisted(() => {
   return { state, reset, enqueue, makeBuilder, callsFor, updatePayloads }
 })
 
-vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.makeBuilder(t) } }))
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.makeBuilder(t), rpc: async () => ({ data: false, error: null }) /* FL-75: no address here is on the shared no-marketing list */ } }))
 const sendEmailMock = vi.hoisted(() => vi.fn(async (_a: any) => ({ success: true, id: 're-1' })))
 // renderTemplate is replaced by a faithful stand-in (lib/resend.ts imports the
 // Resend SDK, which tests never load): {{tag}} → ctx value or '', and the

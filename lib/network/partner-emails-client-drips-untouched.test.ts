@@ -32,7 +32,7 @@ const sha = (f: string) => createHash('sha256').update(
 // table on origin/main f115e0ee, and its fingerprint there.
 const READERS_ON_MAIN: [string, string][] = [
   ['app/api/clients/[id]/profile/route.ts', '4a47ac4eb2f683fc'],
-  ['app/api/cron/send-drips/route.ts', '578c105a680e7a82'],
+  ['app/api/cron/send-drips/route.ts', '1aeb906c3c422f64'], // was 578c105a680e7a82 until FL-75 slice 2 (2026-11-23): 'unsubscribed_elsewhere' counted as an expected skip in the drip, welcome and stage loops (3 lines added; one line gained a trailing ||).
   ['app/api/drip-paths/[id]/active-lead-count/route.ts', '056cb018b12b8cb3'], // was da565643377fe6d4 until partner emails slice 4 (2026-11-22): on a PARTNER sequence the count adds its active partners; a client sequence counts exactly as before with no second read (lib/network/partner-drip-send.test.ts)
   ['app/api/drip-paths/[id]/steps/route.ts', 'c533d59d49988555'],
   ['app/api/engagements/[id]/route.ts', '6c8e7223f7175b7f'],
@@ -52,8 +52,8 @@ const READERS_ON_MAIN: [string, string][] = [
   ['lib/beta-drip-never-enrolled-243.test.ts', 'b086aaccbf163cd3'],
   ['lib/beta-drip-project-type-selection.test.ts', 'e3d9d00571caca11'],
   ['lib/beta-drip-status-panel.test.tsx', 'fc65c8766d02d1d4'],
-  ['lib/beta-email-styles-send.test.ts', '78731a603f3130ef'],
-  ['lib/beta-email-subject-hold-316.test.ts', 'f18a817156273404'],
+  ['lib/beta-email-styles-send.test.ts', '1b1ba58f60032035'], // was 78731a603f3130ef until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
+  ['lib/beta-email-subject-hold-316.test.ts', '6e3f45758b9131a4'], // was f18a817156273404 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/beta-email-test-send.test.ts', '49cc167e9d174aca'],
   ['lib/beta-intake-dedup.test.ts', '2be27d9c8dcbf45f'],
   ['lib/beta-intake-observability.test.ts', 'bdd7b10d6494080f'],
@@ -62,27 +62,27 @@ const READERS_ON_MAIN: [string, string][] = [
   ['lib/beta-ops-alerts-silent-sends.test.ts', '2366a7238fd5eadf'],
   ['lib/beta-returning-drip-intake.test.ts', '23177f350c6ffe72'],
   ['lib/beta-returning-drip-lifecycle.test.ts', '5792bdc0cfcf1cf9'],
-  ['lib/beta-returning-drip-subject-hold.test.ts', '6a13a6f920ce96aa'],
+  ['lib/beta-returning-drip-subject-hold.test.ts', 'aba8dc74d8befc85'], // was 6a13a6f920ce96aa until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/beta-transfer-any-lead-endpoint.test.ts', '2401b1ec2f192638'],
-  ['lib/booking-link.test.ts', 'ce677d058cee457b'],
+  ['lib/booking-link.test.ts', '3caef63e32bb5c80'], // was ce677d058cee457b until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/db-columns.snapshot.txt', '94c607012337abbc'],
   ['lib/drip-enrol-outcome.test.ts', '4a3454b8fc9e9c81'],
-  ['lib/drip-followups.test.ts', 'f3e4c818a89d1238'],
+  ['lib/drip-followups.test.ts', '437d84a4ee31572c'], // was f3e4c818a89d1238 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/drip-followups.ts', '09b0d1b509bc7dcf'],
-  ['lib/drip-interface-active-gate.test.ts', '0fae95ada939aa00'],
+  ['lib/drip-interface-active-gate.test.ts', '80db3e20e61e53e1'], // was 0fae95ada939aa00 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/drip-lifecycle.ts', '925f6146f4b30a72'],
-  ['lib/drip-send-visibility.test.ts', '14008bc553ba3726'],
-  ['lib/drip-send.ts', 'abc8ee5ebb0319ef'], // was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
-  ['lib/drip-terminal-failure.test.ts', '49237effee21311e'],
-  ['lib/email-send-integrity.test.ts', 'e33633a1976c8871'],
+  ['lib/drip-send-visibility.test.ts', 'c43058ced6311dce'], // was 14008bc553ba3726 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
+  ['lib/drip-send.ts', 'dd1d4c5f505cef43'], // was abc8ee5ebb0319ef until FL-75 slice 2 (2026-11-23): one import and one block after the opted-out stop — the shared no-marketing list is asked; said no → stopped 'unsubscribed_elsewhere', unreadable → held. 17 lines added, none changed (git diff --numstat). With every address clear, lib/network/client-drip-send-bytes.test.ts (44 scenarios) is still byte for byte. Before that: was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
+  ['lib/drip-terminal-failure.test.ts', '32ad3daf75b14fc1'], // was 49237effee21311e until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
+  ['lib/email-send-integrity.test.ts', '4319daf32390c67c'], // was e33633a1976c8871 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/enquiry-resubmission.ts', '0d8017c3ef522e4b'],
   ['lib/failure-alerts.ts', 'e81fbbafa22adf2d'],
   ['lib/lead-transfer.ts', '264c798d55204ee4'],
   ['lib/location-close.ts', 'a612ca11e4ba29e7'],
-  ['lib/rate-guard.test.ts', 'b158e7e3a54fed88'],
-  ['lib/reply-to-drips.test.ts', 'd7c96a52171ee9c3'],
+  ['lib/rate-guard.test.ts', '38cd6964ab4317b5'], // was b158e7e3a54fed88 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
+  ['lib/reply-to-drips.test.ts', '49d65def5eb79cd1'], // was d7c96a52171ee9c3 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/resend-webhook-drip-stop.test.ts', 'b57ffd8b7bdee762'],
-  ['lib/sender-domain-drips.test.ts', 'e3d871685de108c5'],
+  ['lib/sender-domain-drips.test.ts', '059f9a395a8dde1b'], // was e3d871685de108c5 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['migrations/cleanup_legacy_drip_paths.sql', '6051ef52c8909eda'],
   ['migrations/drip_consecutive_failures.sql', '45e31cfe6a77edf0'],
   ['migrations/drips_infrastructure.sql', '7b59351ea82ccef8'],

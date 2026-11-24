@@ -26,6 +26,7 @@
 // never went into a drip, e.g. junk-on-create).
 
 import { supabaseService } from './supabase-service'
+import { addressSaidNo, SAID_NO_ELSEWHERE, NO_LIST_UNREADABLE } from './marketing-no-list'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
@@ -152,7 +153,8 @@ export async function cancelPendingWelcomeEmail(
   leadId: string,
   // 'closed_lost' — issue 204, a no-engagement lead closed "not interested".
   // 'returning_client' — the send-time new-leads-only gate found a past client.
-  reason: 'junk' | 'opted_out' | 'stage_changed' | 'closed_lost' | 'returning_client',
+  // 'unsubscribed_elsewhere' — FL-75 slice 2: the address said no at any location.
+  reason: 'junk' | 'opted_out' | 'stage_changed' | 'closed_lost' | 'returning_client' | 'unsubscribed_elsewhere',
 ): Promise<void> {
   try {
     const { error } = await supabaseService
@@ -225,6 +227,19 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   if (lead.marketing_opt_out === true) {
     await cancelPendingWelcomeEmail(leadId, 'opted_out')
     return { sent: false, error: 'opted_out' }
+  }
+
+  // FL-75 slice 2: an unsubscribe counts everywhere. The same ADDRESS said
+  // no at any location (or on a record since deleted) → treated exactly like
+  // this record's own opt-out. List unreadable → hold (row untouched, tried
+  // again next tick), never a send on a guess.
+  {
+    const noList = await addressSaidNo(lead.email)
+    if (noList === 'unreadable') return { sent: false, error: NO_LIST_UNREADABLE }
+    if (noList === 'said_no') {
+      await cancelPendingWelcomeEmail(leadId, SAID_NO_ELSEWHERE)
+      return { sent: false, error: SAID_NO_ELSEWHERE }
+    }
   }
 
   // Paused → HOLD, don't cancel. Leaving the row untouched means the

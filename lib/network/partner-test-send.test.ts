@@ -149,14 +149,14 @@ describe('client emails are untouched by slice 3 (fingerprint against origin/mai
   // The footer-intent edits (2026-11-22) taken back out, exactly (footer-intent-footprint.ts).
   const sha = (f: string) => createHash('sha256').update(withoutFooterIntent(f, readFileSync(join(process.cwd(), f), 'utf8'))).digest('hex').slice(0, 16)
   const MAIN: [string, string][] = [
-    ['lib/drip-send.ts', 'abc8ee5ebb0319ef'],   // was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
-    ['app/api/cron/send-drips/route.ts', '578c105a680e7a82'],
+    ['lib/drip-send.ts', 'dd1d4c5f505cef43'], // was abc8ee5ebb0319ef until FL-75 slice 2 (2026-11-23): one import and one block after the opted-out stop — the shared no-marketing list is asked; said no → stopped 'unsubscribed_elsewhere', unreadable → held. 17 lines added, none changed (git diff --numstat). With every address clear, lib/network/client-drip-send-bytes.test.ts (44 scenarios) is still byte for byte. Before that: was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
+    ['app/api/cron/send-drips/route.ts', '1aeb906c3c422f64'], // was 578c105a680e7a82 until FL-75 slice 2 (2026-11-23): 'unsubscribed_elsewhere' counted as an expected skip in the drip, welcome and stage loops (3 lines added; one line gained a trailing ||).
     ['app/api/emails/test-send/route.ts', 'b9a621dce5327f45'],
     ['lib/merge-tags.ts', '4740d372d4eecc71'],
     ['lib/resend.ts', '87416e6398e3e10c'],   // was 54a3332a2fa7fc36 until partner emails slice 4 (2026-11-22): ONE comment changed — the {{partner_name}} line no longer says it does nothing. No code changed (git diff af902cb -- lib/resend.ts)
     ['lib/marketing-consent.ts', '5f63f5b6bc50f8e2'],
-    ['lib/welcome-email.ts', '54f7f0fe8ed1f1ca'],
-    ['lib/stage-emails.ts', 'f599a27fb53be364'],
+    ['lib/welcome-email.ts', '3f80ae1ca08a467f'], // was 54f7f0fe8ed1f1ca until FL-75 slice 2 (2026-11-23): one import and one block after the opted-out cancel — the shared no-marketing list is asked; said no → cancelled 'unsubscribed_elsewhere', unreadable → held. Plus that reason added to cancelPendingWelcomeEmail's type.
+    ['lib/stage-emails.ts', '28f77de3ee5e46a5'], // was f599a27fb53be364 until FL-75 slice 2 (2026-11-23): one import and one block after the opted-out cancel — the shared no-marketing list is asked; said no → cancelled 'unsubscribed_elsewhere', unreadable → held. 16 lines added, none changed.
     ['lib/drip-lifecycle.ts', '925f6146f4b30a72'],
     ['lib/partner-merge-tags.ts', '16fa3436d6632bae'],
   ]

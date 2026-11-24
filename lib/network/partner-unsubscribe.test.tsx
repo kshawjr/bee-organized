@@ -183,8 +183,15 @@ describe('OPENING a partner\'s unsubscribe link sends nobody an unsubscribe (mai
     }
     noWritesAtAll()
   })
-  it('a client key, or junk, posted to the button changes nothing', async () => {
-    for (const t of [CTOKEN, 'nope', 'AB'.repeat(32)]) expect((await press(t, 'confirm=yes')).status).toBe(404)
+  it('junk posted to the button changes nothing', async () => {
+    for (const t of ['nope', 'AB'.repeat(32), 'ab'.repeat(31)]) expect((await press(t, 'confirm=yes')).status).toBe(404)
+    noWritesAtAll()
+  })
+  it("a client's key posted to the button goes to the CLIENT path only — never a partner function (FL-75 slice 2)", async () => {
+    // unknown client key: looked up on leads, nothing found, nothing written
+    const res = await press(CTOKEN, 'confirm=yes')
+    expect(res.status).toBe(303)
+    expect(h.state.rpc).toEqual([])
     noWritesAtAll()
   })
   it('once used, the page shows the confirmation (no button), still without writing', async () => {
@@ -251,12 +258,22 @@ describe('PRESSING the button does unsubscribe', () => {
   })
 })
 
-describe("a client's link works exactly as before (one open still unsubscribes a client: unchanged, an open item)", () => {
-  it("a client's key never reaches any partner function", async () => {
-    h.state.queue.push({ table: 'leads', resp: { data: { id: 'lead-1', first_name: 'Sarah', name: 'Sarah M', location_uuid: 'loc-1', marketing_unsubscribed_at: null, marketing_opt_out: false }, error: null } })
+describe("a client's link (FL-75 slice 2: it asks too now; the partner list stays separate)", () => {
+  const sarah = () => h.state.queue.push({ table: 'leads', resp: { data: { id: 'lead-1', first_name: 'Sarah', name: 'Sarah M', location_uuid: 'loc-1', marketing_unsubscribed_at: null, marketing_opt_out: false }, error: null } })
+  it("opening a client's link asks, writes nothing, and asks no partner function", async () => {
+    sarah()
     const html = await render(CTOKEN)
-    expect(html).toContain('unsubscribed, Sarah')
+    expect(html).toContain('Stop receiving marketing emails?')
+    expect(html).toContain(`<form method="post" action="/unsubscribe/${CTOKEN}/confirm"`)
     expect(h.state.rpc).toEqual([])
+    noWritesAtAll()
+  })
+  it("pressing a client's button writes the CLIENT record only — never a partner function", async () => {
+    sarah()
+    const res = await press(CTOKEN, 'confirm=yes')
+    expect(res.status).toBe(303)
+    expect(h.state.rpc).toEqual([])
+    expect(h.state.updates.map(u => u.table)).toEqual(['leads'])
     expect(h.state.updates[0].arg.marketing_opt_out).toBe(true)
     expect(h.state.cascades).toHaveLength(1)
   })
@@ -264,34 +281,41 @@ describe("a client's link works exactly as before (one open still unsubscribes a
     expect(await render(CTOKEN)).toContain('no longer active')
     expect(h.state.rpc).toEqual([])
   })
-  it('the client unsubscribe files are byte for byte main\'s (f115e0ee), and so is the test that pins their behaviour', () => {
+  it("the client token mint, consent gate and opt-in page are byte for byte main's (f115e0ee)", () => {
     const { createHash } = require('node:crypto') as typeof import('node:crypto')
     const sha = (f: string) => createHash('sha256').update(readFileSync(join(ROOT, f))).digest('hex').slice(0, 16)
     expect({
       'lib/marketing-unsubscribe.ts': sha('lib/marketing-unsubscribe.ts'),
       'lib/marketing-consent.ts': sha('lib/marketing-consent.ts'),
-      'lib/beta-unsubscribe-page.test.tsx': sha('lib/beta-unsubscribe-page.test.tsx'),
       'app/mailing-list/[token]/page.tsx': sha('app/mailing-list/[token]/page.tsx'),
     }).toEqual({
       'lib/marketing-unsubscribe.ts': '70df2b79338a6972',
       'lib/marketing-consent.ts': '5f63f5b6bc50f8e2',
-      'lib/beta-unsubscribe-page.test.tsx': 'e1fb4f34beb7b6b1',
       'app/mailing-list/[token]/page.tsx': '4d8ae8b2a4a359d5',
     })
+    // lib/beta-unsubscribe-page.test.tsx was pinned here too ('e1fb4f34beb7b6b1')
+    // until FL-75 slice 2 (2026-11-23) rewrote it: Kevin's ruling that opening
+    // a client's link must only read, like a partner's.
   })
-  it("the client part of the page is main's, line for line", () => {
-    const src = readFileSync(join(ROOT, 'app/unsubscribe/[token]/page.tsx'), 'utf8')
+  it('the client withdrawal is the same write it always was, now behind the button', () => {
+    const src = readFileSync(join(ROOT, 'lib/client-unsubscribe.ts'), 'utf8')
     expect(src).toContain(`.from('leads')
       .select('id, first_name, name, location_uuid, marketing_unsubscribed_at, marketing_opt_out')
       .eq('unsubscribe_token', token)`)
-    expect(src).toContain(`.update({
-      marketing_opt_out: true,
-      marketing_unsubscribed_at: now,
-      updated_at: now,
-    })
+    expect(src).toContain(`.update({ marketing_opt_out: true, marketing_unsubscribed_at: now, updated_at: now })
     .eq('id', lead.id)
     .is('marketing_unsubscribed_at', null)`)
-    expect(src).toContain(`body="You won't get any more marketing emails from Bee Organized. If you change your mind, just reply to any email we've sent you and we'll happily add you back."`)
+    const page = readFileSync(join(ROOT, 'app/unsubscribe/[token]/page.tsx'), 'utf8')
+    expect(page).toContain(`body="You won't get any more marketing emails from Bee Organized. If you change your mind, just reply to any email we've sent you and we'll happily add you back."`)
+  })
+  it('the client list and the partner list never name each other', () => {
+    for (const f of ['lib/client-unsubscribe.ts', 'lib/marketing-no-list.ts', 'migrations/marketing_unsubscribes.sql']) {
+      const code = readFileSync(join(ROOT, f), 'utf8').split('\n').filter(l => !/^\s*(\/\/|--)/.test(l)).join('\n')
+      expect(code, f).not.toMatch(/partner_unsubscribe|partner-unsubscribe/)
+    }
+    for (const f of ['lib/network/partner-unsubscribe.ts', 'migrations/partner_emails.sql']) {
+      expect(readFileSync(join(ROOT, f), 'utf8'), f).not.toMatch(/marketing_unsubscribes|marketing-no-list|marketing_address_said_no/)
+    }
   })
 })
 

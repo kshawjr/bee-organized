@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
       result.error === 'no_email' ||
       result.error === 'non_email_channel' ||
       result.error === 'opted_out' ||
+      result.error === 'unsubscribed_elsewhere' || // FL-75: the address said no at another location — stopped
       result.error === 'location_not_active' ||
       result.error === 'followups_off' ||   // owner switched off emails after step 1 — stopped
       result.error === 'step_removed' ||    // owner removed this email — skipped, moved on
@@ -173,6 +174,7 @@ export async function GET(req: NextRequest) {
         result.error === 'already_sent' ||
         result.error === 'junk' ||        // cancelled at send time
         result.error === 'opted_out' ||   // cancelled at send time
+        result.error === 'unsubscribed_elsewhere' || // FL-75: said no at another location — cancelled
         result.error === 'paused' ||      // HELD — retried after resume
         result.error === 'returning_client' // cancelled — new leads only
       ) {
@@ -216,7 +218,8 @@ export async function GET(req: NextRequest) {
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
         result.error === 'cancelled' ||
-        result.error === 'opted_out'
+        result.error === 'opted_out' ||
+        result.error === 'unsubscribed_elsewhere' // FL-75: said no at another location — cancelled
       ) {
         stageSkipped++
       } else if (result.error) {

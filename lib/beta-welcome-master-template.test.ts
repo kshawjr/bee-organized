@@ -63,6 +63,8 @@ function respond(table: string, ops: Op[]): { data: any; error: any } {
 
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: {
+    // FL-75: no address here is on the shared no-marketing list.
+    rpc: async () => ({ data: false, error: null }),
     from: (table: string) => {
       const ops: Op[] = []
       const b: any = {}

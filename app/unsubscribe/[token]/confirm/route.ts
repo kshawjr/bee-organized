@@ -1,8 +1,13 @@
 // app/unsubscribe/[token]/confirm/route.ts
 //
-// POST /unsubscribe/<token>/confirm — the "Unsubscribe me" button on a
-// REFERRAL PARTNER's unsubscribe page (partner emails, slice 2). The ONLY
-// place a partner's own unsubscribe is recorded.
+// POST /unsubscribe/<token>/confirm — the "Unsubscribe me" button on the
+// unsubscribe page. The ONLY place a person's own unsubscribe is recorded:
+//   a REFERRAL PARTNER's (64-hex key, partner emails slice 2), and
+//   a CLIENT's (48-hex key, FL-75 slice 2 — before that slice, opening a
+//   client's link unsubscribed on open).
+// The two keys can never be confused, and each goes only to its own list:
+// a partner's to partner_unsubscribes, a client's to the shared no-marketing
+// list (by the database trigger on the lead record).
 //
 // WHY A BUTTON AND A POST: mail programs and security scanners open every
 // link in an email (and link previews and prefetches do too). If opening the
@@ -19,18 +24,18 @@
 // request) is refused with 400 and changes nothing.
 //
 // The token is the path, so a request has to carry the key from the email.
-// Client links (48 hex) never reach this: the partner functions only accept a
-// 64-hex partner key, and the client page is unchanged.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { consumePartnerUnsubscribeToken, PARTNER_TOKEN_PATTERN } from '@/lib/network/partner-unsubscribe'
+import { consumeClientUnsubscribe, CLIENT_TOKEN_PATTERN } from '@/lib/client-unsubscribe'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
   const token = params?.token || ''
-  if (!PARTNER_TOKEN_PATTERN.test(token)) {
+  const isClient = CLIENT_TOKEN_PATTERN.test(token)
+  if (!isClient && !PARTNER_TOKEN_PATTERN.test(token)) {
     return new NextResponse('This link is no longer active.', { status: 404 })
   }
 
@@ -46,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     return new NextResponse('Nothing was changed.', { status: 400 })
   }
 
-  const result = await consumePartnerUnsubscribeToken(token)
+  const result = isClient ? await consumeClientUnsubscribe(token) : await consumePartnerUnsubscribeToken(token)
   if (oneClick) {
     // A mail provider, not a browser: a plain answer, no page.
     return new NextResponse(result.outcome === 'failed' ? 'Failed' : 'OK', { status: result.outcome === 'failed' ? 500 : 200 })

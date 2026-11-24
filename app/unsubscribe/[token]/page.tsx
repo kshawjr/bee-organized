@@ -6,10 +6,14 @@
 // anonymous — there is no session to scope by) and branches on state. The URL
 // carries the token and NOTHING else — no lead id, no email, no PII.
 //
-// IDEMPOTENT, NOT ONE-TIME, like the opt-in page: people re-click links, mail
-// clients pre-fetch them. The FIRST consume records the withdrawal; every
-// later visit re-renders the same confirmation. A person who unsubscribed is
-// never told something went wrong.
+// OPENING THE LINK ONLY READS — for clients too, from FL-75 slice 2
+// (2026-11-23). Mail programs, security scanners, link previews and
+// prefetches open every link in an email. Until this slice a client's link
+// unsubscribed on open; now a client's no stops marketing at EVERY location
+// by address (the shared no-marketing list), so an open by a scanner would
+// do far more harm. The page asks "Stop receiving marketing emails?"; only
+// the button — a POST to ./confirm — unsubscribes (lib/client-unsubscribe.ts).
+// Every later visit after a press shows the same confirmation.
 //
 // NO EXPIRY STATE — the deliberate difference from the opt-in page. Expiry
 // there bounds the window a leaked link can CREATE a consent record. Here the
@@ -32,40 +36,16 @@
 // needs no change — it only enforces the disabled-hub_user lockout, and an
 // anonymous visitor passes straight through.
 
-import { supabaseService } from '@/lib/supabase-service'
-import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { clientUnsubscribeStatus } from '@/lib/client-unsubscribe'
 import { partnerUnsubscribeStatus } from '@/lib/network/partner-unsubscribe'
 import { partnerGreetingName } from '@/lib/network/partner-greeting'
 import type { ReactNode } from 'react'
 
 export const runtime = 'nodejs'
-// Never statically render or cache: per-token state + (on the first visit)
-// the withdrawal write.
+// Never statically render or cache: per-token state.
 export const dynamic = 'force-dynamic'
 
 type Props = { params: { token: string }; searchParams?: { error?: string } }
-
-// Any lookup failure — unknown token, or the columns not existing yet because
-// migrations/marketing_unsubscribe.sql is still held — resolves to "no row",
-// which renders the clean inactive-link state. A visitor must never meet a
-// stack trace or a 500 on a link WE sent them.
-async function findByToken(token: string) {
-  try {
-    const { data, error } = await supabaseService
-      .from('leads')
-      .select('id, first_name, name, location_uuid, marketing_unsubscribed_at, marketing_opt_out')
-      .eq('unsubscribe_token', token)
-      .maybeSingle()
-    if (error) {
-      console.warn('[unsubscribe] token lookup failed', error.message)
-      return null
-    }
-    return data
-  } catch (err) {
-    console.warn('[unsubscribe] token lookup threw', err)
-    return null
-  }
-}
 
 export default async function UnsubscribePage({ params, searchParams }: Props) {
   const token = params?.token || ''
@@ -74,117 +54,34 @@ export default async function UnsubscribePage({ params, searchParams }: Props) {
     return <Shell title="This link is no longer active" body={INACTIVE_BODY} />
   }
 
-  const lead = await findByToken(token)
+  // Reads only (one SELECT). Unknown token or a lookup error → not_found.
+  const client = await clientUnsubscribeStatus(token)
+  const failed = searchParams?.error === '1'
+
+  if (client.outcome === 'already') {
+    return <Confirmation firstName={client.firstName} />
+  }
+  if (client.outcome === 'pending') {
+    return <ClientStopForm token={token} firstName={client.firstName} failed={failed} />
+  }
 
   // Not a client's link → it may be a referral partner's (partner emails,
-  // slice 2). Everything a client's link does is above and below this block,
-  // unchanged.
-  //
-  // A PARTNER'S LINK ONLY LOOKS. Opening it — by the partner, a mail
-  // program's link scanner, a link preview, a prefetch, a HEAD request —
-  // changes nothing: partnerUnsubscribeStatus is a read (a database function
-  // Postgres itself holds read-only). The page asks "Stop receiving these
-  // emails?", and only the button, a POST to ./confirm
-  // (app/unsubscribe/[token]/confirm/route.ts), unsubscribes.
-  if (!lead) {
-    const partner = await partnerUnsubscribeStatus(token)
-    if (partner.outcome === 'already') {
-      return <PartnerConfirmation firstName={partnerGreetingName(partner.partner) || null} />
-    }
-    if (partner.outcome === 'pending') {
-      return <PartnerStopForm token={token} firstName={partnerGreetingName(partner.partner) || null} failed={searchParams?.error === '1'} />
-    }
-    if (partner.outcome === 'failed') {
-      return <Shell title="Something went wrong on our end" body={FAILED_BODY} />
-    }
+  // slice 2). A PARTNER'S LINK ONLY LOOKS too: partnerUnsubscribeStatus is a
+  // read (a database function Postgres itself holds read-only).
+  const partner = await partnerUnsubscribeStatus(token)
+  if (partner.outcome === 'already') {
+    return <PartnerConfirmation firstName={partnerGreetingName(partner.partner) || null} />
+  }
+  if (partner.outcome === 'pending') {
+    return <PartnerStopForm token={token} firstName={partnerGreetingName(partner.partner) || null} failed={failed} />
+  }
+  if (partner.outcome === 'failed') {
+    return <Shell title="Something went wrong on our end" body={FAILED_BODY} />
   }
 
   // Unknown token → a clean state, NOT an error: the honest reading is "this
   // link doesn't do anything any more".
-  if (!lead) {
-    return <Shell title="This link is no longer active" body={INACTIVE_BODY} />
-  }
-
-  // Already withdrawn → confirmation, no write. marketing_unsubscribed_at is
-  // the idempotency flag (only this page stamps it); a staff-set
-  // marketing_opt_out without it still proceeds to the write below so the
-  // person's OWN act gets its own timestamped record.
-  if (lead.marketing_unsubscribed_at) {
-    return <Confirmation firstName={firstOf(lead)} />
-  }
-
-  // ─── FIRST CONSUME — record the withdrawal ────────────────────
-  // Both columns, one write: marketing_opt_out is the DO-NOT-SEND flag every
-  // send rail already honors (drip-send, stage-emails, welcome-email);
-  // marketing_unsubscribed_at is WHEN the person withdrew — the counterpart of
-  // marketing_consented_at, which is deliberately NOT cleared: it remains the
-  // record that sends made before this moment were permitted. The .is(...)
-  // filter makes the write first-consume-wins at the DATABASE, so two clicks
-  // racing each other can't produce two withdrawal events.
-  const now = new Date().toISOString()
-  const { error: withdrawError } = await supabaseService
-    .from('leads')
-    .update({
-      marketing_opt_out: true,
-      marketing_unsubscribed_at: now,
-      updated_at: now,
-    })
-    .eq('id', lead.id)
-    .is('marketing_unsubscribed_at', null)
-
-  if (withdrawError) {
-    // The inverted failure posture — see the header. Never a false "you're
-    // unsubscribed"; an honest state with a human fallback instead.
-    console.error('[unsubscribe] withdrawal write failed', withdrawError.message)
-    return (
-      <Shell
-        title="Something went wrong on our end"
-        body={FAILED_BODY}
-      />
-    )
-  }
-
-  // The same immediate-silence cascade a staff-set opt-out gets (stop active
-  // drips, cancel pending stage + welcome emails). Belt-and-braces — every
-  // send rail re-checks marketing_opt_out at send time — so a failure here is
-  // warned, never shown: the flag is already down, and that alone stops
-  // every send.
-  try {
-    await applyDripSideEffects({
-      leadId: lead.id,
-      locationUuid: lead.location_uuid || '',
-      prevStage: null,
-      patch: { marketing_opt_out: true },
-    })
-  } catch (err) {
-    console.warn('[unsubscribe] opt-out cascade failed', err)
-  }
-
-  // Provenance in the person's own timeline, so the withdrawal is legible
-  // where a human looks rather than only in a column. Non-fatal.
-  try {
-    await supabaseService.from('touchpoints').insert({
-      lead_id:     lead.id,
-      kind:        'system',
-      method:      'system',
-      label:       'Unsubscribed from marketing emails',
-      notes:       'Clicked the unsubscribe link in a marketing email. Marketing opt-out set; consent history retained.',
-      status:      'done',
-      occurred_at: now,
-    })
-  } catch (err) {
-    console.warn('[unsubscribe] withdrawal touchpoint failed', err)
-  }
-
-  return <Confirmation firstName={firstOf(lead)} />
-}
-
-function firstOf(lead: { first_name?: string | null; name?: string | null }): string | null {
-  const explicit = (lead.first_name || '').trim()
-  if (explicit) return explicit.split(/\s+/)[0]
-  const full = (lead.name || '').trim()
-  if (full) return full.split(/\s+/)[0]
-  return null
+  return <Shell title="This link is no longer active" body={INACTIVE_BODY} />
 }
 
 const FAILED_BODY =
@@ -204,6 +101,37 @@ function Confirmation({ firstName }: { firstName: string | null }) {
   )
 }
 
+// ── A client's question (FL-75 slice 2) ──────────────────────────────────
+// The same shape as the partner's: a plain HTML form (works with no
+// JavaScript; a scanner that only opens links never sends it). The token
+// travels in the address the form posts to, nowhere else.
+function ClientStopForm({ token, firstName, failed }: { token: string; firstName: string | null; failed: boolean }) {
+  return (
+    <Shell
+      title="Stop receiving marketing emails?"
+      body={failed
+        ? "We couldn't process that just now. Please press the button again, or reply to any email from us with the word “unsubscribe” and a person will take you off the list."
+        : `${firstName ? `${firstName}, press` : 'Press'} the button below and Bee Organized will stop sending you marketing emails.`}
+    >
+      <StopButton token={token} />
+    </Shell>
+  )
+}
+
+function StopButton({ token }: { token: string }) {
+  return (
+    <form method="post" action={`/unsubscribe/${encodeURIComponent(token)}/confirm`} style={{ marginBottom: '20px' }}>
+      <input type="hidden" name="confirm" value="yes" />
+      <button
+        type="submit"
+        style={{ background: '#054E4A', color: 'white', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '15px', cursor: 'pointer' }}
+      >
+        Unsubscribe me
+      </button>
+    </form>
+  )
+}
+
 // ── A referral partner's two states (partner emails, slice 2) ──────────────
 // The question, with the one button that unsubscribes. A plain HTML form: it
 // works with no JavaScript, and a scanner that only opens links never sends
@@ -216,15 +144,7 @@ function PartnerStopForm({ token, firstName, failed }: { token: string; firstNam
         ? "We couldn't process that just now. Please press the button again, or reply to any email from us with the word “unsubscribe” and a person will take you off the list."
         : `${firstName ? `${firstName}, press` : 'Press'} the button below and Bee Organized will stop sending you these emails.`}
     >
-      <form method="post" action={`/unsubscribe/${encodeURIComponent(token)}/confirm`} style={{ marginBottom: '20px' }}>
-        <input type="hidden" name="confirm" value="yes" />
-        <button
-          type="submit"
-          style={{ background: '#054E4A', color: 'white', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '15px', cursor: 'pointer' }}
-        >
-          Unsubscribe me
-        </button>
-      </form>
+      <StopButton token={token} />
     </Shell>
   )
 }
@@ -250,7 +170,7 @@ function Shell({
 }: {
   title: string
   body: string
-  // Only the partner question passes anything here (its button).
+  // Only the two questions pass anything here (their button).
   children?: ReactNode
 }) {
   return (

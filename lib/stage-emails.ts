@@ -20,6 +20,7 @@
 // the scheduled row's send_at and clears any cancelled_at.
 
 import { supabaseService } from './supabase-service'
+import { addressSaidNo, SAID_NO_ELSEWHERE, NO_LIST_UNREADABLE } from './marketing-no-list'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
@@ -308,6 +309,21 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
       .update({ cancelled_at: new Date().toISOString(), cancelled_reason: 'opted_out' })
       .eq('id', row.id)
     return { sent: false, error: 'opted_out' }
+  }
+  // FL-75 slice 2: an unsubscribe counts everywhere. The same ADDRESS said
+  // no at any location (or on a record since deleted) → treated exactly like
+  // this record's own opt-out. List unreadable → hold (row untouched, tried
+  // again next tick), never a send on a guess.
+  {
+    const noList = await addressSaidNo(lead.email)
+    if (noList === 'unreadable') return { sent: false, error: NO_LIST_UNREADABLE }
+    if (noList === 'said_no') {
+      await supabaseService
+        .from('scheduled_stage_emails')
+        .update({ cancelled_at: new Date().toISOString(), cancelled_reason: SAID_NO_ELSEWHERE })
+        .eq('id', row.id)
+      return { sent: false, error: SAID_NO_ELSEWHERE }
+    }
   }
   if (!lead.email || typeof lead.email !== 'string' || !lead.email.trim()) {
     // Cancel — no point retrying for a lead without an email.

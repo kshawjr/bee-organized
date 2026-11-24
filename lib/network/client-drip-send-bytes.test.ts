@@ -74,7 +74,15 @@ const h = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase-service', () => ({ supabaseService: {
   from: (t: string) => h.from(t),
-  rpc: (fn: string, args: unknown) => { h.state.calls.push({ rpc: fn, args }); return Promise.resolve({ data: null, error: null }) },
+  // FL-75 slice 2: the shared no-marketing list question is answered "clear"
+  // and deliberately NOT recorded, so every other database call, every Resend
+  // payload and every result below must still be byte for byte main's. What
+  // the question does when the answer is "said no" or "unreadable" is pinned
+  // in lib/marketing-no-list.test.ts.
+  rpc: (fn: string, args: unknown) => {
+    if (fn === 'marketing_address_said_no') return Promise.resolve({ data: false, error: null })
+    h.state.calls.push({ rpc: fn, args }); return Promise.resolve({ data: null, error: null })
+  },
 } }))
 vi.mock('resend', () => ({ Resend: class { emails = { send: async (p: unknown) => { h.state.sent.push(p); return h.state.sc.resend ?? { data: { id: 're_1' }, error: null } } } } }))
 

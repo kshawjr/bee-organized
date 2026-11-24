@@ -51,7 +51,7 @@ const h = vi.hoisted(() => {
 })
 
 vi.mock('@/lib/supabase-service', () => ({
-  supabaseService: { from: (t: string) => h.makeBuilder(t) },
+  supabaseService: { from: (t: string) => h.makeBuilder(t), rpc: async () => ({ data: false, error: null }) /* FL-75: no address here is on the shared no-marketing list */ },
 }))
 const sendEmailMock = vi.hoisted(() => vi.fn(async () => ({ success: true, id: 're-1' })))
 vi.mock('@/lib/resend', () => ({

@@ -62,6 +62,7 @@
 
 import { createHash } from 'crypto'
 import { supabaseService } from './supabase-service'
+import { loadSaidNoSet } from './marketing-no-list'
 import { apiBase } from './mailchimp'
 import { mapLeadToPerson } from './people-mapper'
 // clientStatus.js is an untyped pure JS module — typed at the boundary, same
@@ -189,6 +190,19 @@ export async function syncWebsiteLeadsToMailchimp(
     if (error) throw new Error(`eligibility read failed: ${error.message}`)
     eligible.push(...(data || []))
     if ((data || []).length < 1000) break
+  }
+
+  // FL-75 slice 2: an unsubscribe counts everywhere. Drop anyone whose
+  // ADDRESS said no at any location (the shared no-marketing list), even if
+  // this record's own flags are clear. An unreadable list throws: the batch
+  // does not go out on a guess. They count as skipped below.
+  {
+    const saidNo = await loadSaidNoSet(eligible.map((l) => l.email))
+    if (saidNo.size) {
+      for (let i = eligible.length - 1; i >= 0; i--) {
+        if (saidNo.has(String(eligible[i].email).trim().toLowerCase())) eligible.splice(i, 1)
+      }
+    }
   }
 
   // Skipped = website-source leads for this location that the eligibility

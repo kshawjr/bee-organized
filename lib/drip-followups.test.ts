@@ -43,7 +43,7 @@ const h = vi.hoisted(() => {
   return { state, reset, enqueue, makeBuilder, callsFor, updatePayloads }
 })
 
-vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.makeBuilder(t) } }))
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) => h.makeBuilder(t), rpc: async () => ({ data: false, error: null }) /* FL-75: no address here is on the shared no-marketing list */ } }))
 vi.mock('@/lib/supabase-server', () => ({
   createServerSupabaseClient: vi.fn(async () => ({
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'u1' } } })) },
