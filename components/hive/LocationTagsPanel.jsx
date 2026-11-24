@@ -21,6 +21,7 @@
 import React, { useEffect, useState } from 'react'
 import { T } from './shared/tokens'
 import { tagText } from './shared/tagText'
+import { TAG_LIMIT_PER_LOCATION } from '@/lib/tags'
 
 const fmtDate = (iso) => {
   const d = new Date(iso || '')
@@ -197,7 +198,7 @@ function RecentPromotions({ refreshKey, onChanged }) {
 
 export default function LocationTagsPanel() {
   const [groups, setGroups] = useState(null)
-  const [limits, setLimits] = useState({ limit: 10, rows: [] })
+  const [limits, setLimits] = useState({ limit: TAG_LIMIT_PER_LOCATION, rows: [] })
   const [error, setError] = useState(null)
   const [open, setOpen] = useState({})
   const [making, setMaking] = useState(null)   // group key
@@ -207,7 +208,7 @@ export default function LocationTagsPanel() {
     let dead = false
     fetch('/api/tags/locations')
       .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`); return j })
-      .then(j => { if (!dead) { setGroups(j.groups || []); setLimits({ limit: j.limit || 10, rows: j.limits || [] }) } })
+      .then(j => { if (!dead) { setGroups(j.groups || []); setLimits({ limit: j.limit || TAG_LIMIT_PER_LOCATION, rows: j.limits || [] }) } })
       .catch(e => { if (!dead) { setError(String(e?.message || e)); setGroups([]) } })
     return () => { dead = true }
   }, [refreshKey])

@@ -129,28 +129,35 @@ describe("A) a location's new tag", () => {
     expect(created().attrs).toEqual({ section: 'trade' })
   })
 
-  describe('the limit of ten', () => {
-    it('the tenth is created; the eleventh is refused and nothing is written', async () => {
+  // FL-75 slice 3 (2026-11-23, Kevin): the limit is 15 (was 10 until 2026-11-23).
+  describe('the limit of 15', () => {
+    it('the fifteenth is created; the sixteenth is refused and nothing is written', async () => {
       as('owner', LOC)
-      db().tables.lookups.push(...ownTags(7)) // 2 already + 7 = 9
-      expect((await make({ label: 'Tenth', made_on: 'network' })).status).toBe(200)
+      db().tables.lookups.push(...ownTags(12)) // 2 already + 12 = 14
+      expect((await make({ label: 'Fifteenth', made_on: 'network' })).status).toBe(200)
       created().is_active = true // the real table switches a new row on by default; this stand-in has no defaults
       const before = db().tables.lookups.length
-      const r = await make({ label: 'Eleventh', made_on: 'network' })
+      const r = await make({ label: 'Sixteenth', made_on: 'network' })
       expect(r.status).toBe(409)
-      expect(r.body).toEqual({ error: 'tag_limit', limit: 10, count: 10 })
+      expect(r.body).toEqual({ error: 'tag_limit', limit: 15, count: 15 })
       expect(db().tables.lookups.length).toBe(before)
       expect(db().writes().filter((w) => w.table === 'lookups')).toHaveLength(1)
     })
     it('counts only this location, and only tags of its own that are switched on', async () => {
       as('owner', LOC)
-      db().tables.lookups.push(...ownTags(7), ...ownTags(20, false).map((t, i) => ({ ...t, id: id(300 + i), label: `Removed ${i}` })), ...ownTags(20).map((t, i) => ({ ...t, id: id(400 + i), label: `Theirs ${i}`, location_id: OTHER })))
-      expect((await make({ label: 'Tenth', made_on: 'clients' })).status).toBe(200)
+      db().tables.lookups.push(...ownTags(12), ...ownTags(20, false).map((t, i) => ({ ...t, id: id(300 + i), label: `Removed ${i}` })), ...ownTags(20).map((t, i) => ({ ...t, id: id(400 + i), label: `Theirs ${i}`, location_id: OTHER })))
+      expect((await make({ label: 'Fifteenth', made_on: 'clients' })).status).toBe(200)
+    })
+    it('corporate tags never count: 48 corporate tags switched on and 14 of its own, the fifteenth is still made', async () => {
+      as('owner', LOC)
+      const corporate = Array.from({ length: 48 }, (_, i) => ({ id: id(500 + i), category: 'tags', label: `Corporate ${i}`, location_id: null, is_active: true, attrs: {}, sort_order: 100 + i }))
+      db().tables.lookups.push(...corporate, ...ownTags(12)) // 2 already + 12 = 14 own
+      expect((await make({ label: 'Fifteenth', made_on: 'network' })).status).toBe(200)
     })
     it('holds for corporate creating on a location\'s behalf too', async () => {
       as('super_admin')
-      db().tables.lookups.push(...ownTags(8))
-      expect((await make({ label: 'Eleventh', made_on: 'network' })).body.error).toBe('tag_limit')
+      db().tables.lookups.push(...ownTags(13))
+      expect((await make({ label: 'Sixteenth', made_on: 'network' })).body.error).toBe('tag_limit')
     })
     it('a name that already exists is answered first, so nobody is told "limit" for a tag they can simply use', async () => {
       as('owner', LOC)

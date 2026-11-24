@@ -284,7 +284,7 @@ export function groupTags<T extends Groupable>(rows: T[], screen: TagScreen, own
 //                     goes in (Kevin, 2026-11-16). Nothing is assumed: with no
 //                     group, or a group that is not a Network one, no tag is
 //                     made.
-export const TAG_LIMIT_PER_LOCATION = 10
+export const TAG_LIMIT_PER_LOCATION = 15   // was 10 until 2026-11-23 (FL-75 slice 3, Kevin): 15 of the location's OWN tags; corporate tags never count
 /** The groups a tag made on this screen may go in. Clients has one; Network has eight. */
 export function groupsForScreen(screen: TagScreen) {
   return TAG_GROUPS.filter((g) => (g.screens as readonly string[]).includes(screen))

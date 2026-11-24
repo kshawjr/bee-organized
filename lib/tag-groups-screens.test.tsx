@@ -148,12 +148,12 @@ describe('D) a tag made from the picker', () => {
     expect(JSON.parse(fetchCalls.find((c) => c.init?.method === 'POST')!.init.body)).toEqual({ category: 'tags', label: 'Piano tuner', location_id: LOC, made_on: 'network', group: 'moving_hauling' })
     expect(inSection('moving_hauling')).toEqual(['Mover', 'Piano tuner'])
   })
-  it('at the limit of ten it says so in plain words and creates nothing', async () => {
-    installFetch(() => ({ status: 409, body: { error: 'tag_limit', limit: 10, count: 10 } }))
+  it('at the limit of 15 it says so in plain words and creates nothing', async () => {
+    installFetch(() => ({ status: 409, body: { error: 'tag_limit', limit: 15, count: 15 } }))
     await mount({ screen: 'clients' })
     await type('Piano tuner')
     await click(host.querySelector('[data-create]')); await click(host.querySelector('[data-create-go]'))
-    expect(host.querySelector('[role="alert"]')!.textContent).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')
+    expect(host.querySelector('[role="alert"]')!.textContent).toBe('This location already has 15 tags of its own, and the limit is 15. Delete one you no longer use, or ask corporate to add this one to the main list.')
     expect(offered()).not.toContain('Piano tuner')
   })
   it('with no screen named, the picker is the two-section one it always was', async () => {

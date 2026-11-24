@@ -21,7 +21,8 @@ const sha256 = (p: string) => createHash('sha256').update(withoutOwnerSafe(p, wi
 const AT_0C61AFC: Record<string, string> = {
   'components/BeeHub.jsx': '0b1e8e7b67d42aaf77075f0b480731fb4d82a2e60802a76d150ed0d25d4fce04',
   'lib/crm.ts': '0f15c0b894575bbc93287b9e8d3664efca3949327af030d78ba351ddbb74acbb',
-  'lib/tags.ts': '8ac6a0073785ff5d911175a411592fa5a1c1c6e99a1b1457b2ae651728dca622',
+  // lib/tags.ts was 8ac6a0073785ff5d until 2026-11-23: FL-75 slice 3 raised TAG_LIMIT_PER_LOCATION 10 → 15 (Kevin), nothing else.
+  'lib/tags.ts': '058ce2681a60ff70a5dbc37bd3634b9c332c6925634ba5a120be30b068f71fbf',
   'lib/partner-tag-writes.ts': '524538baf61c01a8b83d40d5c6adedf9aad5687198d7708d058057e47c83655b',
   'lib/lead-to-network.ts': '76807abc8b63bf214a199bca0ec61568c270c9e85276480204d9cefdf1e516d2',
   'lib/network/access.ts': '2c76af86bf29a4725d279317cb1aa57cc9d189db0d38241e50e6bb19fe9fe546',

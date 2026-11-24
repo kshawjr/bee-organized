@@ -41,7 +41,8 @@ const AT_70EAB32: Record<string, string> = {
   'app/api/reminders/route.ts': 'ac50556b4dbb5fe99a59e5eb4e82ec6eb6226f16ff370996cb16118da7e0dfe8',
   'app/api/partner-tags/route.ts': 'c5c2a0d881a2fa57ba8e57d270cf0a869dd64367f88e472684a57f7201406daa',
   'app/api/lookups/route.ts': 'fd4e56c6ec43d06eceb2cd5ad28e0301a0b700f5c850c8fe13d8445a10fa2529',
-  'lib/tags.ts': '8ac6a0073785ff5d911175a411592fa5a1c1c6e99a1b1457b2ae651728dca622',
+  // lib/tags.ts was 8ac6a0073785ff5d until 2026-11-23: FL-75 slice 3 raised TAG_LIMIT_PER_LOCATION 10 → 15 (Kevin), nothing else.
+  'lib/tags.ts': '058ce2681a60ff70a5dbc37bd3634b9c332c6925634ba5a120be30b068f71fbf',
   'lib/phone.ts': 'b873e646b26eb0af8d7ec16d397e6aa0acd90bd33163204b8b13d1ba4403f91c',
   'lib/phone-note.ts': 'c1867e2bf732747edad578c42666252beee6e1c30ffb97a0872256759cbdbe4c',
   'lib/partner-tag-writes.ts': '524538baf61c01a8b83d40d5c6adedf9aad5687198d7708d058057e47c83655b',

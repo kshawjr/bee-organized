@@ -145,9 +145,11 @@ describe("E) a location's new tag", () => {
   it('anything else is treated as Clients, never as a group of its own', () => {
     for (const odd of [undefined, null, 'nurture', 'home_property', 5]) expect(newTagPlacement(odd)!.group).toBe('client_status')
   })
-  it('the limit is ten, and the words say what to do about it', () => {
-    expect(TAG_LIMIT_PER_LOCATION).toBe(10)
-    expect(tagLimitWords(10)).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')
+  // FL-75 slice 3 (2026-11-23, Kevin): 15 of the location's OWN tags, on top
+  // of the corporate ones. Was 10 until 2026-11-23.
+  it('the limit is 15, and the words say what to do about it', () => {
+    expect(TAG_LIMIT_PER_LOCATION).toBe(15)
+    expect(tagLimitWords(15)).toBe('This location already has 15 tags of its own, and the limit is 15. Delete one you no longer use, or ask corporate to add this one to the main list.')
   })
   it('the review mark is read from the settings box', () => {
     expect(tagReview({ attrs: { review: { decision: 'keep_local', at: '2026-11-15T00:00:00Z', by: 'u' } } })).toEqual({ decision: 'keep_local', at: '2026-11-15T00:00:00Z', by: 'u' })

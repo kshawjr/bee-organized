@@ -607,7 +607,7 @@ describe('the tag box (the design\'s picker)', () => {
     expect($('[data-field="tagSearch"]')!.getAttribute('placeholder')).toBe('Search tags or type a new one…')
     expect($('[data-new-tag]')).toBeNull() // nothing typed: nothing to create
     expect($('[data-tag-dialog]')!.textContent).not.toContain('Create a new tag')
-    expect($('[data-own-count]')!.textContent).toBe('1 / 10 location tags')
+    expect($('[data-own-count]')!.textContent).toBe('1 / 15 location tags')
     expect($('[data-picked-count]')!.textContent).toBe('0 selected')
     expect($('[data-form="tags"] [data-save]')!.textContent).toBe('Done')
     expect($('[data-clear-tags]')).toBeNull()
@@ -705,7 +705,7 @@ describe('making a tag from the Network picker', () => {
     await begin()
     expect($('#td-title')!.textContent).toBe('Create a new tag')
     expect($('[data-form="tags"]')).toBeNull()
-    expect($('[data-own-count]')!.textContent).toBe('1 / 10 location tags')
+    expect($('[data-own-count]')!.textContent).toBe('1 / 15 location tags')
     expect(off()).toBe(true)
     await click($('[data-create-back]'))
     expect($('#td-title')!.textContent).toBe('Tags')
@@ -810,7 +810,7 @@ describe('making a tag from the Network picker', () => {
     expect($$('[data-tag-section="professional_services"] [data-pick-tag]').map((b) => words(b))).toEqual(['Garden Club', 'Networking Group'])
     expect(pressed('[data-pick-tag]')).toEqual(['Plumber'])
     expect($('[data-tag-note]')!.textContent).toBe('🌷 Plumber created and selected.')
-    expect($('[data-own-count]')!.textContent).toBe('2 / 10 location tags')
+    expect($('[data-own-count]')!.textContent).toBe('2 / 15 location tags')
     expect($('[data-picked-count]')!.textContent).toBe('1 selected')
     expect(sent().filter((c) => c.url.startsWith('/api/partner-tags'))).toEqual([])
     expect(($('[data-field="tagSearch"]') as HTMLInputElement).value).toBe('') // the search is cleared, so the whole list is back
@@ -836,11 +836,12 @@ describe('making a tag from the Network picker', () => {
     await submit('new-tag')
     expect(sent()).toEqual([])
   })
-  it('a location already at ten of its own: it says why, and Create “name” is off, by tap and by Enter', async () => {
-    const ten = Array.from({ length: 10 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
-    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...ten] })
-    const said = 'This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.'
-    expect($('[data-own-count]')!.textContent).toBe('10 / 10 location tags')
+  // FL-75 slice 3 (2026-11-23, Kevin): 15 own tags (was 10 until 2026-11-23).
+  it('a location already at 15 of its own: it says why, and Create “name” is off, by tap and by Enter', async () => {
+    const full = Array.from({ length: 15 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
+    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...full] })
+    const said = 'This location already has 15 tags of its own, and the limit is 15. Delete one you no longer use, or ask corporate to add this one to the main list.'
+    expect($('[data-own-count]')!.textContent).toBe('15 / 15 location tags')
     expect($('[data-tag-limit]')!.textContent).toBe(said)
     await type('[data-field="tagSearch"]', 'Plumber')
     expect($('[data-new-tag]')!.textContent).toBe('Create “Plumber”')
@@ -851,18 +852,27 @@ describe('making a tag from the Network picker', () => {
     expect($('[data-form="new-tag"]')).toBeNull()
     expect(sent()).toEqual([])
   })
-  it('a switched-off own tag does not count toward the ten', async () => {
-    const nine = Array.from({ length: 9 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
-    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...nine, g('off', 'Old One', 'relationship', ['network'], { location_id: LOC, is_active: false })] })
-    expect($('[data-own-count]')!.textContent).toBe('9 / 10 location tags')
+  it('a switched-off own tag does not count toward the 15', async () => {
+    const fourteen = Array.from({ length: 14 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
+    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...fourteen, g('off', 'Old One', 'relationship', ['network'], { location_id: LOC, is_active: false })] })
+    expect($('[data-own-count]')!.textContent).toBe('14 / 15 location tags')
+    expect($('[data-tag-limit]')).toBeNull()
+    await type('[data-field="tagSearch"]', 'Plumber')
+    expect(($('[data-new-tag]') as HTMLButtonElement).disabled).toBe(false)
+  })
+  it('corporate tags never count toward the 15: 48 of them and 14 of its own reads 14 / 15, and Create is on', async () => {
+    const corporate = Array.from({ length: 48 }, (_, i) => g(`c${i}`, `Corporate ${i}`, 'relationship', ['network']))
+    const own = Array.from({ length: 14 }, (_, i) => g(`o${i}`, `Own ${i}`, 'relationship', ['network'], { location_id: LOC }))
+    await open({ lookups: [...GROUPED.filter((t) => t.id !== 'own'), ...corporate, ...own] })
+    expect($('[data-own-count]')!.textContent).toBe('14 / 15 location tags')
     expect($('[data-tag-limit]')).toBeNull()
     await type('[data-field="tagSearch"]', 'Plumber')
     expect(($('[data-new-tag]') as HTMLButtonElement).disabled).toBe(false)
   })
   it('if the server says the limit is reached: said in plain words, nothing made, nothing ticked', async () => {
-    await open({ createTag: () => ({ status: 409, json: { error: 'tag_limit', limit: 10, count: 10 } }) })
+    await open({ createTag: () => ({ status: 409, json: { error: 'tag_limit', limit: 15, count: 15 } }) })
     await create('Plumber')
-    expect($('[data-save-error]')!.textContent).toBe('This location already has 10 tags of its own, and the limit is 10. Delete one you no longer use, or ask corporate to add this one to the main list.')
+    expect($('[data-save-error]')!.textContent).toBe('This location already has 15 tags of its own, and the limit is 15. Delete one you no longer use, or ask corporate to add this one to the main list.')
     expect($('[data-field="newTag"]')!.getAttribute('aria-invalid')).toBe('true')
     await click($('[data-create-back]'))
     expect($('[data-save-error]')).toBeNull()

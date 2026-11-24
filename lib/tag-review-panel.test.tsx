@@ -25,6 +25,8 @@ const MAIN_LIST = [{ id: 'c1', label: 'Networking Group', icon: '🤝', location
 let host: HTMLElement
 let root: Root
 let posts: any[] = []
+// FL-75 slice 3 (2026-11-23): the panel's limit is 15 (was 10 until 2026-11-23).
+let sendLimit = true
 const mount = async (review: (body: any) => { status: number; body: any } = (b) => (b.dryRun
   ? { status: 200, body: { dryRun: true, plan: { action: b.action, tag: { id: 't1', label: 'Chamber' }, into: b.into ? { id: b.into, label: 'Networking Group' } : null, clients: 2, network: 1, alreadyHave: { clients: 1, network: 0 } } } }
   : { status: 200, body: { ok: true, action: b.action, receipt: `done: ${b.action}` } })) => {
@@ -33,7 +35,7 @@ const mount = async (review: (body: any) => { status: number; body: any } = (b) 
     const u = String(url)
     const ok = (body: any, status = 200) => ({ ok: status < 300, status, json: async () => body })
     if (u === '/api/tags/review') { const body = JSON.parse(init.body); posts.push(body); const a = review(body); return ok(a.body, a.status) }
-    if (u === '/api/tags/locations') return ok({ groups: GROUPS, limit: 10, limits: [{ location_id: LOC, name: 'Portland', count: 2 }] })
+    if (u === '/api/tags/locations') return ok({ groups: GROUPS, ...(sendLimit ? { limit: 15 } : {}), limits: [{ location_id: LOC, name: 'Portland', count: 2 }] })
     if (u.startsWith('/api/tags/make-corporate')) return ok({ promotions: [] })
     if (u.startsWith('/api/lookups')) return ok({ lookups: MAIN_LIST, location: { id: LOC, name: 'Portland' } })
     return ok({})
@@ -42,7 +44,7 @@ const mount = async (review: (body: any) => { status: number; body: any } = (b) 
   await act(async () => { root.render(<LocationTagsPanel />) })
   await act(async () => {}); await act(async () => {})
 }
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); sendLimit = true })
 const settle = async () => { for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) }) }
 const click = async (el: Element | null | undefined) => { if (!el) throw new Error('nothing to click'); await act(async () => { (el as HTMLElement).click() }); await settle() }
 const openGroup = async (key: string) => click(host.querySelector(`[data-tag-group="${key}"] > button`))
@@ -72,7 +74,12 @@ describe('what the panel shows', () => {
   })
   it('says how many own tags each location has, against the limit', async () => {
     await mount()
-    expect(host.querySelector('[data-tag-limits]')!.textContent).toBe('Own tags in use, of 10 allowed: Portland 2')
+    expect(host.querySelector('[data-tag-limits]')!.textContent).toBe('Own tags in use, of 15 allowed: Portland 2')
+  })
+  it('with no limit in the answer, the panel still says 15 (the shared limit, never a typed 10)', async () => {
+    sendLimit = false
+    await mount()
+    expect(host.querySelector('[data-tag-limits]')!.textContent).toBe('Own tags in use, of 15 allowed: Portland 2')
   })
 })
 

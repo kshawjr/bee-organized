@@ -25,7 +25,8 @@ const AT_EC19879: Record<string, string> = {
   'app/api/leads/[id]/route.ts': 'a8eef021b78ee2e6b8154598f27256548b110a46b935e61df68648825825b277',
   'components/BeeHub.jsx': '0b1e8e7b67d42aaf77075f0b480731fb4d82a2e60802a76d150ed0d25d4fce04',
   'lib/phone.ts': 'b873e646b26eb0af8d7ec16d397e6aa0acd90bd33163204b8b13d1ba4403f91c',
-  'lib/tags.ts': '8ac6a0073785ff5d911175a411592fa5a1c1c6e99a1b1457b2ae651728dca622',
+  // lib/tags.ts was 8ac6a0073785ff5d until 2026-11-23: FL-75 slice 3 raised TAG_LIMIT_PER_LOCATION 10 → 15 (Kevin), nothing else.
+  'lib/tags.ts': '058ce2681a60ff70a5dbc37bd3634b9c332c6925634ba5a120be30b068f71fbf',
   'middleware.ts': '6a17cfac0bc06dce536a02027dcc93f10823d9a70129d2ba35e7e1481b925ead',
 }
 
