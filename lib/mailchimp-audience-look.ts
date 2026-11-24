@@ -21,15 +21,19 @@
 //     file goes through scrub(); nothing here calls console.* with a request.
 //
 // ── WHO MAY BE READ ─────────────────────────────────────────────────────────
-// A location is read only when ALL of these are true (readRefusal below):
-//   connected, a token and server prefix stored, an audience chosen,
-//   Kevin's switch on (mailchimp_sync_live), is_active, and
+// A location is read when ALL of these are true (readRefusal below), and
+// nothing else is asked (Kevin's ruling, corrected 2026-11-23):
+//   connected (a token and server prefix stored), an audience chosen, and
 //   lifecycle_status 'active'.
-// A connected location that fails any of them is REFUSED before its token is
-// even selected from the database, with the reason named. That is the
-// strictest reading of Kevin's "inactive" (2026-11-23) and is his to loosen:
-// is_active is false for 36 locations whose lifecycle is 'active'
-// (lib/hub-scope.ts warns it is not a reliable "launched" flag).
+// A location that fails any of them is REFUSED before its token is even
+// selected from the database, with the reason named.
+//
+//   NOT is_active — false for 36 locations whose lifecycle is 'active'
+//     (lib/hub-scope.ts warns it is not a reliable "launched" flag).
+//   NOT mailchimp_sync_live — that switch is the fail-closed gate on SENDING.
+//     Requiring it here would mean arming sends just to look. Reading never
+//     sends, and the switch still guards the sending code exactly as before.
+// Both were in the rule until 2026-11-23 (2193793).
 //
 // ── A BIG AUDIENCE, RATE LIMITS, A HALF-READ ────────────────────────────────
 // Pages of 1000 (Mailchimp's maximum), one request at a time — Mailchimp
@@ -60,9 +64,7 @@ export const MAX_RETRIES = 3
 export type LocationFlags = {
   id: string
   name?: string | null
-  is_active?: boolean | null
   lifecycle_status?: string | null
-  mailchimp_sync_live?: boolean | null
   mailchimp_connected?: boolean | null
   mailchimp_list_id?: string | null
   mailchimp_list_name?: string | null
@@ -71,23 +73,20 @@ export type LocationFlags = {
 export type ReadRefusal =
   | 'not_connected'          // no Mailchimp account linked
   | 'no_audience'            // linked, but no audience chosen
-  | 'location_inactive'      // is_active off, or lifecycle not 'active'
-  | 'switch_off'             // Kevin's mailchimp_sync_live is off
+  | 'location_inactive'      // lifecycle not 'active'
 
 export const REFUSAL_WORDS: Record<ReadRefusal | 'location_not_found', string> = {
   location_not_found: 'That location was not found.',
   not_connected: 'This location has not connected Mailchimp.',
   no_audience: 'This location has connected Mailchimp but not chosen an audience, so there is nothing to look at.',
   location_inactive: 'This location is not active in Bee Hub, so its Mailchimp audience is not read.',
-  switch_off: 'Mailchimp is not switched on for this location yet, so its audience is not read.',
 }
 
 /** Why this location may not be read, or null when it may. Pure. */
 export function readRefusal(loc: LocationFlags): ReadRefusal | null {
   if (!loc.mailchimp_connected) return 'not_connected'
   if (!loc.mailchimp_list_id) return 'no_audience'
-  if (loc.is_active !== true || loc.lifecycle_status !== 'active') return 'location_inactive'
-  if (loc.mailchimp_sync_live !== true) return 'switch_off'
+  if (loc.lifecycle_status !== 'active') return 'location_inactive'
   return null
 }
 
@@ -387,7 +386,7 @@ export async function lookAtLocation(locationId: string, deps: {
   // 1. The flags — WITHOUT the token. A refused location's token is never read.
   const { data: loc, error: locErr } = await db
     .from('locations')
-    .select('id, name, is_active, lifecycle_status, mailchimp_sync_live, mailchimp_connected, mailchimp_list_id, mailchimp_list_name')
+    .select('id, name, lifecycle_status, mailchimp_connected, mailchimp_list_id, mailchimp_list_name')
     .eq('id', locationId)
     .maybeSingle()
   if (locErr || !loc) return { ok: false, reason: 'location_not_found', words: REFUSAL_WORDS.location_not_found, calls }

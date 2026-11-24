@@ -14,13 +14,17 @@ import { readFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { join } from 'path'
 
-vi.mock('@/lib/supabase-service', () => ({ supabaseService: {} }))
-vi.mock('./supabase-service', () => ({ supabaseService: {} }))
+// One shared stand-in, so the sending code (imported below for the switch
+// proof) can be given a database per test.
+const svc = vi.hoisted(() => ({} as any))
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: svc }))
+vi.mock('./supabase-service', () => ({ supabaseService: svc }))
 
 import {
   readRefusal, readAudience, compareSides, lookAtLocation, scrub, PARTIAL_WORDS,
   type MailchimpMember, type BeeHubLead,
 } from './mailchimp-audience-look'
+import { syncWebsiteLeadsToMailchimp } from './mailchimp-sync'
 
 // A made-up token. Never a real one: the real ones are read at run time only.
 const TOKEN = 'fake0token0' + 'zq81x7-us99'
@@ -132,13 +136,15 @@ const PINNED = {
 }
 
 // ── 2. a connected but inactive location is refused ────────────────────────
+// Kevin's ruling, corrected 2026-11-23: read when connected, an audience is
+// chosen and lifecycle is 'active'. Nothing else — not is_active, and NOT
+// the sending switch (mailchimp_sync_live).
 describe('a connected but inactive location is refused, before its token is read', () => {
   const cases: [string, any, string][] = [
-    ['Chattanooga today: is_active off and the switch off', { is_active: false, mailchimp_sync_live: false }, 'location_inactive'],
-    ['is_active off, switch on', { is_active: false }, 'location_inactive'],
     ['closed', { lifecycle_status: 'closed' }, 'location_inactive'],
     ['onboarding', { lifecycle_status: 'onboarding' }, 'location_inactive'],
-    ['active, switch off', { mailchimp_sync_live: false }, 'switch_off'],
+    ['no lifecycle at all', { lifecycle_status: null }, 'location_inactive'],
+    ['closed, even with the switch on', { lifecycle_status: 'closed', mailchimp_sync_live: true }, 'location_inactive'],
     ['no audience chosen (Orlando, Southwest Austin)', { mailchimp_list_id: null, is_active: false, mailchimp_sync_live: false }, 'no_audience'],
     ['not connected', { mailchimp_connected: false }, 'not_connected'],
   ]
@@ -153,10 +159,19 @@ describe('a connected but inactive location is refused, before its token is read
       expect(ops.some((o) => (o.columns || '').includes('mailchimp_access_token'))).toBe(false)
     })
   }
-  it('the rule itself: only all-on reads', () => {
+  it('the rule itself: connected + audience + lifecycle active reads; is_active and the switch are not asked', () => {
     expect(readRefusal(ACTIVE)).toBeNull()
-    expect(readRefusal({ ...ACTIVE, is_active: null })).toBe('location_inactive')
-    expect(readRefusal({ ...ACTIVE, mailchimp_sync_live: null })).toBe('switch_off')
+    for (const is_active of [true, false, null]) for (const mailchimp_sync_live of [true, false, null]) {
+      expect(readRefusal({ ...ACTIVE, is_active, mailchimp_sync_live } as any)).toBeNull()
+    }
+  })
+  it('the flags it reads do not include the switch or is_active', async () => {
+    const { db, ops } = makeDb({ location: ACTIVE, cred: CRED, leads: [] })
+    const mc = makeMailchimp([page([])])
+    await lookAtLocation(LOC, { db, fetchImpl: mc.fetchImpl, sleep: noSleep, loadSuppressed: noSuppressed })
+    const flags = ops.find((o) => o.table === 'locations')!.columns!
+    expect(flags).not.toContain('mailchimp_sync_live')
+    expect(flags).not.toContain('is_active')
   })
 })
 
@@ -327,5 +342,37 @@ describe('the three counts follow the slice 1 rules', () => {
   it('the no-marketing list makes a Bee Hub-only address "not offered", with its reason', () => {
     const c = compareSides({ members: [], leads: [lead('l1', 'no@x.com')], suppressed: new Set(['no@x.com']), complete: true })
     expect(c).toMatchObject({ beeHubOnly: 1, beeHubOnlyEligible: 0, beeHubOnlyNotOffered: { unsubscribed_elsewhere: 1 } })
+  })
+})
+
+// ── 8. the switch off: can be read, still cannot be sent to ───────────────
+describe('a location with the sending switch OFF can be read, and still cannot be sent to', () => {
+  const CHATTANOOGA_TODAY = { ...ACTIVE, is_active: false, mailchimp_sync_live: false }
+  afterEach(() => { delete svc.from; delete svc.rpc; vi.unstubAllGlobals() })
+  it('the look reads it in full, GET only, writing nothing', async () => {
+    const { db, ops } = makeDb({ location: CHATTANOOGA_TODAY, cred: CRED, leads: [lead('l1', 'a@x.com'), lead('l2', 'b@x.com')] })
+    const mc = makeMailchimp([page([member('m1', 'a@x.com')])])
+    const r: any = await lookAtLocation(LOC, { db, fetchImpl: mc.fetchImpl, sleep: noSleep, loadSuppressed: noSuppressed })
+    expect(r).toMatchObject({ ok: true, complete: true })
+    expect(r.comparison).toMatchObject({ both: 1, beeHubOnly: 1, mailchimpOnly: 0 })
+    expect(mc.reqs.map((q) => q.method)).toEqual(['GET'])
+    expect(ops.filter((o) => o.op !== 'select')).toEqual([])
+  })
+  it('the sending code, unchanged, still refuses it: sync_not_enabled, zero requests to Mailchimp, zero writes', async () => {
+    // The same location row, as the sending code reads it — switch off.
+    const { db, ops } = makeDb({ location: { ...CHATTANOOGA_TODAY, ...CRED }, cred: { ...CHATTANOOGA_TODAY, ...CRED }, leads: [lead('l1', 'a@x.com')] })
+    svc.from = db.from; svc.rpc = db.rpc
+    const fetchSpy = vi.fn(async () => { throw new Error('nothing may be sent') })
+    vi.stubGlobal('fetch', fetchSpy)
+    const first = await syncWebsiteLeadsToMailchimp(LOC)
+    // even with a confirmation naming a count and the audience
+    const confirmed = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 1, listId: 'list-1' } })
+    for (const r of [first, confirmed]) expect(r).toMatchObject({ ran: false, reason: 'sync_not_enabled', pushed: 0, failed: 0 })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(ops.filter((o) => o.op !== 'select')).toEqual([])
+  })
+  it('the sending switch is still checked in the sending code, byte for byte (pinned above)', () => {
+    const src = readFileSync(join(process.cwd(), 'lib/mailchimp-' + 'sync.ts'), 'utf8')
+    expect(src).toContain("if (!loc.mailchimp_sync_live) return zeroReport('sync_not_enabled')")
   })
 })
