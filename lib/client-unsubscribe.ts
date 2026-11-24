@@ -132,10 +132,13 @@ export async function consumeClientUnsubscribe(token: string): Promise<ClientUns
     console.warn('[unsubscribe] opt-out cascade failed', err)
   }
 
-  // The person's own timeline. Non-fatal.
+  // The person's own timeline. Non-fatal. location_uuid is required by the
+  // table: before FL-75 slice 2 the page left it out, so this note was
+  // refused every time (0 written for the 6 unsubscribes on record).
   try {
-    await supabaseService.from('touchpoints').insert({
+    const { error: tpError } = await supabaseService.from('touchpoints').insert({
       lead_id: lead.id,
+      location_uuid: lead.location_uuid,
       kind: 'system',
       method: 'system',
       label: 'Unsubscribed from marketing emails',
@@ -143,6 +146,7 @@ export async function consumeClientUnsubscribe(token: string): Promise<ClientUns
       status: 'done',
       occurred_at: now,
     })
+    if (tpError) console.warn('[unsubscribe] withdrawal touchpoint failed', tpError.message)
   } catch (err) {
     console.warn('[unsubscribe] withdrawal touchpoint failed', err)
   }

@@ -151,7 +151,9 @@ describe('PRESSING the button unsubscribes', () => {
     expect(upd.filters.id).toBe('lead-1')
     expect(h.state.cascades).toHaveLength(1)
     expect(h.state.cascades[0]).toMatchObject({ leadId: 'lead-1', patch: { marketing_opt_out: true } })
-    expect(h.state.inserts.find(i => i.table === 'touchpoints')).toBeTruthy()
+    // the timeline note carries the location the table requires (it was left
+    // out before this slice, so the note was never written)
+    expect(h.state.inserts.find(i => i.table === 'touchpoints')!.arg).toMatchObject({ lead_id: 'lead-1', location_uuid: 'loc-1', label: 'Unsubscribed from marketing emails' })
     // a client's press never asks a partner function
     expect(h.state.rpc).toEqual([])
   })
