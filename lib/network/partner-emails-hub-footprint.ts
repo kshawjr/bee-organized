@@ -16,6 +16,8 @@
 // main had].
 // ─────────────────────────────────────────────────────────────
 
+import { withoutMailchimpReviewSlice5 } from './mailchimp-review-hub-footprint'
+
 export const PARTNER_EMAILS_SLICE3_HUB_PIECES: [string, string][] = [
   ["          alignReady={alignReady} links={links} bookingLinks={!forPartner} />\n",
    "          alignReady={alignReady} links={links} />\n"],
@@ -126,8 +128,11 @@ export const PARTNER_EMAILS_SLICE3_HUB_PIECES: [string, string][] = [
 ]
 
 /** BeeHub.jsx with partner emails slice 3 taken back out. Throws if a piece is missing or doubled. */
+// Mailchimp slice 5 (FL-75, 2026-11-24) is taken out first, the same way
+// (mailchimp-review-hub-footprint.ts): every test that reaches BeeHub.jsx
+// through here sees the file as it was on main d41e711.
 export function withoutPartnerEmailsSlice3(src: string): string {
-  let s = src
+  let s = withoutMailchimpReviewSlice5(src)
   for (const [piece, back] of PARTNER_EMAILS_SLICE3_HUB_PIECES) {
     const n = s.split(piece).length - 1
     if (n !== 1) throw new Error(`BeeHub.jsx: a partner emails slice 3 piece ${JSON.stringify(piece.slice(0, 60))} appears ${n} times, expected 1`)

@@ -41,6 +41,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
+import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
@@ -19761,6 +19762,9 @@ export function MailchimpCard({ settings, updateLocation }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy]           = useState(false)
   const [toast, setToast]         = useState(null)
+  // FL-75 slice 5: the "Who goes to Mailchimp" review screen, opened from the
+  // ready state. It sends nothing; Sync now below is unchanged.
+  const [reviewing, setReviewing] = useState(false)
 
   // The connect flow is a full-page redirect, so a failure has to come back as
   // a query param — there is no in-page promise to catch it. Read it once on
@@ -19918,6 +19922,8 @@ export function MailchimpCard({ settings, updateLocation }) {
   const labelStyle = { fontSize:'11px', fontWeight:700, color:HT.ink.muted, textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }
   const rowStyle   = { display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'12px', padding:'8px 0', borderBottom:HT.border.divider }
 
+  if (reviewing && state === 'ready') return <MailchimpReviewScreen locationId={locationId} onClose={()=>setReviewing(false)} />
+
   return (
     <div style={{ margin:'14px 12px 18px', maxWidth:'560px' }}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
@@ -20005,6 +20011,13 @@ export function MailchimpCard({ settings, updateLocation }) {
               <span style={{ fontSize:'12px', color:HT.ink.muted }}>Audience</span>
               <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{listName || listId}</span>
             </div>
+
+            {/* FL-75 slice 5 — choose who goes to Mailchimp. Opens the review
+                screen; nothing is sent from it. */}
+            <button onClick={()=>setReviewing(true)} className="bee-small-action" data-testid="mc-open-review"
+              style={{ display:'block', marginTop:'12px', padding:'9px 16px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.fg, cursor:'pointer' }}>
+              Review who goes to Mailchimp
+            </button>
 
             {/* Sync now (issue 246 step 3A) — ready-state only: an account and an
                 audience are both required before there is anywhere to push TO.
