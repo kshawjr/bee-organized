@@ -19,8 +19,9 @@
 //    Kevin's ruling: REFUSE while any flow that starts when someone is added is
 //    live (reason 'signup_flows_live', naming each one). Refuse too when the
 //    flows can't be read (reason 'mailchimp_unreadable') — "couldn't check" is
-//    never "nothing live". The flows are read again right before EVERY batch;
-//    if anything changed, the run stops there.
+//    never "nothing live". The flows are read again right before EVERY batch,
+//    and again right before that batch's tags are added; if anything changed,
+//    the run stops there.
 //
 // 3. WHO, recomputed live — never from anything saved. loadReview reads the
 //    audience (GET), every Bee Hub record, the shared no-marketing list and the
@@ -387,8 +388,13 @@ export async function syncWebsiteLeadsToMailchimp(
       } else failed.set(k, clean(e?.error || e?.error_code || 'refused'))
     }
 
-    // Tags for the people this batch added.
-    const tagFail = await applyTags(chunk.filter((p) => added.has(p.k)))
+    // Tags for the people this batch added. Adding a tag is a write that can
+    // start a flow, so the flows are read once more right before it: if
+    // anything changed since the batch went (a tag flow switched on, say), no
+    // tag is added, the tags stay owed ('tags_pending') and the run stops.
+    const toTag = chunk.filter((p) => added.has(p.k))
+    const anyTags = toTag.some((p) => carry(tagsByKey.get(p.k) || []).length > 0)
+    const tagFail = !anyTags ? null : !(await flowsStillSame()) ? 'flows_changed' : await applyTags(toTag)
 
     const stamp = stampNow()
     if (tagFail) {

@@ -310,6 +310,27 @@ describe('R2. the flows are read again right before every write', () => {
     expect(r).toMatchObject({ complete: false, pushed: 3, remaining: 4, stopReason: 'flows_changed' })
     expect(s.posts()).toHaveLength(1)
   })
+  it('a tag flow switched on between a batch and its tags → no tag is added, the tags stay owed, the run stops', async () => {
+    let n = 0
+    const leads = [lead('a', 'a@x.com', { project_type: 'Moving' }), lead('b', 'b@x.com', { project_type: 'Home' })]
+    const lt = { lookups: [{ id: 't1', label: 'CLOSEDJOB' }], leadTags: [{ lead_id: 'a', tag_lookup_id: 't1' }] }
+    // reads 1-3 (the look, the start of the run, right before the batch): the tag flow is off.
+    // read 4 (right before the tags): someone has switched it on.
+    const s = setup({ leads, ...lt, flows: () => (++n <= 3 ? flowsAnswer(PAUSED) : flowsAnswer([...PAUSED, CLOSEDJOB_LIVE])) })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(s.posts()).toHaveLength(1)                       // the two people were added
+    expect(s.mc.tagged).toEqual({})                         // and not one tag
+    expect(s.mc.reqs.filter((q) => q.method === 'POST' && /segments/.test(q.url))).toEqual([])
+    expect(r).toMatchObject({ complete: false, pushed: 2, remaining: 0, stopReason: 'flows_changed' })
+    expect(s.dbx.tables.leads.map((l) => l.mailchimp_sync_error)).toEqual(['tags_pending: flows_changed', 'tags_pending: flows_changed'])
+    expect(s.dbx.tables.sync_log.at(-1).status).toBe('partial')
+    // The next press: the owed tags go on, except the one that now starts a live flow.
+    const r2 = await s.run()
+    expect(s.mc.tagged['CLOSEDJOB']).toBeUndefined()
+    expect(s.mc.tagged['Moving']).toEqual(['a@x.com'])
+    expect(s.mc.tagged['Home']).toEqual(['b@x.com'])
+    expect(r2.tagsHeld).toEqual(['CLOSEDJOB'])
+  })
 })
 
 describe('P3. someone who unsubscribed or was cleaned in Mailchimp is never changed', () => {
@@ -520,6 +541,17 @@ describe('tags carry over; R4. a tag that starts a live flow needs the owner’s
     const r = await s.run(confirmOf(await s.run(), ['closedjob']))
     expect(s.mc.tagged['CLOSEDJOB']).toEqual(['a@x.com'])
     expect(r.tagsHeld).toEqual([])
+  })
+  it('one tag at a time: a yes to one held tag carries that one and still holds the other', async () => {
+    const VIP_LIVE = flow({ id: '4', name: 'VIP Thanks', status: 'sending', live: true, start: 'tag', startWords: 'Contact tagged VIP', tag: 'VIP' })
+    const two = { lookups: [{ id: 't1', label: 'CLOSEDJOB' }, { id: 't3', label: 'VIP' }], leadTags: [{ lead_id: 'a', tag_lookup_id: 't1' }, { lead_id: 'a', tag_lookup_id: 't3' }, { lead_id: 'b', tag_lookup_id: 't3' }] }
+    const s = setup({ leads: tagged(), flows: [...PAUSED, CLOSEDJOB_LIVE, VIP_LIVE], ...two })
+    const ask = await s.run()
+    expect(ask.confirm!.heldTags).toEqual([{ tag: 'CLOSEDJOB', flows: ['Closed Job Journey'], people: 1 }, { tag: 'VIP', flows: ['VIP Thanks'], people: 2 }])
+    const r = await s.run(confirmOf(ask, ['CLOSEDJOB']))
+    expect(s.mc.tagged['CLOSEDJOB']).toEqual(['a@x.com'])
+    expect(s.mc.tagged['VIP']).toBeUndefined()
+    expect(r.tagsHeld).toEqual(['VIP'])
   })
   it('after the first sync there is no confirmation, so a held tag is never carried', async () => {
     const s = setup({ leads: tagged(), flows: [...PAUSED, CLOSEDJOB_LIVE], syncLog: [{ entity_type: 'mailchimp_push', entity_id: LOC, status: 'complete' }], ...lt })
