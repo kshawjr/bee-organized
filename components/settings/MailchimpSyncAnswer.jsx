@@ -6,17 +6,13 @@
 // nothing. Every refusal, the switch and the confirmation live in the sending
 // engine on the server.
 //
-//   <SyncConfirm>  the first-sync confirmation: the exact count and audience,
-//                  the Mailchimp flows that start when someone is added (all
-//                  paused, or the server would have refused), and any tag that
-//                  starts a live flow — left off unless ticked, one by one.
+//   (The first-sync confirmation moved to BeforeWeAdd in
+//   MailchimpConnectionScreen.jsx, built to Kevin's Lovable design.)
 //   <SyncResult>   everything else: a refusal in owner words (live flows named,
 //                  with how to pause them), a finished run, or a run that
 //                  stopped partway — never reported as done.
 
-import { useState } from 'react'
 import { T as HT } from '@/components/hive/shared/tokens'
-import { firstSyncConfirmCopy } from '@/lib/mailchimp-connection-state'
 
 const n = (x) => Number(x || 0).toLocaleString('en-US')
 const people = (x) => `${n(x)} ${x === 1 ? 'person' : 'people'}`
@@ -26,8 +22,6 @@ const box = (tone) => ({
 })
 const para = { fontSize: '13px', color: HT.ink.primary, lineHeight: 1.6, margin: '0 0 8px' }
 const small = { fontSize: '12px', color: HT.ink.secondary, lineHeight: 1.55, margin: '0 0 8px' }
-const primaryBtn = (busy) => ({ padding: '8px 14px', background: HT.accent.fg, border: 'none', borderRadius: HT.radius.control, fontFamily: 'inherit', fontWeight: 700, color: HT.accent.onFill, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1 })
-const quietBtn = { padding: '8px 14px', background: 'transparent', border: HT.border.control, borderRadius: HT.radius.control, fontFamily: 'inherit', fontWeight: 600, color: HT.ink.secondary, cursor: 'pointer' }
 
 function FlowList({ flows, testid }) {
   return (
@@ -38,47 +32,6 @@ function FlowList({ flows, testid }) {
         </li>
       ))}
     </ul>
-  )
-}
-
-export function SyncConfirm({ confirm, syncing, onYes, onCancel }) {
-  const [tagsOk, setTagsOk] = useState([])
-  const held = confirm.held_tags || []
-  const paused = confirm.paused_flows || []
-  return (
-    <div data-testid="mc-sync-confirm" style={box('warn')}>
-      <p style={para}>{firstSyncConfirmCopy(confirm.count, confirm.list_name)}</p>
-      {paused.length > 0 ? (
-        <>
-          <p style={small}>These Mailchimp flows start when someone is added. They are paused, so nobody gets their email. Keep them paused until this finishes:</p>
-          <FlowList flows={paused} testid="mc-paused-flows" />
-        </>
-      ) : (
-        <p style={small}>No Mailchimp flow starts when someone is added to this audience.</p>
-      )}
-      {held.length > 0 && (
-        <div data-testid="mc-held-tags" style={{ margin: '0 0 10px' }}>
-          <p style={small}>These tags start a flow in Mailchimp that sends an email. They are left off unless you tick them:</p>
-          {held.map((h) => {
-            const on = tagsOk.includes(h.tag)
-            return (
-              <label key={h.tag} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '13px', color: HT.ink.primary, lineHeight: 1.5, margin: '0 0 6px', cursor: 'pointer' }}>
-                <input type="checkbox" checked={on} disabled={syncing} aria-label={`Carry the tag ${h.tag}`}
-                  onChange={(e) => setTagsOk(e.target.checked ? [...tagsOk, h.tag] : tagsOk.filter((t) => t !== h.tag))}
-                  style={{ width: '18px', height: '18px', marginTop: '1px', accentColor: HT.accent.fg }} />
-                <span><strong>{h.tag}</strong> — starts {h.flows.map((f) => `“${f}”`).join(', ')} · {people(h.people)}</span>
-              </label>
-            )
-          })}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button onClick={() => onYes(tagsOk)} disabled={syncing} className="bee-small-action" data-testid="mc-sync-yes" style={primaryBtn(syncing)}>
-          {syncing ? 'Syncing…' : `Yes, subscribe ${n(confirm.count)}`}
-        </button>
-        <button onClick={onCancel} disabled={syncing} className="bee-small-action" style={quietBtn}>Cancel</button>
-      </div>
-    </div>
   )
 }
 

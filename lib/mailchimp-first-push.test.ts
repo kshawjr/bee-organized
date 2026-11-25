@@ -113,7 +113,7 @@ function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: 
 }
 
 // ── Flows, as lib/mailchimp-flows.ts would report them ────────
-const flow = (over: Partial<Flow>): Flow => ({ kind: 'journey', id: '1', name: 'Welcome New Contacts', status: 'paused', live: false, start: 'signup', startWords: 'Contact signs up to Bee Organized Friends', tag: null, ...over })
+const flow = (over: Partial<Flow>): Flow => ({ kind: 'journey', id: '1', name: 'Welcome New Contacts', status: 'paused', live: false, start: 'signup', startWords: 'Contact signs up to Bee Organized Friends', tag: null, subjects: [], ...over })
 const flowsAnswer = (flows: Flow[]): FlowsRead => ({
   ok: true, flows,
   mustPause: flows.filter((f) => f.live && f.start !== 'tag'),
@@ -193,7 +193,7 @@ describe('R1 + R3. live sign-up flows, or flows that cannot be read: refuse', ()
     const s = setup({ leads: THREE(), flows: live })
     const r = await s.run()
     expect(r.reason).toBe('signup_flows_live')
-    expect(r.mustPause).toEqual([{ name: 'Welcome New Contacts', status: 'sending', start: 'Contact signs up to Bee Organized Friends' }])
+    expect(r.mustPause).toEqual([{ name: 'Welcome New Contacts', status: 'sending', start: 'Contact signs up to Bee Organized Friends', subjects: [] }])
     expect(r.howToPause).toMatch(/Pause/)
     expect(s.mc.reqs.filter((q) => q.method !== 'GET')).toEqual([])
     expect(s.dbx.writes).toEqual([])

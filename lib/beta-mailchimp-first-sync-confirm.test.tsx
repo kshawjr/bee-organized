@@ -42,6 +42,7 @@ vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: (t: string) 
 import { syncWebsiteLeadsToMailchimp } from '@/lib/mailchimp-sync'
 import { NOT_LIVE_COPY, firstSyncConfirmCopy } from '@/lib/mailchimp-connection-state'
 import { MailchimpCard } from '@/components/BeeHub'
+import { buildReview } from '@/lib/mailchimp-review'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -189,6 +190,11 @@ function cardFetch(opts: { live?: boolean | 'fail'; syncReplies?: any[] }) {
       if (opts.live === 'fail') return { ok: false, status: 500, json: async () => ({ error: 'x' }) }
       return { ok: true, status: 200, json: async () => ({ live: opts.live === true }) }
     }
+    // FL-75 slice 6 (2026-11-25): the ready state's screen reads the overview.
+    if (String(url).startsWith('/api/mailchimp/overview?')) {
+      if (opts.live === 'fail') return { ok: false, status: 500, json: async () => ({ error: 'x' }) }
+      return { ok: true, status: 200, json: async () => ({ live: opts.live === true, synced: false, reviewed: true, flows: { ok: true, mustPause: [], paused: [] } }) }
+    }
     if (String(url) === '/api/mailchimp/sync') {
       const next = replies.shift()
       return { ok: true, status: 200, json: async () => next }
@@ -202,7 +208,10 @@ describe('the "not switched on yet" line', () => {
   it('shows under a connected card when sending is off', async () => {
     fetchMock = cardFetch({ live: false }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    expect(container.textContent).toContain(NOT_LIVE_COPY)
+    // 2026-11-25: with an audience chosen, the line is the connection screen's
+    // own (Lovable design), and the first sync stays off with it.
+    expect(container.querySelector('[data-testid="mc-not-live"]')?.textContent).toMatch(/isn.t switched on for your location yet/)
+    expect((container.querySelector('[data-testid="mc-start"]') as HTMLButtonElement).disabled).toBe(true)
     unmount()
   })
 
@@ -217,6 +226,7 @@ describe('the "not switched on yet" line', () => {
     fetchMock = cardFetch({ live: true }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
     expect(container.textContent).not.toContain(NOT_LIVE_COPY)
+    expect(container.querySelector('[data-testid="mc-not-live"]')).toBeNull()
     unmount()
   })
 
@@ -236,53 +246,57 @@ describe('the "not switched on yet" line', () => {
   })
 })
 
-describe('the first-sync confirmation on the card', () => {
-  const ASK = { ran: false, reason: 'needs_confirmation', pushed: 0, skipped: 0, failed: 0,
-    confirm: { count: 19, list_id: 'list1', list_name: 'Bee Organized Friends', flows: 'fp1', paused_flows: [], held_tags: [] } }
-
-  it('Sync now on a first sync shows the count + audience and sends nothing more', async () => {
-    fetchMock = cardFetch({ live: true, syncReplies: [ASK] }); vi.stubGlobal('fetch', fetchMock)
+// 2026-11-25 (FL-75 slice 6, second pass): the confirmation moved off the
+// card onto the Lovable connection screen ("Before we add these people",
+// components/settings/MailchimpConnectionScreen.jsx). The four card tests that
+// were here — Sync now asks first and sends nothing more, Cancel sends
+// nothing, Yes re-sends the confirmed count and audience, a moved count asks
+// again — are re-pinned against the new screen in
+// lib/mailchimp-connection-screen.test.tsx ("the first-sync confirmation —
+// nothing live"). The card's wiring to it is pinned below.
+describe('the card hands the ready state to the connection screen', () => {
+  it('a connected card with an audience shows the screen, which reads the overview', async () => {
+    fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('/api/mailchimp/status?')) return { ok: true, status: 200, json: async () => ({ live: true }) }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+      throw new Error('unexpected ' + url)
+    }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    await click(button('Sync now'))
-    expect(container.textContent).toContain(
-      'This will subscribe 19 people to Bee Organized Friends. They have not been synced before.')
-    expect(button('Sync now')).toBeUndefined()
-    expect(syncCalls()).toHaveLength(1)
-    expect(JSON.parse(syncCalls()[0][1].body).confirm).toBeUndefined()
+    expect(container.querySelector('[data-testid="mc-connection"]')).toBeTruthy()
+    expect(fetchMock.mock.calls.filter((c: any[]) => String(c[0]) === '/api/mailchimp/sync')).toHaveLength(0)
     unmount()
   })
-
-  it('Cancel sends nothing', async () => {
-    fetchMock = cardFetch({ live: true, syncReplies: [ASK] }); vi.stubGlobal('fetch', fetchMock)
+  it('Back to Mailchimp from the review records nothing (Done’s onDone is pinned in mailchimp-review-screen)', async () => {
+    const posts: any[] = []
+    fetchMock = vi.fn(async (url: string, init: any = {}) => {
+      if (init.method === 'POST') { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+      if (String(url).startsWith('/api/mailchimp/review')) return { ok: false, status: 500, json: async () => ({ error: 'x' }) }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    await click(button('Sync now'))
-    await click(button('Cancel'))
-    expect(syncCalls()).toHaveLength(1)
-    expect(container.textContent).not.toContain('This will subscribe')
-    expect(button('Sync now')).toBeTruthy()
+    await click(container.querySelector('[data-testid="mc-open-review"]') as any)
+    await click(Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Back to Mailchimp')))
+    expect(posts).toEqual([])
     unmount()
   })
-
-  it('Yes re-sends with the confirmed count + audience, and shows the result', async () => {
-    fetchMock = cardFetch({ live: true, syncReplies: [ASK, { ran: true, reason: null, complete: true, pushed: 19, already: 0, skipped: 3, failed: 0, remaining: 0, tags_held: [], confirm: null }] })
-    vi.stubGlobal('fetch', fetchMock)
+  it('Done on the review records it (one POST to the overview), and nothing else', async () => {
+    const posts: any[] = []
+    const REVIEW = { ok: true, choicesReady: true, mailchimpWords: null,
+      location: { id: 'x', name: 'Test', audienceName: 'Bee Organized Friends', timeZone: 'America/New_York' },
+      model: buildReview({ leads: [], contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'America/New_York' } as any) }
+    fetchMock = vi.fn(async (url: string, init: any = {}) => {
+      if (init.method === 'POST') { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+      if (String(url).startsWith('/api/mailchimp/review')) return { ok: true, status: 200, json: async () => REVIEW }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    await click(button('Sync now'))
-    await click(button('Yes, subscribe 19'))
-    expect(syncCalls()).toHaveLength(2)
-    expect(JSON.parse(syncCalls()[1][1].body).confirm).toEqual({ count: 19, list_id: 'list1', flows: 'fp1', tags_ok: [] })
-    expect(container.textContent).toContain('Done: added 19 people to Bee Organized Friends.')
-    unmount()
-  })
-
-  it('if the count moved, the card asks again with the new number', async () => {
-    const ASK20 = { ...ASK, confirm: { ...ASK.confirm, count: 20 } }
-    fetchMock = cardFetch({ live: true, syncReplies: [ASK, ASK20] }); vi.stubGlobal('fetch', fetchMock)
-    await mountCard(READY)
-    await click(button('Sync now'))
-    await click(button('Yes, subscribe 19'))
-    expect(container.textContent).toContain('This will subscribe 20 people to Bee Organized Friends.')
-    expect(button('Yes, subscribe 20')).toBeTruthy()
+    await click(container.querySelector('[data-testid="mc-open-review"]') as any)
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    await click(Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Done'))
+    expect(posts).toEqual([{ url: '/api/mailchimp/overview', body: { location_id: 'loc_test', reviewed: true } }])
+    expect(container.querySelector('[data-testid="mc-connection"]')).toBeTruthy()
     unmount()
   })
 })

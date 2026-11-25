@@ -107,7 +107,7 @@ const ArrowLeft = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
 )
 
-export default function MailchimpReviewScreen({ locationId, onClose }) {
+export default function MailchimpReviewScreen({ locationId, onClose, onDone = onClose }) {
   const [data, setData] = useState(null)       // the GET answer
   const [err, setErr] = useState(null)
   const [people, setPeople] = useState([])
@@ -382,7 +382,9 @@ export default function MailchimpReviewScreen({ locationId, onClose }) {
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
         {/* "Done", not "Save" (Kevin, 2026-11-24): every tick is already saved
             as it is made, so this button only goes back. */}
-        <Btn variant="primary" onClick={onClose}><span>Done</span></Btn>
+        {/* FL-75 slice 6: Done also tells the Mailchimp screen the review is
+            finished (step 1 ticked); Back to Mailchimp does not. */}
+        <Btn variant="primary" onClick={onDone}><span>Done</span></Btn>
       </div>
     </Frame>
   )

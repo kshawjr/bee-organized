@@ -44,6 +44,7 @@ export type Flow = {
   start: 'signup' | 'tag' | 'other'
   startWords: string        // Mailchimp's own words for the start, e.g. "Contact signs up to …"
   tag: string | null        // for start 'tag': the tag's name (null if it could not be named)
+  subjects: string[]        // subject lines of the emails it sends, from the steps already read (shown to the owner only)
 }
 
 export type FlowsRead =
@@ -133,14 +134,14 @@ export async function readFlows(args: {
     // 1. Journeys ("Flows" / Customer Journeys) on this audience, with their start step.
     const journeys = (await getAll('customer-journeys/journeys', 'journeys')).filter((j) => String(j?.list_id || '') === listId)
     const tagIds = new Set<string>()
-    const pending: Array<{ j: any; trigger: any | null }> = []
+    const pending: Array<{ j: any; trigger: any | null; steps: any[] }> = []
     for (const j of journeys) {
       const steps = await get(`customer-journeys/journeys/${encodeURIComponent(String(j.id))}/steps`)
       const list = Array.isArray(steps?.steps) ? steps.steps : null
       if (!list) throw new ReadFail('unreadable_flow', `The steps of the flow "${String(j?.journey_name || j.id)}" could not be read`)
       const trigger = list.find((s: any) => String(s?.step_type || '').startsWith('trigger')) || null
       if (trigger && String(trigger.step_type) === 'trigger-tag_added' && trigger?.trigger_settings?.tag_id != null) tagIds.add(String(trigger.trigger_settings.tag_id))
-      pending.push({ j, trigger })
+      pending.push({ j, trigger, steps: list })
     }
 
     // Tag flows name their tag by id; the tag's name is a static segment's name.
@@ -151,7 +152,7 @@ export async function readFlows(args: {
       }
     }
 
-    for (const { j, trigger } of pending) {
+    for (const { j, trigger, steps } of pending) {
       const status = String(j?.status || 'unknown')
       const stepType = String(trigger?.step_type || '')
       const isTag = stepType === 'trigger-tag_added'
@@ -168,6 +169,7 @@ export async function readFlows(args: {
         start: isTag && tag ? 'tag' : isSignup ? 'signup' : 'other',
         startWords: [trigger?.display_text, trigger?.display_subtext].filter(Boolean).join('').trim() || (trigger ? stepType : 'start step not found'),
         tag,
+        subjects: subjectsOf(steps),
       })
     }
 
@@ -180,7 +182,7 @@ export async function readFlows(args: {
       flows.push({
         kind: 'classic', id: String(a.id), name: String(a?.settings?.title || `Automation ${a.id}`), status,
         live: !OFF_CLASSIC.has(status), start: String(a?.trigger_settings?.workflow_type || '') === 'welcomeSeries' ? 'signup' : 'other',
-        startWords: String(a?.trigger_settings?.workflow_type || 'unknown start'), tag: null,
+        startWords: String(a?.trigger_settings?.workflow_type || 'unknown start'), tag: null, subjects: [],
       })
     }
 
@@ -197,6 +199,19 @@ export async function readFlows(args: {
     if (err instanceof ReadFail) return { ok: false, reason: err.reason, detail: err.detail }
     return { ok: false, reason: 'request_failed', detail: scrub(err?.message || err, token) }
   }
+}
+
+// The subject line of every email a journey sends, in step order, as Mailchimp
+// returns them inside the steps (action_details.email.settings.subject_line).
+// For the owner's eyes only; never part of the fingerprint.
+function subjectsOf(steps: any[]): string[] {
+  const out: string[] = []
+  for (const s of steps) {
+    if (String(s?.step_type || '') !== 'action-send_email') continue
+    const subj = String(s?.action_details?.email?.settings?.subject_line || '').trim()
+    if (subj && !out.includes(subj)) out.push(subj)
+  }
+  return out
 }
 
 // Changes when any flow on the audience appears, goes, is renamed, changes

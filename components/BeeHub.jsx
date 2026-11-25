@@ -42,7 +42,7 @@ import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"
-import { SyncConfirm as McSyncConfirm, SyncResult as McSyncResult } from "@/components/settings/MailchimpSyncAnswer"
+import MailchimpConnectionScreen from "@/components/settings/MailchimpConnectionScreen"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
@@ -19778,15 +19778,6 @@ export function MailchimpCard({ settings, updateLocation }) {
     if (q.get('mailchimp') === 'error') setReturnErr(q.get('reason') || 'failed')
   }, [])
 
-  // "Sync now" (issue 246 step 3A) — manual push of eligible website leads.
-  // syncResult holds the SERVER's report verbatim; the card renders numbers it
-  // was told, never numbers it computed. It never reads the sync gate itself —
-  // a gated-off location learns that from the response's reason.
-  const [syncing, setSyncing]       = useState(false)
-  const [syncResult, setSyncResult] = useState(null)
-  // The server's needs_confirmation answer, verbatim: { count, list_id, list_name }.
-  const [pendingConfirm, setPendingConfirm] = useState(null)
-
   // null = not known (not asked yet, or the read failed) — shows nothing.
   const [live, setLive] = useState(null)
   useEffect(() => {
@@ -19802,30 +19793,6 @@ export function MailchimpCard({ settings, updateLocation }) {
     })()
     return () => { cancelled = true }
   }, [connected, locationId])
-
-  async function runSync(confirm = null) {
-    if (!locationId) { setSaveErr('No location id — reload and try again.'); return }
-    setSyncing(true); setSyncResult(null); setSaveErr(null); setPendingConfirm(null)
-    try {
-      const r = await fetch('/api/mailchimp/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(confirm ? { location_id: locationId, confirm } : { location_id: locationId }),
-      })
-      if (!r.ok) {
-        let detail = `sync_failed_${r.status}`
-        try { const j = await r.json(); detail = j.error || detail } catch {}
-        setSaveErr(detail); setSyncing(false); return
-      }
-      const j = await r.json()
-      if (j.reason === 'needs_confirmation' && j.confirm) { setPendingConfirm(j.confirm); return }
-      setSyncResult(j)
-    } catch (e) {
-      setSaveErr(String(e?.message || e))
-    } finally {
-      setSyncing(false)
-    }
-  }
 
   const needsAudience = state === 'needs_audience'
 
@@ -19923,7 +19890,27 @@ export function MailchimpCard({ settings, updateLocation }) {
   const labelStyle = { fontSize:'11px', fontWeight:700, color:HT.ink.muted, textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }
   const rowStyle   = { display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'12px', padding:'8px 0', borderBottom:HT.border.divider }
 
-  if (reviewing && state === 'ready') return <MailchimpReviewScreen locationId={locationId} onClose={()=>setReviewing(false)} />
+  // FL-75 slice 6: Done on the review records that it was finished (step 1 of
+  // the first sync), then comes back; Back to Mailchimp only comes back.
+  async function reviewDone() {
+    try {
+      await fetch('/api/mailchimp/overview', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ location_id: locationId, reviewed: true }) })
+    } catch { /* the step stays unticked; the owner can press Done again */ }
+    setReviewing(false)
+  }
+  if (reviewing && state === 'ready') return <MailchimpReviewScreen locationId={locationId} onClose={()=>setReviewing(false)} onDone={reviewDone} />
+  // FL-75 slice 6: once an account and audience are chosen, the screen is the
+  // Lovable connection design (never synced / syncing / on hold) and its
+  // first-sync confirmation. Sync now lives there; what it shows is read from
+  // the server, which checks everything again before it sends.
+  if (state === 'ready') return (
+    <>
+      {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
+      <MailchimpConnectionScreen locationId={locationId} accountName={accountName} listName={listName}
+        onReview={()=>setReviewing(true)} onDisconnect={doDisconnect} disconnectBusy={busy} />
+      {saveErr && <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'0 16px', lineHeight:1.5 }}>{saveErr}</p>}
+    </>
+  )
 
   return (
     <div style={{ margin:'14px 12px 18px', maxWidth:'560px' }}>
@@ -20002,70 +19989,6 @@ export function MailchimpCard({ settings, updateLocation }) {
           </div>
         )}
 
-        {state === 'ready' && (
-          <div style={{ marginTop:'12px' }}>
-            <div style={rowStyle}>
-              <span style={{ fontSize:'12px', color:HT.ink.muted }}>Account</span>
-              <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{accountName || '—'}</span>
-            </div>
-            <div style={{ ...rowStyle, borderBottom:'none' }}>
-              <span style={{ fontSize:'12px', color:HT.ink.muted }}>Audience</span>
-              <span style={{ fontSize:'13px', color:HT.ink.primary, fontWeight:600, textAlign:'right' }}>{listName || listId}</span>
-            </div>
-
-            {/* FL-75 slice 5 — choose who goes to Mailchimp. Opens the review
-                screen; nothing is sent from it. */}
-            <button onClick={()=>setReviewing(true)} className="bee-small-action" data-testid="mc-open-review"
-              style={{ display:'block', marginTop:'12px', padding:'9px 16px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.fg, cursor:'pointer' }}>
-              Review who goes to Mailchimp
-            </button>
-
-            {/* Sync now (issue 246 step 3A) — ready-state only: an account and an
-                audience are both required before there is anywhere to push TO.
-                The result line repeats the server's report; when the location's
-                sending isn't switched on yet, the server says so and nothing
-                was sent — the card just relays that in owner words. */}
-            {!pendingConfirm && (
-              <button onClick={()=>runSync()} disabled={syncing} className="bee-small-action"
-                style={{ marginTop:'10px', padding:'9px 16px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
-                {syncing ? (syncResult?.reason === 'signup_flows_live' ? 'Checking…' : 'Syncing…') : (syncResult?.reason === 'signup_flows_live' ? 'Check again' : 'Sync now')}
-              </button>
-            )}
-
-            {/* First sync: nothing has been sent; the server is asking (FL-75
-                slice 6: count, audience, the paused flows, held tags). */}
-            {pendingConfirm && (
-              <McSyncConfirm confirm={pendingConfirm} syncing={syncing}
-                onYes={(tagsOk)=>runSync({ count: pendingConfirm.count, list_id: pendingConfirm.list_id, flows: pendingConfirm.flows, tags_ok: tagsOk })}
-                onCancel={()=>setPendingConfirm(null)} />
-            )}
-
-            {syncResult && <McSyncResult result={syncResult} listName={listName} />}
-
-            {!confirming ? (
-              <button onClick={()=>setConfirming(true)} className="bee-small-action"
-                style={{ marginTop:'10px', marginLeft:'8px', padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
-                Disconnect
-              </button>
-            ) : (
-              <div style={{ marginTop:'10px', background:HT.surface.sunken, borderRadius:HT.radius.control, padding:'11px 12px' }}>
-                <p style={{ fontSize:'13px', color:HT.ink.secondary, lineHeight:1.6, margin:'0 0 9px' }}>
-                  Disconnect Mailchimp? Your account and audience will be forgotten here. Nothing in Mailchimp is changed or deleted.
-                </p>
-                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-                  <button onClick={doDisconnect} disabled={busy} className="bee-small-action"
-                    style={{ padding:'8px 14px', background:HT.state.danger.strong, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.ink.inverse, cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-                    {busy ? 'Disconnecting…' : 'Yes, disconnect'}
-                  </button>
-                  <button onClick={()=>setConfirming(false)} disabled={busy} className="bee-small-action"
-                    style={{ padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         {saveErr && (
           <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'10px 0 0', lineHeight:1.5 }}>{saveErr}</p>

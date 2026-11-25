@@ -309,11 +309,16 @@ describe('the Sync now button', () => {
     unmountCard()
   })
 
+  // FL-75 slice 6 (2026-11-25): Sync now lives on the Lovable connection
+  // screen, which first reads the overview (read only); a location that has
+  // synced before shows Sync now. The trigger and the numbers are unchanged.
+  const RUNNING = { live: true, synced: true, reviewed: true, audience_count: 10, last_run: null, flows: { ok: true, mustPause: [], paused: [] } }
+  const route = (syncAnswer: any, overview: any = RUNNING) => async (url: string) => ({
+    ok: true, status: 200,
+    json: async () => (String(url).startsWith('/api/mailchimp/overview?') ? overview : syncAnswer),
+  })
   it('POSTs the trigger and reports the server’s numbers verbatim', async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: true, status: 200,
-      json: async () => ({ ran: true, reason: null, complete: true, pushed: 12, already: 3, skipped: 7, failed: 2, remaining: 0, tags_held: [] }),
-    }))
+    fetchMock.mockImplementation(route({ ran: true, reason: null, complete: true, pushed: 12, already: 3, skipped: 7, failed: 2, remaining: 0, tags_held: [] }))
     await mountCard(READY)
     await act(async () => { syncButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
@@ -330,14 +335,13 @@ describe('the Sync now button', () => {
   })
 
   it('a gated-off location hears it plainly: nothing was sent', async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: true, status: 200,
-      json: async () => ({ ran: false, reason: 'sync_not_enabled', pushed: 0, skipped: 0, failed: 0 }),
-    }))
+    // 2026-11-25: the screen already knows the switch is off (the overview),
+    // so Sync now is off and says why; the server would refuse it anyway.
+    fetchMock.mockImplementation(route({ ran: false, reason: 'sync_not_enabled', pushed: 0, skipped: 0, failed: 0 }, { ...RUNNING, live: false }))
     await mountCard(READY)
-    await act(async () => { syncButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    expect(container.textContent).toMatch(/Nothing was sent/i)
+    expect(syncButton()!.disabled).toBe(true)
     expect(container.textContent).toMatch(/switched on for your location yet/i)
+    expect(fetchMock.mock.calls.filter((c: any[]) => String(c[0]) === '/api/mailchimp/sync')).toHaveLength(0)
     unmountCard()
   })
 })

@@ -255,14 +255,18 @@ describe('the card renders the state it is in', () => {
     expect(container.textContent).toContain('Bee Organized KC')
     expect(container.textContent).toContain('Bee clients')
     const btn = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim())
-    expect(btn).toContain('Disconnect')
+    // FL-75 slice 6 (2026-11-25): the ready state is now the Lovable connection
+    // screen (components/settings/MailchimpConnectionScreen.jsx); its
+    // Disconnect reads "Disconnect Mailchimp", as in the design.
+    expect(btn).toContain('Disconnect Mailchimp')
     // Finished means finished: no picker still hanging around, and no audience
-    // fetch for a state that has nothing to choose. The one read it does make
-    // is the read-only status check behind the "not switched on yet" line.
+    // fetch for a state that has nothing to choose. The reads it makes are the
+    // read-only status check and (slice 6) the read-only overview, both GETs.
     expect(container.querySelector('select')).toBeNull()
     const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
     expect(urls.filter((u: string) => u.includes('/audiences'))).toHaveLength(0)
-    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?'))).toHaveLength(0)
+    expect(fetchMock.mock.calls.filter((c: any[]) => c[1]?.method && c[1].method !== 'GET')).toHaveLength(0)
   })
 
   it('Disconnect asks first, and says Mailchimp itself is untouched', async () => {
@@ -271,14 +275,15 @@ describe('the card renders the state it is in', () => {
       mailchimpListId: 'a1', mailchimpListName: 'Clients',
     })
     const disconnect = Array.from(container.querySelectorAll('button'))
-      .find(b => b.textContent?.trim() === 'Disconnect')!
+      .find(b => b.textContent?.trim() === 'Disconnect Mailchimp')!
     await act(async () => { disconnect.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
-    expect(container.textContent).toMatch(/Nothing in Mailchimp is changed or deleted/i)
-    // Asking is not doing: no disconnect call (the status read on mount is not one).
+    // The design's words (slice 6, 2026-11-25).
+    expect(container.textContent).toMatch(/Your Mailchimp audience stays as it is/i)
+    // Asking is not doing: no disconnect call (the reads on mount are not one).
     const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
     expect(urls.filter((u: string) => u.includes('disconnect'))).toHaveLength(0)
-    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?'))).toHaveLength(0)
   })
 
   it('a failed connect return is surfaced, not swallowed', async () => {

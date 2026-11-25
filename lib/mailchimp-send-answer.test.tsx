@@ -3,14 +3,12 @@
 // FL-75 slice 6 (2026-11-25) — what the Mailchimp card shows after Sync now
 // (components/settings/MailchimpSyncAnswer.jsx), mounted for real:
 //   • live sign-up flows: each one named, how to pause it, no way to send
-//   • the confirmation: exact count + audience, the paused flows, and each
-//     held tag as its own unticked box — Yes sends only the ticked ones
 //   • a run that stopped partway is never worded as done
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { SyncConfirm, SyncResult, syncResultWords } from '@/components/settings/MailchimpSyncAnswer'
+import { SyncResult, syncResultWords } from '@/components/settings/MailchimpSyncAnswer'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let host: HTMLElement, root: Root
@@ -26,7 +24,7 @@ const LIVE = {
   must_pause: [{ name: 'Welcome New Contacts', status: 'sending', start: 'Contact signs up to Bee Organized Friends' }, { name: 'Profile Quiz - Welcome Flow', status: 'sending', start: '…' }],
   how_to_pause: 'In Mailchimp, go to Automations, open the flow by its name, and choose Pause. Then come back and press Check again.',
 }
-const ASK = {
+const _ASK_RETIRED = {
   count: 143, list_id: 'list1', list_name: 'Bee Organized Friends', flows: 'fp1',
   paused_flows: [{ name: 'Welcome New Contacts', status: 'paused', start: '' }, { name: 'Profile Quiz - Welcome Flow', status: 'paused', start: '' }],
   held_tags: [{ tag: 'CLOSEDJOB', flows: ['Closed Job Journey'], people: 4 }, { tag: 'VIP', flows: ['VIP Thanks'], people: 1 }],
@@ -48,36 +46,11 @@ describe('refused because sign-up flows are on', () => {
   })
 })
 
-describe('the first-sync confirmation', () => {
-  it('shows the exact count and audience, and the paused flows by name', async () => {
-    await mount(<SyncConfirm confirm={ASK} syncing={false} onYes={() => {}} onCancel={() => {}} />)
-    expect(host.textContent).toContain('This will subscribe 143 people to Bee Organized Friends.')
-    expect(Array.from(host.querySelectorAll('[data-testid="mc-paused-flows"] li')).map((li) => li.textContent)).toEqual(['Welcome New Contacts (paused)', 'Profile Quiz - Welcome Flow (paused)'])
-    expect(btn('Yes, subscribe 143')).toBeTruthy()
-  })
-  it('held tags start unticked; Yes sends none of them', async () => {
-    const onYes = vi.fn()
-    await mount(<SyncConfirm confirm={ASK} syncing={false} onYes={onYes} onCancel={() => {}} />)
-    const boxes = Array.from(host.querySelectorAll('[data-testid="mc-held-tags"] input[type=checkbox]')) as HTMLInputElement[]
-    expect(boxes).toHaveLength(2)
-    for (const b of boxes) expect(b.checked).toBe(false)
-    expect(host.textContent).toContain('CLOSEDJOB — starts “Closed Job Journey” · 4 people')
-    await act(async () => { btn('Yes, subscribe 143')!.click() })
-    expect(onYes).toHaveBeenCalledWith([])
-  })
-  it('ticking one tag sends that tag only', async () => {
-    const onYes = vi.fn()
-    await mount(<SyncConfirm confirm={ASK} syncing={false} onYes={onYes} onCancel={() => {}} />)
-    await act(async () => { (host.querySelector('input[aria-label="Carry the tag CLOSEDJOB"]') as HTMLInputElement).click() })
-    await act(async () => { btn('Yes, subscribe 143')!.click() })
-    expect(onYes).toHaveBeenCalledWith(['CLOSEDJOB'])
-  })
-  it('no sign-up flows at all is said plainly', async () => {
-    await mount(<SyncConfirm confirm={{ ...ASK, paused_flows: [], held_tags: [] }} syncing={false} onYes={() => {}} onCancel={() => {}} />)
-    expect(host.textContent).toContain('No Mailchimp flow starts when someone is added to this audience.')
-    expect(host.querySelector('[data-testid="mc-held-tags"]')).toBeNull()
-  })
-})
+// The first-sync confirmation that used to be here (SyncConfirm) was rebuilt
+// to Kevin's Lovable design on 2026-11-25 as BeforeWeAdd in
+// components/settings/MailchimpConnectionScreen.jsx; its tests — exact count
+// and audience, held tags unticked and one by one, no flows — are in
+// lib/mailchimp-connection-screen.test.tsx.
 
 describe('results', () => {
   it('a run that stopped partway is never worded as done', () => {

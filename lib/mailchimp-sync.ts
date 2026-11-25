@@ -132,7 +132,7 @@ export type SyncRefusal =
   | 'mailchimp_unreadable' | 'signup_flows_live' | 'beehub_unreadable' | 'choices_not_ready'
   | 'no_list_unreadable' | 'needs_confirmation'
 
-export type FlowLine = { name: string; status: string; start: string }
+export type FlowLine = { name: string; status: string; start: string; subjects?: string[] }
 export type HeldTag = { tag: string; flows: string[]; people: number }
 
 export type SyncReport = {
@@ -170,7 +170,7 @@ export type SyncConfirm = { count: number; listId: string; flows: string; tagsOk
 const emptyReport = (): Omit<SyncReport, 'ran'> => ({ pushed: 0, alreadyThere: 0, skipped: 0, failed: 0, remaining: 0, tagsHeld: [], errors: [] })
 const refuse = (reason: SyncRefusal, extra: Partial<SyncReport> = {}): SyncReport => ({ ran: false, reason, ...emptyReport(), ...extra })
 
-const flowLine = (f: Flow): FlowLine => ({ name: f.name, status: f.status, start: f.startWords })
+const flowLine = (f: Flow): FlowLine => ({ name: f.name, status: f.status, start: f.startWords, subjects: f.subjects || [] })
 
 type Deps = {
   db?: any
