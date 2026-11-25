@@ -193,4 +193,12 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     for (const b of boxes) expect(b.disabled).toBe(true)
     for (const b of Array.from(host.querySelectorAll('[data-testid="mc-phone-next"] button')) as HTMLButtonElement[]) expect(b.disabled).toBe(true)
   })
+  it('the page keeps its heading and says nothing is sent (the pop-up design gets these from its frame)', async () => {
+    installFetch(); await mount()
+    expect(host.querySelector('[data-testid="mc-title"]')!.textContent).toBe('Who goes to Mailchimp')
+    expect(host.querySelector('[data-testid="mc-nothing-sent"]')!.textContent).toContain('Nothing is sent from this screen')
+    // above the big number
+    const title = host.querySelector('[data-testid="mc-title"]')!
+    expect(title.compareDocumentPosition(host.querySelector('[data-testid="mc-big-number"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })

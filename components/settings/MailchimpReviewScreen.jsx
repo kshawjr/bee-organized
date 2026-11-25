@@ -7,6 +7,8 @@
 // LOOK (2026-11-24, second pass): rebuilt to Kevin's Lovable design,
 // kshawjr/mailchimbeehub @ 2cbefaf, src/components/settings/WhoGoesToMailchimp.tsx.
 // Same order, same sections, same words where the words are true of the real
+// data — plus the page's own heading and "Nothing is sent" line, which the
+// pop-up design gets from its frame and a Settings page must keep.
 // data: a big number card, then Groups, Not changing, Same person?,
 // Exceptions (closed until asked for) and Save. Colours, type and radii are
 // the export's, through components/design/tokens.js like the rest of the
@@ -384,6 +386,12 @@ function Frame({ onClose, children }) {
       <button type="button" data-mcr-back onClick={onClose} style={{ marginBottom: '16px', display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '36px' }}>
         <ArrowLeft /><span style={{ fontSize: '14px', lineHeight: '20px' }}>Back to Mailchimp</span>
       </button>
+      {/* KEPT ON PURPOSE (Kevin, 2026-11-24): the design has no heading and no
+          reassurance because it opens in a pop-up framed by the Mailchimp logo.
+          This is a Settings page with no such frame, so the page keeps both.
+          Styled as the design's own heading + line (H and P in MailchimpModal.tsx). */}
+      <h3 data-testid="mc-title" style={{ fontSize: '24px', lineHeight: '32px', fontWeight: 300, color: T.foreground, fontFamily: FONT.heading, margin: 0 }}>Who goes to Mailchimp</h3>
+      <p data-testid="mc-nothing-sent" style={{ marginTop: '8px', marginBottom: '20px', fontFamily: FONT.body, fontSize: '14px', lineHeight: 1.625, color: T.mutedFg }}>Nothing is sent from this screen. Your ticks are saved as you make them.</p>
       {children}
     </div>
   )
