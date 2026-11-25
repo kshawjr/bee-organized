@@ -176,6 +176,12 @@ const MARKS = {
   dialpad: (p) => <LogoMark id="dialpad" letter="D" {...p} />,
 }
 
+// The same 48px tile, for the top of a connection's own screen.
+export function ConnectionMark({ id }) {
+  const Mark = MARKS[id]
+  return Mark ? <Mark /> : null
+}
+
 const CHIP_TONE = { connected: 'ok', finish: 'warn', off: 'quiet' }
 const cardBox = { display:'flex', flexDirection:'column', alignItems:'stretch', minWidth:0, padding:'20px', borderRadius:R.xxl, border:`1px solid ${T.border}`, background:T.card, fontFamily:FONT.ui, textAlign:'left' }
 

@@ -98,11 +98,12 @@ describe('the Slack card', () => {
     expect(container.querySelector('[data-slack-reconnect-words]')!.textContent).toContain('your lead posts stay in the channel they go to now.')
   })
 
-  it('Manage connection no longer says a reconnect moves the channel: it says Disconnect, then connect again', async () => {
+  // 2026-11-25: the "Manage connection" expander is gone (Lovable look). The
+  // same words sit over the quiet Disconnect / Reconnect links at the foot.
+  it('the foot of the screen no longer says a reconnect moves the channel: it says Disconnect, then connect again', async () => {
     await mount({ slackConnected: true, slackScopes: NEW_SCOPES })
-    const manage = Array.from(container.querySelectorAll('button')).find(b => /manage/i.test(b.textContent || ''))!
-    await act(async () => { manage.click() })
-    expect(text()).toContain('Moving lead posts to another channel? Disconnect, then connect again and pick it. Reconnect keeps the channel you have, unless you choose a different workspace.')
+    expect(Array.from(container.querySelectorAll('button')).find(b => /manage/i.test(b.textContent || ''))).toBeUndefined()
+    expect(container.querySelector('[data-conn-footnote]')!.textContent).toContain('Moving lead posts to another channel? Disconnect, then connect again and pick it. Reconnect keeps the channel you have, unless you choose a different workspace.')
     expect(text()).not.toContain('Posting to a different channel or workspace? Reconnect.')
   })
 

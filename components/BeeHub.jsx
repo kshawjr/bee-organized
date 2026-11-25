@@ -60,6 +60,8 @@ import * as SUI from "@/components/settings/SettingsShell"
 import * as TUI from "@/components/settings/TeamAndLeads"
 import * as LUI from "@/components/settings/LocationRows"
 import * as CUI from "@/components/settings/ConnectionsPage"
+import * as KUI from "@/components/settings/ConnectionScreen"
+import { slackChannelBroken, jobberScreenState, importStoppedPartWay, whenWords } from "@/lib/connection-health"
 import * as SCUI from "@/components/settings/CallScripts"
 import { AppRail, ClosedSection, RAIL_W, RAIL_W_COLLAPSED, RAIL_COLLAPSED_KEY } from "@/components/design/AppRail"
 import { financialsVisible } from "@/lib/financial-access"
@@ -17439,9 +17441,6 @@ export function JobberCard({ settings, updateLocation }) {
   const [busy, setBusy]           = useState(false)
   const [error, setError]         = useState(null)
   const [toast, setToast]         = useState(null)
-  // The rare admin actions (switch account / disconnect / re-sync) live behind a
-  // quiet expander when connected, so a healthy card carries no alarming buttons.
-  const [managing, setManaging]   = useState(false)
   // Live import phase, lifted from the embedded (chromeless) ClientImportCard so
   // the single status header can read "bringing in your clients now" etc.
   const [importPhase, setImportPhase] = useState('idle') // idle|running|complete|error
@@ -17451,6 +17450,25 @@ export function JobberCard({ settings, updateLocation }) {
   const accountName  = settings.location.jobberAccountName || ''
   const hasImported  = !!settings.location.jobberInitialImportCompletedAt || importPhase === 'complete'
   const importing    = importPhase === 'running'
+
+  // When Jobber last sent an update, and how the last import ended. One read
+  // of what Bee Hub already logged (GET connection-health: reads only), again
+  // when an import on this page finishes or stops. undefined = not known.
+  const [health, setHealth] = useState(undefined)
+  const importSettled = importPhase === 'complete' || importPhase === 'error'
+  useEffect(() => {
+    if (!locationId || status === 'disconnected') { setHealth(undefined); return undefined }
+    let dead = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/connection-health')
+        if (!r || !r.ok) return
+        const j = await r.json()
+        if (!dead) setHealth(j?.jobber ?? null)
+      } catch { /* not known stays not known */ }
+    })()
+    return () => { dead = true }
+  }, [locationId, status, importSettled])
 
   // OAuth entry point — same flow used by initial Connect and by Reconnect.
   function goConnect() {
@@ -17487,94 +17505,73 @@ export function JobberCard({ settings, updateLocation }) {
     }
   }
 
-  // State-driven presentation. Each state gives ONE unmistakable message: a
-  // full-width status strip co-located with a warm, literal explanation — no
-  // corner pill to hunt for, no token/expiry jargon (that detail lives in the
-  // super_admin Jobber Health view). A healthy connection is calm with no
-  // alarming buttons; only a genuinely dead one shows a prominent action.
-  const V = {
-    connected: {
-      accent:'#16a34a', softBg:'rgba(22,163,74,0.09)', softBorder:'rgba(22,163,74,0.22)',
-      stripIcon:'✓', stripLabel:'Connected & syncing',
-      headline:'Jobber is connected',
-      body:'Your clients, jobs, and invoices flow into Bee Hub automatically. There’s nothing you need to do here.',
-    },
-    reconnect_required: {
-      accent:'#b45309', softBg:'rgba(217,119,6,0.11)', softBorder:'rgba(217,119,6,0.30)',
-      stripIcon:'!', stripLabel:'Action needed',
-      headline:'Reconnect Jobber to keep syncing',
-      body:'Your Jobber connection needs to be refreshed, so new clients and jobs have paused. Reconnecting takes about 30 seconds — none of your existing information is lost.',
-    },
-    disconnected: {
-      accent:'#5a6e6a', softBg:'rgba(0,0,0,0.025)', softBorder:'rgba(0,0,0,0.09)',
-      stripIcon:'', stripLabel:'',
-      headline:'Connect Jobber',
-      body:'Link your Jobber account to bring your clients, jobs, and invoices into Bee Hub automatically.',
-    },
-  }
-  const v = V[status] || V.disconnected
-  const primaryBtn = (label, bg) => (
-    <button onClick={goConnect} disabled={busy}
-      style={{ width:'100%', padding:'13px', background:bg, border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-      ⚡ {label}
-    </button>
-  )
-
-  // Connected splits by import phase into ONE status + ONE next step. Everything
-  // "fine to an owner" (connected AND auto-refreshing AND already imported)
-  // reads the same calm way; the only healthy call-to-action is a first import.
-  const connectedHeadline =
-      importing                 ? 'Bringing in your clients'
-    : importPhase === 'parked'  ? 'Sample imported — finishing overnight'
-    :                             'Jobber is connected'
-  const connectedBody =
-      importing                ? 'Bringing in your existing clients now — this usually takes a few minutes. You can leave this page; it keeps going.'
-    : importPhase === 'parked' ? 'A starter set of your clients is in Bee Hub now. The rest import automatically overnight — nothing is lost.'
-    : importPhase === 'error'  ? 'Your connection is fine, but the last import didn’t finish. You can try again below.'
-    : hasImported              ? 'Your clients, jobs, and invoices are in Bee Hub and stay up to date automatically. There’s nothing you need to do here.'
-    :                            'Next step: bring your existing clients into Bee Hub so everything’s in one place. New clients then sync automatically.'
-  const headline = status === 'connected' ? connectedHeadline : v.headline
-  const body     = status === 'connected' ? connectedBody     : v.body
+  // ONE state for the whole screen, from what is already known: the
+  // connection (deriveJobberStatus), the import stamp, what the import engine
+  // on this page says right now, and how the last import ended
+  // (lib/connection-health.ts jobberScreenState — the rule lives there).
+  const stoppedAt = importStoppedPartWay(health?.lastJob)
+  const screen = jobberScreenState({
+    status, importPhase,
+    hasImported: !!settings.location.jobberInitialImportCompletedAt,
+    lastJob: health?.lastJob,
+  })
+  const CHIP = {
+    off:['Not connected','quiet'], reconnect:['Needs attention','warn'], stuck:['On hold','warn'],
+    importing:['Importing','own'], first:['Ready to import','own'], running:['Syncing','ok'],
+  }[screen]
+  const lastSent = health ? whenWords(health.lastInboundAt) : ''
 
   return (
-    <div style={{ borderRadius:'14px', overflow:'hidden', margin:'0 12px', border:`1px solid ${v.softBorder}`, background:'white' }}>
+    <KUI.ConnFrame data-jobber-screen={screen} service="Jobber" mark={<CUI.ConnectionMark id="jobber" />}
+      place={settings.location.name || 'Jobber'}
+      account={status === 'disconnected' ? 'No account linked yet' : (accountName ? `Account · ${accountName}` : 'Account linked')}
+      status={CHIP[0]} tone={CHIP[1]}
+      intro="Your Jobber account, and the client import that runs from it."
+      footer={status !== 'disconnected' && (
+        /* Disconnect is a quiet text link at the foot, under a rule — never a
+           button (Kevin, 2026-11-25). */
+        <KUI.ConnFooter note="Switching to a different Jobber account, or stopping sync? Either way, the clients and leads already imported stay in Bee Hub.">
+          <KUI.QuietLink data-jobber-disconnect onClick={()=>setConfirming(true)} disabled={busy}>Disconnect</KUI.QuietLink>
+          {status === 'connected' && (
+            <KUI.QuietLink data-jobber-switch onClick={goConnect} disabled={busy}>Reconnect to a different account</KUI.QuietLink>
+          )}
+        </KUI.ConnFooter>
+      )}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
 
-      {/* Full-width status strip — the state is unmissable and sits right above
-          its own explanation, not in a far corner. */}
-      {v.stripLabel && (
-        <div style={{ display:'flex', alignItems:'center', gap:'9px', padding:'10px 16px', background:v.softBg, borderBottom:`1px solid ${v.softBorder}` }}>
-          <span style={{ width:'20px', height:'20px', borderRadius:'50%', background:v.accent, color:'white', fontSize:'12px', fontWeight:800, display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>{v.stripIcon}</span>
-          <span style={{ fontSize:'12.5px', fontWeight:700, color:v.accent, letterSpacing:'0.2px' }}>{v.stripLabel}</span>
-        </div>
+      {status === 'disconnected' && (
+        <KUI.Area title="Your account" last>
+          <p style={KUI.mutedText}>Link your Jobber account to bring your clients, jobs, and invoices into Bee Hub automatically.</p>
+          <SUI.Btn variant="primary" onClick={goConnect} disabled={busy} style={{ marginTop:'16px' }}>Connect Jobber</SUI.Btn>
+        </KUI.Area>
       )}
 
-      <div style={{ padding:'16px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'9px' }}>
-          <div style={{ width:'42px', height:'42px', borderRadius:'11px', background:'rgba(255,107,53,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <span style={{ fontSize:'21px' }}>⚡</span>
-          </div>
-          <div style={{ minWidth:0 }}>
-            <p style={{ fontSize:'15.5px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>{headline}</p>
-            {status==='connected' && accountName && (
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                Linked to <span style={{ fontWeight:600, color:'#5a6e6a' }}>{accountName}</span>
-              </p>
-            )}
-          </div>
-        </div>
+      {status !== 'disconnected' && (
+        <KUI.Area title="Your clients">
+          {status === 'reconnect_required' && (
+            <>
+              <KUI.ConnNotice data-jobber-reconnect title="Jobber needs your permission again.">
+                <p style={{ margin:'8px 0 0' }}>Your clients are still here. Reconnect Jobber to resume new updates. It takes about 30 seconds — none of your existing information is lost.</p>
+              </KUI.ConnNotice>
+              <SUI.Btn variant="primary" onClick={goConnect} disabled={busy} style={{ marginTop:'16px' }}>Reconnect Jobber</SUI.Btn>
+            </>
+          )}
 
-        <p style={{ fontSize:'13px', color:'#5a6e6a', lineHeight:1.55, marginBottom: status==='connected' ? '2px' : '14px' }}>{body}</p>
+          {/* Running: what came across, and when Jobber last spoke. Each tile
+              is drawn only when its number is known — an unknown is left out,
+              never guessed. */}
+          {screen === 'running' && health && (
+            <KUI.Metrics>
+              {health?.broughtIn ? <KUI.Metric data-jobber-brought-in value={health.broughtIn.toLocaleString()} label="Clients brought in" /> : null}
+              <KUI.Metric data-jobber-last-sent value={lastSent || 'Nothing yet'} label="Jobber last sent an update" />
+            </KUI.Metrics>
+          )}
 
-        {/* Prominent action ONLY where an action is genuinely required. */}
-        {status==='reconnect_required' && primaryBtn('Reconnect Jobber', v.accent)}
-        {status==='disconnected'       && primaryBtn('Connect Jobber', '#1a2e2b')}
-
-        {/* Connected: the import next-step (CTA / live progress / retry) comes
-            from the reused import engine, rendered chromeless so it sits inside
-            this one card. It self-hides once the initial import is done. */}
-        {status==='connected' && (
-          <>
+          {/* Connected: the import next-step (first import / live progress /
+              stopped part way) comes from the reused import ENGINE, drawn
+              chromeless so it sits inside this screen. It draws nothing once
+              the first import is done. */}
+          {status === 'connected' && (
             <ClientImportCard
               chromeless
               isJobberConnected
@@ -17582,80 +17579,42 @@ export function JobberCard({ settings, updateLocation }) {
               initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
               onPhaseChange={setImportPhase}
               apiRef={importApiRef}
+              stoppedAt={stoppedAt}
             />
+          )}
 
-            {/* Healthy card carries no alarming buttons — the rare switch /
-                disconnect / re-sync controls hide behind a quiet expander. */}
-            <div style={{ marginTop: importing ? '12px' : '8px' }}>
-              <button onClick={()=>setManaging(m=>!m)}
-                style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
-                Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
-              </button>
-              {managing && (
-                <div style={{ marginTop:'6px', padding:'12px', borderRadius:'10px', background:'rgba(0,0,0,0.02)', border:'1px solid rgba(0,0,0,0.06)' }}>
-                  <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'10px' }}>
-                    Switching to a different Jobber account, or stopping sync? Either way, the clients and leads already imported stay in Bee Hub.
-                  </p>
-                  <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
-                    <button onClick={goConnect} disabled={busy}
-                      style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                      Reconnect to a different account
-                    </button>
-                    {hasImported && !importing && (
-                      <button onClick={()=>importApiRef.current?.startImport?.()} disabled={busy}
-                        style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                        Re-sync from Jobber
-                      </button>
-                    )}
-                    <button onClick={()=>setConfirming(true)} disabled={busy}
-                      style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(239,68,68,0.35)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                      Disconnect
-                    </button>
-                  </div>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.45, marginTop:'8px' }}>
-                    Re-sync only if records may have been missed during a disconnection — it never creates duplicates.
-                  </p>
-                </div>
-              )}
+          {screen === 'running' && hasImported && !importing && (
+            <div style={{ marginTop:'12px' }}>
+              <KUI.QuietLink data-jobber-resync onClick={()=>importApiRef.current?.startImport?.()} disabled={busy}>Re-sync from Jobber</KUI.QuietLink>
+              <p style={{ ...KUI.mutedText, fontSize:'13px' }}>Re-sync only if records may have been missed during a disconnection — it never creates duplicates.</p>
             </div>
-          </>
-        )}
-
-        {/* reconnect_required: keep a disconnect escape hatch, but quiet. */}
-        {status==='reconnect_required' && (
-          <button onClick={()=>setConfirming(true)} disabled={busy}
-            style={{ display:'block', margin:'12px auto 0', background:'none', border:'none', padding:'4px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', textDecoration:'underline', cursor:busy?'default':'pointer' }}>
-            Disconnect instead
-          </button>
-        )}
-
-        {error && <p style={{ fontSize:'12px', color:'#ef4444', marginTop:'10px' }}>Something went wrong: {error}</p>}
-      </div>
-
-      {confirming&&(
-        <div
-          style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
-          <div onClick={e=>e.stopPropagation()}
-            style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
-            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>Disconnect from Jobber?</p>
-            <p style={{ fontSize:'12.5px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'16px' }}>
-              This will stop syncing. Your imported leads and history will remain in Bee Hub. You can reconnect any time.
-            </p>
-            {error&&<p style={{ fontSize:'11px', color:'#ef4444', marginBottom:'10px' }}>Couldn't disconnect: {error}</p>}
-            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-              <button onClick={()=>setConfirming(false)} disabled={busy}
-                style={{ padding:'8px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#5a6e6a', cursor:busy?'default':'pointer' }}>
-                Cancel
-              </button>
-              <button onClick={doDisconnect} disabled={busy}
-                style={{ padding:'8px 14px', background:'#ef4444', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-                {busy ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+        </KUI.Area>
       )}
-    </div>
+
+      {status !== 'disconnected' && (
+        <KUI.Area title="New updates" last>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'16px' }}>
+            {['Requests', 'Quotes', 'Jobs', 'Invoices'].map(item => (
+              <SUI.Pill key={item} tone={status === 'reconnect_required' ? 'warn' : 'ok'}>{item}</SUI.Pill>
+            ))}
+          </div>
+          <p style={KUI.mutedText}>New requests, quotes, jobs and invoices come across on their own.</p>
+          {status === 'reconnect_required' && (
+            <KUI.Say data-jobber-paused tone="warn" style={{ marginTop:'8px' }}>Updates are paused until you reconnect.</KUI.Say>
+          )}
+        </KUI.Area>
+      )}
+
+      {error && <KUI.Say role="alert" small tone="danger" style={{ marginTop:'12px' }}>Something went wrong: {error}</KUI.Say>}
+
+      {confirming && (
+        <KUI.ConfirmWindow title="Disconnect from Jobber?" error={error} busy={busy} confirmLabel="Disconnect" busyLabel="Disconnecting…"
+          onCancel={()=>setConfirming(false)} onConfirm={doDisconnect}>
+          This will stop syncing. Your imported leads and history will remain in Bee Hub. You can reconnect any time.
+        </KUI.ConfirmWindow>
+      )}
+    </KUI.ConnFrame>
   )
 }
 
@@ -17677,7 +17636,7 @@ export function JobberCard({ settings, updateLocation }) {
 // exposes startImport so the unified card's "Re-sync" (in the Manage expander)
 // can trigger it. All three are additive — the default (standalone) render and
 // the import ENGINE are untouched.
-export function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt, chromeless = false, onPhaseChange, apiRef }) {
+export function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt, chromeless = false, onPhaseChange, apiRef, stoppedAt = null }) {
   const router = useRouter()
   const [importState, setImportState] = useState('idle') // idle | running | complete | error
   const [jobId, setJobId]             = useState(null)
@@ -17810,9 +17769,10 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   // data flows through Jobber webhooks from here on — re-running the bulk
   // import would create duplicates in tables that don't yet have UNIQUE
   // constraints on jobber_*_id.
-  if (initialImportCompletedAt && importState !== 'running' && importState !== 'complete') {
-    // Chromeless: the unified card shows "up to date" and hosts the quiet
-    // re-sync in its Manage expander, so render nothing here.
+  if (initialImportCompletedAt && importState !== 'running' && importState !== 'complete' && !(chromeless && importState === 'error')) {
+    // Chromeless: the Jobber screen shows what came across and hosts the
+    // quiet re-sync link, so render nothing here. (A re-sync that STOPPED is
+    // let through above, so the screen can say so and offer to carry on.)
     if (chromeless) return null
     const completedDate = (() => {
       try {
@@ -17943,42 +17903,50 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   // The unified card owns the status strip + header + plain-language message;
   // this supplies only the action/progress region for the connected states.
   if (chromeless) {
+    const total = status?.total_records || 0
+    // How far a stopped import got: this sitting's own numbers if it stopped
+    // while the page was open, else the last import's (stoppedAt).
+    const stopped = (processed > 0 && total > processed) ? { done: processed, total } : (stoppedAt || null)
+    const stoppedBox = (
+      <div data-import-stopped>
+        <KUI.ConnNotice title={stopped
+          ? `${stopped.done.toLocaleString()} of ${stopped.total.toLocaleString()} clients came across before the import stopped.`
+          : 'The import stopped before it finished.'}>
+          <p style={{ margin:'8px 0 0' }}>Your imported clients are safe. Carry on and it brings in the rest; nobody is added twice.</p>
+          {error && <p data-import-error style={{ margin:'8px 0 0', fontSize:'13px' }}>What stopped it: {error}</p>}
+        </KUI.ConnNotice>
+        <SUI.Btn variant="primary" onClick={startImport} disabled={!locationId} style={{ marginTop:'16px' }}>Carry on</SUI.Btn>
+      </div>
+    )
     if (importState === 'running') {
       return (
-        <div style={{ marginTop:'12px' }}>
-          <style>{`@keyframes beeImportIndeterminate2 { 0%{left:-30%} 100%{left:100%} } @keyframes bee-fly-u { 0%{transform:translate(0,0) rotate(-10deg)} 25%{transform:translate(34px,-7px) rotate(6deg)} 50%{transform:translate(68px,5px) rotate(-5deg)} 75%{transform:translate(32px,12px) rotate(9deg)} 100%{transform:translate(0,0) rotate(-10deg)} }`}</style>
-          <div style={{ position:'relative', height:'44px', overflow:'hidden', marginBottom:'8px' }}>
+        <div data-import-running>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', marginBottom:'12px' }}>
+            <p style={KUI.strongText}>Bringing in your clients</p>
+            <KUI.Say role="status" tone="ink" style={{ fontVariantNumeric:'tabular-nums', textAlign:'right' }}>
+              {progressPct == null ? humanizeImportPhase(rawPhase) : `${processed.toLocaleString()} of ${total.toLocaleString()}`}
+            </KUI.Say>
+          </div>
+          {/* The import's own flying bees — Kevin approved these separately;
+              they stay (lib/beta-bee-loader.test.tsx). */}
+          <style>{`@keyframes bee-fly-u { 0%{transform:translate(0,0) rotate(-10deg)} 25%{transform:translate(34px,-7px) rotate(6deg)} 50%{transform:translate(68px,5px) rotate(-5deg)} 75%{transform:translate(32px,12px) rotate(9deg)} 100%{transform:translate(0,0) rotate(-10deg)} }`}</style>
+          <div aria-hidden="true" style={{ position:'relative', height:'44px', overflow:'hidden', marginBottom:'8px' }}>
             <span style={{ position:'absolute', top:'12px', left:'12%', fontSize:'22px', animation:'bee-fly-u 3.2s ease-in-out infinite' }}>🐝</span>
             <span style={{ position:'absolute', top:'16px', left:'46%', fontSize:'22px', animation:'bee-fly-u 4.1s ease-in-out infinite' }}>🐝</span>
             <span style={{ position:'absolute', top:'10px', left:'78%', fontSize:'22px', animation:'bee-fly-u 3.7s ease-in-out infinite' }}>🐝</span>
           </div>
-          {progressPct == null ? (
-            <div style={{ height:'6px', background:'rgba(168,201,196,0.25)', borderRadius:'3px', overflow:'hidden', position:'relative' }}>
-              <div style={{ position:'absolute', top:0, bottom:0, width:'30%', background:'linear-gradient(90deg,transparent,#a8c9c4,transparent)', borderRadius:'3px', animation:'beeImportIndeterminate2 1.4s ease-in-out infinite' }} />
-            </div>
-          ) : (
-            <div>
-              <div style={{ height:'6px', background:'rgba(168,201,196,0.25)', borderRadius:'3px', overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${progressPct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'3px', transition:'width 0.2s ease' }} />
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', textAlign:'right' }}>
-                {preCount ? humanizeImportPhase(rawPhase) : `${processed} of ${status?.total_records ?? '?'} · ${progressPct}%`}
-              </p>
-            </div>
-          )}
-          <button onClick={cancelImport}
-            style={{ width:'100%', padding:'7px', marginTop:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'11.5px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer' }}>
-            Cancel import
-          </button>
+          <KUI.Progress value={progressPct == null ? null : processed} max={total} label="Clients brought in" />
+          <p style={{ ...KUI.mutedText, marginTop:'12px' }}>This usually takes a few minutes. You can leave this page; it keeps going.{etaText ? ` ${etaText}` : ''}</p>
+          <KUI.QuietLink data-import-cancel onClick={cancelImport}>Cancel import</KUI.QuietLink>
         </div>
       )
     }
     if (importState === 'parked') {
-      // Sample-now/bulk-later gap state — informational only; the unified
-      // JobberCard header carries the headline, this the detail.
+      // Sample-now/bulk-later gap state — informational only.
       return (
-        <div style={{ marginTop:'10px', padding:'10px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px' }}>
-          <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5 }}>
+        <div data-import-parked>
+          <p style={KUI.strongText}>Sample imported — finishing overnight</p>
+          <p style={{ ...KUI.mutedText, marginTop:'4px' }}>
             A starter set of {(status?.processed_records || 0).toLocaleString()} clients is in Bee Hub now.
             The remaining {Math.max(0, (status?.total_records || 0) - (status?.processed_records || 0)).toLocaleString()} import
             automatically overnight — nothing is lost.
@@ -17986,36 +17954,22 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
         </div>
       )
     }
-    if (importState === 'error') {
-      return (
-        <div style={{ marginTop:'12px' }}>
-          <p style={{ fontSize:'12.5px', color:'#ef4444', marginBottom:'8px' }}>{error || 'Something interrupted the import.'} You can try again.</p>
-          <button onClick={startImport} disabled={!locationId}
-            style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
-            Try again
-          </button>
-        </div>
-      )
-    }
+    if (importState === 'error') return stoppedBox
     if (importState === 'complete') {
       return (
-        <div style={{ marginTop:'10px' }}>
-          <p style={{ fontSize:'12.5px', color:'#16a34a', fontWeight:600 }}>
-            ✓ {summary?.total_clients ?? status?.processed_records ?? 0} clients brought in. Updating your view…
-          </p>
-        </div>
+        <KUI.Say role="status" data-import-complete strong tone="ok" style={{ marginTop:'12px' }}>
+          ✓ {summary?.total_clients ?? status?.processed_records ?? 0} clients brought in. Updating your view…
+        </KUI.Say>
       )
     }
+    // idle, and the last import stopped part way → carry on from there.
+    if (stoppedAt) return stoppedBox
     // idle & not-yet-imported → the single primary "bring in clients" action.
     return (
-      <div style={{ marginTop:'12px' }}>
-        <button onClick={startImport} disabled={!locationId}
-          style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
-          ⚡ Bring in my clients
-        </button>
-        <p style={{ fontSize:'11.5px', color:'#8a9e9a', textAlign:'center', marginTop:'8px', lineHeight:1.45 }}>
-          {importEstimateLine(clientCount)}
-        </p>
+      <div data-import-first>
+        <p style={{ ...KUI.mutedText, marginBottom:'16px' }}>Bring your existing Jobber clients into Bee Hub. New clients then sync automatically.</p>
+        <SUI.Btn variant="primary" onClick={startImport} disabled={!locationId}>Bring in my clients</SUI.Btn>
+        <p style={{ ...KUI.mutedText, marginTop:'12px' }}>{importEstimateLine(clientCount)}</p>
       </div>
     )
   }
@@ -21811,7 +21765,6 @@ export function SlackCard({ settings, updateLocation, readOnly = false }) {
   const [busy, setBusy]       = useState(false)
   const [error, setError]     = useState(null)
   const [toast, setToast]     = useState(null)
-  const [managing, setManaging] = useState(false)
   // Test-message button — result is PERSISTENT text (not a toast): the failure
   // copy tells the owner what to fix (invite the bot / reconnect) and must
   // stay readable while they go do it.
@@ -21826,6 +21779,25 @@ export function SlackCard({ settings, updateLocation, readOnly = false }) {
     slack_connected: connected,
     slack_scopes: settings.location.slackScopes || null,
   })
+
+  // Did the last lead alert arrive? One read of what Bee Hub already logged
+  // (GET connection-health: reads only). undefined = not known, which is
+  // never drawn as broken.
+  const [lastPost, setLastPost] = useState(undefined)
+  useEffect(() => {
+    setLastPost(undefined)
+    if (!locationId || !connected) return undefined
+    let dead = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/connection-health')
+        if (!r || !r.ok) return
+        const j = await r.json()
+        if (!dead) setLastPost(j?.slack?.lastPost ?? null)
+      } catch { /* not known stays not known */ }
+    })()
+    return () => { dead = true }
+  }, [locationId, connected])
 
   // Team invite link — a shareable Slack invite URL the owner pastes + saves,
   // then copies to hand to teammates. LOCATION invite only (no corporate link).
@@ -21936,183 +21908,131 @@ export function SlackCard({ settings, updateLocation, readOnly = false }) {
     }
   }
 
-  const softBorder = connected ? 'rgba(22,163,74,0.22)' : 'rgba(26,46,43,0.10)'
   const channelLabel = channelName
     ? (channelName.startsWith('#') ? channelName : `#${channelName}`)
     : ''
+  // Which of the three screens this is. "Channel broken" is read from the
+  // last lead alert Bee Hub tried to post (lib/connection-health.ts); a test
+  // message that arrives in this sitting clears it, since the test is the
+  // proof the owner was sent to get.
+  const channelBroken = connected && slackChannelBroken(lastPost) && !(testResult && testResult.ok)
+  const screen = !connected ? 'off' : channelBroken ? 'broken' : 'connected'
+  const CHIP = { off:['Not connected','quiet'], connected:['Connected','ok'], broken:['Channel unavailable','warn'] }[screen]
+  const lastPostWhen = lastPost ? whenWords(lastPost.at) : ''
 
   return (
-    <div style={{ position:'relative', borderRadius:'16px', overflow:'hidden', border:`0.5px solid ${softBorder}`, background:'white', boxShadow:'0 1px 6px rgba(26,46,43,0.06)' }}>
-      {/* Soft, pale Slack-purple accent bleeding off the top-right corner —
-          the card's one warm flourish. Non-interactive, clipped by overflow. */}
-      <span aria-hidden style={{ position:'absolute', top:'-42px', right:'-42px', width:'120px', height:'120px', borderRadius:'50%', background:'rgba(74,21,75,0.06)', pointerEvents:'none' }} />
-
+    <KUI.ConnFrame data-slack-screen={screen} service="Slack" mark={<CUI.ConnectionMark id="slack" />}
+      place={settings.location.name || 'Slack'}
+      account={connected
+        /* Wraps. A long workspace name used to be cut with "…", which hid the
+           one thing this line is for. */
+        ? <span data-slack-connected-line style={{ minWidth:0, overflowWrap:'anywhere' }}>{teamName ? `Workspace · ${teamName}` : 'Workspace linked'}</span>
+        : 'No workspace linked yet'}
+      status={CHIP[0]} tone={CHIP[1]}
+      intro="New leads also post to your Slack channel, on top of the new lead emails you set on Team."
+      footer={connected && (
+        /* Disconnect is a quiet text link at the foot, under a rule — never a
+           button (Kevin, 2026-11-25). Reconnect sits beside it. */
+        <KUI.ConnFooter note="Moving lead posts to another channel? Disconnect, then connect again and pick it. Reconnect keeps the channel you have, unless you choose a different workspace. Stopping Slack posts? Disconnect — your email notifications are unaffected.">
+          <KUI.QuietLink data-slack-disconnect onClick={()=>setConfirming(true)} disabled={busy}>Disconnect</KUI.QuietLink>
+          <KUI.QuietLink data-slack-reconnect onClick={goConnect} disabled={busy}>Reconnect</KUI.QuietLink>
+        </KUI.ConnFooter>
+      )}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
 
-      <div style={{ position:'relative', padding:'15px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'11px', marginBottom:'9px' }}>
-          {/* Circular Slack-purple avatar with '#'. */}
-          <div style={{ width:'40px', height:'40px', borderRadius:'50%', background:'#4a154b', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 6px rgba(74,21,75,0.28)' }}>
-            <span aria-hidden style={{ color:'white', fontSize:'20px', fontWeight:800, lineHeight:1 }}>#</span>
-          </div>
-          <div style={{ minWidth:0 }}>
-            <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>
-              {connected ? 'Slack' : 'Connect Slack'}
-            </p>
-            {connected ? (
-              <p style={{ display:'flex', alignItems:'flex-start', gap:'6px', fontSize:'11px', color:'#5a6e6a', marginTop:'3px' }}>
-                {/* Small green status dot. */}
-                <span aria-hidden style={{ width:'7px', height:'7px', borderRadius:'50%', background:'#16a34a', flexShrink:0, marginTop:'4px', boxShadow:'0 0 0 2px rgba(22,163,74,0.18)' }} />
-                {/* Wraps. A long channel or workspace name used to be cut with
-                    "…", which hid the one thing this line is for. */}
-                <span data-slack-connected-line style={{ minWidth:0, overflowWrap:'anywhere' }}>
-                  Connected{channelLabel ? ` · ${channelLabel}` : ''}{teamName ? ` · ${teamName}` : ''}
-                </span>
-              </p>
-            ) : (
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Post new leads to your team’s channel</p>
-            )}
-          </div>
-        </div>
+      {!connected && (
+        <KUI.Area title="Your workspace" last>
+          <p style={KUI.mutedText}>Post a message to your team’s Slack channel every time a new lead comes in — on top of the email.</p>
+          <SUI.Btn variant="primary" onClick={goConnect} disabled={busy} style={{ marginTop:'16px' }}>Add to Slack</SUI.Btn>
+        </KUI.Area>
+      )}
 
-        <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom: connected ? '2px' : '12px' }}>
-          {connected
-            ? 'New leads are posted to your Slack channel in addition to the email notification.'
-            : 'Post a message to your team’s Slack channel every time a new lead comes in — on top of the email.'}
-        </p>
-
-        {needsChannelsReconnect && !readOnly && (
-          <div data-slack-channels-reconnect style={{ marginTop:'10px', padding:'10px 11px', borderRadius:'10px', background:'rgba(74,21,75,0.04)', border:'0.5px solid rgba(74,21,75,0.18)' }}>
-            {/* TRUE because of lib/slack-lead-channel.ts: a reconnect to the
-                same workspace keeps the lead channel whatever is picked. The
-                owner is told the pick is coming so it does not look like a
-                question whose answer matters. */}
-            <p data-slack-reconnect-words style={{ fontSize:'12px', color:'#4a154b', lineHeight:1.5, marginBottom:'8px' }}>
-              Reconnect Slack to turn on channels for your jobs. Slack will ask you to pick a channel. It doesn’t matter which one: your lead posts stay in {channelLabel || 'the channel they go to now'}.
-            </p>
-            <button onClick={goConnect} disabled={busy}
-              style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-              Reconnect Slack
-            </button>
-          </div>
-        )}
-
-        {/* Automatic job channels (slice 3): the switch lives here, where the
-            reconnect box lives. Off by default; greyed with a reason until
-            the location has reconnected. It renders nothing where Slack is
-            not connected or the migration has not run. */}
-        {connected && !readOnly && <SlackAutoChannels locationId={locationId} />}
-
-        {!connected && (
-          <button onClick={goConnect} disabled={busy}
-            style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-            Add to Slack
-          </button>
-        )}
-
-        {/* Send test message — proves the whole path (token → channel → bot)
-            with one click. For a broken channel (e.g. a private channel the
-            bot was never invited to) the inline result tells the owner what
-            to do, instead of them finding out from a missed lead. */}
-        {connected && (
-          <div style={{ marginTop:'10px' }}>
-            <button onClick={sendTest} disabled={testing}
-              style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'10px', background:'white', border:'0.5px solid rgba(74,21,75,0.30)', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'#4a154b', cursor:testing?'default':'pointer', opacity:testing?0.6:1 }}>
-              {testing ? 'Sending test…' : 'Send test message'}
-            </button>
-            {testResult && (
-              <p style={{ fontSize:'11px', lineHeight:1.5, marginTop:'7px', color: testResult.ok ? '#16a34a' : '#ef4444' }}>
-                {testResult.msg}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Team invite link — only meaningful once Slack is connected. LOCATION
-            invite only; there is intentionally no corporate/community link. */}
-        {connected && (
-          <div style={{ marginTop:'12px', paddingTop:'12px', borderTop:`0.5px solid ${softBorder}` }}>
-            <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', letterSpacing:'0.2px', marginBottom:'6px' }}>Team invite link</p>
-            <div style={{ display:'flex', gap:'7px', alignItems:'stretch' }}>
-              <input
-                value={inviteDraft}
-                onChange={e=>setInviteDraft(e.target.value)}
-                readOnly={readOnly}
-                placeholder="Paste your Slack invite link"
-                style={{ flex:1, minWidth:0, padding:'9px 10px', borderRadius:'10px', border:'0.5px solid rgba(26,46,43,0.15)', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background: readOnly?'rgba(0,0,0,0.03)':'white', outline:'none' }}
-              />
-              {!readOnly && (
-                <button onClick={saveInvite} disabled={savingInvite || !inviteDirty}
-                  style={{ padding:'9px 14px', background:'white', border:'0.5px solid rgba(74,21,75,0.30)', borderRadius:'10px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'#4a154b', cursor:(savingInvite||!inviteDirty)?'default':'pointer', opacity:(savingInvite||!inviteDirty)?0.5:1, flexShrink:0 }}>
-                  {savingInvite ? 'Saving…' : 'Save'}
-                </button>
+      {connected && (
+        <KUI.Area title="Lead alerts">
+          {channelBroken ? (
+            /* TRUE TO WHAT HAPPENED, not to the design's sample words ("#leads
+               no longer exists"): every real case of this is a private
+               channel the Bee Hub app was never added to. And the design's
+               Reconnect button is not offered as the fix, because a reconnect
+               keeps the same channel (lib/slack-lead-channel.ts). */
+            <KUI.ConnNotice data-slack-broken title={`Bee Hub can’t post to ${channelLabel || 'your channel'}.`}>
+              <p style={{ margin:'8px 0 0' }}>The last lead alert{lastPostWhen ? ` (${lastPostWhen})` : ''} didn’t arrive: Slack couldn’t find the channel. New leads still reach you by email.</p>
+              <p style={{ margin:'8px 0 0' }}>This usually means it’s a private channel. In Slack, open the channel, type /invite and add the Bee Hub app, then send a test message. Or Disconnect, then Add to Slack again and pick a public channel.</p>
+            </KUI.ConnNotice>
+          ) : (
+            <div>
+              <p data-slack-channel style={{ ...KUI.strongText, overflowWrap:'anywhere' }}>{channelLabel || 'Your Slack channel'}</p>
+              <p style={{ ...KUI.mutedText, marginTop:'4px' }}>New leads are posted to your Slack channel in addition to the email notification.</p>
+              {lastPost && lastPost.status === 'accepted' && lastPostWhen && (
+                <p data-slack-last-post style={{ ...KUI.mutedText, fontSize:'13px', marginTop:'4px' }}>Last lead alert posted {lastPostWhen}.</p>
               )}
             </div>
-            {/* The card's one confident splash of colour — filled Slack-purple. */}
-            <button onClick={copyInvite} disabled={!hasSavedInvite}
-              style={{ marginTop:'8px', width:'100%', maxWidth:CONTROL_W.action, padding:'10px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:hasSavedInvite?'pointer':'default', opacity:hasSavedInvite?1:0.4, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
-              {copied ? 'Copied ✓' : 'Copy team invite'}
-            </button>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'7px' }}>
-              Copy it and send to anyone you’d like on your team’s Slack.
-            </p>
-            {inviteError && <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'7px' }}>Couldn’t save: {inviteError}</p>}
-          </div>
-        )}
+          )}
+          {/* Send test message — proves the whole path (token → channel → bot)
+              with one click. For a broken channel the result tells the owner
+              what to do, instead of them finding out from a missed lead. */}
+          <SUI.Btn variant={channelBroken ? 'primary' : 'outline'} onClick={sendTest} disabled={testing} style={{ marginTop:'16px' }}>
+            {testing ? 'Sending test…' : 'Send test message'}
+          </SUI.Btn>
+          {testResult && (
+            <KUI.Say role="status" data-slack-test-result small tone={testResult.ok ? 'ok' : 'danger'} style={{ marginTop:'8px' }}>
+              {testResult.msg}
+            </KUI.Say>
+          )}
+        </KUI.Area>
+      )}
 
-        {connected && (
-          <div style={{ marginTop:'10px' }}>
-            <button onClick={()=>setManaging(m=>!m)}
-              style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
-              Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
-            </button>
-            {managing && (
-              <div style={{ marginTop:'6px', padding:'11px', borderRadius:'8px', background:'rgba(0,0,0,0.02)', border:'0.5px solid rgba(26,46,43,0.08)' }}>
-                <p style={{ fontSize:'11px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'9px' }}>
-                  Moving lead posts to another channel? Disconnect, then connect again and pick it. Reconnect keeps the channel you have, unless you choose a different workspace. Stopping Slack posts? Disconnect — your email notifications are unaffected.
+      {/* Job channels. A location whose install predates the channels
+          permission gets the reconnect line; the switch (SlackAutoChannels)
+          draws nothing until it has an answer. `wrap` is handed the switch,
+          or null, so the heading is drawn only when one of the two has
+          something to say. */}
+      {connected && !readOnly && (
+        <SlackAutoChannels locationId={locationId} bare wrap={drawn => (!needsChannelsReconnect && !drawn) ? null : (
+          <KUI.Area title="Job channels">
+            {needsChannelsReconnect && (
+              <div data-slack-channels-reconnect>
+                {/* TRUE because of lib/slack-lead-channel.ts: a reconnect to the
+                    same workspace keeps the lead channel whatever is picked. The
+                    owner is told the pick is coming so it does not look like a
+                    question whose answer matters. */}
+                <p data-slack-reconnect-words style={KUI.mutedText}>
+                  Reconnect Slack to turn on channels for your jobs. Slack will ask you to pick a channel. It doesn’t matter which one: your lead posts stay in {channelLabel || 'the channel they go to now'}.
                 </p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
-                  <button onClick={goConnect} disabled={busy}
-                    style={{ padding:'8px 12px', background:'white', border:'0.5px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                    Reconnect
-                  </button>
-                  <button onClick={()=>setConfirming(true)} disabled={busy}
-                    style={{ padding:'8px 12px', background:'white', border:'0.5px solid rgba(239,68,68,0.35)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                    Disconnect
-                  </button>
-                </div>
+                <SUI.Btn variant="primary" onClick={goConnect} disabled={busy} style={{ marginTop:'16px' }}>Reconnect Slack</SUI.Btn>
               </div>
             )}
-          </div>
-        )}
+            {drawn && <div style={{ marginTop: needsChannelsReconnect ? '20px' : 0 }}>{drawn}</div>}
+          </KUI.Area>
+        )} />
+      )}
 
-        {error && <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'9px' }}>Something went wrong: {error}</p>}
-      </div>
+      {/* Team invite link — only meaningful once Slack is connected. LOCATION
+          invite only; there is intentionally no corporate/community link. */}
+      {connected && (
+        <KUI.Area title="Invite your team" last>
+          <SUI.Field label="Team invite link" type="url" value={inviteDraft} onChange={e=>setInviteDraft(e.target.value)} readOnly={readOnly}
+            placeholder="Paste your Slack invite link" />
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'12px', marginTop:'16px' }}>
+            {!readOnly && (
+              <SUI.Btn variant="primary" onClick={saveInvite} disabled={savingInvite || !inviteDirty}>{savingInvite ? 'Saving…' : 'Save'}</SUI.Btn>
+            )}
+            <SUI.Btn onClick={copyInvite} disabled={!hasSavedInvite}>{copied ? 'Copied ✓' : 'Copy team invite'}</SUI.Btn>
+          </div>
+          <p style={{ ...KUI.mutedText, fontSize:'13px', marginTop:'12px' }}>Copy it and send to anyone you’d like on your team’s Slack.</p>
+          {inviteError && <KUI.Say role="alert" small tone="danger" style={{ marginTop:'8px' }}>Couldn’t save: {inviteError}</KUI.Say>}
+        </KUI.Area>
+      )}
+
+      {error && <KUI.Say role="alert" small tone="danger" style={{ marginTop:'12px' }}>Something went wrong: {error}</KUI.Say>}
 
       {confirming && (
-        <div
-          style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
-          <div onClick={e=>e.stopPropagation()}
-            style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
-            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>Disconnect from Slack?</p>
-            <p style={{ fontSize:'12.5px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'16px' }}>
-              New leads will stop posting to Slack. Your email notifications are unaffected. You can reconnect any time.
-            </p>
-            {error && <p style={{ fontSize:'11px', color:'#ef4444', marginBottom:'10px' }}>Couldn't disconnect: {error}</p>}
-            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-              <button onClick={()=>setConfirming(false)} disabled={busy}
-                style={{ padding:'8px 14px', background:'white', border:'0.5px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#5a6e6a', cursor:busy?'default':'pointer' }}>
-                Cancel
-              </button>
-              <button onClick={doDisconnect} disabled={busy}
-                style={{ padding:'8px 14px', background:'#ef4444', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
-                {busy ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <KUI.ConfirmWindow title="Disconnect from Slack?" error={error} busy={busy} confirmLabel="Disconnect" busyLabel="Disconnecting…"
+          onCancel={()=>setConfirming(false)} onConfirm={doDisconnect}>
+          New leads will stop posting to Slack. Your email notifications are unaffected. You can reconnect any time.
+        </KUI.ConfirmWindow>
       )}
-    </div>
+    </KUI.ConnFrame>
   )
 }
 
@@ -24461,45 +24381,24 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         )}
 
         {activeSection==='slack'&&(
-          <div style={{ paddingBottom:'12px' }}>
-
-            <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Slack</h1>
-              {/* Slack notifications — additive to the new lead emails. New
-                  leads ALSO post to the location's Slack channel once the app
-                  is installed. */}
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>New leads also post to your Slack channel, on top of the new lead emails you set on Team.</p>
-            </div>
-
-            {/* Half-width: sits at ~half on the wider settings column (auto-fill
-                keeps the empty companion track) and reflows to full-width on
-                narrow screens. */}
-            <div style={{ margin:'14px 12px 0', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'10px' }}>
-              <SlackCard settings={settings} updateLocation={updateLocation} />
-            </div>
-
-          </div>
+          <SUI.SettingsPage>
+            {/* Slack notifications — additive to the new lead emails. The
+                screen itself (name, state, areas, the quiet Disconnect link)
+                is SlackCard, to the Lovable design (2026-11-25). */}
+            <SlackCard settings={settings} updateLocation={updateLocation} />
+          </SUI.SettingsPage>
         )}
 
         {/* ── Connections › Jobber (issue 246 step 1) ─────────────────────
             Moved out of Location, where it was the only thing under an
             "Integrations" header. */}
         {activeSection==='jobber'&&(
-          <div style={{ paddingBottom:'12px' }}>
-
-            <div style={{ padding:'18px 16px 2px' }}>
-              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Jobber</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Your Jobber account, and the client import that runs from it.</p>
-            </div>
-
-            {/* One unified Jobber card: connection status + import next-step in a
-                single plain-language card, driven by deriveJobberStatus +
-                jobber_initial_import_completed_at + the live import phase. */}
-            <div style={{ marginTop:'14px' }}>
-              <JobberCard settings={settings} updateLocation={updateLocation} />
-            </div>
-
-          </div>
+          <SUI.SettingsPage>
+            {/* One Jobber screen: connection + import in a single state,
+                driven by deriveJobberStatus + jobber_initial_import_completed_at
+                + the live import phase (lib/connection-health.ts). */}
+            <JobberCard settings={settings} updateLocation={updateLocation} />
+          </SUI.SettingsPage>
         )}
 
         {/* ── Connections › Mailchimp (issue 246 step 2) — a real connect */}

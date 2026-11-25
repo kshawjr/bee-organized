@@ -12,6 +12,8 @@
 // [what is there now, what main had].
 // ─────────────────────────────────────────────────────────────
 
+import { withoutConnectionScreens } from '../connection-screens-hub-footprint'
+
 export const MAILCHIMP_REVIEW_HUB_PIECES: [string, string][] = [
   ['import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"\n', ''],
   ["  // FL-75 slice 5: the \"Who goes to Mailchimp\" review screen, opened from the\n  // ready state. It sends nothing; Sync now below is unchanged.\n  const [reviewing, setReviewing] = useState(false)\n", ''],
@@ -21,7 +23,9 @@ export const MAILCHIMP_REVIEW_HUB_PIECES: [string, string][] = [
 
 /** BeeHub.jsx with Mailchimp slice 5 taken back out. Throws if a piece is missing or doubled. */
 export function withoutMailchimpReviewSlice5(src: string): string {
-  let s = src
+  // 2026-11-25: the Slack and Jobber connection screens came after this
+  // slice, so they are taken back out first (connection-screens-hub-footprint.ts).
+  let s = withoutConnectionScreens(src)
   for (const [piece, back] of MAILCHIMP_REVIEW_HUB_PIECES) {
     const n = s.split(piece).length - 1
     if (n !== 1) throw new Error(`BeeHub.jsx: a Mailchimp slice 5 piece ${JSON.stringify(piece.slice(0, 60))} appears ${n} times, expected 1`)

@@ -159,13 +159,38 @@ describe('the switch for automatic job channels', () => {
     expect(host.innerHTML).toBe('')
   })
 
-  it('it lives in the Slack card, under the reconnect box, for a connected location', () => {
+  // 2026-11-25 (Lovable look): the switch has its own "Job channels" area,
+  // after "Lead alerts" (where Send test message is) and with the reconnect
+  // box above it in the SAME area. Still one mount, still connected + not
+  // read-only, and still nothing drawn until there is an answer.
+  it('it lives in the Slack card, under the reconnect box in "Job channels", for a connected location', () => {
     const src = readFileSync('components/BeeHub.jsx', 'utf8')
     const card = src.slice(src.indexOf('export function SlackCard('))
-    const mountAt = card.indexOf('{connected && !readOnly && <SlackAutoChannels locationId={locationId} />}')
+    const mountAt = card.indexOf('{connected && !readOnly && (\n        <SlackAutoChannels locationId={locationId} bare wrap={')
     expect(mountAt).toBeGreaterThan(0)
-    expect(mountAt).toBeGreaterThan(card.indexOf('data-slack-channels-reconnect'))
-    expect(mountAt).toBeLessThan(card.indexOf('Send test message'))
+    const area = card.slice(mountAt, card.indexOf('Invite your team'))
+    expect(area).toContain('<KUI.Area title="Job channels">')
+    expect(area.indexOf('data-slack-channels-reconnect')).toBeGreaterThan(0)
+    expect(area.indexOf('{drawn && ')).toBeGreaterThan(area.indexOf('data-slack-channels-reconnect'))
+    expect(mountAt).toBeGreaterThan(card.indexOf('Send test message'))
     expect(src.split('<SlackAutoChannels').length - 1).toBe(1)
+  })
+
+  it('a caller\'s frame is handed the switch, or null when there is nothing to draw', async () => {
+    const seen: any[] = []
+    const mountWith = async (props: any) => {
+      if (root) act(() => root.unmount()); host?.remove()
+      host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+      await act(async () => { root.render(<SlackAutoChannels locationId={LOC} {...props} />) })
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    }
+    answer = { ...OFF, setUp: false }
+    await mountWith({ wrap: (d: any) => { seen.push(d); return d ? <section data-frame>{d}</section> : null } })
+    expect(seen[seen.length - 1]).toBeNull()
+    expect(host.innerHTML).toBe('')
+    answer = { ...OFF }
+    await mountWith({ bare: true, wrap: (d: any) => { seen.push(d); return d ? <section data-frame>{d}</section> : null } })
+    expect(host.querySelector('[data-frame] [data-slack-auto]')).toBeTruthy()
+    expect((host.querySelector('[data-slack-auto]') as HTMLElement).style.borderTop).toBe('')
   })
 })
