@@ -309,28 +309,40 @@ describe('the two tabs', () => {
   // never from what a screen loaded (a Supabase read stops at 1,000 rows).
   const tabsFetch = (countsAnswer: any = { ok: true, status: 200, json: async () => ({ network: 100, nurturing: 5037 }) }) => vi.fn(async (url: string, init?: any) => {
     if (String(url).startsWith('/api/network/counts')) { calls.push({ url, method: 'GET' }); return countsAnswer }
-    if (String(url).startsWith('/api/network/list')) return { ok: true, status: 200, json: async () => ({ contacts: [], tags: [], followUps: {}, total: 0, truncated: false }) }
-    if (String(url).startsWith('/api/network/summary')) return { ok: true, status: 200, json: async () => ({ referrers: [], totals: {} }) }
-    if (String(url).startsWith('/api/lookups')) return { ok: true, status: 200, json: async () => ({ lookups: [] }) }
+    if (String(url).startsWith('/api/network/list')) { calls.push({ url, method: 'GET' }); return { ok: true, status: 200, json: async () => ({ contacts: [], tags: [], followUps: {}, total: 0, truncated: false }) } }
+    if (String(url).startsWith('/api/network/summary')) { calls.push({ url, method: 'GET' }); return { ok: true, status: 200, json: async () => ({ referrers: [], totals: {} }) } }
+    if (String(url).startsWith('/api/lookups')) { calls.push({ url, method: 'GET' }); return { ok: true, status: 200, json: async () => ({ lookups: [] }) } }
     return server(url, init)
   })
-  const tabs = (fetchImpl: any) => mount(React.createElement(NetworkTabs as any, { locationId: LOC, locationName: 'Philadelphia Suburbs', fetchImpl }))
-  const shownRows = () => !($('[data-network-list] .nw-wrap') as HTMLElement | null)?.hidden
+  const tabs = (fetchImpl: any, over: any = {}) => mount(React.createElement(NetworkTabs as any, { locationId: LOC, locationName: 'Philadelphia Suburbs', fetchImpl, ...over }))
+  const networkReads = () => calls.filter((c) => /^\/api\/(network\/list|network\/summary|lookups)/.test(c.url))
 
-  it('open on Network, and switch to Nurturing', async () => {
+  it('open on Network, and switch to Nurturing: the Network list goes away', async () => {
     await tabs(tabsFetch())
     expect($('[data-tab="network"]')!.getAttribute('aria-selected')).toBe('true')
-    expect(shownRows()).toBe(true)
+    expect($('[data-network-list]')).toBeTruthy()
     expect($('[data-nurture-ui]')).toBeNull()
     await press($('[data-tab="nurture"]')!)
-    // The list stays mounted for its Add button, but its rows are not shown.
-    expect(shownRows()).toBe(false)
+    expect($('[data-network-list]')).toBeNull()
     expect($('[data-nurture-ui]')).toBeTruthy()
     expect($$('[data-row]')).toHaveLength(25)
   })
 
-  it('each tab shows its count from the server, written with commas (Kevin, 2026-11-25)', async () => {
+  it('the Network list is not loaded while the Nurturing tab is showing (Kevin, 2026-11-25)', async () => {
+    await tabs(tabsFetch(), { startOnNurturing: true })
+    expect($('[data-nurture-ui]')).toBeTruthy()
+    expect($('[data-network-list]')).toBeNull()
+    expect(networkReads()).toEqual([])
+    // Going to Network loads it then, and not before.
+    await press($('[data-tab="network"]')!)
+    expect(networkReads().map((c) => c.url.split('?')[0])).toContain('/api/network/list')
+  })
+
+  it('each tab shows its count from the server, written with commas, on either tab', async () => {
     await tabs(tabsFetch())
+    expect($('[data-tab="network"]')!.textContent).toBe('Network & Partners(100)')
+    expect($('[data-tab="nurture"]')!.textContent).toBe('Nurturing Clients(5,037)')
+    await press($('[data-tab="nurture"]')!)
     expect($('[data-tab="network"]')!.textContent).toBe('Network & Partners(100)')
     expect($('[data-tab="nurture"]')!.textContent).toBe('Nurturing Clients(5,037)')
     expect(calls.filter((c) => c.url.startsWith('/api/network/counts')).map((c) => c.url)).toEqual([`/api/network/counts?location_id=${LOC}`])
@@ -343,31 +355,29 @@ describe('the two tabs', () => {
     expect($('[data-tab-count]')).toBeNull()
   })
 
-  it('Add and the three dots sit at the top right of the tab bar; Add is on both tabs, the three dots only on Network', async () => {
+  it('Network: Add and the three dots sit at the top right of the tab bar', async () => {
     await tabs(tabsFetch())
     const spot = $('[data-network-tab-actions]')!
     expect(spot.closest('.nt-bar')).toBeTruthy()
     expect($$('[data-network-tab-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts', 'more'])
     expect($('[data-actions]')).toBeNull() // not under the title any more
-    await press($('[data-tab="nurture"]')!)
-    expect($$('[data-network-tab-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts'])
     expect(($('[data-act="add-contacts"]') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('Nurturing: no Add and no three dots (Kevin, 2026-11-25: nothing to add a person to)', async () => {
+    await tabs(tabsFetch())
+    await press($('[data-tab="nurture"]')!)
+    expect($('[data-network-tab-actions]')).toBeNull()
+    expect($('[data-act="add-contacts"]')).toBeNull()
+    expect($('[data-act="more"]')).toBeNull()
+    // and back on Network they are there again
+    await press($('[data-tab="network"]')!)
+    expect($$('[data-network-tab-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts', 'more'])
   })
 
   it('the three dots hold Export, and only Export', async () => {
     await tabs(tabsFetch())
     await press($('[data-act="more"]')!)
     expect($$('[data-network-tab-actions] [role="menuitem"]').map((b) => b.getAttribute('data-act'))).toEqual(['export'])
-  })
-
-  it('Add on the Nurturing tab opens the add box where it can be seen (the bug: no Add there at all)', async () => {
-    await tabs(tabsFetch())
-    await press($('[data-tab="nurture"]')!)
-    await press($('[data-act="add-contacts"]')!)
-    await press($('[data-act="add"]')!)
-    const box = $('[data-network-add]')!
-    expect(box).toBeTruthy()
-    // Not inside anything hidden.
-    for (let el: HTMLElement | null = box; el; el = el.parentElement) expect(el.hidden, el.className).toBe(false)
   })
 })

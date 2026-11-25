@@ -13,17 +13,14 @@
 //     No number is shown until the count answers, or if it fails; never a
 //     made-up zero.
 //   · ADD and the round THREE DOTS (Export) sit at the top right of this
-//     bar, on both tabs. They are the Network list's own buttons, menus and
-//     boxes (NetworkListScreen.jsx), drawn into the spot below.
+//     bar, ON THE NETWORK TAB ONLY. They are the Network list's own buttons,
+//     menus and boxes (NetworkListScreen.jsx), drawn into the spot below.
 //
-// WHY ADD WAS MISSING ON NURTURING (found 2026-11-25): the Add button lived
-// inside NetworkListScreen, which this file only mounted on the Network tab.
-// NurturingScreen never had an Add of its own, so switching tabs took the
-// button away with the list. Now the list stays mounted on the Nurturing tab
-// with its rows hidden, so its Add, and the add and import boxes behind it
-// (which open over the page), work from either tab. Adding from Nurturing adds a Network contact, exactly as on the
-// Network tab, and then shows it on the Network tab. The three dots only show
-// on the Network tab: Export is the Network contacts file; Nurturing has none.
+// NO ADD ON NURTURING (Kevin's ruling, 2026-11-25, option 1): Nurturing is
+// a question Bee Hub asks fresh each time (lib/network/nurturing.ts), not a
+// list anyone is filed into, so there is nothing to add to it. The Nurturing
+// tab shows neither Add nor the three dots, and the Network list is not
+// mounted (so not loaded) while the Nurturing tab is showing.
 //
 // Mounted by components/BeeHub.jsx only where the new Network list was
 // already mounted: for a viewer lib/network/access.ts says yes to (super
@@ -90,9 +87,10 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
     return () => { alive = false }
   }, [locationId, fetchImpl, refreshKey, countsKey])
 
-  // Something was added or imported: count again, and show it where it went.
-  const onContactsChanged = () => { setCountsKey((n) => n + 1); setTab('network') }
+  // Something was added or imported: count again.
+  const onContactsChanged = () => { setCountsKey((n) => n + 1) }
 
+  // The Network list, and its Add and three dots, live on the Network tab only.
   const listShown = tab === 'network' || (tab === 'overview' && !!locationId)
   return (
     <div data-network-tabs>
@@ -107,14 +105,12 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
           </button>
           {!locationId && <button type="button" role="tab" className="nt-tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')} data-tab="overview">All locations</button>}
         </div>
-        {tab !== 'overview' && <div className="nt-actions" ref={setActionsSpot} data-network-tab-actions />}
+        {listShown && <div className="nt-actions" ref={setActionsSpot} data-network-tab-actions />}
       </div>
       {tab === 'overview' && !locationId && <NetworkOverview fetchImpl={fetchImpl} />}
-      {/* The list stays mounted on the Nurturing tab, rows hidden, so its
-          Add button and boxes are there on both tabs. */}
-      {tab !== 'overview' && (
+      {listShown && (
         <NetworkListScreen locationId={locationId} locationName={locationName} {...(fetchImpl ? { fetchImpl } : {})} {...networkProps}
-          actionsTarget={actionsSpot} showMore={tab === 'network'} onContactsChanged={onContactsChanged} listHidden={!listShown} />
+          actionsTarget={actionsSpot} onContactsChanged={onContactsChanged} />
       )}
       {tab === 'nurture' && <NurturingScreen locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
     </div>

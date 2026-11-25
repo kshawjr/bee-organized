@@ -463,10 +463,7 @@ export default function NetworkListScreen({
   // 2026-11-25: where the Add and three-dots buttons go. NetworkTabs.jsx hands
   // in a spot at the top right of its tab bar; with none (this screen on its
   // own) they sit under the title, where they always were.
-  actionsTarget = null, showMore = true, onContactsChanged = () => {},
-  // On the Nurturing tab the list is kept but not shown: its Add button and
-  // the boxes behind it (which open over the page) still work from there.
-  listHidden = false,
+  actionsTarget = null, onContactsChanged = () => {},
 }) {
   const [data, setData] = useState(null)        // { contacts, tags, followUps, truncated }
   const [referrals, setReferrals] = useState(null) // Map id → rollup, or null until it answers
@@ -656,15 +653,14 @@ export default function NetworkListScreen({
               <b>From a spreadsheet</b><span>A CSV file from Outlook, Google Contacts, Mailchimp, LinkedIn or any spreadsheet.</span>
             </button>
           </>)}</Menu>
-          {/* MORE: the rare actions. Export only, for now. Network contacts only:
-              on the Nurturing tab there is no export, so no three dots. */}
-          {showMore && <Menu anchorClass="nw-more-anchor" className="nw-more-menu" trigger={(open, toggle) => (
+          {/* MORE: the rare actions. Export only, for now. */}
+          <Menu anchorClass="nw-more-anchor" className="nw-more-menu" trigger={(open, toggle) => (
             <button type="button" className="nw-dots" aria-expanded={open} aria-haspopup="menu" onClick={toggle} aria-label="More" title="More" data-act="more"><i /><i /><i /></button>
           )}>{(close) => (<>
             <button type="button" role="menuitem" className="nw-add-choice" disabled={!locationId || !data || !contacts.length} onClick={() => { close(); exportAll() }} data-act="export">
               <b><IconDownload /> Export CSV</b><span>{locationId ? (data ? `All ${contacts.length} at ${locationName || 'this location'}, in the columns the import reads.` : 'Loading…') : 'Pick one location first.'}</span>
             </button>
-          </>)}</Menu>}
+          </>)}</Menu>
   </>)
   const actNotes = (<>
           {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add, change or export contacts. A contact belongs to one location, so none of these work across all of them at once.</p>}
@@ -672,10 +668,10 @@ export default function NetworkListScreen({
   </>)
 
   return (
-    <div data-network-ui data-network-list style={listHidden ? { minHeight: 0 } : undefined}>
+    <div data-network-ui data-network-list>
       <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
       <style>{CSS}</style>
-      <div className="nw-wrap" hidden={listHidden} data-bulk-open={(selectable && selected.size > 0) || undefined}>
+      <div className="nw-wrap" data-bulk-open={(selectable && selected.size > 0) || undefined}>
         <p className="nw-eyebrow">Network &amp; Nurture</p>
         <h1 className="nw-title">Network{locationId && locationName ? ` · ${locationName}` : ''}</h1>
         <p className="nw-lede">Everyone who isn&rsquo;t a client: who sends you work, who you recommend, and who you are still figuring out.</p>
