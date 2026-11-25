@@ -19,8 +19,9 @@
 //     even with nobody in it; each archived person carries their archive day
 //   • people who said no are counted, never listed, never tickable
 //   • phone-only matches are asked one at a time; "same" only moves the count
-//   • every tick is saved as it is made (POST /api/mailchimp/review); "Save"
+//   • every tick is saved as it is made (POST /api/mailchimp/review); "Done"
 //     at the bottom only goes back — there is nothing left unsaved by then
+//   • the big-number line names the audience (the location's own list name)
 //   • until migrations/mailchimp_review_choices.sql is run, nothing can change
 //
 // NOTHING IS SENT from this screen; it does not touch Sync now or its
@@ -163,6 +164,7 @@ export default function MailchimpReviewScreen({ locationId, onClose }) {
   const m = data.model
   const ready = data.choicesReady
   const tz = data.location.timeZone
+  const audience = (data.location.audienceName || '').trim()
 
   async function save(scope, key, choice, undo) {
     setSaveErr(null)
@@ -235,7 +237,12 @@ export default function MailchimpReviewScreen({ locationId, onClose }) {
       <section aria-label="How many people will be added" style={{ ...card, padding: '20px', textAlign: 'center' }}>
         <p aria-live="polite" data-testid="mc-big-number" style={{ fontSize: '48px', lineHeight: 1, fontWeight: 300, color: T.foreground, fontFamily: FONT.heading, fontVariantNumeric: 'tabular-nums' }}>{n(addingNow)}</p>
         <p data-testid="mc-big-words" style={{ marginTop: '4px', fontSize: '16px', lineHeight: '24px', color: T.foreground }}>
-          {addingNow === 1 ? 'person' : 'people'} {m.mailchimpKnown ? 'will be added to your Mailchimp audience' : (addingNow === 1 ? 'is ticked to go to your Mailchimp audience' : 'are ticked to go to your Mailchimp audience')}
+          {/* The destination is named, as the first-sync confirmation names it
+              (Kevin, 2026-11-24 — because of Chattanooga). The name is the
+              location's own mailchimp_list_name, read by the server; only when
+              it is missing does the line fall back to "your Mailchimp audience". */}
+          {addingNow === 1 ? 'person' : 'people'} {m.mailchimpKnown ? 'will be added to ' : (addingNow === 1 ? 'is ticked to go to ' : 'are ticked to go to ')}
+          {audience ? <strong data-testid="mc-audience" style={{ fontWeight: 700 }}>{audience}</strong> : 'your Mailchimp audience'}
         </p>
         {m.mailchimpKnown ? (
           <p data-testid="mc-gap" style={{ ...small, marginTop: '8px', fontFamily: FONT.body }}>
@@ -373,7 +380,9 @@ export default function MailchimpReviewScreen({ locationId, onClose }) {
       </div>
 
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
-        <Btn variant="primary" onClick={onClose}><span>Save</span></Btn>
+        {/* "Done", not "Save" (Kevin, 2026-11-24): every tick is already saved
+            as it is made, so this button only goes back. */}
+        <Btn variant="primary" onClick={onClose}><span>Done</span></Btn>
       </div>
     </Frame>
   )

@@ -68,7 +68,8 @@ describe('the screen', () => {
     installFetch(); await mount()
     // new: bob (worked), cat (no history), dee (archived, unticked) → 2 ticked
     expect(big()).toBe('2')
-    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to your Mailchimp audience')
+    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to Friends')
+    expect(host.querySelector('[data-testid="mc-audience"]')!.textContent).toBe('Friends')
     expect(host.querySelector('[data-testid="mc-gap"]')!.textContent).toBe('1 already in your Mailchimp · 3 new to Mailchimp')
     const first = host.querySelector('section')!
     expect(first.contains(host.querySelector('[data-testid="mc-big-number"]'))).toBe(true)
@@ -163,7 +164,7 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     expect(box.checked).toBe(false)
     expect(box.disabled).toBe(true)
   })
-  it('sections come in the design’s order, and Save only goes back', async () => {
+  it('sections come in the design’s order, and Done only goes back', async () => {
     installFetch()
     host = document.createElement('div'); document.body.appendChild(host)
     root = createRoot(host)
@@ -172,7 +173,8 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     expect(Array.from(host.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['Groups', 'Not changing', 'Same person?', 'Exceptions'])
     const posts = () => calls.filter((c) => c.init?.method === 'POST').length
-    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Save')!
+    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Done')!
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent === 'Save')).toBe(false)
     await click(save)
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(posts()).toBe(0)
@@ -200,5 +202,16 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     // above the big number
     const title = host.querySelector('[data-testid="mc-title"]')!
     expect(title.compareDocumentPosition(host.querySelector('[data-testid="mc-big-number"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+  it('names the audience from the location; with no name on file it says "your Mailchimp audience"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { const a = answer([]); return new Response(JSON.stringify({ ...a, location: { ...a.location, audienceName: null } }), { status: 200 }) }))
+    await mount()
+    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to your Mailchimp audience')
+    expect(host.querySelector('[data-testid="mc-audience"]')).toBeNull()
+  })
+  it('when Mailchimp could not be read, the line still names the audience', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { const a = answer([]); return new Response(JSON.stringify({ ...a, mailchimpWords: 'Mailchimp could not be reached.', model: { ...a.model, mailchimpKnown: false } }), { status: 200 }) }))
+    await mount()
+    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people are ticked to go to Friends')
   })
 })
