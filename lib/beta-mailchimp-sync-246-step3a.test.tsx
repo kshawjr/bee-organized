@@ -186,7 +186,8 @@ describe('fail closed: a gated location sends NOTHING', () => {
   it('sync_live=false → zero report with a reason, and zero fetches', async () => {
     dbResolver = standardResolver([lead()], 1, { location: { mailchimp_sync_live: false } })
     const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report).toEqual({ ran: false, reason: 'sync_not_enabled', pushed: 0, skipped: 0, failed: 0, errors: [] })
+    // 2026-11-25 slice 6: the report carries more zero fields; the rule is the same.
+    expect(report).toMatchObject({ ran: false, reason: 'sync_not_enabled', pushed: 0, skipped: 0, failed: 0, alreadyThere: 0, remaining: 0, errors: [] })
     // The count that matters: not one request left the building.
     expect(fetchMock.mock.calls).toHaveLength(0)
     expect(dbWrites).toHaveLength(0)
@@ -206,208 +207,16 @@ describe('fail closed: a gated location sends NOTHING', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 3 · THE PUSH
 // ═══════════════════════════════════════════════════════════════════════════
-describe('the upsert', () => {
-  it('PUTs to /lists/{id}/members/{hash} with status_if_new and NO status field', async () => {
-    dbResolver = standardResolver([lead()], 1)
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(1)
-
-    const put = fetchMock.mock.calls.find((c: any[]) => c[1]?.method === 'PUT')!
-    expect(put, 'a member PUT').toBeTruthy()
-    expect(String(put[0])).toBe(
-      `https://us7.api.mailchimp.com/3.0/lists/list1/members/${MD5_OF_LOWERCASED_EMAIL('person@example.com')}`,
-    )
-    const body = JSON.parse(put[1].body)
-    expect(body.email_address).toBe('person@example.com')
-    expect(body.status_if_new).toBe('subscribed')
-    // THE pin. A plain `status` would resurrect a Mailchimp-side unsubscribe.
-    expect(Object.prototype.hasOwnProperty.call(body, 'status')).toBe(false)
-    expect(body.merge_fields).toEqual({ FNAME: 'Pat', LNAME: 'Jones' })
-  })
-
-  it('tags ride the tags endpoint, each active — lead tags resolved from the JUNCTION', async () => {
-    dbResolver = standardResolver([lead()], 1, {
-      leadTags: [{ lead_id: 'lead-1', tag_lookup_id: 'tl-vip' }],
-      lookups: [{ id: 'tl-vip', label: 'VIP' }],
-    })
-    await syncWebsiteLeadsToMailchimp(LOC)
-    const tagCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).endsWith('/tags'))!
-    expect(tagCall, 'a tags POST').toBeTruthy()
-    expect(tagCall[1].method).toBe('POST')
-    const body = JSON.parse(tagCall[1].body)
-    // New: created just now, no engagements, no touchpoints. Exact equality
-    // doubles as the column pin: the row's tags column says ColumnDecoyTag,
-    // and it must not be here.
-    expect(body.tags).toEqual([
-      { name: 'Moving', status: 'active' },
-      { name: 'Website', status: 'active' },
-      { name: 'New', status: 'active' },
-      { name: 'VIP', status: 'active' },
-    ])
-  })
-
-  it('junction tags: labels land in the PUT run, the leads.tags column is never read', async () => {
-    dbResolver = standardResolver([lead()], 1, {
-      leadTags: [
-        { lead_id: 'lead-1', tag_lookup_id: 'tl-vip' },
-        { lead_id: 'lead-1', tag_lookup_id: 'tl-ret' },
-        // A junction row whose definition is missing resolves to nothing —
-        // no crash, no raw uuid leaking into Mailchimp as a "tag".
-        { lead_id: 'lead-1', tag_lookup_id: 'tl-gone' },
-      ],
-      lookups: [
-        { id: 'tl-vip', label: 'VIP' },
-        { id: 'tl-ret', label: 'Returning' },
-      ],
-    })
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(1)
-    const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => String(c[0]).endsWith('/tags'))![1].body)
-    const names = body.tags.map((t: any) => t.name)
-    expect(names).toContain('VIP')
-    expect(names).toContain('Returning')
-    // The poisoned column value: present on the row, absent from the send.
-    expect(names).not.toContain('ColumnDecoyTag')
-    expect(names).not.toContain('tl-gone')
-  })
-
-  it('the tag resolution is batched — one lead_tags read and one lookups read for the whole run', async () => {
-    const queryCounts: Record<string, number> = {}
-    const inner = standardResolver([
-      lead({ id: 'l1', email: 'a@example.com' }),
-      lead({ id: 'l2', email: 'b@example.com' }),
-      lead({ id: 'l3', email: 'c@example.com' }),
-    ], 3, {
-      leadTags: [
-        { lead_id: 'l1', tag_lookup_id: 'tl-vip' },
-        { lead_id: 'l3', tag_lookup_id: 'tl-vip' },
-      ],
-      lookups: [{ id: 'tl-vip', label: 'VIP' }],
-    })
-    dbResolver = (q: any) => {
-      queryCounts[q.table] = (queryCounts[q.table] || 0) + 1
-      return inner(q)
-    }
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(3)
-    // 3 leads fit one 200-chunk: exactly one junction read, and exactly one
-    // definitions read — never a query per lead.
-    expect(queryCounts['lead_tags']).toBe(1)
-    expect(queryCounts['lookups']).toBe(1)
-  })
-
-  it('and the engine source never reads the leads.tags column', () => {
-    const src = readFileSync(join(process.cwd(), 'lib/mailchimp-sync.ts'), 'utf8')
-    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
-    // row.tags was the bug: the write-orphan text[] column instead of the
-    // lead_tags junction. The only lead-tag source is tagLabelsByLead.
-    expect(code).not.toMatch(/row\.tags/)
-    expect(code).toMatch(/from\('lead_tags'\)/)
-  })
-
-  it('THE STALE COLUMN: a won client is tagged Client, whatever client_status says', async () => {
-    // The row's snapshot says 'StaleColumnValue'; the engagements say Closed
-    // Won. The tag must say Client — the live derivation, not the column.
-    dbResolver = standardResolver([lead()], 1, {
-      engagements: [{ client_id: 'lead-1', stage: 'Closed Won' }],
-    })
-    await syncWebsiteLeadsToMailchimp(LOC)
-    const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => String(c[0]).endsWith('/tags'))![1].body)
-    const names = body.tags.map((t: any) => t.name)
-    expect(names).toContain('Client')
-    expect(names).not.toContain('StaleColumnValue')
-    expect(names).not.toContain('New')
-  })
-
-  it('and the engine source never reads the snapshot column', () => {
-    const src = readFileSync(join(process.cwd(), 'lib/mailchimp-sync.ts'), 'utf8')
-    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
-    expect(code).not.toMatch(/client_status/)
-  })
-
-  it('success stamps synced_at + the status MAILCHIMP returned, error null', async () => {
-    fetchMock.mockImplementation(async (url: string, init: any = {}) => ({
-      ok: true, status: 200,
-      text: async () => JSON.stringify({ status: 'unsubscribed' }),
-    }))
-    dbResolver = standardResolver([lead()], 1)
-    await syncWebsiteLeadsToMailchimp(LOC)
-    const write = dbWrites.find(w => w.table === 'leads')!
-    expect(write.payload.mailchimp_synced_at).toBeTruthy()
-    // They unsubscribed inside Mailchimp; status_if_new preserved that, and the
-    // row records the truth rather than what we hoped.
-    expect(write.payload.mailchimp_status).toBe('unsubscribed')
-    expect(write.payload.mailchimp_sync_error).toBeNull()
-    expect(write.eq).toEqual(['id', 'lead-1'])
-  })
-
-  it('one failure does not abort the run — the error lands, the rest push', async () => {
-    fetchMock.mockImplementation(async (url: string, init: any = {}) => {
-      if (init?.method === 'PUT' && String(url).includes(MD5_OF_LOWERCASED_EMAIL('bad@example.com'))) {
-        return { ok: false, status: 400, text: async () => JSON.stringify({ detail: 'looks fake or invalid' }) }
-      }
-      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'subscribed' }) }
-    })
-    dbResolver = standardResolver([
-      lead({ id: 'lead-bad', email: 'bad@example.com' }),
-      lead({ id: 'lead-good', email: 'good@example.com' }),
-    ], 2)
-
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(1)
-    expect(report.failed).toBe(1)
-    expect(report.errors[0]).toEqual({ lead_id: 'lead-bad', error: 'looks fake or invalid' })
-
-    // The failed row gets the error and KEEPS synced_at null — retryable.
-    const badWrite = dbWrites.find(w => w.eq[1] === 'lead-bad')!
-    expect(badWrite.payload.mailchimp_sync_error).toBe('looks fake or invalid')
-    expect(badWrite.payload.mailchimp_synced_at).toBeUndefined()
-    // The good row still landed.
-    const goodWrite = dbWrites.find(w => w.eq[1] === 'lead-good')!
-    expect(goodWrite.payload.mailchimp_synced_at).toBeTruthy()
-  })
-
-  it('a tags failure fails the LEAD — synced_at stays null so the retry re-PUTs', async () => {
-    fetchMock.mockImplementation(async (url: string, init: any = {}) => {
-      if (String(url).endsWith('/tags')) {
-        return { ok: false, status: 500, text: async () => JSON.stringify({ detail: 'tag store down' }) }
-      }
-      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'subscribed' }) }
-    })
-    dbResolver = standardResolver([lead()], 1)
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(0)
-    expect(report.failed).toBe(1)
-    const write = dbWrites.find(w => w.table === 'leads')!
-    expect(write.payload.mailchimp_synced_at).toBeUndefined()
-    expect(write.payload.mailchimp_sync_error).toMatch(/tags_failed/)
-  })
-
-  it('skipped = website leads the eligibility clauses excluded', async () => {
-    // 5 website leads exist for the location; 1 is eligible.
-    dbResolver = standardResolver([lead()], 5)
-    const report = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(report.pushed).toBe(1)
-    expect(report.skipped).toBe(4)
-  })
-
-  it('requests are sequential — the second PUT starts after the first resolves', async () => {
-    let inFlight = 0, maxInFlight = 0
-    fetchMock.mockImplementation(async (url: string, init: any = {}) => {
-      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight)
-      await new Promise(r => setTimeout(r, 5))
-      inFlight--
-      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'subscribed' }) }
-    })
-    dbResolver = standardResolver([
-      lead({ id: 'l1', email: 'a@example.com' }),
-      lead({ id: 'l2', email: 'b@example.com' }),
-      lead({ id: 'l3', email: 'c@example.com' }),
-    ], 3)
-    await syncWebsiteLeadsToMailchimp(LOC)
-    expect(maxInFlight).toBe(1)
-  })
-})
+// 2026-11-25, FL-75 slice 6 RETIRED this block ("the upsert"): it pinned the
+// old engine — one PUT per website lead with status_if_new. Slice 6 replaced
+// it with Mailchimp's batch add (update_existing:false) for the people ticked
+// on "Who goes to Mailchimp". What these tests protected is pinned again,
+// against the new engine, in lib/mailchimp-first-push.test.ts:
+//   • never re-subscribing an unsubscribe → update_existing:false on every
+//     batch, no PUT/PATCH ever, members already in Mailchimp never sent
+//   • the live status tag, not the stale column; junction tag labels, never
+//     the leads.tags column; one lead_tags + one lookups read per run
+//   • one refused address does not stop the rest; a tag failure is never "done"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 4 · THE TRIGGER IS THE ONLY TRIGGER
@@ -503,7 +312,7 @@ describe('the Sync now button', () => {
   it('POSTs the trigger and reports the server’s numbers verbatim', async () => {
     fetchMock.mockImplementation(async () => ({
       ok: true, status: 200,
-      json: async () => ({ ran: true, reason: null, pushed: 12, skipped: 7, failed: 2 }),
+      json: async () => ({ ran: true, reason: null, complete: true, pushed: 12, already: 3, skipped: 7, failed: 2, remaining: 0, tags_held: [] }),
     }))
     await mountCard(READY)
     await act(async () => { syncButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
@@ -512,10 +321,11 @@ describe('the Sync now button', () => {
     expect(call, 'the trigger POST').toBeTruthy()
     expect(call[1].method).toBe('POST')
 
-    expect(container.textContent).toContain('Pushed 12 to Mailchimp')
-    expect(container.textContent).toContain('7 skipped')
-    expect(container.textContent).toContain('2 failed')
-    expect(container.textContent).toMatch(/retried on the next sync/i)
+    // 2026-11-25 slice 6 wording: what was added, what was already there and
+    // left as it was, what Mailchimp refused — the server's numbers verbatim.
+    expect(container.textContent).toContain('Done: added 12 people to Bee clients.')
+    expect(container.textContent).toContain('3 people were already there and left exactly as they were')
+    expect(container.textContent).toContain('2 people couldn’t be added')
     unmountCard()
   })
 

@@ -16,6 +16,7 @@
 // main had].
 // ─────────────────────────────────────────────────────────────
 
+import { withoutMailchimpSendSlice6 } from './mailchimp-send-hub-footprint'
 import { withoutMailchimpReviewSlice5 } from './mailchimp-review-hub-footprint'
 
 export const PARTNER_EMAILS_SLICE3_HUB_PIECES: [string, string][] = [
@@ -132,7 +133,9 @@ export const PARTNER_EMAILS_SLICE3_HUB_PIECES: [string, string][] = [
 // (mailchimp-review-hub-footprint.ts): every test that reaches BeeHub.jsx
 // through here sees the file as it was on main d41e711.
 export function withoutPartnerEmailsSlice3(src: string): string {
-  let s = withoutMailchimpReviewSlice5(src)
+  // 2026-11-25: Mailchimp slice 6 (the card's confirmation and result) is
+  // taken back out first, then slice 5, exactly as slice 5 was chained in.
+  let s = withoutMailchimpReviewSlice5(withoutMailchimpSendSlice6(src))
   for (const [piece, back] of PARTNER_EMAILS_SLICE3_HUB_PIECES) {
     const n = s.split(piece).length - 1
     if (n !== 1) throw new Error(`BeeHub.jsx: a partner emails slice 3 piece ${JSON.stringify(piece.slice(0, 60))} appears ${n} times, expected 1`)

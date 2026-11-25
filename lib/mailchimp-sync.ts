@@ -1,63 +1,69 @@
 // lib/mailchimp-sync.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Issue 246 step 3A — push a location's ELIGIBLE website leads into its chosen
-// Mailchimp audience. Manual trigger only: the /api/mailchimp/sync route (and
-// nothing else) calls this. NO cron, no webhook, no back-catalog re-push.
+// The ONE place Bee Hub adds people to a location's Mailchimp audience.
+// Called only by POST /api/mailchimp/sync (the "Sync now" button). No cron, no
+// webhook.
 //
-// ── THE GATE, BEFORE ANYTHING ELSE ──────────────────────────────────────────
-// mailchimp_sync_live is the fail-closed per-location switch, flipped by hand
-// exactly like notifications_live. When it is FALSE this function returns a
-// zero report with a reason and sends NOTHING — it does not "dry run", it does
-// not warm up, it does not touch Mailchimp at all. Same for a missing
-// connection or a missing audience: no half-configured location ever emits a
-// network request from here.
+// FL-75 SLICE 6 (2026-11-25) rebuilt this. It used to push "website leads",
+// one PUT at a time. It now sends the people the owner ticked on "Who goes to
+// Mailchimp" (slice 5), in batches. In order, every time:
 //
-// ── THE FIRST SYNC IS CONFIRMED, NUMBER AND LIST, BEFORE ANYTHING SENDS ─────
-// Flipping mailchimp_sync_live used to mean the first press of Sync now
-// subscribed every eligible person at once, with no warning (19 real people
-// for Chattanooga). So for a location that has never had a lead synced, this
-// function sends NOTHING unless the caller passes a `confirm` naming the exact
-// count and audience it is about to send. Anything else — no confirm, a stale
-// count (a lead arrived since the owner looked), a different audience — gets
-// reason 'needs_confirmation' with the CURRENT count and list name, and zero
-// requests. The check lives here, not in the card or the route, for the same
-// reason the sync_live gate does: a bare POST to the route must not get round
-// it. "First" = no lead at this location has mailchimp_synced_at set.
+// 1. KEVIN'S SWITCH, before anything else. mailchimp_sync_live is the
+//    fail-closed per-location switch, flipped by hand. Off means this returns a
+//    zero report and makes NO request at all. Same for a missing connection or
+//    audience. It lives here, not in a screen or a route, so a bare POST cannot
+//    get round it.
 //
-// ── ELIGIBILITY IS THE CONSENT BASIS ────────────────────────────────────────
-// source = 'Website' is the ONLY qualifying source: those people filled in the
-// location's own form. Imported Jobber clients, manual entries, referrals —
-// none of them asked to be marketed to, so none of them qualify, regardless of
-// how good their email looks. On top of that: a real email, no marketing
-// opt-out, no unsubscribe timestamp, and never previously synced
-// (mailchimp_synced_at IS NULL — this step never re-pushes a synced row).
-// is_junk rows are also excluded: the Recycle Bin is deletion-pending, and
-// "we market to the trash" is not a sentence anyone wants to say.
+// 2. THE FLOWS, read live (lib/mailchimp-flows.ts). Tested 2026-11-25: an add
+//    starts a live "Contact signs up" flow within 5 seconds and sends its email.
+//    Kevin's ruling: REFUSE while any flow that starts when someone is added is
+//    live (reason 'signup_flows_live', naming each one). Refuse too when the
+//    flows can't be read (reason 'mailchimp_unreadable') — "couldn't check" is
+//    never "nothing live". The flows are read again right before EVERY batch;
+//    if anything changed, the run stops there.
 //
-// ── WHY PUT + status_if_new, AND NEVER `status` ─────────────────────────────
-// PUT /lists/{id}/members/{hash} upserts. POST would 400 on an existing member;
-// worse, a plain `status` field on the PUT would OVERWRITE the member's current
-// state — re-subscribing someone who unsubscribed INSIDE Mailchimp, which is
-// the one thing a sync must never do. status_if_new applies only when the
-// member does not exist yet; an existing member keeps whatever status they
-// have. Do not "improve" this to `status`.
+// 3. WHO, recomputed live — never from anything saved. loadReview reads the
+//    audience (GET), every Bee Hub record, the shared no-marketing list and the
+//    owner's saved choices, and applies the slice 1 rules. A saved tick is only
+//    a choice among people who can be offered right now; nobody who said no,
+//    is in the Recycle Bin, or is already in Mailchimp is ever in the set.
+//    On top of that, the no-marketing list is checked AGAIN on the final
+//    addresses just before sending, and archived Mailchimp contacts are read
+//    and left out.
 //
-// ── CLIENT STATUS COMES FROM THE DERIVATION, NOT THE COLUMN ─────────────────
-// leads.client_status is a point-in-time snapshot and is stale. The live truth
-// is deriveClientStatus(), fed through the REAL mapper — the same recipe
-// lib/hub-all-overview.ts uses server-side, so the tag on a Mailchimp member
-// agrees with what the Hub shows for that person BY CONSTRUCTION.
+// 4. THE FIRST-SYNC CONFIRMATION. Until a run has finished completely for this
+//    location (a 'complete' row in sync_log, entity_type 'mailchimp_push'),
+//    nothing is sent unless the caller's `confirm` names the exact count, the
+//    audience, and the state of the flows (a fingerprint) that the owner was
+//    shown. Anything else gets 'needs_confirmation' with the current numbers.
+//    A half-finished first sync is still a first sync: carrying on asks again,
+//    for what is left.
 //
-// ── FAILURE SHAPE ───────────────────────────────────────────────────────────
-// Per-lead, never per-run: one bad email must not strand the other 80. Success
-// stamps mailchimp_synced_at + the status Mailchimp returned; failure stamps
-// mailchimp_sync_error and leaves synced_at NULL so the next run retries it.
-// A tag-write failure counts as a failure for the same reason — synced_at
-// stays NULL, and the retry's PUT is idempotent so re-pushing is safe.
+// 5. NEVER CHANGE ANYONE ALREADY IN MAILCHIMP. The add is Mailchimp's batch
+//    subscribe, POST /lists/{id}, with update_existing: false. Proven at Test
+//    Location on 2026-11-25: re-adding an UNSUBSCRIBED contact this way is
+//    refused ("already a list member", ERROR_CONTACT_EXISTS) and their status
+//    and last-changed time do not move. People already in Mailchimp are left
+//    out before the call anyway; the flag is the second lock.
+//    This file never PUTs or PATCHes a member and never sends `status` for an
+//    existing one.
 //
-// Requests run SEQUENTIALLY. Mailchimp allows 10 simultaneous connections per
-// account; one at a time is far under it, and the volumes here (website leads
-// per location) never justify a pool worth debugging.
+// 6. TAGS carry over (project type, source, live client status, the record's
+//    own tags, including the location's own). A tag that starts a LIVE flow in
+//    Mailchimp is held back unless the owner said yes to that tag, one by one,
+//    on this run's confirmation (Kevin's ruling). Tags only go on people this
+//    run added.
+//
+// 7. SCALE AND HALF-DONE. 500 people per call (Mailchimp's batch limit),
+//    one call at a time. 429 and 5xx are retried (Retry-After honoured, then
+//    1s/2s/4s); after three retries the run STOPS. The run also stops before
+//    it runs out of time (the route has 60 seconds). A stopped run reports
+//    complete: false, how many were added and how many are left, and writes a
+//    'partial' row — never 'complete'. Pressing Sync now again carries on:
+//    everyone already added is now in Mailchimp, so the live read leaves them
+//    out, and Mailchimp itself refuses a second add of the same address. A
+//    batch retried after a lost answer may come back "already a member" for
+//    people the first try added; those are counted as added, never twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createHash } from 'crypto'
@@ -65,6 +71,11 @@ import { supabaseService } from './supabase-service'
 import { loadSaidNoSet } from './marketing-no-list'
 import { apiBase } from './mailchimp'
 import { mapLeadToPerson } from './people-mapper'
+import { readFlows, FLOWS_UNREADABLE_WORDS, HOW_TO_PAUSE, type FlowsRead, type Flow } from './mailchimp-flows'
+import { loadReview, type ReviewLoad } from './mailchimp-review-load'
+import { isIncluded, matchedByPhone } from './mailchimp-review'
+import { emailKey } from './mailchimp-rules'
+import { scrub } from './mailchimp-audience-look'
 // clientStatus.js is an untyped pure JS module — typed at the boundary, same
 // as lib/hub-all-overview.ts does, so the arguments stay checked.
 import { deriveClientStatus as deriveClientStatusUntyped } from '@/components/hive/shared/clientStatus'
@@ -77,6 +88,11 @@ const deriveClientStatus = deriveClientStatusUntyped as (
 
 export const MD5_OF_LOWERCASED_EMAIL = (email: string): string =>
   createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+
+export const BATCH_SIZE = 500
+export const MAX_RETRIES = 3
+export const TIME_BUDGET_MS = 45_000
+export const RUN_ENTITY = 'mailchimp_push'
 
 // ── Tags ──────────────────────────────────────────────────────
 // project_type + source + the LIVE derived client status + the lead's tag
@@ -111,154 +127,419 @@ export function buildMemberTags(args: {
   return out
 }
 
+export type SyncRefusal =
+  | 'sync_not_enabled' | 'not_connected' | 'no_audience' | 'location_not_found'
+  | 'mailchimp_unreadable' | 'signup_flows_live' | 'beehub_unreadable' | 'choices_not_ready'
+  | 'no_list_unreadable' | 'needs_confirmation'
+
+export type FlowLine = { name: string; status: string; start: string }
+export type HeldTag = { tag: string; flows: string[]; people: number }
+
 export type SyncReport = {
   ran: boolean
-  // ran:false reasons — every one of them means ZERO requests were sent.
-  reason?: 'sync_not_enabled' | 'not_connected' | 'no_audience' | 'location_not_found' | 'needs_confirmation'
-  // Present only with reason 'needs_confirmation': what the first sync WOULD
-  // send, for the owner to confirm. Echo count + listId back as `confirm`.
-  confirm?: { count: number; listId: string; listName: string | null }
-  pushed: number
-  skipped: number
-  failed: number
-  // A sample of what went wrong, for the server log / response body.
-  errors: Array<{ lead_id: string; error: string }>
+  // ran:false — every reason means ZERO writes to Mailchimp on this call.
+  reason?: SyncRefusal
+  words?: string
+  // reason 'signup_flows_live': each live flow that must be paused, and how.
+  mustPause?: FlowLine[]
+  howToPause?: string
+  // reason 'needs_confirmation': what the first sync WOULD do. Echo count,
+  // listId and flows back as `confirm` (plus tagsOk for any held tag allowed).
+  confirm?: {
+    count: number
+    listId: string
+    listName: string | null
+    flows: string
+    pausedFlows: FlowLine[]
+    heldTags: HeldTag[]
+  }
+  first?: boolean
+  complete?: boolean          // ran: every batch done, every tag applied
+  stopReason?: string         // complete:false — why it stopped
+  pushed: number              // added to Mailchimp on this run
+  alreadyThere: number        // Mailchimp said "already a member"; left exactly as they were
+  skipped: number             // new to Mailchimp but unticked by the owner
+  failed: number              // Mailchimp refused this address (e.g. looks fake)
+  remaining: number           // ticked, not yet tried because the run stopped
+  tagsHeld: string[]          // tags not carried: they start a live flow
+  errors: Array<{ email_key: string; error: string }>
 }
 
-const zeroReport = (reason: NonNullable<SyncReport['reason']>): SyncReport => ({
-  ran: false, reason, pushed: 0, skipped: 0, failed: 0, errors: [],
-})
+export type SyncConfirm = { count: number; listId: string; flows: string; tagsOk?: string[] }
 
-// Read one Mailchimp response safely — the outcome may be in the body even
-// when the HTTP status is fine, and the body may not be JSON at all.
-async function readJson(res: Response): Promise<any> {
-  const text = await res.text().catch(() => '')
-  try { return JSON.parse(text) } catch { return { detail: text.slice(0, 200) } }
+const emptyReport = (): Omit<SyncReport, 'ran'> => ({ pushed: 0, alreadyThere: 0, skipped: 0, failed: 0, remaining: 0, tagsHeld: [], errors: [] })
+const refuse = (reason: SyncRefusal, extra: Partial<SyncReport> = {}): SyncReport => ({ ran: false, reason, ...emptyReport(), ...extra })
+
+const flowLine = (f: Flow): FlowLine => ({ name: f.name, status: f.status, start: f.startWords })
+
+type Deps = {
+  db?: any
+  fetchImpl?: (url: string, init: any) => Promise<any>
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+  loadReviewImpl?: (locationId: string, deps: any) => Promise<ReviewLoad>
+  readFlowsImpl?: (args: any) => Promise<FlowsRead>
+  loadSuppressed?: (emails: readonly unknown[]) => Promise<Set<string>>
+  budgetMs?: number
+  batchSize?: number
 }
 
-export type SyncConfirm = { count: number; listId: string }
-
+// Kept under its old name: the route and its tests call it. It no longer
+// sends only website leads — see the header.
 export async function syncWebsiteLeadsToMailchimp(
   locationUuid: string,
   opts: { confirm?: SyncConfirm | null } = {},
+  deps: Deps = {},
 ): Promise<SyncReport> {
-  // ── 1. The gate ─────────────────────────────────────────────
-  const { data: loc, error: locErr } = await supabaseService
+  const db = deps.db || supabaseService
+  const doFetch = deps.fetchImpl || ((url: string, init: any) => fetch(url, init) as any)
+  const sleep = deps.sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const now = deps.now || (() => Date.now())
+  const started = now()
+  const budget = deps.budgetMs ?? TIME_BUDGET_MS
+  const batchSize = deps.batchSize || BATCH_SIZE
+  const flowsOf = deps.readFlowsImpl || readFlows
+  const reviewOf = deps.loadReviewImpl || loadReview
+  const saidNoOf = deps.loadSuppressed || loadSaidNoSet
+
+  // ── 1. The switch ───────────────────────────────────────────
+  const { data: loc, error: locErr } = await db
     .from('locations')
-    .select('id, mailchimp_connected, mailchimp_access_token, mailchimp_server_prefix, mailchimp_list_id, mailchimp_list_name, mailchimp_sync_live')
+    .select('id, location_id, mailchimp_connected, mailchimp_access_token, mailchimp_server_prefix, mailchimp_list_id, mailchimp_list_name, mailchimp_sync_live')
     .eq('id', locationUuid)
     .maybeSingle()
-  if (locErr || !loc) return zeroReport('location_not_found')
-
-  if (!loc.mailchimp_connected || !loc.mailchimp_access_token || !loc.mailchimp_server_prefix) {
-    return zeroReport('not_connected')
-  }
-  if (!loc.mailchimp_list_id) return zeroReport('no_audience')
-  // The fail-closed switch. False means false — nothing is sent, and the
-  // report says why instead of pretending an empty location.
-  if (!loc.mailchimp_sync_live) return zeroReport('sync_not_enabled')
+  if (locErr || !loc) return refuse('location_not_found')
+  if (!loc.mailchimp_connected || !loc.mailchimp_access_token || !loc.mailchimp_server_prefix) return refuse('not_connected')
+  if (!loc.mailchimp_list_id) return refuse('no_audience')
+  // False means false — nothing is sent, nothing is read.
+  if (!loc.mailchimp_sync_live) return refuse('sync_not_enabled')
 
   const token = loc.mailchimp_access_token as string
-  const base = apiBase(loc.mailchimp_server_prefix as string)
+  const prefix = loc.mailchimp_server_prefix as string
+  const base = apiBase(prefix)
   const listId = loc.mailchimp_list_id as string
+  const listName = (loc.mailchimp_list_name as string) || null
+  const clean = (t: unknown) => scrub(String(t ?? ''), token)
 
-  // ── 2. Eligibility ──────────────────────────────────────────
-  // leads.location_uuid (uuid, NOT NULL) rather than leads.location_id (the
-  // text slug): the guard hands this function the locations.id uuid, and
-  // location_uuid is its direct typed key — no slug round-trip, no text/uuid
-  // comparison to get wrong (hub_users.location_id being TEXT is exactly that
-  // bug class). The two columns agree on every row in prod, so this is a
-  // choice of the cleaner join, not a behavioral fork.
-  //
-  // Paged because PostgREST caps a response at 1000 rows and a first-ever sync
-  // on a busy location could clear that.
-  const eligible: any[] = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabaseService
-      .from('leads')
-      .select('*')
-      .eq('location_uuid', locationUuid)
-      .eq('source', 'Website')
-      .not('email', 'is', null)
-      .neq('email', '')
-      .not('marketing_opt_out', 'is', true)
-      .is('marketing_unsubscribed_at', null)
-      .is('mailchimp_synced_at', null)
-      .not('is_junk', 'is', true)
-      .order('id', { ascending: true })
-      .range(from, from + 999)
-    if (error) throw new Error(`eligibility read failed: ${error.message}`)
-    eligible.push(...(data || []))
-    if ((data || []).length < 1000) break
+  // ── 2. The flows, live ──────────────────────────────────────
+  const readNowFlows = () => flowsOf({ token, serverPrefix: prefix, listId, fetchImpl: doFetch, sleep })
+  const flows = await readNowFlows()
+  if (!flows.ok) return refuse('mailchimp_unreadable', { words: FLOWS_UNREADABLE_WORDS })
+  if (flows.mustPause.length) {
+    return refuse('signup_flows_live', { mustPause: flows.mustPause.map(flowLine), howToPause: HOW_TO_PAUSE })
   }
 
-  // FL-75 slice 2: an unsubscribe counts everywhere. Drop anyone whose
-  // ADDRESS said no at any location (the shared no-marketing list), even if
-  // this record's own flags are clear. An unreadable list throws: the batch
-  // does not go out on a guess. They count as skipped below.
+  // ── 3. Who, live ────────────────────────────────────────────
+  // The no-marketing list must be readable. loadSaidNoSet treats a missing
+  // table as "nobody said no"; for sending, that is a guess, so check first.
   {
-    const saidNo = await loadSaidNoSet(eligible.map((l) => l.email))
-    if (saidNo.size) {
-      for (let i = eligible.length - 1; i >= 0; i--) {
-        if (saidNo.has(String(eligible[i].email).trim().toLowerCase())) eligible.splice(i, 1)
-      }
+    const probe = await db.from('marketing_unsubscribes').select('email_normalized', { count: 'exact', head: true })
+    if (probe?.error) return refuse('no_list_unreadable', { words: 'The no-marketing list could not be read, so nothing was sent.' })
+  }
+  const review = await reviewOf(locationUuid, { db: deps.db, fetchImpl: deps.fetchImpl, sleep: deps.sleep, loadSuppressed: deps.loadSuppressed, withLeadIds: true })
+  if (!review.ok) return refuse('beehub_unreadable', { words: review.words })
+  if (review.mailchimpWords || !review.model.mailchimpKnown) return refuse('mailchimp_unreadable', { words: review.mailchimpWords || FLOWS_UNREADABLE_WORDS })
+  if (!review.choicesReady) return refuse('choices_not_ready', { words: 'Saving choices isn’t switched on yet, so nothing was sent.' })
+
+  const model = review.model
+  const groupChoice: Record<string, 'in' | 'out' | null> = {}
+  for (const g of model.groups) groupChoice[g.key] = g.choice
+  const sameSet = matchedByPhone(model.phone)
+  const offered = model.people.filter((p) => !sameSet.has(p.k))
+  let sendSet = offered.filter((p) => isIncluded(p, groupChoice))
+  const skipped = offered.length - sendSet.length
+
+  // Belt and braces, right before sending: the no-marketing list again, and
+  // Mailchimp's archived contacts (an archived contact can be re-added, which
+  // would undo the owner's archiving — so they are never in the set).
+  {
+    const saidNo = await saidNoOf(sendSet.map((p) => p.e))
+    const archived = await readArchivedKeys({ base, listId, token, doFetch, sleep })
+    if (!archived.ok) return refuse('mailchimp_unreadable', { words: FLOWS_UNREADABLE_WORDS })
+    sendSet = sendSet.filter((p) => !saidNo.has(p.k) && !archived.keys.has(p.k))
+  }
+  sendSet.sort((a, b) => a.k.localeCompare(b.k))
+
+  // ── 4. Tags, and which are held ─────────────────────────────
+  const idsByKey = review.leadIdsByKey || {}
+  // People an earlier run added whose tags did not land ('tags_pending'):
+  // they are in Mailchimp now, so they are not in sendSet, but their tags are
+  // still owed. They are finished first, and a run is never 'complete' while
+  // any is left.
+  const pendingRes = await db.from('leads').select('id, email').eq('location_uuid', locationUuid).like('mailchimp_sync_error', 'tags_pending:%')
+  if (pendingRes?.error) throw new Error(`tags_pending read failed: ${pendingRes.error.message}`)
+  const repair: Array<{ k: string; e: string }> = []
+  {
+    const seen = new Set(sendSet.map((p) => p.k))
+    for (const r of pendingRes?.data || []) { const k = emailKey(r.email); if (k && !seen.has(k)) { seen.add(k); repair.push({ k, e: String(r.email).trim() }) } }
+  }
+  const sendIds = [...sendSet, ...repair].flatMap((p) => idsByKey[p.k] || [])
+  const { rowsById, tagsById } = await loadRowsAndTags(db, sendIds, now())
+  const tagsByKey = new Map<string, string[]>()
+  for (const p of [...sendSet, ...repair]) {
+    const all: string[] = []
+    for (const id of idsByKey[p.k] || []) all.push(...(tagsById[id] || []))
+    tagsByKey.set(p.k, buildMemberTags({ leadTags: all }))
+  }
+  const liveTagFlows = new Map<string, string[]>()     // lower(tag) → flow names
+  for (const f of flows.tagFlows) if (f.tag) liveTagFlows.set(f.tag.toLowerCase(), [...(liveTagFlows.get(f.tag.toLowerCase()) || []), f.name])
+  const heldTags: HeldTag[] = []
+  {
+    const counts = new Map<string, { tag: string; n: number }>()
+    for (const tags of Array.from(tagsByKey.values())) for (const t of tags) {
+      const lc = t.toLowerCase()
+      if (!liveTagFlows.has(lc)) continue
+      const c = counts.get(lc) || { tag: t, n: 0 }; c.n++; counts.set(lc, c)
     }
+    for (const [lc, c] of Array.from(counts.entries())) heldTags.push({ tag: c.tag, flows: liveTagFlows.get(lc) || [], people: c.n })
+    heldTags.sort((a, b) => a.tag.localeCompare(b.tag))
   }
 
-  // Skipped = website-source leads for this location that the eligibility
-  // clauses excluded (no email, opted out, unsubscribed, already synced,
-  // junked). Counted with head:true — PostgREST aggregates are disabled on
-  // this project, but head-counts work.
-  const { count: totalWebsite } = await supabaseService
-    .from('leads')
-    .select('id', { count: 'exact', head: true })
-    .eq('location_uuid', locationUuid)
-    .eq('source', 'Website')
-  const skipped = Math.max(0, (totalWebsite ?? eligible.length) - eligible.length)
+  // ── 5. First sync? Then the confirmation ────────────────────
+  const firstDone = await db.from('sync_log').select('id').eq('entity_type', RUN_ENTITY).eq('entity_id', locationUuid).eq('status', 'complete').limit(1)
+  // A failed read throws: guessing "not first" is the unconfirmed mass add this exists to stop.
+  if (firstDone?.error) throw new Error(`first-sync record read failed: ${firstDone.error.message}`)
+  const first = !(firstDone?.data || []).length
 
-  if (eligible.length === 0) {
-    return { ran: true, pushed: 0, skipped, failed: 0, errors: [] }
-  }
-
-  // ── 2b. The first-sync confirmation (see header) ────────────
-  // A failed count throws rather than guessing "not first" — guessing wrong
-  // is exactly the unconfirmed mass subscribe this exists to stop.
-  const { count: syncedBefore, error: syncedErr } = await supabaseService
-    .from('leads')
-    .select('id', { count: 'exact', head: true })
-    .eq('location_uuid', locationUuid)
-    .not('mailchimp_synced_at', 'is', null)
-  if (syncedErr || syncedBefore == null) {
-    throw new Error(`synced-before count failed: ${syncedErr?.message || 'no count'}`)
-  }
-  if (syncedBefore === 0) {
+  let tagsOk = new Set<string>()
+  if (first && sendSet.length > 0) {
     const c = opts.confirm
-    const confirmed = !!c && c.count === eligible.length && c.listId === listId
+    const confirmed = !!c && c.count === sendSet.length && c.listId === listId && c.flows === flows.fingerprint
     if (!confirmed) {
-      return {
-        ran: false, reason: 'needs_confirmation', pushed: 0, skipped, failed: 0, errors: [],
-        confirm: { count: eligible.length, listId, listName: (loc.mailchimp_list_name as string) || null },
-      }
+      return refuse('needs_confirmation', {
+        first: true,
+        confirm: { count: sendSet.length, listId, listName, flows: flows.fingerprint, pausedFlows: flows.signupFlows.map(flowLine), heldTags },
+        skipped,
+      })
     }
+    tagsOk = new Set((c!.tagsOk || []).map((t) => String(t).trim().toLowerCase()))
+  }
+  const tagsHeld = heldTags.filter((h) => !tagsOk.has(h.tag.toLowerCase())).map((h) => h.tag)
+  const carry = (tags: string[]) => tags.filter((t) => !liveTagFlows.has(t.toLowerCase()) || tagsOk.has(t.toLowerCase()))
+
+  if (sendSet.length === 0 && repair.length === 0) {
+    return { ran: true, first, complete: true, ...emptyReport(), skipped, tagsHeld }
   }
 
-  // ── 3. Derivation inputs (the hub-all-overview recipe) ──────
-  // The status tag must be the LIVE derivation, so fetch what it reads: each
-  // lead's engagements (open → Active, won → Client, any → settles Nurturing)
-  // and reach-out touchpoints (Attempting). Chunked .in() — an unfiltered
-  // child read is the bug class the Hub already fixed once.
-  //
-  // lead_tags rides the same chunks: the REAL tags live in the junction
-  // (leads.tags the column is a write-orphan — nothing in the app populates
-  // it), resolved tag_lookup_id → lookups.label in ONE batched read below,
-  // never per lead. Same resolution _hub-page.tsx does for the Hub.
-  const ids = eligible.map((l: any) => l.id)
+  // ── 6. Send ─────────────────────────────────────────────────
+  const report: SyncReport = { ran: true, first, complete: false, ...emptyReport(), skipped, tagsHeld }
+  const segments = new SegmentCache({ base, listId, token, doFetch, sleep })
+  const stampNow = () => new Date(now()).toISOString()
+  const idsFor = (keys: Iterable<string>) => Array.from(keys).flatMap((k) => idsByKey[k] || [])
+  // Tags for people Bee Hub added; one call per tag per 500 people.
+  const applyTags = async (people: Array<{ k: string; e: string }>): Promise<string | null> => {
+    const byTag = new Map<string, { name: string; emails: string[] }>()
+    for (const p of people) for (const t of carry(tagsByKey.get(p.k) || [])) {
+      const lc = t.toLowerCase(); const g = byTag.get(lc) || { name: t, emails: [] }; g.emails.push(p.e); byTag.set(lc, g)
+    }
+    for (const g of Array.from(byTag.values())) {
+      const ok = await segments.addMembers(g.name, g.emails)
+      if (!ok.ok) return `tags_failed (${g.name}): ${clean(ok.detail)}`
+    }
+    return null
+  }
+  // Right before EVERY Mailchimp write: the flows again. Any change stops the run.
+  const flowsStillSame = async () => {
+    const fresh = await readNowFlows()
+    return fresh.ok && fresh.fingerprint === flows.fingerprint && fresh.mustPause.length === 0
+  }
+
+  let i = 0
+  let stopReason: string | null = null
+  try {
+  // Owed tags first.
+  if (repair.length) {
+    if (!(await flowsStillSame())) stopReason = 'flows_changed'
+    else {
+      const fail = await applyTags(repair)
+      if (fail) stopReason = fail
+      else await writeLeads(db, idsFor(repair.map((p) => p.k)), { mailchimp_synced_at: stampNow(), mailchimp_sync_error: null, updated_at: stampNow() })
+    }
+  }
+  for (; !stopReason && i < sendSet.length; i += batchSize) {
+    if (now() - started > budget) { stopReason = 'time'; break }
+    if (!(await flowsStillSame())) { stopReason = 'flows_changed'; break }
+
+    const chunk = sendSet.slice(i, i + batchSize)
+    const res = await mcWrite(doFetch, sleep, token, 'POST', `${base}lists/${encodeURIComponent(listId)}`, {
+      members: chunk.map((p) => {
+        const row = (idsByKey[p.k] || []).map((id) => rowsById[id]).find(Boolean) || {}
+        return { email_address: p.e, status: 'subscribed', merge_fields: { FNAME: String(row.first_name || '').trim(), LNAME: String(row.last_name || '').trim() } }
+      }),
+      update_existing: false,
+    })
+    if (!res.ok) { stopReason = `batch_failed: ${clean(res.detail)}`; break }
+
+    const added = new Set<string>()
+    for (const m of res.body?.new_members || []) { const k = emailKey(m?.email_address); if (k) added.add(k) }
+    if (Number(res.body?.total_updated || 0) > 0 || (res.body?.updated_members || []).length) {
+      // Cannot happen with update_existing:false. If Mailchimp ever says it
+      // did, stop at once and say so.
+      stopReason = 'mailchimp_reported_an_update'; break
+    }
+    const already = new Set<string>()
+    const failed = new Map<string, string>()
+    for (const e of res.body?.errors || []) {
+      const k = emailKey(e?.email_address); if (!k) continue
+      if (e?.error_code === 'ERROR_CONTACT_EXISTS') {
+        // After a retried call, "already a member" is our own first try landing.
+        if (res.attempts > 1) added.add(k); else already.add(k)
+      } else failed.set(k, clean(e?.error || e?.error_code || 'refused'))
+    }
+
+    // Tags for the people this batch added.
+    const tagFail = await applyTags(chunk.filter((p) => added.has(p.k)))
+
+    const stamp = stampNow()
+    if (tagFail) {
+      await writeLeads(db, idsFor(added), { mailchimp_status: 'subscribed', mailchimp_sync_error: `tags_pending: ${tagFail}`.slice(0, 500), updated_at: stamp })
+    } else {
+      await writeLeads(db, idsFor(added), { mailchimp_synced_at: stamp, mailchimp_status: 'subscribed', mailchimp_sync_error: null, updated_at: stamp })
+    }
+    await writeLeads(db, idsFor(already), { mailchimp_synced_at: stamp, mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp })
+    for (const [k, msg] of Array.from(failed.entries())) {
+      await writeLeads(db, idsByKey[k] || [], { mailchimp_sync_error: msg.slice(0, 500), updated_at: stamp })
+      if (report.errors.length < 25) report.errors.push({ email_key: k, error: msg })
+    }
+    report.pushed += added.size
+    report.alreadyThere += already.size
+    report.failed += failed.size
+    if (tagFail) { stopReason = tagFail; i += batchSize; break }
+  }
+  } catch (err: any) {
+    // Something broke mid-run (a Bee Hub write, say). Whatever already went
+    // to Mailchimp stays there; the run is recorded as partial, never complete.
+    stopReason = `error: ${clean(err?.message || err).slice(0, 300)}`
+  }
+  report.remaining = Math.max(0, sendSet.length - Math.min(i, sendSet.length))
+  report.complete = !stopReason && report.remaining === 0
+  if (stopReason) report.stopReason = stopReason
+
+  // The run record. Only a run that finished everything is 'complete'; that
+  // is what ends the first-sync confirmation for this location.
+  const log = await db.from('sync_log').insert({
+    location_id: (loc.location_id as string) || locationUuid,
+    direction: 'outbound',
+    entity_type: RUN_ENTITY,
+    entity_id: locationUuid,
+    status: report.complete ? 'complete' : 'partial',
+    message: JSON.stringify({ first, list_id: listId, added: report.pushed, already: report.alreadyThere, failed: report.failed, remaining: report.remaining, skipped, tags_held: tagsHeld, stop: stopReason }).slice(0, 2000),
+  })
+  if (log?.error && report.complete) {
+    // Everything went, but the record did not land: say so; the next press
+    // will simply ask for confirmation again (with nothing left to send).
+    report.stopReason = `record_not_saved: ${log.error.message}`
+  }
+  return report
+}
+
+// ── Mailchimp writes, with retries ────────────────────────────
+async function mcWrite(doFetch: any, sleep: (ms: number) => Promise<void>, token: string, method: 'POST', url: string, body: unknown):
+  Promise<{ ok: true; body: any; attempts: number } | { ok: false; detail: string }> {
+  for (let attempt = 0; ; attempt++) {
+    let res: any
+    try {
+      res = await doFetch(url, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' })
+    } catch (err: any) {
+      if (attempt < MAX_RETRIES) { await sleep(1000 * 2 ** attempt); continue }
+      return { ok: false, detail: String(err?.message || err) }
+    }
+    const text = await res.text().catch(() => '')
+    let parsed: any = null
+    try { parsed = JSON.parse(text) } catch { parsed = { detail: text.slice(0, 200) } }
+    if (res.status >= 200 && res.status < 300) return { ok: true, body: parsed, attempts: attempt + 1 }
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
+      const after = Number(res.headers?.get?.('retry-after'))
+      await sleep(Number.isFinite(after) && after > 0 ? Math.min(after, 60) * 1000 : 1000 * 2 ** attempt)
+      continue
+    }
+    return { ok: false, detail: `http ${res.status}: ${String(parsed?.detail || parsed?.title || '').slice(0, 200)}` }
+  }
+}
+
+async function mcGet(doFetch: any, sleep: (ms: number) => Promise<void>, token: string, url: string): Promise<{ ok: true; body: any } | { ok: false }> {
+  for (let attempt = 0; ; attempt++) {
+    let res: any
+    try { res = await doFetch(url, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }) }
+    catch { if (attempt < MAX_RETRIES) { await sleep(1000 * 2 ** attempt); continue } return { ok: false } }
+    const text = await res.text().catch(() => '')
+    let parsed: any = null
+    try { parsed = JSON.parse(text) } catch { parsed = null }
+    if (res.status >= 200 && res.status < 300 && parsed) return { ok: true, body: parsed }
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) { await sleep(1000 * 2 ** attempt); continue }
+    return { ok: false }
+  }
+}
+
+// Mailchimp's archived contacts, by address. GET only; a failed read fails.
+async function readArchivedKeys(a: { base: string; listId: string; token: string; doFetch: any; sleep: (ms: number) => Promise<void> }):
+  Promise<{ ok: true; keys: Set<string> } | { ok: false }> {
+  const keys = new Set<string>()
+  for (let offset = 0; ; offset += 1000) {
+    const r = await mcGet(a.doFetch, a.sleep, a.token, `${a.base}lists/${encodeURIComponent(a.listId)}/members?status=archived&count=1000&offset=${offset}&fields=total_items,members.email_address`)
+    if (!r.ok) return { ok: false }
+    const rows = Array.isArray(r.body?.members) ? r.body.members : null
+    const total = Number(r.body?.total_items)
+    if (!rows || !Number.isFinite(total)) return { ok: false }
+    for (const m of rows) { const k = emailKey(m?.email_address); if (k) keys.add(k) }
+    if (!rows.length || offset + rows.length >= total) return { ok: true, keys }
+  }
+}
+
+// Tags are static segments. Read once, created when missing, members added
+// 500 at a time. Adding a tag never changes anyone's status.
+class SegmentCache {
+  private ids: Map<string, string> | null = null
+  constructor(private a: { base: string; listId: string; token: string; doFetch: any; sleep: (ms: number) => Promise<void> }) {}
+  private async load(): Promise<boolean> {
+    if (this.ids) return true
+    const ids = new Map<string, string>()
+    for (let offset = 0; ; offset += 1000) {
+      const r = await mcGet(this.a.doFetch, this.a.sleep, this.a.token, `${this.a.base}lists/${encodeURIComponent(this.a.listId)}/segments?type=static&count=1000&offset=${offset}&fields=total_items,segments.id,segments.name`)
+      if (!r.ok) return false
+      const rows = Array.isArray(r.body?.segments) ? r.body.segments : []
+      for (const s of rows) ids.set(String(s.name || '').trim().toLowerCase(), String(s.id))
+      if (!rows.length || offset + rows.length >= Number(r.body?.total_items || 0)) break
+    }
+    this.ids = ids
+    return true
+  }
+  async addMembers(name: string, emails: string[]): Promise<{ ok: true } | { ok: false; detail: string }> {
+    if (!(await this.load())) return { ok: false, detail: 'tags could not be read' }
+    const lc = name.trim().toLowerCase()
+    let id = this.ids!.get(lc)
+    if (!id) {
+      const made = await mcWrite(this.a.doFetch, this.a.sleep, this.a.token, 'POST', `${this.a.base}lists/${encodeURIComponent(this.a.listId)}/segments`, { name: name.trim(), static_segment: [] })
+      if (!made.ok || !made.body?.id) return { ok: false, detail: made.ok ? 'no tag id' : made.detail }
+      id = String(made.body.id); this.ids!.set(lc, id)
+    }
+    for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+      const r = await mcWrite(this.a.doFetch, this.a.sleep, this.a.token, 'POST', `${this.a.base}lists/${encodeURIComponent(this.a.listId)}/segments/${encodeURIComponent(id)}`, { members_to_add: emails.slice(i, i + BATCH_SIZE) })
+      if (!r.ok) return { ok: false, detail: r.detail }
+    }
+    return { ok: true }
+  }
+}
+
+async function writeLeads(db: any, ids: string[], patch: Record<string, unknown>) {
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await db.from('leads').update(patch).in('id', ids.slice(i, i + 200))
+    if (error) throw new Error(`lead write-back failed: ${error.message}`)
+  }
+}
+
+// ── Each record's tags (the hub-all-overview recipe) ──────────
+// The status tag must be the LIVE derivation, so fetch what it reads: each
+// lead's engagements (open → Active, won → Client, any → settles Nurturing),
+// reach-out touchpoints, Jobber child rows and Network moves — the same inputs
+// the Hub ships, so the tag agrees with what the Hub shows. Chunked .in().
+async function loadRowsAndTags(db: any, ids: string[], nowMs: number): Promise<{ rowsById: Record<string, any>; tagsById: Record<string, string[]> }> {
+  const rowsById: Record<string, any> = {}
+  const tagsById: Record<string, string[]> = {}
+  if (!ids.length) return { rowsById, tagsById }
   const openIds = new Set<string>()
   const wonIds = new Set<string>()
   const engagementCounts: Record<string, number> = {}
-  // Inbox rule (2026-09-03): the status tag must agree with the Inbox, so the
-  // derivation gets the same exit inputs the hub page ships — the newest close
-  // (exit 3), the Jobber child rows (exit 1) and Network moves (exit 2).
   const lastClosedByLead: Record<string, string> = {}
   const srByLead: Record<string, any[]> = {}
   const quotesByLead: Record<string, any[]> = {}
@@ -268,25 +549,21 @@ export async function syncWebsiteLeadsToMailchimp(
   const leadTagRows: Array<{ lead_id: string; tag_lookup_id: string }> = []
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200)
-    const [engRes, touchRes, tagRes, srRes, quoteRes, jobRes, partnerRes] = await Promise.all([
-      supabaseService.from('engagements').select('client_id, stage, closed_at').in('client_id', chunk),
-      // ⚠️ `kind`, not `type` — the COLUMN is touchpoints.kind; the mapper
-      // renames it on the timeline entry the derivation reads. `label` is
-      // what identifies a 'Webform resubmission' (the enquiry date).
-      supabaseService.from('touchpoints').select('lead_id, kind, label, occurred_at').in('lead_id', chunk),
-      supabaseService.from('lead_tags').select('lead_id, tag_lookup_id').in('lead_id', chunk),
-      supabaseService.from('service_requests').select('lead_id, requested_at, created_at').in('lead_id', chunk),
-      supabaseService.from('quotes').select('lead_id, created_at').in('lead_id', chunk),
-      supabaseService.from('jobs').select('lead_id, created_at').in('lead_id', chunk),
-      supabaseService.from('partners').select('customer_lead_id, is_customer').is('deleted_at', null).in('customer_lead_id', chunk),
+    const [leadRes, engRes, touchRes, tagRes, srRes, quoteRes, jobRes, partnerRes] = await Promise.all([
+      db.from('leads').select('*').in('id', chunk),
+      db.from('engagements').select('client_id, stage, closed_at').in('client_id', chunk),
+      // ⚠️ `kind`, not `type` — the COLUMN is touchpoints.kind.
+      db.from('touchpoints').select('lead_id, kind, label, occurred_at').in('lead_id', chunk),
+      db.from('lead_tags').select('lead_id, tag_lookup_id').in('lead_id', chunk),
+      db.from('service_requests').select('lead_id, requested_at, created_at').in('lead_id', chunk),
+      db.from('quotes').select('lead_id, created_at').in('lead_id', chunk),
+      db.from('jobs').select('lead_id, created_at').in('lead_id', chunk),
+      db.from('partners').select('customer_lead_id, is_customer').is('deleted_at', null).in('customer_lead_id', chunk),
     ])
-    if (engRes.error) throw new Error(`engagements read failed: ${engRes.error.message}`)
-    if (touchRes.error) throw new Error(`touchpoints read failed: ${touchRes.error.message}`)
-    if (tagRes.error) throw new Error(`lead_tags read failed: ${tagRes.error.message}`)
-    if (srRes.error) throw new Error(`service_requests read failed: ${srRes.error.message}`)
-    if (quoteRes.error) throw new Error(`quotes read failed: ${quoteRes.error.message}`)
-    if (jobRes.error) throw new Error(`jobs read failed: ${jobRes.error.message}`)
-    if (partnerRes.error) throw new Error(`partners read failed: ${partnerRes.error.message}`)
+    for (const [name, r] of [['leads', leadRes], ['engagements', engRes], ['touchpoints', touchRes], ['lead_tags', tagRes], ['service_requests', srRes], ['quotes', quoteRes], ['jobs', jobRes], ['partners', partnerRes]] as const) {
+      if ((r as any).error) throw new Error(`${name} read failed: ${(r as any).error.message}`)
+    }
+    for (const l of leadRes.data || []) rowsById[l.id] = l
     for (const e of engRes.data || []) {
       engagementCounts[e.client_id] = (engagementCounts[e.client_id] || 0) + 1
       if (e.stage === 'Closed Won') wonIds.add(e.client_id)
@@ -300,123 +577,30 @@ export async function syncWebsiteLeadsToMailchimp(
     for (const j of jobRes.data || []) (jobsByLead[j.lead_id] ||= []).push(j)
     for (const p of partnerRes.data || []) if (p.is_customer !== true && p.customer_lead_id) networkMoved.add(String(p.customer_lead_id))
   }
-
-  // Resolve tag definitions ONCE for the whole run — the distinct
-  // tag_lookup_ids are bounded by the admin vocabulary (a handful of rows),
-  // so this is a single .in() read, not a per-lead query.
+  // Tag definitions ONCE for the whole run — one .in() read, never per lead.
   const tagLabelById: Record<string, string> = {}
   const tagLookupIds = Array.from(new Set(leadTagRows.map((r) => r.tag_lookup_id)))
   if (tagLookupIds.length > 0) {
-    const { data: lookupRows, error: lookupErr } = await supabaseService
-      .from('lookups')
-      .select('id, label')
-      .in('id', tagLookupIds)
+    const { data: lookupRows, error: lookupErr } = await db.from('lookups').select('id, label').in('id', tagLookupIds)
     if (lookupErr) throw new Error(`lookups read failed: ${lookupErr.message}`)
     for (const r of lookupRows || []) tagLabelById[r.id] = r.label
   }
-  const tagLabelsByLead: Record<string, string[]> = {}
-  for (const r of leadTagRows) {
-    const label = tagLabelById[r.tag_lookup_id]
-    if (label) (tagLabelsByLead[r.lead_id] ||= []).push(label)
+  const labelsByLead: Record<string, string[]> = {}
+  for (const r of leadTagRows) { const label = tagLabelById[r.tag_lookup_id]; if (label) (labelsByLead[r.lead_id] ||= []).push(label) }
+  for (const id of ids) {
+    const row = rowsById[id]
+    if (!row) continue
+    const person = mapLeadToPerson(row, {
+      touchpoints: touchByLead[id] || [],
+      engagement_count: engagementCounts[id] || 0,
+      service_requests: srByLead[id] || [],
+      quotes: quotesByLead[id] || [],
+      jobs: jobsByLead[id] || [],
+      last_closed_at: lastClosedByLead[id] || null,
+      network_moved: networkMoved.has(id),
+    })
+    const status = deriveClientStatus(person, openIds, nowMs, wonIds)
+    tagsById[id] = buildMemberTags({ projectType: row.project_type, source: row.source, clientStatus: status, leadTags: labelsByLead[id] || [] })
   }
-
-  // ── 4. Push, one lead at a time ─────────────────────────────
-  const nowMs = Date.now()
-  let pushed = 0
-  const errors: Array<{ lead_id: string; error: string }> = []
-
-  for (const row of eligible) {
-    const email = String(row.email).trim()
-    // The DB clauses cannot see whitespace-only emails; this can.
-    if (!email) { errors.push({ lead_id: row.id, error: 'empty_email' }); continue }
-
-    try {
-      const person = mapLeadToPerson(row, {
-        touchpoints: touchByLead[row.id] || [],
-        engagement_count: engagementCounts[row.id] || 0,
-        service_requests: srByLead[row.id] || [],
-        quotes: quotesByLead[row.id] || [],
-        jobs: jobsByLead[row.id] || [],
-        last_closed_at: lastClosedByLead[row.id] || null,
-        network_moved: networkMoved.has(row.id),
-      })
-      const status = deriveClientStatus(person, openIds, nowMs, wonIds)
-      const tags = buildMemberTags({
-        projectType: row.project_type,
-        source: row.source,
-        clientStatus: status,
-        leadTags: tagLabelsByLead[row.id] || [],
-      })
-
-      const hash = MD5_OF_LOWERCASED_EMAIL(email)
-
-      // Upsert the member. status_if_new ONLY — see the header for why a
-      // plain `status` here would resurrect Mailchimp-side unsubscribes.
-      const memberRes = await fetch(`${base}lists/${listId}/members/${hash}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email_address: email,
-          status_if_new: 'subscribed',
-          merge_fields: {
-            FNAME: row.first_name || '',
-            LNAME: row.last_name || '',
-          },
-        }),
-        cache: 'no-store',
-      })
-      const member = await readJson(memberRes)
-      if (!memberRes.ok) {
-        throw new Error(String(member?.detail || member?.title || `member_http_${memberRes.status}`))
-      }
-
-      // Tags ride a separate endpoint. A failure here fails the LEAD (synced_at
-      // stays NULL, the retry re-PUTs harmlessly) — a member without their tags
-      // is a half-synced member, and half-synced reads as synced forever.
-      if (tags.length > 0) {
-        const tagRes = await fetch(`${base}lists/${listId}/members/${hash}/tags`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: tags.map((name) => ({ name, status: 'active' })) }),
-          cache: 'no-store',
-        })
-        if (!tagRes.ok) {
-          const tagBody = await readJson(tagRes)
-          throw new Error(`tags_failed: ${String(tagBody?.detail || tagBody?.title || tagRes.status)}`)
-        }
-      }
-
-      // Success write-back. The status recorded is what MAILCHIMP said — for
-      // an existing member who unsubscribed over there, that is 'unsubscribed',
-      // and recording it truthfully is the point.
-      const { error: writeErr } = await supabaseService
-        .from('leads')
-        .update({
-          mailchimp_synced_at: new Date().toISOString(),
-          mailchimp_status: String(member?.status || 'subscribed'),
-          mailchimp_sync_error: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', row.id)
-      if (writeErr) {
-        // The push happened but the stamp failed — surface it as a failure so
-        // somebody looks; the retry's PUT is idempotent.
-        throw new Error(`writeback_failed: ${writeErr.message}`)
-      }
-
-      pushed++
-    } catch (err: any) {
-      const message = String(err?.message || err).slice(0, 500)
-      errors.push({ lead_id: row.id, error: message })
-      // Failure write-back: the error lands on the row, synced_at stays NULL
-      // so the next run picks this lead up again. Best-effort — if even this
-      // write fails, the error is still in the report.
-      await supabaseService
-        .from('leads')
-        .update({ mailchimp_sync_error: message, updated_at: new Date().toISOString() })
-        .eq('id', row.id)
-    }
-  }
-
-  return { ran: true, pushed, skipped, failed: errors.length, errors }
+  return { rowsById, tagsById }
 }

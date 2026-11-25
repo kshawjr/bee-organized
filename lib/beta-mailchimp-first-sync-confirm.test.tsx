@@ -18,7 +18,8 @@ import { act } from 'react-dom/test-utils'
 
 // ── Chainable Supabase mock (same shape as the 3A suite) ──────
 type Resolved = { data?: any; error?: any; count?: number | null }
-let dbResolver: (q: any) => Resolved
+// 2026-11-25: the engine half retired (see below); the card tests never reach the database.
+let dbResolver: (q: any) => Resolved = () => ({ data: [], error: null })
 let dbWrites: Array<{ table: string; payload: any; eq: any[] }>
 
 function makeBuilder(table: string) {
@@ -85,69 +86,14 @@ const TWO = [lead('l1', 'a@example.com'), lead('l2', 'b@example.com')]
 // ═══════════════════════════════════════════════════════════════════════════
 // 1 · THE ENGINE
 // ═══════════════════════════════════════════════════════════════════════════
-describe('first sync: nothing sends until the count and audience are confirmed', () => {
-  it('no confirm → needs_confirmation with the count + audience name, ZERO requests, ZERO writes', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 0 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(r.ran).toBe(false)
-    expect(r.reason).toBe('needs_confirmation')
-    expect(r.confirm).toEqual({ count: 2, listId: 'list1', listName: 'Bee Organized Friends' })
-    expect(r.pushed).toBe(0)
-    expect(fetchMock.mock.calls).toHaveLength(0)
-    expect(dbWrites).toHaveLength(0)
-  })
-
-  it('a STALE count (a lead arrived since they looked) asks again with the new count', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 0 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 1, listId: 'list1' } })
-    expect(r.reason).toBe('needs_confirmation')
-    expect(r.confirm?.count).toBe(2)
-    expect(fetchMock.mock.calls).toHaveLength(0)
-  })
-
-  it('a confirm for a DIFFERENT audience is not a confirm for this one', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 0 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 2, listId: 'other-list' } })
-    expect(r.reason).toBe('needs_confirmation')
-    expect(fetchMock.mock.calls).toHaveLength(0)
-  })
-
-  it('the matching confirm sends exactly the confirmed people', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 0 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 2, listId: 'list1' } })
-    expect(r.ran).toBe(true)
-    expect(r.pushed).toBe(2)
-    expect(fetchMock.mock.calls.filter((c: any[]) => c[1]?.method === 'PUT')).toHaveLength(2)
-  })
-
-  it('after the first sync, later syncs need no confirm', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 1 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(r.ran).toBe(true)
-    expect(r.pushed).toBe(2)
-  })
-
-  it('if the "synced before?" count fails, it throws — it never guesses "not first"', async () => {
-    dbResolver = resolver(TWO, { syncedErr: { message: 'boom' } })
-    await expect(syncWebsiteLeadsToMailchimp(LOC)).rejects.toThrow(/synced-before count failed/)
-    expect(fetchMock.mock.calls).toHaveLength(0)
-  })
-
-  it('switched off still wins: a first-sync location that is not live is never offered a confirm', async () => {
-    dbResolver = resolver(TWO, { syncedBefore: 0, location: { mailchimp_sync_live: false } })
-    const r = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 2, listId: 'list1' } })
-    expect(r.reason).toBe('sync_not_enabled')
-    expect(r.confirm).toBeUndefined()
-    expect(fetchMock.mock.calls).toHaveLength(0)
-  })
-
-  it('nobody eligible on a first sync → nothing to confirm, an honest zero', async () => {
-    dbResolver = resolver([], { syncedBefore: 0 })
-    const r = await syncWebsiteLeadsToMailchimp(LOC)
-    expect(r).toMatchObject({ ran: true, pushed: 0 })
-    expect(r.reason).toBeUndefined()
-  })
-})
+// 2026-11-25, FL-75 slice 6 RETIRED the engine half of this file. It pinned
+// the old rule "first = no lead has mailchimp_synced_at" and a confirm of
+// { count, list_id }. Slice 6's engine counts a first sync as finished only
+// when a whole run completed (sync_log 'mailchimp_push' 'complete'), and the
+// confirm also carries the flows fingerprint. The same promises — no confirm,
+// a stale count, another audience: nothing sends; a failed "first?" read
+// throws; switched off wins; nobody to send is an honest zero — are pinned
+// against the new engine in lib/mailchimp-first-push.test.ts.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2 · THE ROUTE RELAYS THE CONFIRM, AND ONLY A WELL-FORMED ONE
@@ -157,7 +103,7 @@ describe('POST /api/mailchimp/sync passes confirm through to the engine', () => 
     vi.resetModules()
     const engine = vi.fn(async () => ({
       ran: false, reason: 'needs_confirmation', pushed: 0, skipped: 0, failed: 0, errors: [],
-      confirm: { count: 19, listId: 'list1', listName: 'Bee Organized Friends' },
+      confirm: { count: 19, listId: 'list1', listName: 'Bee Organized Friends', flows: 'fp1', pausedFlows: [], heldTags: [] },
     }))
     vi.doMock('@/lib/mailchimp-sync', () => ({ syncWebsiteLeadsToMailchimp: engine }))
     vi.doMock('@/lib/supabase-server', () => ({
@@ -172,13 +118,17 @@ describe('POST /api/mailchimp/sync passes confirm through to the engine', () => 
       method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
     }) as any)
 
-    const res = await call({ confirm: { count: 19, list_id: 'list1' } })
-    expect(engine).toHaveBeenLastCalledWith(LOC, { confirm: { count: 19, listId: 'list1' } })
+    // 2026-11-25 slice 6: the confirm also names the flows the owner was shown.
+    const res = await call({ confirm: { count: 19, list_id: 'list1', flows: 'fp1', tags_ok: ['CLOSEDJOB', 7] } })
+    expect(engine).toHaveBeenLastCalledWith(LOC, { confirm: { count: 19, listId: 'list1', flows: 'fp1', tagsOk: ['CLOSEDJOB'] } })
     const j = await res.json()
     expect(j.reason).toBe('needs_confirmation')
-    expect(j.confirm).toEqual({ count: 19, list_id: 'list1', list_name: 'Bee Organized Friends' })
+    expect(j.confirm).toEqual({ count: 19, list_id: 'list1', list_name: 'Bee Organized Friends', flows: 'fp1', paused_flows: [], held_tags: [] })
 
-    await call({ confirm: { count: '19', list_id: 'list1' } })
+    await call({ confirm: { count: '19', list_id: 'list1', flows: 'fp1' } })
+    expect(engine).toHaveBeenLastCalledWith(LOC, { confirm: null })
+    // the old shape, without the flows, is no confirm at all
+    await call({ confirm: { count: 19, list_id: 'list1' } })
     expect(engine).toHaveBeenLastCalledWith(LOC, { confirm: null })
     await call({})
     expect(engine).toHaveBeenLastCalledWith(LOC, { confirm: null })
@@ -288,7 +238,7 @@ describe('the "not switched on yet" line', () => {
 
 describe('the first-sync confirmation on the card', () => {
   const ASK = { ran: false, reason: 'needs_confirmation', pushed: 0, skipped: 0, failed: 0,
-    confirm: { count: 19, list_id: 'list1', list_name: 'Bee Organized Friends' } }
+    confirm: { count: 19, list_id: 'list1', list_name: 'Bee Organized Friends', flows: 'fp1', paused_flows: [], held_tags: [] } }
 
   it('Sync now on a first sync shows the count + audience and sends nothing more', async () => {
     fetchMock = cardFetch({ live: true, syncReplies: [ASK] }); vi.stubGlobal('fetch', fetchMock)
@@ -314,14 +264,14 @@ describe('the first-sync confirmation on the card', () => {
   })
 
   it('Yes re-sends with the confirmed count + audience, and shows the result', async () => {
-    fetchMock = cardFetch({ live: true, syncReplies: [ASK, { ran: true, reason: null, pushed: 19, skipped: 3, failed: 0, confirm: null }] })
+    fetchMock = cardFetch({ live: true, syncReplies: [ASK, { ran: true, reason: null, complete: true, pushed: 19, already: 0, skipped: 3, failed: 0, remaining: 0, tags_held: [], confirm: null }] })
     vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
     await click(button('Sync now'))
     await click(button('Yes, subscribe 19'))
     expect(syncCalls()).toHaveLength(2)
-    expect(JSON.parse(syncCalls()[1][1].body).confirm).toEqual({ count: 19, list_id: 'list1' })
-    expect(container.textContent).toContain('Pushed 19 to Mailchimp')
+    expect(JSON.parse(syncCalls()[1][1].body).confirm).toEqual({ count: 19, list_id: 'list1', flows: 'fp1', tags_ok: [] })
+    expect(container.textContent).toContain('Done: added 19 people to Bee Organized Friends.')
     unmount()
   })
 

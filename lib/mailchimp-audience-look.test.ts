@@ -11,6 +11,7 @@
 //   • no token ever reaches a log, a test result or a report
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'fs'
+import { execSync } from 'child_process'
 import { createHash } from 'crypto'
 import { join } from 'path'
 
@@ -119,8 +120,12 @@ describe('not one write, to either side', () => {
   })
   it('by fingerprint: the existing Mailchimp files are byte for byte what they were at eeaedb2', () => {
     const sha = (f: string) => createHash('sha256').update(readFileSync(join(process.cwd(), f))).digest('hex')
+    // 2026-11-25, FL-75 slice 6: the sending file was rebuilt on purpose (it is
+    // the slice that sends). Its pin moves to the commit this claim was made
+    // at; slice 6's own tests pin the new file.
+    const shaAt = (rev: string, f: string) => createHash('sha256').update(execSync(`git show ${rev}:${f}`, { cwd: process.cwd(), maxBuffer: 1 << 26 })).digest('hex')
     expect({
-      sync: sha('lib/mailchimp-' + 'sync.ts'),
+      sync: shaAt('eeaedb2', 'lib/mailchimp-' + 'sync.ts'),
       client: sha('lib/mailchimp.ts'),
       rules: sha('lib/mailchimp-rules.ts'),
       noList: sha('lib/marketing-no-list.ts'),
@@ -366,13 +371,14 @@ describe('a location with the sending switch OFF can be read, and still cannot b
     vi.stubGlobal('fetch', fetchSpy)
     const first = await syncWebsiteLeadsToMailchimp(LOC)
     // even with a confirmation naming a count and the audience
-    const confirmed = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 1, listId: 'list-1' } })
+    const confirmed = await syncWebsiteLeadsToMailchimp(LOC, { confirm: { count: 1, listId: 'list-1', flows: 'any' } })
     for (const r of [first, confirmed]) expect(r).toMatchObject({ ran: false, reason: 'sync_not_enabled', pushed: 0, failed: 0 })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(ops.filter((o) => o.op !== 'select')).toEqual([])
   })
   it('the sending switch is still checked in the sending code, byte for byte (pinned above)', () => {
     const src = readFileSync(join(process.cwd(), 'lib/mailchimp-' + 'sync.ts'), 'utf8')
-    expect(src).toContain("if (!loc.mailchimp_sync_live) return zeroReport('sync_not_enabled')")
+    // 2026-11-25, FL-75 slice 6: same check, new helper name (refuse, not zeroReport).
+    expect(src).toContain("if (!loc.mailchimp_sync_live) return refuse('sync_not_enabled')")
   })
 })

@@ -42,6 +42,7 @@ import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"
+import { SyncConfirm as McSyncConfirm, SyncResult as McSyncResult } from "@/components/settings/MailchimpSyncAnswer"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
@@ -20027,36 +20028,19 @@ export function MailchimpCard({ settings, updateLocation }) {
             {!pendingConfirm && (
               <button onClick={()=>runSync()} disabled={syncing} className="bee-small-action"
                 style={{ marginTop:'10px', padding:'9px 16px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
-                {syncing ? 'Syncing…' : 'Sync now'}
+                {syncing ? (syncResult?.reason === 'signup_flows_live' ? 'Checking…' : 'Syncing…') : (syncResult?.reason === 'signup_flows_live' ? 'Check again' : 'Sync now')}
               </button>
             )}
 
-            {/* First sync: nothing has been sent; the server is asking. */}
+            {/* First sync: nothing has been sent; the server is asking (FL-75
+                slice 6: count, audience, the paused flows, held tags). */}
             {pendingConfirm && (
-              <div style={{ marginTop:'10px', background:HT.state.warning.soft, borderRadius:HT.radius.control, padding:'11px 12px' }}>
-                <p style={{ fontSize:'13px', color:HT.ink.primary, lineHeight:1.6, margin:'0 0 9px' }}>
-                  {firstSyncConfirmCopy(pendingConfirm.count, pendingConfirm.list_name)}
-                </p>
-                <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-                  <button onClick={()=>runSync({ count: pendingConfirm.count, list_id: pendingConfirm.list_id })} disabled={syncing} className="bee-small-action"
-                    style={{ padding:'8px 14px', background:HT.accent.fg, border:'none', borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.onFill, cursor:syncing?'default':'pointer', opacity:syncing?0.7:1 }}>
-                    {syncing ? 'Syncing…' : `Yes, subscribe ${pendingConfirm.count}`}
-                  </button>
-                  <button onClick={()=>setPendingConfirm(null)} disabled={syncing} className="bee-small-action"
-                    style={{ padding:'8px 14px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:600, color:HT.ink.secondary, cursor:'pointer' }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              <McSyncConfirm confirm={pendingConfirm} syncing={syncing}
+                onYes={(tagsOk)=>runSync({ count: pendingConfirm.count, list_id: pendingConfirm.list_id, flows: pendingConfirm.flows, tags_ok: tagsOk })}
+                onCancel={()=>setPendingConfirm(null)} />
             )}
 
-            {syncResult && (
-              <p style={{ fontSize:'12px', color:syncResult.ran?HT.ink.secondary:HT.state.warning.fg, background:syncResult.ran?HT.surface.sunken:HT.state.warning.soft, borderRadius:HT.radius.control, padding:'8px 10px', margin:'8px 0 0', lineHeight:1.5 }}>
-                {syncResult.ran
-                  ? `Pushed ${syncResult.pushed} to Mailchimp · ${syncResult.skipped} skipped · ${syncResult.failed} failed${syncResult.failed > 0 ? ' — failed contacts will be retried on the next sync' : ''}`
-                  : 'Nothing was sent — sending to Mailchimp isn\u2019t switched on for your location yet.'}
-              </p>
-            )}
+            {syncResult && <McSyncResult result={syncResult} listName={listName} />}
 
             {!confirming ? (
               <button onClick={()=>setConfirming(true)} className="bee-small-action"

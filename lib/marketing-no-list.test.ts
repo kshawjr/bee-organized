@@ -189,30 +189,11 @@ describe('the Closed Won follow-up refuses an address that said no elsewhere', (
   })
 })
 
-describe("today's Sync now engine drops anyone whose address said no, and sends nothing to Mailchimp here", () => {
-  const liveLoc = { id: 'loc-1', mailchimp_connected: true, mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1', mailchimp_list_id: 'L1', mailchimp_list_name: 'Clients', mailchimp_sync_live: true }
-  const people = [cleanLead({ id: 'a', email: 'keep@x.com' }), cleanLead({ id: 'b', email: ' Gone@X.com ' })]
-  it('the first-sync confirmation counts only the people still allowed — and nothing is sent', async () => {
-    h.enqueue('locations', liveLoc)
-    h.enqueue('leads', people)                                       // eligibility page
-    h.enqueue('marketing_unsubscribes', [{ email_normalized: 'gone@x.com' }])
-    h.enqueue('leads', null, null, 2)                                // website total
-    h.enqueue('leads', null, null, 0)                                // synced before: none → first sync
-    const report = await syncWebsiteLeadsToMailchimp('loc-1')
-    expect(report.ran).toBe(false)
-    expect(report.reason).toBe('needs_confirmation')
-    expect(report.confirm?.count).toBe(1)
-    expect(report.skipped).toBe(1)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-  it('list unreadable → the batch stops before anything is sent', async () => {
-    h.enqueue('locations', liveLoc)
-    h.enqueue('leads', people)
-    h.enqueue('marketing_unsubscribes', null, BROKEN.error)
-    await expect(syncWebsiteLeadsToMailchimp('loc-1', { confirm: { count: 2, listId: 'L1' } as any })).rejects.toThrow(/no-marketing list/)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-})
+// 2026-11-25, FL-75 slice 6 RETIRED "today's Sync now engine drops anyone
+// whose address said no": it drove the old engine's query order. The same two
+// promises are pinned against the new engine in lib/mailchimp-first-push.test.ts:
+// an address on this list is never sent, whatever the saved tick says; and a
+// list that cannot be read means nothing is sent.
 
 describe('nothing in this slice sends to Mailchimp, and the two lists stay apart', () => {
   const ROOT = process.cwd()

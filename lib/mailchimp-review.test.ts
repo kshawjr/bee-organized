@@ -294,19 +294,30 @@ describe('A + F. nothing sends — by fingerprint', () => {
     expect(urls.length).toBeGreaterThan(0)
     for (const u of urls) expect(u.startsWith('/api/mailchimp/review')).toBe(true)
   })
+  // 2026-11-25, FL-75 slice 6 is the slice that sends, so it changes the
+  // sending file, its route and the card's confirmation ON PURPOSE. These
+  // slice 5 claims ("slice 5 changed none of them") are kept, checked at main
+  // a8c77c0 — the last commit before slice 6 — instead of the working tree.
+  // Slice 6's own tests (lib/mailchimp-first-push.test.ts) pin what changed.
+  const SLICE5_DONE = 'a8c77c0'
+  const at = (rev: string, f: string) => execSync(`git show ${rev}:${f}`, { cwd: ROOT, maxBuffer: 1 << 27 }).toString()
   it('F. the sending files, the switch route and the first-sync confirmation are byte for byte as on main d41e711', () => {
     for (const f of ['lib/mailchimp-sync.ts', 'lib/mailchimp.ts', 'app/api/mailchimp/sync/route.ts', 'app/api/mailchimp/status/route.ts', 'lib/mailchimp-connection-state.ts', 'lib/mailchimp-rules.ts', 'lib/marketing-no-list.ts', 'lib/mailchimp-audience-look.ts']) {
       const then = execSync(`git show d41e711:${f}`, { cwd: ROOT, maxBuffer: 1 << 26 }).toString()
-      expect(sha(read(f)), f).toBe(sha(then))
+      expect(sha(at(SLICE5_DONE, f)), f).toBe(sha(then))
+    }
+    // and the files slice 6 did not need to touch are still exactly so today
+    for (const f of ['lib/mailchimp.ts', 'app/api/mailchimp/status/route.ts', 'lib/mailchimp-connection-state.ts', 'lib/mailchimp-rules.ts', 'lib/marketing-no-list.ts', 'lib/mailchimp-audience-look.ts']) {
+      expect(sha(read(f)), f).toBe(sha(at('d41e711', f)))
     }
   })
   it('BeeHub.jsx is main d41e711 plus the slice 5 pieces, and nothing else', () => {
     const then = execSync('git show d41e711:components/BeeHub.jsx', { cwd: ROOT, maxBuffer: 1 << 27 }).toString()
-    expect(sha(withoutMailchimpReviewSlice5(read('components/BeeHub.jsx')))).toBe(sha(then))
+    expect(sha(withoutMailchimpReviewSlice5(at(SLICE5_DONE, 'components/BeeHub.jsx')))).toBe(sha(then))
   })
   it('F. the Mailchimp card’s Sync now and its first-sync confirmation are untouched', () => {
     const then = execSync('git show d41e711:components/BeeHub.jsx', { cwd: ROOT, maxBuffer: 1 << 27 }).toString()
-    const now = read('components/BeeHub.jsx')
+    const now = at(SLICE5_DONE, 'components/BeeHub.jsx')
     const cut = (s: string, from: string, to: string) => { const a = s.indexOf(from); const b = s.indexOf(to, a); expect(a).toBeGreaterThan(-1); expect(b).toBeGreaterThan(a); return s.slice(a, b) }
     const runSync = (s: string) => cut(s, '  async function runSync(confirm = null) {', '  const needsAudience')
     const confirmBlock = (s: string) => cut(s, '{/* First sync: nothing has been sent; the server is asking. */}', '{syncResult && (')

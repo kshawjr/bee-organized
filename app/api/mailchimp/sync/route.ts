@@ -15,10 +15,12 @@
 // forget it. A gated-off location gets { pushed: 0, reason } and zero requests
 // are sent to Mailchimp.
 //
-// The FIRST sync for a location also needs `confirm: { count, list_id }` in the
-// body, matching what the engine is about to send. Without it the engine
-// answers reason 'needs_confirmation' with the count and audience name, and
-// sends nothing — that check is in the engine too, so this route only relays.
+// The FIRST sync for a location also needs `confirm: { count, list_id, flows }`
+// in the body (plus `tags_ok` for any held tag the owner allowed), matching
+// what the engine is about to send. Without it the engine answers reason
+// 'needs_confirmation' and sends nothing. The flows refusal, the switch and
+// the confirmation all live in the engine (FL-75 slice 6); this route only
+// relays.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -27,10 +29,9 @@ import { syncWebsiteLeadsToMailchimp } from '@/lib/mailchimp-sync'
 
 export const runtime = 'nodejs'
 // 60s matches every other long route here (send-to-jobber, webhooks) — going
-// higher risks the plan cap. A first-ever sync on a big location that hits the
-// wall loses NOTHING: each lead stamps mailchimp_synced_at as it lands, so the
-// eligibility clause shrinks with every push and clicking Sync now again picks
-// up exactly the remainder.
+// higher risks the plan cap. The engine stops itself at 45 seconds and says so
+// (complete: false, how many are left); pressing Sync now again carries on.
+// Everyone already added is in Mailchimp by then, so nobody is added twice.
 export const maxDuration = 60
 
 export async function POST(request: NextRequest) {
@@ -51,8 +52,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const c = body?.confirm
-    const confirm = c && Number.isInteger(c.count) && typeof c.list_id === 'string'
-      ? { count: c.count as number, listId: c.list_id as string }
+    const confirm = c && Number.isInteger(c.count) && typeof c.list_id === 'string' && typeof c.flows === 'string'
+      ? {
+          count: c.count as number, listId: c.list_id as string, flows: c.flows as string,
+          tagsOk: Array.isArray(c.tags_ok) ? c.tags_ok.filter((t: unknown) => typeof t === 'string').slice(0, 50) : [],
+        }
       : null
     const report = await syncWebsiteLeadsToMailchimp(target.locationUuid, { confirm })
     if (report.errors.length) {
@@ -60,18 +64,30 @@ export async function POST(request: NextRequest) {
         JSON.stringify(report.errors.slice(0, 10)))
     }
     console.log('[mailchimp-sync]', target.locationUuid, '—',
-      `ran=${report.ran} pushed=${report.pushed} skipped=${report.skipped} failed=${report.failed}`,
-      report.reason ? `reason=${report.reason}` : '')
+      `ran=${report.ran} complete=${report.complete ?? '-'} pushed=${report.pushed} already=${report.alreadyThere} failed=${report.failed} remaining=${report.remaining}`,
+      report.reason ? `reason=${report.reason}` : '', report.stopReason ? `stop=${report.stopReason}` : '')
     // The full error list stays in the server log; the card gets the numbers
-    // and the reason. Lead ids in a browser payload help nobody.
+    // and the reason. Addresses in a browser payload help nobody.
     return NextResponse.json({
       ran: report.ran,
       reason: report.reason ?? null,
+      words: report.words ?? null,
+      first: report.first ?? null,
+      complete: report.complete ?? null,
+      stopped: report.ran && report.complete === false ? (report.stopReason || 'stopped') : null,
       pushed: report.pushed,
+      already: report.alreadyThere,
       skipped: report.skipped,
       failed: report.failed,
+      remaining: report.remaining,
+      tags_held: report.tagsHeld,
+      must_pause: report.mustPause ?? null,
+      how_to_pause: report.howToPause ?? null,
       confirm: report.confirm
-        ? { count: report.confirm.count, list_id: report.confirm.listId, list_name: report.confirm.listName }
+        ? {
+            count: report.confirm.count, list_id: report.confirm.listId, list_name: report.confirm.listName,
+            flows: report.confirm.flows, paused_flows: report.confirm.pausedFlows, held_tags: report.confirm.heldTags,
+          }
         : null,
     })
   } catch (err: any) {

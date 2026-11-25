@@ -25,6 +25,7 @@ import { readRefusal, REFUSAL_WORDS, readAudience, scrub, AUDIENCE_FAILURE_WORDS
 import { loadSaidNoSet } from './marketing-no-list'
 import { resolveTimezone } from './drip-time'
 import { buildReview, type ReviewLead, type ReviewModel, type StoredChoice } from './mailchimp-review'
+import { emailKey } from './mailchimp-rules'
 
 type FetchLike = (url: string, init: any) => Promise<any>
 
@@ -36,6 +37,9 @@ export type ReviewLoad =
       mailchimpWords: string | null    // why Mailchimp could not be read in full; null when it was
       choicesReady: boolean            // false until migrations/mailchimp_review_choices.sql is run
       model: ReviewModel
+      // Only with deps.withLeadIds (slice 6, the sending code): every Bee Hub
+      // record id at this location, by email address. Never sent to a browser.
+      leadIdsByKey?: Record<string, string[]>
     }
 
 const PAGE = 1000
@@ -58,6 +62,7 @@ export async function loadReview(locationId: string, deps: {
   fetchImpl?: FetchLike
   sleep?: (ms: number) => Promise<void>
   loadSuppressed?: (emails: readonly unknown[]) => Promise<Set<string>>
+  withLeadIds?: boolean
 } = {}): Promise<ReviewLoad> {
   const db = deps.db || supabaseService
 
@@ -121,11 +126,18 @@ export async function loadReview(locationId: string, deps: {
     return { ok: false, reason: 'beehub_read_failed', words: 'Bee Hub’s own records could not be read, so nothing is shown. ' + scrub(err?.message || err, token || '') }
   }
 
+  let leadIdsByKey: Record<string, string[]> | undefined
+  if (deps.withLeadIds) {
+    leadIdsByKey = {}
+    for (const l of leads) { const k = emailKey(l.email); if (k) (leadIdsByKey[k] ||= []).push(l.id) }
+  }
+
   return {
     ok: true,
     location: { id: locationId, name: (loc as any).name ?? null, audienceName: (loc as any).mailchimp_list_name ?? null, timeZone },
     mailchimpWords: mailchimpWords ? scrub(mailchimpWords, token || '') : null,
     choicesReady,
     model: buildReview({ leads, contacted, suppressed, members, choices, timeZone }),
+    ...(leadIdsByKey ? { leadIdsByKey } : {}),
   }
 }
