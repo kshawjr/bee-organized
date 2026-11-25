@@ -60,6 +60,7 @@ async function mount() {
 const big = () => host.querySelector('[data-testid="mc-big-number"]')!.textContent
 const person = (name: string) => Array.from(host.querySelectorAll('[data-testid="mc-person"]')).find((el) => el.textContent!.includes(name)) as HTMLElement | undefined
 const click = async (el: Element) => { await act(async () => { (el as HTMLElement).click() }) ; await act(async () => { await new Promise((r) => setTimeout(r, 0)) }) }
+const openList = async () => { const b = host.querySelector('[data-testid="mc-open-list"]'); if (b) await click(b) }
 afterEach(() => { act(() => root?.unmount()); host?.remove(); vi.unstubAllGlobals(); saved = [] })
 
 describe('the screen', () => {
@@ -67,25 +68,28 @@ describe('the screen', () => {
     installFetch(); await mount()
     // new: bob (worked), cat (no history), dee (archived, unticked) → 2 ticked
     expect(big()).toBe('2')
-    expect(host.textContent).toContain('People who will be added to your Mailchimp audience “Friends”')
+    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to your Mailchimp audience')
     expect(host.querySelector('[data-testid="mc-gap"]')!.textContent).toBe('1 already in your Mailchimp · 3 new to Mailchimp')
     const first = host.querySelector('section')!
     expect(first.contains(host.querySelector('[data-testid="mc-big-number"]'))).toBe(true)
   })
   it('archived people are in the list with no filter, unticked, with their archive day', async () => {
     installFetch(); await mount()
+    await openList()
     const dee = person('Dee Doe')!
     expect(dee).toBeTruthy()
     expect((dee.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false)
     expect(dee.textContent).toContain('Archived on Aug 17, 2026')
-    expect((host.querySelector('select[aria-label="Show group"]') as HTMLSelectElement).value).toBe('')
+    expect((host.querySelector('select[aria-label="Filter by group"]') as HTMLSelectElement).value).toBe('')
+    expect(host.querySelector('[data-testid="mc-group-archived"] [data-testid="mc-group-note"]')!.textContent).toBe('Archived on Aug 17, 2026 · tick to add them')
   })
   it('people who said no are not in the list — no box to tick — only counted', async () => {
     installFetch(); await mount()
+    await openList()
     expect(person('Eve Doe')).toBeUndefined()
     expect(person('Fay Doe')).toBeUndefined()
     expect(host.textContent).not.toContain('eve@example.com')
-    expect(host.querySelector('[data-testid="mc-not-offered"]')!.textContent).toMatch(/Can’t be added2/)
+    expect(host.querySelector('[data-testid="mc-not-offered"]')!.textContent).toMatch(/^Can’t be added2/)
   })
   it('unticking a group saves it, drops the number, and a reload shows it back', async () => {
     installFetch(); await mount()
@@ -102,13 +106,15 @@ describe('the screen', () => {
   })
   it('ticking one archived person in saves that person and survives a reload', async () => {
     installFetch(); await mount()
+    await openList()
     await click(person('Dee Doe')!.querySelector('input[type=checkbox]')!)
     expect(big()).toBe('3')
     expect(JSON.parse(calls.find((c) => c.init?.method === 'POST')!.init.body)).toMatchObject({ scope: 'person', key: 'dee@example.com', choice: 'in' })
     act(() => root.unmount()); host.remove()
     await mount()
+    await openList()
     expect((person('Dee Doe')!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true)
-    expect(person('Dee Doe')!.textContent).toContain('changed by you')
+    expect(person('Dee Doe')!.textContent).toContain('Changed')
   })
   it('a phone match is asked once; "same" changes only the count; the person stays listed', async () => {
     installFetch(); await mount()
@@ -118,7 +124,8 @@ describe('the screen', () => {
     const yes = Array.from(q.querySelectorAll('button')).find((b) => b.textContent === 'Yes, same person')!
     await click(yes)
     expect(big()).toBe('1')
-    expect(person('Cat Doe')!.textContent).toContain('matched by phone')
+    await openList()
+    expect(person('Cat Doe')!.textContent).toContain('Matched by phone')
     expect(JSON.parse(calls.find((c) => c.init?.method === 'POST')!.init.body)).toMatchObject({ scope: 'phone', key: 'm2|cat@example.com', choice: 'same' })
   })
   it('calls nothing but its own route', async () => {
@@ -129,6 +136,7 @@ describe('the screen', () => {
   it('a refused save puts the tick back and says why', async () => {
     installFetch(); await mount()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'said_no', words: 'This person has said no to marketing emails, so they can’t be added to Mailchimp.' }), { status: 409 })))
+    await openList()
     await click(person('Bob Doe')!.querySelector('input[type=checkbox]')!)
     expect((person('Bob Doe')!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true)
     expect(host.textContent).toContain('said no to marketing emails')
@@ -138,7 +146,51 @@ describe('the screen', () => {
     const many = Array.from({ length: 120 }, (_, i) => lead('p' + String(i).padStart(3, '0')))
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, choicesReady: true, mailchimpWords: null, location: { id: LOC, name: 'T', audienceName: null, timeZone: 'UTC' }, model: buildReview({ leads: many, contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'UTC' }) }), { status: 200 })))
     await mount()
+    expect(host.querySelectorAll('[data-testid="mc-person"]').length).toBe(0)   // closed until asked for
+    await openList()
     expect(host.querySelectorAll('[data-testid="mc-person"]').length).toBe(50)
+    expect(host.textContent).toContain('Showing 50 of 120')
     expect(big()).toBe('120')
+  })
+it('the Archived group is on screen with nobody in it, and cannot be ticked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, choicesReady: true, mailchimpWords: null, location: { id: LOC, name: 'T', audienceName: null, timeZone: 'UTC' }, model: buildReview({ leads: [lead('ann'), lead('bob')], contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'UTC' }) }), { status: 200 })))
+    await mount()
+    const g = host.querySelector('[data-testid="mc-group-archived"]')!
+    expect(g).toBeTruthy()
+    expect(g.querySelector('[data-testid="mc-group-count"]')!.textContent).toBe('0')
+    expect(g.querySelector('[data-testid="mc-group-note"]')!.textContent).toBe('No one here is archived')
+    const box = g.querySelector('input[type=checkbox]') as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(box.disabled).toBe(true)
+  })
+  it('sections come in the design’s order, and Save only goes back', async () => {
+    installFetch()
+    host = document.createElement('div'); document.body.appendChild(host)
+    root = createRoot(host)
+    const onClose = vi.fn()
+    await act(async () => { root.render(<MailchimpReviewScreen locationId={LOC} onClose={onClose} />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(Array.from(host.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['Groups', 'Not changing', 'Same person?', 'Exceptions'])
+    const posts = () => calls.filter((c) => c.init?.method === 'POST').length
+    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Save')!
+    await click(save)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(posts()).toBe(0)
+  })
+  it('the list does not move the big number when only opened', async () => {
+    installFetch(); await mount()
+    const before = big()
+    await openList()
+    expect(big()).toBe(before)
+  })
+  it('before the migration is run, nothing on the screen can be ticked or answered', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...answer([]), choicesReady: false }), { status: 200 })))
+    await mount()
+    await openList()
+    expect(host.textContent).toContain('Saving choices isn’t switched on yet')
+    const boxes = Array.from(host.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    expect(boxes.length).toBeGreaterThan(5)
+    for (const b of boxes) expect(b.disabled).toBe(true)
+    for (const b of Array.from(host.querySelectorAll('[data-testid="mc-phone-next"] button')) as HTMLButtonElement[]) expect(b.disabled).toBe(true)
   })
 })
