@@ -136,15 +136,17 @@ describe('JobberCard — unified connection + import, plain-language & state-dri
         updateLocation={() => {}}
       />,
     )
-    expect(host.textContent).toContain('Connected & syncing')
-    expect(host.textContent).toContain('Jobber is connected')
-    expect(host.textContent).toContain('up to date automatically')
+    // 2026-11-25, the Lovable look: one chip says the state ("Syncing"), and
+    // the account is named under the location.
+    expect(host.querySelector('[data-conn-chip]')!.textContent).toBe('Syncing')
+    expect(host.querySelector('[data-jobber-screen]')!.getAttribute('data-jobber-screen')).toBe('running')
+    expect(host.textContent).toContain('New requests, quotes, jobs and invoices come across on their own.')
     expect(host.textContent).toContain('Bee Organized NWA')
     // Nothing to do: no import CTA, and no token/expiry jargon.
     expect(host.textContent).not.toContain('Bring in my clients')
     expect(host.textContent).not.toContain('Start Import')
     expect(host.textContent).not.toMatch(/token|expire|auto-refresh/i)
-    expect(host.textContent).toContain('Manage connection')
+    expect(host.textContent).not.toContain('Manage connection')   // the expander is gone: its links sit at the foot
     await unmount()
   })
 
@@ -159,31 +161,40 @@ describe('JobberCard — unified connection + import, plain-language & state-dri
         updateLocation={() => {}}
       />,
     )
-    expect(host.textContent).toContain('Connected & syncing')
-    expect(host.textContent).toContain('Next step')
+    expect(host.querySelector('[data-conn-chip]')!.textContent).toBe('Ready to import')
+    expect(host.textContent).toContain('Bring your existing Jobber clients into Bee Hub.')
     expect(buttonByText(host, 'Bring in my clients')).toBeTruthy()
     expect(host.textContent).not.toContain('Reconnect Jobber')
     await unmount()
   })
 
-  it('connected: Manage expander hides switch / re-sync / disconnect until opened', async () => {
+  it('connected: switch account / re-sync / disconnect are quiet text links, never buttons', async () => {
     const { host, unmount } = await mount(
       <JobberCard
         settings={settingsFor({ jobberStatus: 'connected', jobberAccountName: 'Bee Organized NWA', jobberInitialImportCompletedAt: '2026-07-09T12:00:00Z' })}
         updateLocation={() => {}}
       />,
     )
-    expect(host.textContent).not.toContain('Disconnect')
-    expect(host.textContent).not.toContain('Re-sync from Jobber')
-    const manage = buttonByText(host, 'Manage connection')!
-    await act(async () => { manage.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    expect(host.textContent).toContain('Reconnect to a different account')
-    expect(host.textContent).toContain('Re-sync from Jobber')
-    expect(host.textContent).toContain('Disconnect')
+    // Kevin, 2026-11-25: Disconnect is a quiet text link at the bottom,
+    // below a divider, never a button. The old "Manage connection" expander
+    // (three boxed buttons, Disconnect in red) is gone.
+    const foot = host.querySelector('[data-conn-footer]') as HTMLElement
+    expect(foot.style.borderTop).toMatch(/1px solid/)
+    expect(host.querySelector('[data-conn-screen]')!.lastElementChild).toBe(foot)
+    const quiet = (t: string) => buttonByText(host, t)!
+    for (const t of ['Disconnect', 'Reconnect to a different account', 'Re-sync from Jobber']) {
+      expect(quiet(t), t).toBeTruthy()
+      expect(quiet(t).hasAttribute('data-conn-quiet'), t).toBe(true)
+      expect(quiet(t).hasAttribute('data-sbtn'), t).toBe(false)
+      expect(quiet(t).style.border, t).toMatch(/none/)
+      expect(quiet(t).style.background, t).toBe('transparent')
+    }
+    expect(foot.contains(quiet('Disconnect'))).toBe(true)
+    expect(foot.contains(quiet('Reconnect to a different account'))).toBe(true)
     await unmount()
   })
 
-  it('reconnect_required: amber Action needed + one Reconnect button, never offers import, no jargon', async () => {
+  it('reconnect_required: amber Needs attention + one Reconnect button, never offers import, no jargon', async () => {
     const { host, unmount } = await mount(
       <JobberCard
         settings={settingsFor({
@@ -194,8 +205,10 @@ describe('JobberCard — unified connection + import, plain-language & state-dri
         updateLocation={() => {}}
       />,
     )
-    expect(host.textContent).toContain('Action needed')
-    expect(host.textContent).toContain('Reconnect Jobber')
+    expect(host.querySelector('[data-conn-chip]')!.textContent).toBe('Needs attention')
+    expect(host.querySelector('[data-conn-chip]')!.getAttribute('data-conn-tone')).toBe('warn')
+    expect(buttonByText(host, 'Reconnect Jobber')!.getAttribute('data-sbtn')).toBe('primary')
+    expect(host.textContent).toContain('Updates are paused until you reconnect.')
     expect(host.textContent).toContain('30 seconds')
     expect(host.textContent).toContain('none of your existing information is lost')
     // A dead connection never offers import, and never shows raw token vocab.

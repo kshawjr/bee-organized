@@ -270,7 +270,8 @@ describe('a record the person may not see answers "not found", never "forbidden"
   it('no route in the family still answers a location mismatch with 403 (source)', () => {
     for (const f of ['app/api/touchpoints/route.ts', 'app/api/partner-tags/route.ts', 'app/api/reminders/route.ts', 'app/api/lookups/route.ts', 'app/api/lookups/[id]/route.ts',
       'app/api/companies/route.ts', 'app/api/companies/[id]/route.ts', 'app/api/companies/[id]/referrals/route.ts', 'app/api/companies/[id]/touchpoints/route.ts', 'app/api/partners/[id]/referrals/route.ts',
-      'app/api/network/list/route.ts', 'app/api/network/nurturing/route.ts', 'app/api/network/import/route.ts', 'app/api/network/summary/route.ts']) {
+      'app/api/network/list/route.ts', 'app/api/network/nurturing/route.ts', 'app/api/network/import/route.ts', 'app/api/network/summary/route.ts',
+      'app/api/network/counts/route.ts']) {
       const s = readFileSync(join(process.cwd(), f), 'utf8')
       expect(s, f).not.toMatch(/forbidden_wrong_location/)
       expect(s, f).not.toMatch(/(canReadLocation|mayReadNetworkLocation)\([^)]*\)\)?\s*\{?\s*\n?\s*return NextResponse\.json\(\{ error: 'forbidden' \}, \{ status: 403 \}\)/)

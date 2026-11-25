@@ -133,7 +133,11 @@ describe('single-helper invariant — no drifting copies', () => {
   })
 
   it('the card renders a distinct reconnect_required state with a prominent action', () => {
-    expect(src).toMatch(/reconnect_required:/)          // per-state presentation entry
+    // 2026-11-25 (Lovable look): the per-state table is gone; the state comes
+    // from lib/connection-health.ts jobberScreenState and the screen draws
+    // its own reconnect box.
+    expect(src).toMatch(/\{status === 'reconnect_required' && \(\s*<>\s*<KUI\.ConnNotice data-jobber-reconnect/)
+    expect(src).toMatch(/reconnect:\['Needs attention','warn'\]/)
     expect(src).toMatch(/Reconnect Jobber/)             // the prominent reconnect CTA
   })
 })

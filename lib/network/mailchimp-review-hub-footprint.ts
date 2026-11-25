@@ -12,6 +12,8 @@
 // [what is there now, what main had].
 // ─────────────────────────────────────────────────────────────
 
+import { withoutConnectionScreens } from '../connection-screens-hub-footprint'
+
 export const MAILCHIMP_REVIEW_HUB_PIECES: [string, string][] = [
   ['import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"\n', ''],
   ["  // FL-75 slice 5: the \"Who goes to Mailchimp\" review screen, opened from the\n  // ready state. It sends nothing; Sync now below is unchanged.\n  const [reviewing, setReviewing] = useState(false)\n", ''],
@@ -19,8 +21,12 @@ export const MAILCHIMP_REVIEW_HUB_PIECES: [string, string][] = [
   ["            {/* FL-75 slice 5 — choose who goes to Mailchimp. Opens the review\n                screen; nothing is sent from it. */}\n            <button onClick={()=>setReviewing(true)} className=\"bee-small-action\" data-testid=\"mc-open-review\"\n              style={{ display:'block', marginTop:'12px', padding:'9px 16px', background:'transparent', border:HT.border.control, borderRadius:HT.radius.control, fontFamily:'inherit', fontWeight:700, color:HT.accent.fg, cursor:'pointer' }}>\n              Review who goes to Mailchimp\n            </button>\n\n", ''],
 ]
 
-/** BeeHub.jsx with Mailchimp slice 5 taken back out. Throws if a piece is missing or doubled. */
-export function withoutMailchimpReviewSlice5(src: string): string {
+/**
+ * Slice 5's own pieces taken out of a BeeHub.jsx that has nothing later in it
+ * (the file as it was at a8c77c0, which lib/mailchimp-review.test.ts reads
+ * from git). Throws if a piece is missing or doubled.
+ */
+export function withoutMailchimpReviewSlice5Pieces(src: string): string {
   let s = src
   for (const [piece, back] of MAILCHIMP_REVIEW_HUB_PIECES) {
     const n = s.split(piece).length - 1
@@ -28,4 +34,11 @@ export function withoutMailchimpReviewSlice5(src: string): string {
     s = s.split(piece).join(back)
   }
   return s
+}
+
+/** Today's BeeHub.jsx (slice 6 already taken out by the caller) with Mailchimp slice 5 taken back out. */
+export function withoutMailchimpReviewSlice5(src: string): string {
+  // 2026-11-25: the Slack and Jobber connection screens came after this
+  // slice, so they are taken back out first (connection-screens-hub-footprint.ts).
+  return withoutMailchimpReviewSlice5Pieces(withoutConnectionScreens(src))
 }

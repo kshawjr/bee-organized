@@ -616,12 +616,14 @@ describe('reading the flows (GET only, fail closed)', () => {
 })
 
 describe('slice 6 changed BeeHub.jsx in the Mailchimp card only', () => {
-  it('BeeHub.jsx is main a8c77c0 plus the slice 6 pieces, and nothing else', async () => {
+  it('BeeHub.jsx is main 36d0752 plus the slice 6 pieces, and nothing else', async () => {
     const { execSync } = await import('child_process')
     const { createHash } = await import('crypto')
     const { withoutMailchimpSendSlice6 } = await import('./network/mailchimp-send-hub-footprint')
     const sha = (t: string) => createHash('sha256').update(t).digest('hex')
-    const then = execSync('git show a8c77c0:components/BeeHub.jsx', { cwd: process.cwd(), maxBuffer: 1 << 27 }).toString()
+    // 2026-11-25: brought up to date with main 36d0752 (the Slack and Jobber
+    // screens). Slice 6 touches none of their lines.
+    const then = execSync('git show 36d0752:components/BeeHub.jsx', { cwd: process.cwd(), maxBuffer: 1 << 27 }).toString()
     expect(sha(withoutMailchimpSendSlice6(readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')))).toBe(sha(then))
   })
 })

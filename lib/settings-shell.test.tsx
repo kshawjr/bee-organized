@@ -587,12 +587,13 @@ describe('Lato and Arvo cannot leak', () => {
   })
 
   // Location was the example here until it was rebuilt (slice 3), then Call
-  // scripts until slice 5. Jobber's own screen, behind its Connections card,
-  // is still in the old look.
-  it('an unrebuilt section (Jobber) carries no new font and sits outside every data-settings-ui', async () => {
-    await mount({ franchiseRole: 'owner', initialSection: 'jobber' })
+  // scripts until slice 5, then Jobber's own screen until 2026-11-25 (rebuilt
+  // with Slack's to the Lovable design). Mailchimp's screen, behind its
+  // Connections card, is still in the old look.
+  it('an unrebuilt section (Mailchimp) carries no new font and sits outside every data-settings-ui', async () => {
+    await mount({ franchiseRole: 'owner', initialSection: 'mailchimp' })
     const body = pane().lastElementChild as HTMLElement
-    expect(body.textContent).toContain('the client import that runs from it')
+    expect(body.textContent).toContain('the audience your clients belong to')
     // The one rebuilt piece on this screen is the "All connections" link
     // above the card; the card itself is outside it.
     expect(Array.from(body.querySelectorAll('[data-settings-ui]')).map(e => (e.textContent || '').trim()), 'the only rebuilt piece is the back link').toEqual(['All connections'])
@@ -650,20 +651,46 @@ describe('the new pieces are used by Settings and by nothing else', () => {
   // mounted by SettingsScreen and nothing else, so it is Settings too.
   const tStart = lines.findIndex(l => l.startsWith('export function TeamSection('))
   const tEnd = lines.findIndex((l, i) => i > tStart && l === '}')
-  it('BeeHub.jsx uses them only inside SettingsScreen and its Seats card (TeamSection)', () => {
+  // 2026-11-25: the Slack and Jobber screens (SlackCard, JobberCard, and the
+  // import step JobberCard draws inside itself, ClientImportCard) are Settings
+  // too — each is mounted by SettingsScreen (ClientImportCard's rebuilt branch
+  // by JobberCard) and by nothing else. Pinned just below.
+  const span = (name: string) => {
+    const a = lines.findIndex(l => l.startsWith(`export function ${name}(`))
+    return [a, lines.findIndex((l, i) => i > a && l === '}')] as const
+  }
+  const cards = ['SlackCard', 'JobberCard', 'ClientImportCard'].map(span)
+  it('BeeHub.jsx uses them only inside SettingsScreen, its Seats card (TeamSection) and the Slack and Jobber screens', () => {
     expect(start).toBeGreaterThan(0)
     expect(end).toBeGreaterThan(start)
     expect(tStart).toBeGreaterThan(0)
     expect(tEnd).toBeLessThan(start)
-    const inSettings = (i: number) => (i >= start && i <= end) || (i >= tStart && i <= tEnd)
+    for (const [a, b] of cards) { expect(a).toBeGreaterThan(0); expect(b).toBeGreaterThan(a) }
+    const inSettings = (i: number) => (i >= start && i <= end) || (i >= tStart && i <= tEnd) || cards.some(([a, b]) => i >= a && i <= b)
     const outside = lines
       .map((l, i) => ({ l, i }))
-      .filter(({ l, i }) => /\b(SUI|TUI)\b/.test(l) && !l.trim().startsWith('//') && !inSettings(i))
+      .filter(({ l, i }) => /\b(SUI|TUI|KUI)\b/.test(l) && !l.trim().startsWith('//') && !inSettings(i))
       .map(({ l }) => l.trim())
     expect(outside).toEqual([
       'import * as SUI from "@/components/settings/SettingsShell"',
       'import * as TUI from "@/components/settings/TeamAndLeads"',
+      'import * as KUI from "@/components/settings/ConnectionScreen"',
     ])
+    // Each screen is mounted once, by SettingsScreen; the import step's
+    // rebuilt (chromeless) branch once, by JobberCard.
+    for (const c of ['SlackCard', 'JobberCard']) {
+      const at = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.includes(`<${c} `))
+      expect(at.length, c).toBe(1)
+      expect(at[0].i, c).toBeGreaterThan(start); expect(at[0].i, c).toBeLessThan(end)
+    }
+    const chromeless = lines.map((l, i) => ({ l, i })).filter(({ l }) => /^\s*chromeless$/.test(l))
+    expect(chromeless.length).toBe(1)
+    expect(chromeless[0].i).toBeGreaterThan(cards[1][0]); expect(chromeless[0].i).toBeLessThan(cards[1][1])
+    // …and inside ClientImportCard the new pieces are in that branch only.
+    const [ia, ib] = cards[2]
+    const branch = lines.findIndex((l, i) => i > ia && l === '  if (chromeless) {')
+    const branchEnd = lines.findIndex((l, i) => i > branch && l === '  }')
+    for (let i = ia; i <= ib; i++) if (/\b(SUI|KUI)\b/.test(lines[i]) && !lines[i].trim().startsWith('//')) expect(i > branch && i < branchEnd, lines[i].trim()).toBe(true)
     // TeamSection is mounted once, by SettingsScreen.
     const mounts = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.includes('<TeamSection '))
     expect(mounts.length).toBe(1)
@@ -675,7 +702,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     const importers = (needle: string) =>
       [...walk('components'), ...walk('app'), ...walk('lib')].filter(p => readFileSync(p, 'utf8').includes(needle)).sort()
     // Slice 2 added the Team pieces and restyled the Bees card.
-    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
+    expect(importers("settings/SettingsShell'").concat(importers('settings/SettingsShell"')).sort()).toEqual(['components/BeeHub.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionScreen.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/TeamAndLeads.jsx'])
     // 2026-11-13: the territory panel (shared with Admin's location sheet) takes
     // ONE colour from the tokens, the gold of its "Change this territory"
     // label. It names no font: see the Lato test above.
@@ -683,7 +710,9 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // 2026-11-19: Network slice 6's confirmation box, inside the Network list and sheet.
     // 2026-11-23: partner emails slice 5, Start / Stop on the contact sheet.
     // 2026-11-24: Mailchimp "Who goes to Mailchimp" rebuilt to the Lovable design (FL-75).
-    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/AddContactDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/ContactSheet.jsx', 'components/network/ImportDialog.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/NetworkOverview.jsx', 'components/network/NetworkTabs.jsx', 'components/network/NurtureBulkConfirm.jsx', 'components/network/NurtureSheet.jsx', 'components/network/NurturingScreen.jsx', 'components/network/PartnerEmails.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/MailchimpConnectionScreen.jsx', 'components/settings/MailchimpReviewScreen.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
+    // 2026-11-25: the Slack and Jobber screens' pieces (ConnectionScreen.jsx).
+    // 2026-11-25: the Mailchimp connection screen (MailchimpConnectionScreen.jsx, FL-101).
+    expect(importers("from '@/components/design/tokens'")).toEqual(['components/admin/LocationZipsPanel.jsx', 'components/design/AppRail.jsx', 'components/hive/BeeRosterSettings.jsx', 'components/network/AddContactDialog.jsx', 'components/network/ConfirmChange.jsx', 'components/network/ContactSheet.jsx', 'components/network/ImportDialog.jsx', 'components/network/NetworkListScreen.jsx', 'components/network/NetworkOverview.jsx', 'components/network/NetworkTabs.jsx', 'components/network/NurtureBulkConfirm.jsx', 'components/network/NurtureSheet.jsx', 'components/network/NurturingScreen.jsx', 'components/network/PartnerEmails.jsx', 'components/network/TagDialog.jsx', 'components/settings/CallScripts.jsx', 'components/settings/ConnectionScreen.jsx', 'components/settings/ConnectionsPage.jsx', 'components/settings/LocationRows.jsx', 'components/settings/MailchimpConnectionScreen.jsx', 'components/settings/MailchimpReviewScreen.jsx', 'components/settings/SettingsShell.jsx', 'components/settings/TeamAndLeads.jsx'])
     // The Bees card is mounted by Settings and by nothing else.
     expect(importers('hive/BeeRosterSettings"').concat(importers("hive/BeeRosterSettings'")).filter(p => !p.includes('.test.'))).toEqual(['components/BeeHub.jsx'])
   })
@@ -708,16 +737,21 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // Call scripts: slice 5.
     await mount({ franchiseRole: 'owner', initialSection: 'scripts' })
     expect(is(bg(), T.background), `scripts: ${bg()}`).toBe(true)
-    // Emails paints its own background; the three screens behind a
-    // Connections card are not rebuilt.
-    for (const section of ['emails', 'slack', 'jobber', 'mailchimp']) {
+    // Slack's and Jobber's own screens: 2026-11-25 (the Lovable design).
+    for (const section of ['slack', 'jobber']) {
+      await mount({ franchiseRole: 'owner', initialSection: section })
+      expect(is(bg(), T.background), `${section}: ${bg()}`).toBe(true)
+    }
+    // Emails paints its own background; Mailchimp's screen, behind its
+    // Connections card, is not rebuilt.
+    for (const section of ['emails', 'mailchimp']) {
       await mount({ franchiseRole: 'owner', initialSection: section })
       expect(is(bg(), '#f7f5f0'), `${section}: ${bg()}`).toBe(true)
     }
     // The no-access notice is old-look too.
     await mount({ franchiseRole: 'manager', initialSection: 'emails' })
     expect(is(bg(), '#f7f5f0'), `notice: ${bg()}`).toBe(true)
-    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team', 'location', 'tags', 'connections', 'texting', 'scripts'])
+    expect(Shell.REBUILT_SECTIONS).toEqual(['profile', 'team', 'location', 'tags', 'connections', 'texting', 'scripts', 'slack', 'jobber'])
   })
 
   it('no new dependency: the shell imports React, the tokens and Bee Hub\'s own icons — nothing else', () => {

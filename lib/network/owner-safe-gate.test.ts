@@ -33,6 +33,7 @@ vi.mock('@/lib/supabase-server', () => ({
 import { NEW_NETWORK_ROLES } from './access'
 import * as list from '@/app/api/network/list/route'
 import * as nurturing from '@/app/api/network/nurturing/route'
+import * as counts from '@/app/api/network/counts/route'
 import * as person from '@/app/api/network/nurturing/[id]/route'
 import * as followUp from '@/app/api/network/nurturing/[id]/follow-up/route'
 import * as nurtureBulk from '@/app/api/network/nurturing/bulk/route'
@@ -50,6 +51,7 @@ const p = { params: Promise.resolve({ id: ID }) }
 const HANDLERS: [string, () => Promise<Response>][] = [
   ['GET list', () => list.GET(req(`/x?location_id=${LOC}`))],
   ['GET nurturing', () => nurturing.GET(req(`/x?location_id=${LOC}`))],
+  ['GET counts', () => counts.GET(req(`/x?location_id=${LOC}`))],
   ['GET nurturing/[id]', () => person.GET(req('/x'), p)],
   ['POST follow-up', () => followUp.POST(req('/x', { due_on: '2026-12-01', note: 'x' }), p)],
   ['POST nurturing/bulk', () => nurtureBulk.POST(req('/x', { location_id: LOC, action: 'tag_add', tag_id: ID, selection: { ids: [ID] }, dry_run: true }))],
@@ -90,10 +92,11 @@ describe('every Network route asks the gate first, then the location rule', () =
   const walk = (d: string) => { for (const f of readdirSync(d)) { const x = join(d, f); statSync(x).isDirectory() ? walk(x) : f === 'route.ts' && files.push(x) } }
   walk(root)
   // Partner emails slice 5 added contacts/[id]/sequences (GET, POST, DELETE).
-  it('there are 12 route files, 16 handlers', () => {
-    expect(files.length).toBe(12)
+  // 2026-11-25: counts (GET), the two numbers on the tabs.
+  it('there are 13 route files, 17 handlers', () => {
+    expect(files.length).toBe(13)
     const handlers = files.flatMap((f) => readFileSync(f, 'utf8').match(/export async function (GET|POST|PATCH|PUT|DELETE)\b/g) || [])
-    expect(handlers.length).toBe(16)
+    expect(handlers.length).toBe(17)
   })
   for (const f of files) {
     const rel = f.slice(root.length + 1)

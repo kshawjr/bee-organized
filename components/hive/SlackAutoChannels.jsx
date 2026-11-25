@@ -41,7 +41,12 @@ export function sinceLabel(iso) {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-export default function SlackAutoChannels({ locationId }) {
+// `wrap` (optional) is handed what this draws — or null when it draws nothing
+// — and returns what goes on screen. The Slack screen uses it to put a
+// "Job channels" heading over the switch only when there is something under
+// the heading. `bare` drops the rule and gap above, for a caller that draws
+// its own.
+export default function SlackAutoChannels({ locationId, wrap = null, bare = false }) {
   const [state, setState] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -57,7 +62,7 @@ export default function SlackAutoChannels({ locationId }) {
     return () => { dead = true }
   }, [locationId])
 
-  if (!state || !state.setUp || !state.connected) return null
+  if (!state || !state.setUp || !state.connected) return wrap ? wrap(null) : null
 
   const { on, since, capped, cap, reconnected, canSet } = state
   // Turning OFF is always allowed to someone who may set it; turning ON
@@ -82,8 +87,8 @@ export default function SlackAutoChannels({ locationId }) {
   const reason = !canSet ? AUTO_OWNER_ONLY : (!on && !reconnected ? AUTO_NEEDS_RECONNECT : null)
   const when = sinceLabel(since)
 
-  return (
-    <div data-slack-auto style={{ marginTop: '12px', paddingTop: '12px', borderTop: T.border.thin, textAlign: 'left' }}>
+  const drawn = (
+    <div data-slack-auto style={bare ? { textAlign: 'left' } : { marginTop: '12px', paddingTop: '12px', borderTop: T.border.thin, textAlign: 'left' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
         <p id="slack-auto-label" style={{ flex: 1, minWidth: 0, margin: 0, fontSize: '13px', fontWeight: 600, lineHeight: 1.35, color: reason ? T.ink.muted : T.ink.primary }}>
           {AUTO_LABEL}
@@ -120,4 +125,5 @@ export default function SlackAutoChannels({ locationId }) {
       </div>
     </div>
   )
+  return wrap ? wrap(drawn) : drawn
 }

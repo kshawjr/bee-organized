@@ -24,7 +24,7 @@ vi.mock('./supabase-service', () => ({ supabaseService: svc }))
 import { buildReview, isIncluded, countAdding, groupWords, BULK_DAY_MIN, type ReviewLead, type ReviewMember, type StoredChoice } from './mailchimp-review'
 import { loadReview } from './mailchimp-review-load'
 import { saveChoice, validateChoice } from './mailchimp-review-choices'
-import { withoutMailchimpReviewSlice5 } from './network/mailchimp-review-hub-footprint'
+import { withoutMailchimpReviewSlice5Pieces } from './network/mailchimp-review-hub-footprint'
 
 const ROOT = join(__dirname, '..')
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8')
@@ -313,7 +313,9 @@ describe('A + F. nothing sends — by fingerprint', () => {
   })
   it('BeeHub.jsx is main d41e711 plus the slice 5 pieces, and nothing else', () => {
     const then = execSync('git show d41e711:components/BeeHub.jsx', { cwd: ROOT, maxBuffer: 1 << 27 }).toString()
-    expect(sha(withoutMailchimpReviewSlice5(at(SLICE5_DONE, 'components/BeeHub.jsx')))).toBe(sha(then))
+    // The file is read as it was at a8c77c0, before the Slack and Jobber
+    // screens, so only slice 5's own pieces come out.
+    expect(sha(withoutMailchimpReviewSlice5Pieces(at(SLICE5_DONE, 'components/BeeHub.jsx')))).toBe(sha(then))
   })
   it('F. the Mailchimp card’s Sync now and its first-sync confirmation are untouched', () => {
     const then = execSync('git show d41e711:components/BeeHub.jsx', { cwd: ROOT, maxBuffer: 1 << 27 }).toString()

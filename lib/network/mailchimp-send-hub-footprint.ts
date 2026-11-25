@@ -9,10 +9,12 @@
 // gone, and Done on the review records that the review was finished.
 // Older tests pin BeeHub.jsx by fingerprint. They take THIS change back out
 // first, by these exact pieces — each must be present exactly once, and the
-// file with all of them put back is byte for byte origin/main a8c77c0. So ANY
-// other change still fails them.
+// file with all of them put back is byte for byte origin/main 36d0752 (the
+// branch was brought up to date with main on 2026-11-25; the Slack and Jobber
+// screens touch none of these lines, and a8c77c0 had the same Mailchimp card).
+// So ANY other change still fails them.
 //
-// [what is there now, what main a8c77c0 had].
+// [what is there now, what main had].
 // ─────────────────────────────────────────────────────────────
 
 export const MAILCHIMP_SEND_HUB_PIECES: [string, string][] = [
