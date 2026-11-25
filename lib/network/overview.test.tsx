@@ -149,6 +149,6 @@ describe('three tabs on a phone', () => {
     const phone = src.slice(src.indexOf('@media (max-width:767px)'), src.indexOf('}\n', src.indexOf('@media (max-width:767px)')) + 1)
     expect(phone).toContain('[data-network-tabs] .nt-tab{flex:1 1 0;min-width:0;')
     expect(phone).toContain('white-space:normal')
-    expect(phone).toContain('[data-network-tabs] .nt-tabs{display:flex;max-width:100%}')
+    expect(phone).toContain('[data-network-tabs] .nt-tabs{display:flex;flex:1 1 auto;max-width:100%}')
   })
 })

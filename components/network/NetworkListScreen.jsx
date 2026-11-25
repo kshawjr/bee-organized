@@ -58,6 +58,7 @@
 'use client'
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useClickAway, insideRefs } from '@/components/ui/useClickAway'
 import { T, NET, TAG_TONES, FONT, FONT_STYLESHEET_HREF } from '@/components/design/tokens'
 import { TYPE_META, LEVEL_META, PARTNER_LEVELS, PARTNER_STAGES, NET_TYPES, contactTypes, hasType, isOrganization, isReferralPartner, partnerLevel, partnerStage, money, talkedLabel, COLD_AFTER_DAYS } from '@/lib/network/types'
@@ -101,9 +102,6 @@ const CSS = `
 [data-network-ui] .nw-preview{display:inline-flex;align-items:center;gap:6px;margin-top:12px;padding:5px 10px;border:1px dashed ${T.input};border-radius:999px;font-size:12px!important;color:${T.mutedFg};background:${T.card}}
 [data-network-ui] .nw-toolbar{margin-top:20px}
 [data-network-ui] .nw-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
-[data-network-ui] .nw-act{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 16px;border-radius:10px;border:1px solid ${T.input};background:${T.card};color:${T.primary};font-size:14px!important;font-weight:700;white-space:nowrap}
-[data-network-ui] .nw-act:hover:not(:disabled){border-color:${T.primary}}
-[data-network-ui] .nw-act[data-primary]{background:${T.primary};border-color:${T.primary};color:${T.primaryFg}}
 [data-network-ui] .nw-act-note{flex-basis:100%;margin:0;font-size:12.5px;color:${T.mutedFg}}
 [data-network-ui] .nw-add-menu{width:min(320px,calc(100vw - 32px));padding:6px}
 [data-network-ui] .nw-add-choice{display:grid;gap:2px;width:100%;min-height:56px;padding:10px 12px!important;border-radius:10px;border:0!important;background:transparent;text-align:left!important;color:${T.primary}}
@@ -112,7 +110,23 @@ const CSS = `
 [data-network-ui] .nw-add-choice span{font-size:12.5px;line-height:1.35;color:${T.mutedFg}}
 [data-network-ui] .nw-more-menu{width:min(280px,calc(100vw - 32px));padding:6px}
 @media (max-width:600px){ [data-network-ui] .nw-actions{position:relative} [data-network-ui] .nw-anchor.nw-more-anchor{position:static} [data-network-ui] .nw-more-anchor .nw-menu{left:0;right:auto} }
-[data-network-ui] .nw-actions .nw-act:not([data-primary]){gap:4px}
+/* THE HEADER BUTTONS (2026-11-25, Kevin's Lovable design): Add, then the round
+   three-dots button for the rare actions (Export). Hosted at the top right of
+   the Network & Nurture tab bar (NetworkTabs.jsx), on both tabs. */
+[data-network-ui][data-network-head-actions]{position:relative;min-height:0;background:transparent;display:flex;align-items:center;gap:8px;flex-shrink:0}
+[data-network-ui] .nw-add-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 16px;border-radius:10px;background:${T.primary};color:${T.primaryFg};font-size:14px!important;font-weight:700;white-space:nowrap}
+[data-network-ui] .nw-add-btn:hover:not(:disabled){background:color-mix(in oklab,${T.primary} 88%,${T.card})}
+[data-network-ui] .nw-dots{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:44px;height:44px;border-radius:999px!important;border:1px solid ${T.border}!important;background:linear-gradient(135deg,${T.sageSoft},${T.card})!important;box-shadow:0 2px 8px rgb(0 0 0 / .06);transition:transform .2s ease,box-shadow .2s ease}
+[data-network-ui] .nw-dots i{width:5px;height:5px;border-radius:999px;transition:transform .26s cubic-bezier(.3,1.6,.5,1)}
+[data-network-ui] .nw-dots i:nth-child(1){background:${T.primary}}
+[data-network-ui] .nw-dots i:nth-child(2){background:${T.gold}}
+[data-network-ui] .nw-dots i:nth-child(3){background:${T.mutedFg}}
+[data-network-ui] .nw-dots:hover{transform:translateY(-1px);box-shadow:0 6px 14px rgb(0 0 0 / .1)}
+[data-network-ui] .nw-dots:hover i:nth-child(1){transform:translateY(-3px)}
+[data-network-ui] .nw-dots:hover i:nth-child(3){transform:translateY(3px)}
+[data-network-ui] .nw-dots[aria-expanded="true"]{transform:rotate(90deg)}
+[data-network-ui][data-network-head-actions] .nw-menu{left:auto;right:0}
+@media (prefers-reduced-motion:reduce){ [data-network-ui] .nw-dots,[data-network-ui] .nw-dots i{transition:none} }
 [data-network-ui] .nw-row-wrap{display:flex;align-items:stretch;min-width:0;border-bottom:1px solid ${T.border}}
 [data-network-ui] .nw-row-wrap:last-child{border-bottom:0}
 [data-network-ui] .nw-row-wrap[data-even]{background:color-mix(in oklab,var(--nw-tint) 32%,${T.card})}
@@ -232,8 +246,6 @@ const IconSliders = () => <Svg><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5
 const IconTag = () => <Svg><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z" /><path d="M7 7h.01" /></Svg>
 const IconCheck = () => <Svg size={12}><path d="M5 12l5 5l10 -10" /></Svg>
 const IconPlus = () => <Svg><path d="M12 5v14M5 12h14" /></Svg>
-const IconChevron = () => <Svg size={14}><path d="M6 9l6 6 6-6" /></Svg>
-const IconMore = () => <Svg><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></Svg>
 const IconDownload = () => <Svg><path d="M12 3v12M7 10l5 5 5-5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></Svg>
 const IconClock = () => <Svg><path d="M8 2v4M16 2v4M3 10h18M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" /><circle cx="18" cy="18" r="4" /><path d="M18 16.5V18l1 1" /></Svg>
 const IconFirst = () => <Svg><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" /></Svg>
@@ -448,6 +460,13 @@ function Group({ type, contacts, open, onToggle, page, size, onPage, onSize, onO
 export default function NetworkListScreen({
   locationId = null, locationName = '', onOpenContact = null,
   initialTagId = null, onInitialTagConsumed = () => {}, fetchImpl = null, now = null, refreshKey = 0,
+  // 2026-11-25: where the Add and three-dots buttons go. NetworkTabs.jsx hands
+  // in a spot at the top right of its tab bar; with none (this screen on its
+  // own) they sit under the title, where they always were.
+  actionsTarget = null, showMore = true, onContactsChanged = () => {},
+  // On the Nurturing tab the list is kept but not shown: its Add button and
+  // the boxes behind it (which open over the page) still work from there.
+  listHidden = false,
 }) {
   const [data, setData] = useState(null)        // { contacts, tags, followUps, truncated }
   const [referrals, setReferrals] = useState(null) // Map id → rollup, or null until it answers
@@ -620,24 +639,14 @@ export default function NetworkListScreen({
     setActNote({ words: `Saved ${name}: ${contacts.length} contact${contacts.length === 1 ? '' : 's'} at ${locationName || 'this location'}.`, tone: 'good' })
   }
 
-  return (
-    <div data-network-ui data-network-list>
-      <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
-      <style>{CSS}</style>
-      <div className="nw-wrap" data-bulk-open={(selectable && selected.size > 0) || undefined}>
-        <p className="nw-eyebrow">Network &amp; Nurture</p>
-        <h1 className="nw-title">Network{locationId && locationName ? ` · ${locationName}` : ''}</h1>
-        <p className="nw-lede">Everyone who isn&rsquo;t a client: who sends you work, who you recommend, and who you are still figuring out.</p>
-        <span className="nw-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
-
-        <div className="nw-actions" data-actions>
+  const headButtons = (<>
           {/* ONE BUTTON for adding (2026-11-19): one person, or from a
               spreadsheet. It is the list's own Menu: it closes by picking a
               choice, pressing the button again, Escape, or a click anywhere
               outside it (Kevin, 2026-11-19). */}
           <Menu anchorClass="nw-add-anchor" className="nw-add-menu" trigger={(open, toggle) => (
-            <button type="button" className="nw-act" data-primary disabled={!locationId} aria-expanded={open} aria-haspopup="menu" onClick={toggle} data-act="add-contacts">
-              <IconPlus />Add contacts<IconChevron />
+            <button type="button" className="nw-add-btn" data-primary disabled={!locationId} aria-expanded={open} aria-haspopup="menu" onClick={toggle} data-act="add-contacts">
+              <IconPlus />Add
             </button>
           )}>{(close) => (<>
             <button type="button" role="menuitem" className="nw-add-choice" onClick={() => { close(); setActNote(null); setDialog('add') }} data-act="add">
@@ -647,17 +656,35 @@ export default function NetworkListScreen({
               <b>From a spreadsheet</b><span>A CSV file from Outlook, Google Contacts, Mailchimp, LinkedIn or any spreadsheet.</span>
             </button>
           </>)}</Menu>
-          {/* MORE: the rare actions. Export only, for now. */}
-          <Menu anchorClass="nw-more-anchor" className="nw-more-menu" trigger={(open, toggle) => (
-            <button type="button" className="nw-act" aria-expanded={open} aria-haspopup="menu" onClick={toggle} aria-label="More" data-act="more"><IconMore />More</button>
+          {/* MORE: the rare actions. Export only, for now. Network contacts only:
+              on the Nurturing tab there is no export, so no three dots. */}
+          {showMore && <Menu anchorClass="nw-more-anchor" className="nw-more-menu" trigger={(open, toggle) => (
+            <button type="button" className="nw-dots" aria-expanded={open} aria-haspopup="menu" onClick={toggle} aria-label="More" title="More" data-act="more"><i /><i /><i /></button>
           )}>{(close) => (<>
             <button type="button" role="menuitem" className="nw-add-choice" disabled={!locationId || !data || !contacts.length} onClick={() => { close(); exportAll() }} data-act="export">
               <b><IconDownload /> Export CSV</b><span>{locationId ? (data ? `All ${contacts.length} at ${locationName || 'this location'}, in the columns the import reads.` : 'Loading…') : 'Pick one location first.'}</span>
             </button>
-          </>)}</Menu>
+          </>)}</Menu>}
+  </>)
+  const actNotes = (<>
           {!locationId && <p className="nw-act-note" data-act-note="pick-location">Pick one location to add, change or export contacts. A contact belongs to one location, so none of these work across all of them at once.</p>}
           {locationId && actNote && <p className="nw-act-note" data-tone={actNote.tone} role="status" data-act-note="done">{actNote.words}</p>}
-        </div>
+  </>)
+
+  return (
+    <div data-network-ui data-network-list style={listHidden ? { minHeight: 0 } : undefined}>
+      <link rel="stylesheet" href={FONT_STYLESHEET_HREF} />
+      <style>{CSS}</style>
+      <div className="nw-wrap" hidden={listHidden} data-bulk-open={(selectable && selected.size > 0) || undefined}>
+        <p className="nw-eyebrow">Network &amp; Nurture</p>
+        <h1 className="nw-title">Network{locationId && locationName ? ` · ${locationName}` : ''}</h1>
+        <p className="nw-lede">Everyone who isn&rsquo;t a client: who sends you work, who you recommend, and who you are still figuring out.</p>
+        <span className="nw-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
+
+        {!actionsTarget
+          ? <div className="nw-actions" data-actions>{headButtons}{actNotes}</div>
+          : (!locationId || actNote) && <div className="nw-actions" data-act-notes>{actNotes}</div>}
+        {actionsTarget && createPortal(<div data-network-ui data-network-head-actions>{headButtons}</div>, actionsTarget)}
 
         {problem && <div className="nw-problem" role="alert" data-problem>We couldn&rsquo;t load the Network list ({problem}). Nothing has been changed. Reload the page to try again.</div>}
         {!problem && !data && <p className="nw-none" data-loading style={{ marginTop: '20px' }}>Loading contacts…</p>}
@@ -793,13 +820,13 @@ export default function NetworkListScreen({
       {dialog === 'add' && locationId && (
         <AddContactDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
           onClose={() => setDialog(null)}
-          onAdded={(id) => { setDialog(null); setReloads((n) => n + 1); if (onOpenContact) onOpenContact(id) }}
+          onAdded={(id) => { setDialog(null); setReloads((n) => n + 1); onContactsChanged(); if (onOpenContact) onOpenContact(id) }}
           onOpenExisting={onOpenContact ? (id) => { setDialog(null); onOpenContact(id) } : null} />
       )}
       {dialog === 'import' && locationId && (
         <ImportDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
           onClose={() => setDialog(null)}
-          onImported={() => setReloads((n) => n + 1)} />
+          onImported={() => { setReloads((n) => n + 1); onContactsChanged() }} />
       )}
     </div>
   )

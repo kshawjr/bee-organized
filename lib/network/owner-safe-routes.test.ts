@@ -86,6 +86,7 @@ vi.mock('@/lib/network/access', () => ({
 import * as list from '@/app/api/network/list/route'
 import * as summary from '@/app/api/network/summary/route'
 import * as nurturing from '@/app/api/network/nurturing/route'
+import * as counts from '@/app/api/network/counts/route'
 import * as person from '@/app/api/network/nurturing/[id]/route'
 import * as followUp from '@/app/api/network/nurturing/[id]/follow-up/route'
 import * as nurtureBulk from '@/app/api/network/nurturing/bulk/route'
@@ -153,6 +154,7 @@ type Call = { name: string; kind: Kind; run: (w: Where) => Promise<Response> }
 const CALLS: Call[] = [
   { name: 'GET list (one location)', kind: 'read', run: (w) => list.GET(req(`/api/network/list?location_id=${LOCS[w]}`)) },
   { name: 'GET summary (one location)', kind: 'read', run: (w) => summary.GET(req(`/api/network/summary?location_id=${LOCS[w]}`)) },
+  { name: 'GET counts (one location)', kind: 'read', run: (w) => counts.GET(req(`/api/network/counts?location_id=${LOCS[w]}`)) },
   { name: 'GET nurturing (one location)', kind: 'read', run: (w) => nurturing.GET(req(`/api/network/nurturing?location_id=${LOCS[w]}`)) },
   { name: 'GET nurturing/[id]', kind: 'read', run: (w) => person.GET(req(`/api/network/nurturing/${L[w]}`), params(L[w])) },
   { name: 'GET contacts/[id]', kind: 'read', run: (w) => contact.GET(req(`/api/network/contacts/${C[w]}`), params(C[w])) },
@@ -167,6 +169,7 @@ const CALLS: Call[] = [
 const ALL_VIEWS: { name: string; run: () => Promise<Response> }[] = [
   { name: 'GET list (All locations)', run: () => list.GET(req('/api/network/list')) },
   { name: 'GET summary (All locations)', run: () => summary.GET(req('/api/network/summary')) },
+  { name: 'GET counts (All locations)', run: () => counts.GET(req('/api/network/counts')) },
   { name: 'GET overview', run: () => overview.GET() },
 ]
 

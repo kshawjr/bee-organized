@@ -304,19 +304,70 @@ describe('read only', () => {
 })
 
 describe('the two tabs', () => {
+  // The Network list's reads, plus the tab counts. The list loads ZERO rows
+  // here on purpose: the numbers on the tabs must come from the counts read,
+  // never from what a screen loaded (a Supabase read stops at 1,000 rows).
+  const tabsFetch = (countsAnswer: any = { ok: true, status: 200, json: async () => ({ network: 100, nurturing: 5037 }) }) => vi.fn(async (url: string, init?: any) => {
+    if (String(url).startsWith('/api/network/counts')) { calls.push({ url, method: 'GET' }); return countsAnswer }
+    if (String(url).startsWith('/api/network/list')) return { ok: true, status: 200, json: async () => ({ contacts: [], tags: [], followUps: {}, total: 0, truncated: false }) }
+    if (String(url).startsWith('/api/network/summary')) return { ok: true, status: 200, json: async () => ({ referrers: [], totals: {} }) }
+    if (String(url).startsWith('/api/lookups')) return { ok: true, status: 200, json: async () => ({ lookups: [] }) }
+    return server(url, init)
+  })
+  const tabs = (fetchImpl: any) => mount(React.createElement(NetworkTabs as any, { locationId: LOC, locationName: 'Philadelphia Suburbs', fetchImpl }))
+  const shownRows = () => !($('[data-network-list] .nw-wrap') as HTMLElement | null)?.hidden
+
   it('open on Network, and switch to Nurturing', async () => {
-    const netFetch = vi.fn(async (url: string, init?: any) => {
-      if (String(url).startsWith('/api/network/list')) return { ok: true, status: 200, json: async () => ({ contacts: [], tags: [], followUps: {}, total: 0, truncated: false }) }
-      if (String(url).startsWith('/api/network/summary')) return { ok: true, status: 200, json: async () => ({ referrers: [], totals: {} }) }
-      return server(url, init)
-    })
-    await mount(React.createElement(NetworkTabs as any, { locationId: LOC, locationName: 'Philadelphia Suburbs', fetchImpl: netFetch }))
+    await tabs(tabsFetch())
     expect($('[data-tab="network"]')!.getAttribute('aria-selected')).toBe('true')
-    expect($('[data-network-list]')).toBeTruthy()
+    expect(shownRows()).toBe(true)
     expect($('[data-nurture-ui]')).toBeNull()
     await press($('[data-tab="nurture"]')!)
-    expect($('[data-network-list]')).toBeNull()
+    // The list stays mounted for its Add button, but its rows are not shown.
+    expect(shownRows()).toBe(false)
     expect($('[data-nurture-ui]')).toBeTruthy()
     expect($$('[data-row]')).toHaveLength(25)
+  })
+
+  it('each tab shows its count from the server, written with commas (Kevin, 2026-11-25)', async () => {
+    await tabs(tabsFetch())
+    expect($('[data-tab="network"]')!.textContent).toBe('Network & Partners(100)')
+    expect($('[data-tab="nurture"]')!.textContent).toBe('Nurturing Clients(5,037)')
+    expect(calls.filter((c) => c.url.startsWith('/api/network/counts')).map((c) => c.url)).toEqual([`/api/network/counts?location_id=${LOC}`])
+  })
+
+  it('no count from the server means no number on the tab, never a made-up zero', async () => {
+    await tabs(tabsFetch({ ok: false, status: 500, json: async () => ({ error: 'x' }) }))
+    expect($('[data-tab="network"]')!.textContent).toBe('Network & Partners')
+    expect($('[data-tab="nurture"]')!.textContent).toBe('Nurturing Clients')
+    expect($('[data-tab-count]')).toBeNull()
+  })
+
+  it('Add and the three dots sit at the top right of the tab bar; Add is on both tabs, the three dots only on Network', async () => {
+    await tabs(tabsFetch())
+    const spot = $('[data-network-tab-actions]')!
+    expect(spot.closest('.nt-bar')).toBeTruthy()
+    expect($$('[data-network-tab-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts', 'more'])
+    expect($('[data-actions]')).toBeNull() // not under the title any more
+    await press($('[data-tab="nurture"]')!)
+    expect($$('[data-network-tab-actions] button').map((b) => b.getAttribute('data-act'))).toEqual(['add-contacts'])
+    expect(($('[data-act="add-contacts"]') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('the three dots hold Export, and only Export', async () => {
+    await tabs(tabsFetch())
+    await press($('[data-act="more"]')!)
+    expect($$('[data-network-tab-actions] [role="menuitem"]').map((b) => b.getAttribute('data-act'))).toEqual(['export'])
+  })
+
+  it('Add on the Nurturing tab opens the add box where it can be seen (the bug: no Add there at all)', async () => {
+    await tabs(tabsFetch())
+    await press($('[data-tab="nurture"]')!)
+    await press($('[data-act="add-contacts"]')!)
+    await press($('[data-act="add"]')!)
+    const box = $('[data-network-add]')!
+    expect(box).toBeTruthy()
+    // Not inside anything hidden.
+    for (let el: HTMLElement | null = box; el; el = el.parentElement) expect(el.hidden, el.className).toBe(false)
   })
 })
