@@ -159,6 +159,9 @@ export type SyncReport = {
     flows: string
     pausedFlows: FlowLine[]
     heldTags: HeldTag[]
+    // Who is NOT in `count`, for the one quiet line under it (2026-11-26):
+    // archived people left unticked, and people held on the refused list.
+    leftOut: { archived: number; refused: number }
   }
   first?: boolean
   complete?: boolean          // ran: every batch done, every tag applied
@@ -351,7 +354,10 @@ export async function syncWebsiteLeadsToMailchimp(
     if (!confirmed) {
       return refuse('needs_confirmation', {
         first: true,
-        confirm: { count: sendSet.length, listId, listName, flows: flows.fingerprint, pausedFlows: flows.signupFlows.map(flowLine), heldTags },
+        confirm: {
+          count: sendSet.length, listId, listName, flows: flows.fingerprint, pausedFlows: flows.signupFlows.map(flowLine), heldTags,
+          leftOut: { archived: offered.filter((p) => p.g === 'archived' && !isIncluded(p, groupChoice)).length, refused: heldBack },
+        },
         skipped,
       })
     }

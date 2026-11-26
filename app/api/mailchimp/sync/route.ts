@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
         ? {
             count: report.confirm.count, list_id: report.confirm.listId, list_name: report.confirm.listName,
             flows: report.confirm.flows, paused_flows: report.confirm.pausedFlows, held_tags: report.confirm.heldTags,
+            left_out: report.confirm.leftOut,
           }
         : null,
     })

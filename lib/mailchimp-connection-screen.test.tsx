@@ -20,7 +20,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import MailchimpConnectionScreen, { BeforeWeAdd, Hold, PAUSE_LINE, screenState, startAllowed, lastSyncedWords } from '@/components/settings/MailchimpConnectionScreen'
+import MailchimpConnectionScreen, { BeforeWeAdd, Hold, PAUSE_LINE, screenState, startAllowed, lastSyncedWords, leftOutWords } from '@/components/settings/MailchimpConnectionScreen'
 import { loadOverview, markReviewed, connectionState, canStart, REVIEW_DONE_COLUMN, FIRST_SYNC_COLUMN } from './mailchimp-overview'
 import { FIRST_SYNC_DATE } from './mailchimp-sync'
 import { enforceRealRules } from './db-rules-check'
@@ -334,12 +334,35 @@ describe('the first-sync confirmation — nothing live', () => {
     expect(a.syncCalls()).toHaveLength(1)
     expect(a.syncCalls()[0].body.confirm).toBeUndefined()
     expect(host.querySelector('[data-testid="mc-before-we-add"]')!.getAttribute('data-kind')).toBe('ask')
-    expect(byId('mc-confirm-count')!.textContent).toBe('About to add 143 people to Bee Organized Friends.')
-    expect(byId('mc-confirm-clear')!.textContent).toBe('Nothing in Mailchimp will email them.')
+    // Kevin's approved design (Control Hive, BeforeWeAdd, 2026-11-26): the count
+    // and the audience once, in the heading; one line on what happens.
+    expect(byId('mc-confirm-count')!.textContent).toBe('Add 143 people to Bee Organized Friends?')
+    expect(byId('mc-confirm-count')!.tagName).toBe('H2')
+    expect(byId('mc-confirm-what')!.textContent).toBe('They’re added to your Mailchimp audience. Nothing else is sent from Bee Hub.')
     expect(byId('mc-add')!.textContent).toBe('Add them')
     expect(byId('mc-add')!.disabled).toBe(false)
-    expect(host.textContent).toContain('Mailchimp · First sync')
-    expect(host.textContent).toContain('Bee Organized Friends · Test Bee Organized')
+    // no repeated facts: the audience's name and the count appear once on the page
+    const page = host.querySelector('[data-testid="mc-before-we-add"]')!.textContent!
+    expect(page.split('Bee Organized Friends').length - 1).toBe(1)
+    expect(page.split('143').length - 1).toBe(1)
+    expect(page).not.toMatch(/Mailchimp · First sync|About to add|Nothing in Mailchimp will email them|Paused, so they won/)
+    expect(byId('mc-confirm-left-out')).toBeNull()                  // nobody left out → no line
+    expect(Array.from(host.querySelectorAll('[data-testid="mc-before-we-add"] button')).map((b) => b.textContent)).toEqual(['Back to Mailchimp', 'Add them', 'Cancel'])
+  })
+  it('the route hands the left-out numbers to the screen', () => {
+    expect(readFileSync(join(process.cwd(), 'app/api/mailchimp/sync/route.ts'), 'utf8')).toContain('left_out: report.confirm.leftOut,')
+  })
+  it('one quiet line only when someone is left out: archived, refused, or both — in plain words', async () => {
+    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: { ...ASK, count: 14, list_name: 'Test Bee Organized', left_out: { archived: 1, refused: 6 } } }] })
+    await mount(screen(a))
+    await click(byId('mc-start'))
+    expect(byId('mc-confirm-count')!.textContent).toBe('Add 14 people to Test Bee Organized?')
+    expect(byId('mc-confirm-left-out')!.textContent).toBe('1 archived person and 6 people Mailchimp refused aren’t included.')
+    expect(leftOutWords({ archived: 1, refused: 0 })).toBe('1 archived person isn’t included.')
+    expect(leftOutWords({ archived: 3, refused: 0 })).toBe('3 archived people aren’t included.')
+    expect(leftOutWords({ archived: 0, refused: 1 })).toBe('1 person Mailchimp refused isn’t included.')
+    expect(leftOutWords({ archived: 0, refused: 0 })).toBeNull()
+    expect(leftOutWords(undefined)).toBeNull()
   })
   it('promises no Bee Hub welcome email: the sync sends none to people already in Bee Hub', async () => {
     const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }] })
@@ -378,7 +401,7 @@ describe('the first-sync confirmation — nothing live', () => {
     await click(byId('mc-start'))
     await click(byId('mc-add'))
     expect(host.textContent).toContain('Something changed in Mailchimp since you looked, so nothing was added.')
-    expect(byId('mc-confirm-count')!.textContent).toBe('About to add 144 people to Bee Organized Friends.')
+    expect(byId('mc-confirm-count')!.textContent).toBe('Add 144 people to Bee Organized Friends?')
   })
   it('a tag that starts a live flow: its own box, unticked; ticking one carries that one only', async () => {
     const held = { ...ASK, held_tags: [{ tag: 'CLOSEDJOB', flows: ['Closed Job Journey'], people: 4 }, { tag: 'VIP', flows: ['VIP Thanks'], people: 1 }] }
@@ -415,7 +438,7 @@ describe('the first-sync confirmation — something live: refused, never warned'
     await click(byId('mc-start'))
     await click(byId('mc-check-again'))
     expect(a.syncCalls()[1].body.confirm).toBeUndefined()
-    expect(byId('mc-confirm-count')!.textContent).toBe('About to add 143 people to Bee Organized Friends.')
+    expect(byId('mc-confirm-count')!.textContent).toBe('Add 143 people to Bee Organized Friends?')
     expect(byId('mc-add')!.disabled).toBe(false)
   })
   it('Check again while they are still on: says so, Add stays off, nothing is sent with a confirm', async () => {

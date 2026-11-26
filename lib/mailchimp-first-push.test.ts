@@ -1018,3 +1018,21 @@ describe('the quiz flow: Kevin’s known condition, narrow', () => {
     expect(src).toContain('ONE EXCEPTION, FROM KEVIN — NOT FROM MAILCHIMP')
   })
 })
+
+// 2026-11-26: the confirmation's count is the people who will actually be
+// sent; who is left out (archived unticked, held as refused) is counted apart.
+describe('the confirmation counts only the people who will be sent', () => {
+  it('held refused people are not in the count; they and the archived are named as left out', async () => {
+    const held = (k: string) => ({ location_id: LOC, email_key: k, kind: 'invalid', mailchimp_code: 'ERROR_GENERIC', mailchimp_said: 'looks fake', refused_count: 1, first_refused_at: 'x', last_refused_at: 'x', held: true, retry_requested_at: null })
+    const s = setup({
+      leads: [...THREE(), lead('f1', 'f1@x.com'), lead('f2', 'f2@x.com'), lead('arch', 'arch@x.com', { archived_at: '2026-08-01T00:00:00Z' })],
+      refusals: [held('f1@x.com'), held('f2@x.com')],
+    })
+    const r = await s.run()
+    expect(r).toMatchObject({ ran: false, reason: 'needs_confirmation', heldBack: 0 })
+    expect(r.confirm).toMatchObject({ count: 3, leftOut: { archived: 1, refused: 2 } })
+    const sent = await s.run(confirmOf(r))
+    expect(sent).toMatchObject({ pushed: 3, heldBack: 2 })
+    expect(s.posts()[0].body.members).toHaveLength(3)
+  })
+})

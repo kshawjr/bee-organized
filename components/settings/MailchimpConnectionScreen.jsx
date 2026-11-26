@@ -334,31 +334,39 @@ const STILL = { flows: 'Checked again. These are still on.', unreadable: 'Checke
 //       'live'       something live — flows = the server's must_pause list
 //       'unreadable' couldn't check
 // Only 'ask' has a button that can add anyone.
+// The one quiet line under the count: who is NOT being added, only when
+// someone is (archived people left unticked; people held on the refused list).
+export function leftOutWords(lo) {
+  const a = Number(lo?.archived || 0), r = Number(lo?.refused || 0)
+  if (!a && !r) return null
+  const arch = a ? `${n(a)} archived ${a === 1 ? 'person' : 'people'}` : ''
+  const ref = r ? `${n(r)} ${r === 1 ? 'person' : 'people'} Mailchimp refused` : ''
+  if (a && r) return `${arch} and ${ref} aren’t included.`
+  return `${arch || ref} ${(a || r) === 1 ? 'isn’t' : 'aren’t'} included.`
+}
+
 export function BeforeWeAdd({ kind, confirm, flows, listName, accountName, changed, again, busy, onYes, onCheckAgain, onCancel }) {
   const [tagsOk, setTagsOk] = useState([])
   const list = (confirm?.list_name || listName || '').trim() || 'your Mailchimp audience'
   const count = kind === 'ask' ? Number(confirm?.count || 0) : null
   const held = kind === 'ask' ? (confirm?.held_tags || []) : []
-  const paused = kind === 'ask' ? (confirm?.paused_flows || []) : []
   const reason = kind === 'live' ? 'flows' : 'unreadable'
   return (
     <div data-testid="mc-before-we-add" data-kind={kind}>
       <button type="button" data-mcc-back onClick={onCancel} disabled={busy}><ArrowLeft /><span>Back to Mailchimp</span></button>
-      <h2 style={{ marginTop: '8px', fontSize: '20px', lineHeight: '28px', fontWeight: 400, color: T.primary }}>Mailchimp · First sync</h2>
-      <p style={{ ...muted, marginTop: '6px' }}>{[list, (accountName || '').trim()].filter(Boolean).join(' · ')}</p>
       {changed && <p role="status" style={{ marginTop: '12px', fontSize: '14px', lineHeight: '20px', color: T.warning }}>Something changed in Mailchimp since you looked, so nothing was added. Here it is again.</p>}
 
       {kind === 'ask' ? (
         <div style={{ marginTop: '20px' }}>
-          <p data-testid="mc-confirm-count" data-mcc-big style={{ fontFamily: FONT.body, color: T.primary }}>
-            About to add <strong>{people(count)}</strong> to <strong>{list}</strong>.
-          </p>
-          <p data-testid="mc-confirm-clear" style={{ ...muted, marginTop: '12px' }}>Nothing in Mailchimp will email them.</p>
-          {paused.length > 0 && (
-            <p data-testid="mc-paused-flows" style={{ ...small, marginTop: '8px' }}>
-              Paused, so they won’t send: {paused.map((f) => f.name).join(', ')}. Keep them paused until this finishes.
-            </p>
-          )}
+          {/* Kevin's approved design (Bee Organized Control Hive, BeforeWeAdd):
+              the count and the audience once, in the heading; one line on what
+              happens; one quiet line only if someone is left out; Add them,
+              Cancel. The count is the people who will actually be sent. */}
+          <h2 data-testid="mc-confirm-count" data-mcc-big style={{ fontFamily: FONT.body, color: T.primary, fontWeight: 400 }}>
+            Add <strong>{people(count)}</strong> to <strong>{list}?</strong>
+          </h2>
+          <p data-testid="mc-confirm-what" style={{ ...muted, marginTop: '12px' }}>They’re added to your Mailchimp audience. Nothing else is sent from Bee Hub.</p>
+          {leftOutWords(confirm?.left_out) && <p data-testid="mc-confirm-left-out" style={{ ...small, marginTop: '4px' }}>{leftOutWords(confirm?.left_out)}</p>}
           {held.length > 0 && (
             <div data-testid="mc-held-tags" style={{ marginTop: '20px' }}>
               <p style={{ fontSize: '14px', fontWeight: 700, color: T.foreground }}>These tags start an email in Mailchimp</p>
@@ -375,7 +383,7 @@ export function BeforeWeAdd({ kind, confirm, flows, listName, accountName, chang
               })}
             </div>
           )}
-          <div data-mcc-actions style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
+          <div data-mcc-actions style={{ marginTop: '24px' }}>
             <Btn variant="primary" data-testid="mc-add" disabled={busy} onClick={() => onYes(tagsOk)}>{busy ? 'Adding…' : 'Add them'}</Btn>
             <Btn variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Btn>
           </div>
