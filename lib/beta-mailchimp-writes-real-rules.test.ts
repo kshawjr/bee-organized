@@ -111,6 +111,8 @@ const mcWrites = allWrites.filter((w) =>
 // Each is run through the real rules by the test named. A new one fails below.
 const RUN_TIME: Record<string, string> = {
   'lib/mailchimp-sync.ts leads update': 'lib/mailchimp-first-push.test.ts runs every sending test through enforceRealRules',
+  // 2026-11-26, FL-75 slice 7: the import's one new-record write.
+  'lib/mailchimp-pull.ts leads insert': 'lib/mailchimp-pull.test.ts runs newLeadRow through enforceRealRules',
 }
 
 describe('every Mailchimp write in the source names real columns and values the rules accept', () => {

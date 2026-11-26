@@ -265,7 +265,7 @@ describe('the card renders the state it is in', () => {
     expect(container.querySelector('select')).toBeNull()
     const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
     expect(urls.filter((u: string) => u.includes('/audiences'))).toHaveLength(0)
-    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?') && !u.startsWith('/api/mailchimp/import?available=1&') /* slice 7 (2026-11-26): read-only "is the import on here?" */)).toHaveLength(0)
     expect(fetchMock.mock.calls.filter((c: any[]) => c[1]?.method && c[1].method !== 'GET')).toHaveLength(0)
   })
 
@@ -283,7 +283,7 @@ describe('the card renders the state it is in', () => {
     // Asking is not doing: no disconnect call (the reads on mount are not one).
     const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
     expect(urls.filter((u: string) => u.includes('disconnect'))).toHaveLength(0)
-    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?'))).toHaveLength(0)
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?') && !u.startsWith('/api/mailchimp/import?available=1&') /* slice 7 (2026-11-26): read-only "is the import on here?" */)).toHaveLength(0)
   })
 
   it('a failed connect return is surfaced, not swallowed', async () => {

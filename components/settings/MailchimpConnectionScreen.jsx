@@ -44,6 +44,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { T, R, FONT, SHADOW, alpha } from '@/components/design/tokens'
 import { IconUsers, IconClock, IconExternalLink, IconCheck } from '@/components/ui/icons'
 import { SyncResult } from '@/components/settings/MailchimpSyncAnswer'
+import MailchimpImportScreen from '@/components/settings/MailchimpImportScreen'
 
 const MC_LOGO = 'https://www.google.com/s2/favicons?domain=mailchimp.com&sz=128'
 const MAILCHIMP_URL = 'https://mailchimp.com'
@@ -413,6 +414,17 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
   const [result, setResult] = useState(null)
   const [err, setErr] = useState(null)
   const [win, setWin] = useState(null)           // 'pause' | 'disconnect' | null
+  // FL-75 slice 7: "Bring people in from Mailchimp" — the server says whether
+  // it is switched on here (pilot locations only); its review opens in place.
+  const [canImport, setCanImport] = useState(false)
+  const [importing, setImporting] = useState(false)
+  useEffect(() => {
+    let off = false
+    doFetch('/api/mailchimp/import?available=1&location_id=' + encodeURIComponent(locationId || ''), { cache: 'no-store' })
+      .then((r) => (r && r.ok ? r.json() : null)).then((j) => { if (!off) setCanImport(!!(j && j.available === true)) })
+      .catch(() => { if (!off) setCanImport(false) })
+    return () => { off = true }
+  }, [locationId])
 
   const load = useCallback(async () => {
     setChecking(true)
@@ -465,6 +477,8 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
   // for the people still to go.
   const notLive = ov && ov.live !== true
   const frame = [list, (accountName || '').trim()].filter(Boolean).join(' · ')
+
+  if (importing) return <MailchimpImportScreen locationId={locationId} fetchImpl={fetchImpl} onClose={() => setImporting(false)} />
 
   return (
     <div data-settings-ui data-mcc data-testid="mc-connection" data-state={state} style={{ margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.foreground }}>
@@ -569,6 +583,16 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
                 <Btn variant="primary" data-testid="mc-sync-now" disabled>Sync now</Btn>
                 <Btn variant="outline" data-testid="mc-check-again" disabled={checking} onClick={async () => { await load(); setCheckedAgain(true) }} icon={<Refresh />}>{checking ? 'Checking…' : 'Check again'}</Btn>
               </>} />
+          )}
+
+          {canImport && (
+            <section data-testid="mc-import-card" style={{ borderRadius: R.lg, border: `1px solid ${T.border}`, background: T.card, padding: '20px', display: 'grid', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '16px', lineHeight: '24px', fontWeight: 700, color: T.primary }}>Bring people in from Mailchimp</h2>
+                <p style={{ ...muted, marginTop: '4px' }}>People in your Mailchimp who aren’t in Bee Hub yet. You choose who comes in; no one is emailed.</p>
+              </div>
+              <div data-mcc-actions><Btn variant="outline" data-testid="mc-open-import" onClick={() => setImporting(true)}>Review who comes in</Btn></div>
+            </section>
           )}
 
           {result && <SyncResult result={result} listName={listName} />}
