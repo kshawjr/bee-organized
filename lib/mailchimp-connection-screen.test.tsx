@@ -509,7 +509,15 @@ describe('the design’s confirmation, without its typed name', () => {
   it('the source has no typed-name field and no "I understand"', () => {
     const src = readFileSync(join(process.cwd(), 'components/settings/MailchimpConnectionScreen.jsx'), 'utf8').replace(/\/\/.*$/gm, '')
     expect(src).not.toMatch(/Type your full name|I understand/i)
-    expect(src).not.toMatch(/<input(?![^>]*type="checkbox")/)
+    // The confirmation itself (BeforeWeAdd) has no text box of any kind.
+    // 2026-11-26: the one text box in the file is "Edit address" on the list
+    // of people Mailchimp refused (RefusedPeople) — not part of any confirmation.
+    const confirmation = src.slice(src.indexOf('export function BeforeWeAdd'), src.indexOf('\nexport function', src.indexOf('export function BeforeWeAdd') + 10))
+    expect(confirmation.length).toBeGreaterThan(500)
+    expect(confirmation).not.toMatch(/<input(?![^>]*type="checkbox")/)
+    const inputs = src.match(/<input(?![^>]*type="checkbox")[^>]*>/g) || []
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]).toContain('data-testid="mc-refused-email"')
   })
   it('the refusal box on its own holds no button of its own: only what it is handed', async () => {
     const AnyHold = Hold as any   // the screen is untyped JS; typed here at the boundary

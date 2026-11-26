@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.error === 'location_not_found' ? 404 : 409 })
   const o = r.overview
   return NextResponse.json({
-    live: o.live, synced: o.synced, reviewed: o.reviewed, audience_count: o.audienceCount,
+    live: o.live, synced: o.synced, reviewed: o.reviewed, refused_count: o.refusedCount, audience_count: o.audienceCount,
     last_synced_at: o.lastSyncedAt, flows: o.flows, how_to_pause: o.howToPause,
   })
 }

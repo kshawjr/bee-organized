@@ -31,6 +31,7 @@ import { supabaseService } from './supabase-service'
 import { apiBase } from './mailchimp'
 import { scrub } from './mailchimp-audience-look'
 import { readFlows, HOW_TO_PAUSE, type FlowsRead, type Flow } from './mailchimp-flows'
+import { listRefused } from './mailchimp-refusals'
 
 // The two dates, by name, so the screen, the sending code and the tests share them.
 export const REVIEW_DONE_COLUMN = 'mailchimp_review_done_at'
@@ -43,6 +44,7 @@ export type Overview = {
   synced: boolean                     // the first sync fully finished (mailchimp_first_sync_at)
   lastSyncedAt: string | null         // the newest time a person was added or found in Mailchimp
   reviewed: boolean                   // Done was pressed (mailchimp_review_done_at)
+  refusedCount: number                // people Mailchimp refused, still on a live record, not left out (0 if unknown)
   audienceCount: number | null        // null = Mailchimp didn't say
   flows:
     | { ok: true; mustPause: OverviewFlow[]; paused: OverviewFlow[] }
@@ -55,6 +57,7 @@ type Deps = {
   fetchImpl?: (url: string, init: any) => Promise<any>
   sleep?: (ms: number) => Promise<void>
   readFlowsImpl?: (args: any) => Promise<FlowsRead>
+  listRefusedImpl?: typeof listRefused
 }
 
 const line = (f: Flow): OverviewFlow => ({ name: f.name, status: f.status, subjects: f.subjects || [] })
@@ -104,6 +107,13 @@ export async function loadOverview(locationUuid: string, deps: Deps = {}): Promi
     console.warn('[mailchimp-overview] audience size not read:', scrub((e as any)?.message || e, token))
   }
 
+  // Who Mailchimp refused (lib/mailchimp-refusals.ts). Unknown → 0, the line hides.
+  let refusedCount = 0
+  try {
+    const rf = await (deps.listRefusedImpl || listRefused)(locationUuid, { db })
+    if (rf.ok) refusedCount = rf.people.length
+  } catch { /* unknown */ }
+
   const fr = await flowsOf({ token, serverPrefix: prefix, listId, fetchImpl: deps.fetchImpl, sleep: deps.sleep })
   const flows: Overview['flows'] = fr.ok
     ? { ok: true, mustPause: fr.mustPause.map(line), paused: fr.signupFlows.filter((f) => !f.live).map(line) }
@@ -111,7 +121,7 @@ export async function loadOverview(locationUuid: string, deps: Deps = {}): Promi
 
   return {
     ok: true,
-    overview: { live: loc.mailchimp_sync_live === true, synced, lastSyncedAt, reviewed, audienceCount, flows, howToPause: HOW_TO_PAUSE },
+    overview: { live: loc.mailchimp_sync_live === true, synced, lastSyncedAt, reviewed, refusedCount, audienceCount, flows, howToPause: HOW_TO_PAUSE },
   }
 }
 

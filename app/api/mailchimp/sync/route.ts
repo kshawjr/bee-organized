@@ -79,6 +79,8 @@ export async function POST(request: NextRequest) {
       already: report.alreadyThere,
       skipped: report.skipped,
       failed: report.failed,
+      said_no: report.saidNo,
+      held_back: report.heldBack,
       remaining: report.remaining,
       tags_held: report.tagsHeld,
       must_pause: report.mustPause ?? null,

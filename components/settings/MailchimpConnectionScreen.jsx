@@ -135,6 +135,112 @@ const ArrowLeft = () => (
 
 // The words sit in a <span> with their own size: app/globals.css forces 16px
 // onto every <button> itself.
+// ── The people Mailchimp refused (2026-11-26) ────────────────────────────
+// "N people couldn't be added", and who, opened in place. Each shows what
+// Mailchimp said — labelled as Mailchimp's words — and whether Bee Hub will
+// send them again. Edit address saves through the client record's own route;
+// Try again sends a held address once more on the next sync; Leave out unticks
+// them for Mailchimp (undone on "Who goes to Mailchimp"). A person who said no
+// in Mailchimp is never here: they are on the no-marketing list.
+export function refusedStatus(p) {
+  if (p.retry_requested) return 'Will be tried once more on the next sync.'
+  if (p.held && p.kind === 'invalid') return 'Not sent again until the address is changed.'
+  if (p.held) return `Not sent again: Mailchimp refused them ${n(p.refused_count)} times.`
+  return 'Will be tried again on the next sync.'
+}
+const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+export function RefusedPeople({ locationId, count, doFetch, onChanged }) {
+  const [open, setOpen] = useState(false)
+  const [list, setList] = useState(null)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(null)        // email_key being saved
+  const [editing, setEditing] = useState(null)  // email_key with the address field open
+  const [draft, setDraft] = useState('')
+
+  const read = useCallback(async () => {
+    setErr(null)
+    try {
+      const r = await doFetch('/api/mailchimp/refused?location_id=' + encodeURIComponent(locationId || ''), { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { setErr(j.words || 'Who Mailchimp refused couldn’t be read. Please try again.'); return }
+      setList(Array.isArray(j.people) ? j.people : [])
+    } catch { setErr('Who Mailchimp refused couldn’t be read. Please try again.') }
+  }, [doFetch, locationId])
+
+  async function toggle() {
+    if (open) { setOpen(false); return }
+    setOpen(true)
+    await read()
+  }
+  async function act(p, action) {
+    setBusy(p.email_key); setErr(null)
+    try {
+      const r = await doFetch('/api/mailchimp/refused', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location_id: locationId, email_key: p.email_key, action }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) setErr(j.words || 'That couldn’t be saved. Please try again.')
+    } catch { setErr('That couldn’t be saved. Please try again.') }
+    setBusy(null)
+    await read(); onChanged && onChanged()
+  }
+  async function saveAddress(p) {
+    const email = draft.trim()
+    if (!EMAIL_OK.test(email)) { setErr('That doesn’t look like an email address.'); return }
+    setBusy(p.email_key); setErr(null)
+    try {
+      for (const rec of p.records) {
+        const r = await doFetch('/api/leads/' + encodeURIComponent(rec.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+        if (!r.ok) { const j = await r.json().catch(() => ({})); setErr(j.detail || j.error || 'The new address couldn’t be saved.'); setBusy(null); return }
+      }
+    } catch { setErr('The new address couldn’t be saved.'); setBusy(null); return }
+    setBusy(null); setEditing(null); setDraft('')
+    await read(); onChanged && onChanged()
+  }
+
+  return (
+    <section aria-label="People Mailchimp refused" data-testid="mc-refused" style={{ borderRadius: R.xl, border: `1px solid ${T.border}`, background: T.card, padding: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <p data-testid="mc-refused-line" style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>{people(count)} couldn’t be added to Mailchimp</p>
+        <button type="button" data-mcc-link data-testid="mc-refused-toggle" aria-expanded={open} onClick={toggle}><span>{open ? 'Hide' : 'See who'}</span></button>
+      </div>
+      <p style={{ ...small, marginTop: '4px' }}>Mailchimp turned these addresses down, so Bee Hub doesn’t keep sending them.</p>
+      {err && <p role="alert" style={{ marginTop: '8px', fontSize: '13px', color: T.destructive }}>{err}</p>}
+      {open && list && (
+        <ul data-testid="mc-refused-list" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, display: 'grid', gap: '8px' }}>
+          {list.length === 0 && <li style={small}>Nobody now. Everyone Mailchimp refused has been changed or left out.</li>}
+          {list.map((p) => (
+            <li key={p.email_key} data-testid="mc-refused-person" style={{ borderTop: `1px solid ${T.border}`, paddingTop: '10px' }}>
+              <p style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>{p.records.map((r) => r.name).filter(Boolean).join(' · ') || p.email}</p>
+              <p style={{ ...small, wordBreak: 'break-all' }}>{p.email}{p.records.length > 1 ? ` · on ${p.records.length} Bee Hub records` : ''}</p>
+              <p data-testid="mc-refused-said" style={{ marginTop: '6px', fontSize: '13px', lineHeight: '18px', color: T.foreground }}>
+                <span style={{ fontWeight: 700 }}>Mailchimp said:</span> <span style={{ fontStyle: 'italic' }}>“{p.mailchimp_said}”</span>
+              </p>
+              <p data-testid="mc-refused-status" style={{ ...small, marginTop: '4px', color: p.held && !p.retry_requested ? T.warning : T.mutedFg }}>{refusedStatus(p)}</p>
+              {editing === p.email_key ? (
+                <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
+                  <input data-testid="mc-refused-email" type="email" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`New email address for ${p.email}`}
+                    style={{ minHeight: '44px', borderRadius: R.lg, border: `1px solid ${T.border}`, padding: '0 12px', fontSize: '16px', fontFamily: FONT.ui, background: T.background, color: T.foreground }} />
+                  {p.records.length > 1 && <p style={small}>This changes the address on all {p.records.length} Bee Hub records.</p>}
+                  <div data-mcc-actions>
+                    <Btn variant="primary" data-testid="mc-refused-save" disabled={busy === p.email_key} onClick={() => saveAddress(p)}>{busy === p.email_key ? 'Saving…' : 'Save address'}</Btn>
+                    <Btn variant="outline" onClick={() => { setEditing(null); setDraft('') }}>Cancel</Btn>
+                  </div>
+                </div>
+              ) : (
+                <div data-mcc-actions style={{ marginTop: '8px' }}>
+                  <Btn variant="outline" data-testid="mc-refused-edit" disabled={!!busy} onClick={() => { setEditing(p.email_key); setDraft(p.email) }}>Edit address</Btn>
+                  {p.held && !p.retry_requested && <Btn variant="outline" data-testid="mc-refused-retry" disabled={!!busy} onClick={() => act(p, 'retry')}>Try again</Btn>}
+                  <Btn variant="outline" data-testid="mc-refused-leave" disabled={!!busy} onClick={() => act(p, 'leave_out')}>Leave out</Btn>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function Btn({ variant = 'outline', icon, children, ...rest }) {
   return <button type="button" data-mcc-btn={variant} {...rest}>{icon}<span>{children}</span></button>
 }
@@ -444,6 +550,10 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
 
           {result && <SyncResult result={result} listName={listName} />}
           {err && <p role="alert" style={{ fontSize: '14px', color: T.destructive }}>{err}</p>}
+
+          {ov && Number(ov.refused_count) > 0 && (
+            <RefusedPeople locationId={locationId} count={Number(ov.refused_count)} doFetch={doFetch} onChanged={load} />
+          )}
 
           <footer style={{ borderTop: `1px solid ${T.border}`, paddingTop: '12px' }}>
             <button type="button" data-mcc-quiet data-testid="mc-disconnect-link" onClick={() => setWin('disconnect')}><span>Disconnect Mailchimp</span></button>

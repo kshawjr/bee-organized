@@ -251,7 +251,7 @@ function compile(def: string): Node | Error {
 /** Rules the reader cannot evaluate. A test holds this empty. */
 export function unreadableRules(): string[] {
   const out: string[] = []
-  for (const [table, rules] of Object.entries(realRules().checks)) {
+  for (const [table, rules] of [...Object.entries(realRules().checks), ...Object.entries(PENDING_TABLES).map(([t, p]) => [t, p.checks] as const)]) {
     for (const r of rules) { const c = compile(r.def); if (c instanceof Error) out.push(`${table}.${r.name}: ${c.message}`) }
   }
   return out
@@ -265,6 +265,31 @@ export function unreadableRules(): string[] {
 // columns are in the real schema now.)
 export const PENDING_COLUMNS: Record<string, string> = {}
 
+// ── Tables a migration creates that the real database does not have YET ──
+// Their rules, written exactly as Postgres will report them, so new code is
+// held to them before the migration runs. A test checks each CHECK here is in
+// the migration file and the table is not in the real schema yet; once it is,
+// refresh lib/db-rules.snapshot.json + lib/db-columns.snapshot.txt and delete
+// the entry (that test fails until you do).
+export const PENDING_TABLES: Record<string, { migration: string; columns: string[]; required: string[]; checks: Rule[] }> = {
+  mailchimp_refusals: {
+    migration: 'migrations/mailchimp_refusals.sql',
+    columns: ['id', 'location_id', 'email_key', 'kind', 'mailchimp_code', 'mailchimp_said', 'refused_count', 'first_refused_at', 'last_refused_at', 'held', 'retry_requested_at'],
+    required: ['location_id', 'email_key', 'kind', 'mailchimp_said'],
+    checks: [
+      { name: 'mailchimp_refusals_email_key_check', def: "CHECK (((email_key = lower(btrim(email_key))) AND (email_key <> ''::text)))" },
+      { name: 'mailchimp_refusals_kind_check', def: "CHECK ((kind = ANY (ARRAY['invalid'::text, 'temporary'::text])))" },
+      { name: 'mailchimp_refusals_mailchimp_said_check', def: 'CHECK (((length(mailchimp_said) >= 1) AND (length(mailchimp_said) <= 1000)))' },
+      { name: 'mailchimp_refusals_refused_count_check', def: 'CHECK ((refused_count >= 1))' },
+    ],
+  },
+}
+
+const columnsOf = (table: string): Set<string> | undefined =>
+  realSchema().get(table) || (PENDING_TABLES[table] ? new Set(PENDING_TABLES[table].columns) : undefined)
+const rulesOf = (table: string): Rule[] => realRules().checks[table] || PENDING_TABLES[table]?.checks || []
+const requiredOf = (table: string): string[] => realRules().required[table] || PENDING_TABLES[table]?.required || []
+
 export type RuleProblem = { code: '23514' | '23502' | '42703'; table: string; rule: string; message: string }
 
 /**
@@ -273,23 +298,22 @@ export type RuleProblem = { code: '23514' | '23502' | '42703'; table: string; ru
  */
 export function rowProblems(table: string, row: Record<string, unknown>, op: 'insert' | 'update' | 'upsert'): RuleProblem[] {
   const out: RuleProblem[] = []
-  const cols = realSchema().get(table)
+  const cols = columnsOf(table)
   if (cols) {
     for (const k of Object.keys(row)) {
       if (!cols.has(k) && !PENDING_COLUMNS[`${table}.${k}`]) out.push({ code: '42703', table, rule: k, message: `column ${table}.${k} does not exist` })
     }
   }
-  const rules = realRules()
   if (op !== 'update') {
-    for (const c of rules.required[table] || []) {
+    for (const c of requiredOf(table)) {
       if (row[c] === undefined || row[c] === null) out.push({ code: '23502', table, rule: c, message: `null value in column "${c}" of relation "${table}" violates not-null constraint` })
     }
   } else {
-    for (const c of rules.required[table] || []) {
+    for (const c of requiredOf(table)) {
       if (Object.prototype.hasOwnProperty.call(row, c) && row[c] === null) out.push({ code: '23502', table, rule: c, message: `null value in column "${c}" of relation "${table}" violates not-null constraint` })
     }
   }
-  for (const r of rules.checks[table] || []) {
+  for (const r of rulesOf(table)) {
     const f = compile(r.def)
     if (f instanceof Error) continue // reported by unreadableRules()
     if (f(row) === false) out.push({ code: '23514', table, rule: r.name, message: `new row for relation "${table}" violates check constraint "${r.name}"` })
@@ -298,7 +322,9 @@ export function rowProblems(table: string, row: Record<string, unknown>, op: 'in
 }
 
 /** The tables the copy holds rules for. */
-export const RULED_TABLES = (): string[] => Object.keys(realRules().checks)
+export const RULED_TABLES = (): string[] => [...Object.keys(realRules().checks), ...Object.keys(PENDING_TABLES)]
+export const ruledColumns = columnsOf
+export const ruledRequired = requiredOf
 
 /**
  * Wrap a stand-in database so its writes are held to the real rules. A row

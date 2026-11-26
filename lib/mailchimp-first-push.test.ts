@@ -25,6 +25,7 @@ import { readFlows, flowsFingerprint, type Flow, type FlowsRead } from './mailch
 import { buildReview, type ReviewLead, type StoredChoice } from './mailchimp-review'
 import { emailKey } from './mailchimp-rules'
 import { enforceRealRules } from './db-rules-check'
+import { syncResultWords } from '@/components/settings/MailchimpSyncAnswer'
 
 const LOC = '11111111-1111-4111-8111-111111111111'
 const LIST = 'list1'
@@ -32,10 +33,11 @@ const TOKEN = 'tok-SECRET-123'
 const noSleep = async () => {}
 
 // ── A small stand-in for Supabase ─────────────────────────────
-function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] } ) {
+function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[]; refusals?: any[] | 'missing'; noListFnMissing?: boolean } ) {
   const tables: Record<string, any[]> = {
     leads: o.leads, sync_log: [], lookups: o.lookups || [], lead_tags: o.leadTags || [],
     engagements: [], touchpoints: [], service_requests: [], quotes: [], jobs: [], partners: [], marketing_unsubscribes: [],
+    mailchimp_refusals: o.refusals === 'missing' ? [] : (o.refusals || []),
   }
   const location = {
     id: LOC, location_id: 'loc_t', mailchimp_connected: true, mailchimp_access_token: TOKEN, mailchimp_server_prefix: 'us9',
@@ -47,6 +49,7 @@ function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; looku
     let head = false, limit = Infinity
     const run = () => {
       if (table === 'marketing_unsubscribes' && o.noListBroken) return { data: null, error: { message: 'broken' }, count: null }
+      if (table === 'mailchimp_refusals' && o.refusals === 'missing') return { data: null, error: { code: '42P01', message: 'relation "mailchimp_refusals" does not exist' }, count: null }
       const rows = (table === 'locations' ? [location] : tables[table] || []).filter((r) => f.every((fn) => fn(r))).slice(0, limit)
       return { data: head ? null : rows, error: null, count: rows.length }
     }
@@ -85,16 +88,39 @@ function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; looku
         }
         return u
       },
-      insert: async (row: any) => { writes.push({ table, op: 'insert', row }); tables[table].push(row); return { error: null } },
+      insert: async (row: any) => {
+        if (table === 'mailchimp_refusals' && o.refusals === 'missing') return { error: { code: '42P01', message: 'missing' } }
+        writes.push({ table, op: 'insert', row }); tables[table].push(row); return { error: null }
+      },
+      delete: () => {
+        const df: Array<(r: any) => boolean> = []
+        const d: any = {
+          eq: (c: string, v: any) => { df.push((r) => r[c] === v); return d },
+          then: (ok: any, bad: any) => {
+            const before = tables[table].length
+            tables[table] = tables[table].filter((r) => !df.every((fn) => fn(r)))
+            writes.push({ table, op: 'delete', removed: before - tables[table].length } as any)
+            return Promise.resolve({ error: null }).then(ok, bad)
+          },
+        }
+        return d
+      },
     }
     return q
   }
-  return { db: { from, rpc: () => { throw new Error('no rpc') } }, writes, tables, location }
+  const rpcCalls: { fn: string; args: any }[] = []
+  const rpc = async (fn: string, args: any) => {
+    if (fn !== 'marketing_unsubscribe_from_mailchimp') throw new Error('unexpected rpc ' + fn)
+    if (o.noListFnMissing) return { data: null, error: { code: '42883', message: 'function does not exist' } }
+    rpcCalls.push({ fn, args }); tables.marketing_unsubscribes.push({ email_normalized: String(args.p_email).trim().toLowerCase(), source: 'mailchimp' })
+    return { data: true, error: null }
+  }
+  return { db: { from, rpc }, writes, tables, location, rpcCalls }
 }
 
 // ── A small stand-in for Mailchimp ────────────────────────────
 type Member = { email: string; status: string }
-function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: { id: string; name: string }[]; fail?: (url: string, method: string, n: number) => number | null }) {
+function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: { id: string; name: string }[]; fail?: (url: string, method: string, n: number) => number | null; accepts?: (email: string) => boolean }) {
   const members: Member[] = [...(o.members || [])]
   const segments = [...(o.segments || [{ id: '16', name: 'CLOSEDJOB' }])]
   const tagged: Record<string, string[]> = {}
@@ -119,7 +145,9 @@ function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: 
       for (const m of body.members) {
         const k = emailKey(m.email_address)!
         if (members.some((x) => emailKey(x.email) === k)) errors.push({ email_address: m.email_address, error: `${m.email_address} is already a list member`, error_code: 'ERROR_CONTACT_EXISTS' })
-        else if (m.email_address.includes('fake')) errors.push({ email_address: m.email_address, error: 'looks fake or invalid', error_code: 'ERROR_GENERIC' })
+        else if (m.email_address.includes('fake') && !o.accepts?.(m.email_address)) errors.push({ email_address: m.email_address, error: `${m.email_address} looks fake or invalid, please enter a real email address.`, error_code: 'ERROR_GENERIC' })
+        else if (m.email_address.includes('gone')) errors.push({ email_address: m.email_address, error: `${m.email_address} was permanently deleted and cannot be re-imported. The contact must re-subscribe to get back on the list.`, error_code: 'ERROR_GENERIC' })
+        else if (m.email_address.includes('busy') && !o.accepts?.(m.email_address)) errors.push({ email_address: m.email_address, error: `${m.email_address} has signed up to a lot of lists very recently; we're not allowing more signups for now`, error_code: 'ERROR_GENERIC' })
         else { members.push({ email: m.email_address, status: m.status }); new_members.push({ email_address: m.email_address, status: m.status }) }
       }
       return reply(200, { new_members, updated_members: [], errors, total_created: new_members.length, total_updated: 0, error_count: errors.length })
@@ -165,15 +193,15 @@ function reviewFrom(dbx: ReturnType<typeof fakeDb>, mc: ReturnType<typeof fakeMa
   }
 }
 
-function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] }) {
-  const dbx = fakeDb({ leads: o.leads, location: o.location, noListBroken: o.noListBroken, lookups: o.lookups, leadTags: o.leadTags })
+function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[]; refusals?: any[] | 'missing'; noListFnMissing?: boolean; accepts?: (email: string) => boolean }) {
+  const dbx = fakeDb({ leads: o.leads, location: o.location, noListBroken: o.noListBroken, lookups: o.lookups, leadTags: o.leadTags, refusals: o.refusals, noListFnMissing: o.noListFnMissing })
   // EVERY sending test writes through the REAL database rules
   // (lib/db-rules-check.ts): a row production would refuse is refused here
   // too, and the afterEach below fails the test. A stand-in that accepts any
   // row is how two never-saved records shipped (2026-11-26).
   const ruled = enforceRealRules(dbx.db)
   lastRuled = ruled
-  const mc = fakeMailchimp({ members: o.members, archived: o.archived, fail: o.fail })
+  const mc = fakeMailchimp({ members: o.members, archived: o.archived, fail: o.fail, accepts: o.accepts })
   const flowCalls = { n: 0 }
   const reviewCalls = { n: 0 }
   const deps = {
@@ -807,5 +835,91 @@ describe('the Recycle Bin: never read, sent, tagged, stamped or written', () => 
     expect(s.posts().flatMap((p) => p.body.members.map((m: any) => m.email_address))).toEqual(['a@x.com'])
     expect(r).toMatchObject({ pushed: 1 })
     expect(touched(s, 'b')).toEqual([])
+  })
+})
+
+// 2026-11-26 (Kevin): the people Mailchimp refused are remembered, by address,
+// and never silently re-sent. A "no" goes on the no-marketing list instead.
+describe('the people Mailchimp refused', () => {
+  const sentTo = (s: any) => s.posts().flatMap((p: any) => p.body.members.map((m: any) => m.email_address))
+  const refusal = (s: any, key: string) => s.dbx.tables.mailchimp_refusals.find((r: any) => r.email_key === key)
+
+  it('a refused person is recorded, by address, with what Mailchimp said — through the real rules', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com'), lead('f', 'Bad.fake@x.com')] })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ complete: true, pushed: 1, failed: 1, saidNo: 0, heldBack: 0 })
+    expect(refusal(s, 'bad.fake@x.com')).toMatchObject({
+      location_id: LOC, email_key: 'bad.fake@x.com', kind: 'invalid', mailchimp_code: 'ERROR_GENERIC',
+      mailchimp_said: 'Bad.fake@x.com looks fake or invalid, please enter a real email address.', refused_count: 1, held: true, retry_requested_at: null,
+    })
+  })
+
+  it('a refused person is NOT silently re-sent on the next sync: held, and the result says so', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com'), lead('f', 'fake.one@x.com')] })
+    await s.run(confirmOf(await s.run()))
+    const r2 = await s.run()                               // the first sync is done: no confirmation
+    expect(sentTo(s)).toEqual(['a@x.com', 'fake.one@x.com'])   // only the first run's batch went
+    expect(r2).toMatchObject({ ran: true, first: false, pushed: 0, failed: 0, heldBack: 1 })
+    expect(syncResultWords(r2, 'Bee Organized Friends')).toBe('Nothing new to add. 1 person Mailchimp refused before wasn’t sent again.')
+  })
+
+  it('a corrected address is a new address: it is sent on the next sync', async () => {
+    const s = setup({ leads: [lead('f', 'fake.one@x.com')], location: SYNCED, refusals: [{ location_id: LOC, email_key: 'fake.one@x.com', kind: 'invalid', mailchimp_code: 'ERROR_GENERIC', mailchimp_said: 'looks fake', refused_count: 1, first_refused_at: 'x', last_refused_at: 'x', held: true, retry_requested_at: null }] })
+    s.dbx.tables.leads[0].email = 'real.one@x.com'
+    const r = await s.run()
+    expect(sentTo(s)).toEqual(['real.one@x.com'])
+    expect(r).toMatchObject({ pushed: 1, heldBack: 0 })
+  })
+
+  it('Try again sends a held address once: refused again → counted, held again; accepted → forgotten', async () => {
+    let ok = false
+    const held = { location_id: LOC, email_key: 'fake.one@x.com', kind: 'invalid', mailchimp_code: 'ERROR_GENERIC', mailchimp_said: 'looks fake', refused_count: 1, first_refused_at: 'x', last_refused_at: 'x', held: true, retry_requested_at: '2026-11-26T17:00:00Z' }
+    const s = setup({ leads: [lead('f', 'fake.one@x.com')], location: SYNCED, refusals: [held], accepts: () => ok })
+    expect(await s.run()).toMatchObject({ pushed: 0, failed: 1, heldBack: 0 })
+    expect(refusal(s, 'fake.one@x.com')).toMatchObject({ refused_count: 2, held: true, retry_requested_at: null })
+    expect(await s.run()).toMatchObject({ pushed: 0, heldBack: 1 })           // Try again is used up
+    refusal(s, 'fake.one@x.com').retry_requested_at = '2026-11-26T18:00:00Z'
+    ok = true
+    expect(await s.run()).toMatchObject({ pushed: 1, failed: 0 })
+    expect(refusal(s, 'fake.one@x.com')).toBeUndefined()
+  })
+
+  it('a possibly temporary refusal is tried again, and held after 3', async () => {
+    const s = setup({ leads: [lead('b', 'busy@x.com')], location: SYNCED })
+    for (let i = 1; i <= 3; i++) {
+      expect(await s.run(), `run ${i}`).toMatchObject({ failed: 1, heldBack: 0 })
+      expect(refusal(s, 'busy@x.com')).toMatchObject({ kind: 'temporary', refused_count: i, held: i >= 3 })
+    }
+    expect(await s.run()).toMatchObject({ failed: 0, heldBack: 1 })
+    expect(sentTo(s).filter((e: string) => e === 'busy@x.com')).toHaveLength(3)
+  })
+
+  it('a "no" in Mailchimp (permanently deleted) goes on the no-marketing list — not the refused list, no Try again', async () => {
+    const s = setup({ leads: [lead('g', 'gone@x.com'), lead('a', 'a@x.com')] })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ complete: true, pushed: 1, failed: 0, saidNo: 1 })
+    expect(s.dbx.rpcCalls).toEqual([{ fn: 'marketing_unsubscribe_from_mailchimp', args: { p_email: 'gone@x.com', p_location: LOC, p_audience: LIST, p_note: expect.stringContaining('Mailchimp said: gone@x.com was permanently deleted') } }])
+    expect(refusal(s, 'gone@x.com')).toBeUndefined()
+    // next sync: the no-marketing list keeps them out (loadSuppressed is this test's stand-in for it)
+    expect(syncResultWords(r, 'Bee Organized Friends')).toContain('1 person had said no in Mailchimp (unsubscribed, bounced or removed), so they are now on your no-marketing list')
+  })
+
+  it('…if the no-marketing list can’t be written (its function not there yet), the "no" is kept as a refusal — never lost', async () => {
+    const s = setup({ leads: [lead('g', 'gone@x.com')], noListFnMissing: true })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ saidNo: 0, failed: 1 })
+    expect(refusal(s, 'gone@x.com')).toMatchObject({ kind: 'temporary', held: false })
+  })
+
+  it('before the migration (no refusals table): nobody is held, nothing is recorded there, the sync runs as before', async () => {
+    const s = setup({ leads: [lead('f', 'fake.one@x.com')], location: SYNCED, refusals: 'missing' })
+    expect(await s.run()).toMatchObject({ ran: true, failed: 1, heldBack: 0 })
+    expect(await s.run()).toMatchObject({ ran: true, failed: 1, heldBack: 0 })   // tried again: the old behaviour
+    expect(s.dbx.writes.filter((w: any) => w.table === 'mailchimp_refusals')).toEqual([])
+  })
+
+  it('the result line tells the truth: today’s 14 added and 6 refused', () => {
+    expect(syncResultWords({ ran: true, complete: true, pushed: 14, already: 0, failed: 6, said_no: 0, held_back: 0, remaining: 0 }, 'Test Bee Organized'))
+      .toBe('Done: added 14 people to Test Bee Organized. 6 people couldn’t be added — Mailchimp refused them (see who on the Mailchimp screen).')
   })
 })

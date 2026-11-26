@@ -63,7 +63,7 @@ describe('results', () => {
   })
   it('done: added, already there, refused', () => {
     expect(syncResultWords({ ran: true, complete: true, pushed: 141, already: 1, failed: 1, remaining: 0 }, 'Bee Organized Friends'))
-      .toBe('Done: added 141 people to Bee Organized Friends. 1 person was already there and left exactly as they were · 1 person couldn’t be added.')
+      .toBe('Done: added 141 people to Bee Organized Friends. 1 person was already there and left exactly as they were · 1 person couldn’t be added — Mailchimp refused them (see who on the Mailchimp screen).')
   })
   it('held tags are listed after a run', async () => {
     await mount(<SyncResult result={{ ran: true, complete: true, pushed: 3, already: 0, failed: 0, remaining: 0, tags_held: ['CLOSEDJOB'] }} listName="X" />)

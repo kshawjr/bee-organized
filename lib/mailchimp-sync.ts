@@ -81,6 +81,7 @@ import { scrub } from './mailchimp-audience-look'
 // clientStatus.js is an untyped pure JS module — typed at the boundary, same
 // as lib/hub-all-overview.ts does, so the arguments stay checked.
 import { deriveClientStatus as deriveClientStatusUntyped } from '@/components/hive/shared/clientStatus'
+import { loadRefusals, recordRefusal, clearRefusal, recordSaidNo, classifyRefusal, isHeld, type Refusal } from './mailchimp-refusals'
 const deriveClientStatus = deriveClientStatusUntyped as (
   person: any,
   openClientIds: Set<string> | null,
@@ -165,7 +166,9 @@ export type SyncReport = {
   pushed: number              // added to Mailchimp on this run
   alreadyThere: number        // Mailchimp said "already a member"; left exactly as they were
   skipped: number             // new to Mailchimp but unticked by the owner
-  failed: number              // Mailchimp refused this address (e.g. looks fake)
+  failed: number              // Mailchimp refused this address on this run (e.g. looks fake) — kept in mailchimp_refusals
+  saidNo: number              // Mailchimp said this person said no (unsubscribed, bounced, deleted, compliance) — now on the no-marketing list
+  heldBack: number            // not sent: Mailchimp refused them before (lib/mailchimp-refusals.ts) and nothing has changed
   remaining: number           // ticked, not yet tried because the run stopped
   tagsHeld: string[]          // tags not carried: they start a live flow
   errors: Array<{ email_key: string; error: string }>
@@ -173,7 +176,7 @@ export type SyncReport = {
 
 export type SyncConfirm = { count: number; listId: string; flows: string; tagsOk?: string[] }
 
-const emptyReport = (): Omit<SyncReport, 'ran'> => ({ pushed: 0, alreadyThere: 0, skipped: 0, failed: 0, remaining: 0, tagsHeld: [], errors: [] })
+const emptyReport = (): Omit<SyncReport, 'ran'> => ({ pushed: 0, alreadyThere: 0, skipped: 0, failed: 0, saidNo: 0, heldBack: 0, remaining: 0, tagsHeld: [], errors: [] })
 const refuse = (reason: SyncRefusal, extra: Partial<SyncReport> = {}): SyncReport => ({ ran: false, reason, ...emptyReport(), ...extra })
 
 const flowLine = (f: Flow): FlowLine => ({ name: f.name, status: f.status, start: f.startWords, subjects: f.subjects || [] })
@@ -264,6 +267,14 @@ export async function syncWebsiteLeadsToMailchimp(
     if (!archived.ok) return refuse('mailchimp_unreadable', { words: FLOWS_UNREADABLE_WORDS })
     sendSet = sendSet.filter((p) => !saidNo.has(p.k) && !archived.keys.has(p.k))
   }
+  // Who Mailchimp refused before (lib/mailchimp-refusals.ts, 2026-11-26): an
+  // invalid address — or one refused HOLD_AFTER times — is not sent again
+  // until its address is edited or the owner presses Try again. Counted, so
+  // the result line says so. Unreadable (migration not run) = nobody held.
+  const refusals = await loadRefusals(locationUuid, { db })
+  const refusedBefore: Map<string, Refusal> = refusals.ok ? refusals.byKey : new Map()
+  const heldBack = sendSet.filter((p) => isHeld(refusedBefore.get(p.k))).length
+  sendSet = sendSet.filter((p) => !isHeld(refusedBefore.get(p.k)))
   sendSet.sort((a, b) => a.k.localeCompare(b.k))
 
   // ── 4. Tags, and which are held ─────────────────────────────
@@ -334,11 +345,11 @@ export async function syncWebsiteLeadsToMailchimp(
   const carry = (tags: string[]) => tags.filter((t) => !liveTagFlows.has(t.toLowerCase()) || tagsOk.has(t.toLowerCase()))
 
   if (sendSet.length === 0 && repair.length === 0) {
-    return { ran: true, first, complete: true, ...emptyReport(), skipped, tagsHeld }
+    return { ran: true, first, complete: true, ...emptyReport(), skipped, heldBack, tagsHeld }
   }
 
   // ── 6. Send ─────────────────────────────────────────────────
-  const report: SyncReport = { ran: true, first, complete: false, ...emptyReport(), skipped, tagsHeld }
+  const report: SyncReport = { ran: true, first, complete: false, ...emptyReport(), skipped, heldBack, tagsHeld }
   const segments = new SegmentCache({ base, listId, token, doFetch, sleep })
   const stampNow = () => new Date(now()).toISOString()
   const idsFor = (keys: Iterable<string>) => Array.from(keys).flatMap((k) => idsByKey[k] || [])
@@ -395,12 +406,20 @@ export async function syncWebsiteLeadsToMailchimp(
     }
     const already = new Set<string>()
     const failed = new Map<string, string>()
+    const failedKind = new Map<string, { kind: 'invalid' | 'temporary'; code: string | null }>()
+    const saidNoHere = new Map<string, string>()
     for (const e of res.body?.errors || []) {
       const k = emailKey(e?.email_address); if (!k) continue
       if (e?.error_code === 'ERROR_CONTACT_EXISTS') {
         // After a retried call, "already a member" is our own first try landing.
         if (res.attempts > 1) added.add(k); else already.add(k)
-      } else failed.set(k, clean(e?.error || e?.error_code || 'refused'))
+        continue
+      }
+      const text = clean(e?.error || e?.error_code || 'refused')
+      const kind = classifyRefusal(e?.error_code, e?.error)
+      // A "no" (Kevin, 2026-11-26) goes on the no-marketing list below.
+      if (kind === 'said_no') saidNoHere.set(k, text)
+      else { failed.set(k, text); failedKind.set(k, { kind: kind === 'invalid' ? 'invalid' : 'temporary', code: e?.error_code ? String(e.error_code) : null }) }
     }
 
     // Tags for the people this batch added. Adding a tag is a write that can
@@ -418,10 +437,24 @@ export async function syncWebsiteLeadsToMailchimp(
       await writeLeads(db, idsFor(added), { mailchimp_synced_at: stamp, mailchimp_status: 'subscribed', mailchimp_sync_error: null, updated_at: stamp })
     }
     await writeLeads(db, idsFor(already), { mailchimp_synced_at: stamp, mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp })
+    for (const [k, msg] of Array.from(saidNoHere.entries())) {
+      const email = chunk.find((p) => p.k === k)?.e || k
+      if (await recordSaidNo(locationUuid, listId, email, msg, { db })) {
+        report.saidNo++
+        await writeLeads(db, idsByKey[k] || [], { mailchimp_sync_error: `said_no_in_mailchimp: ${msg}`.slice(0, 500), updated_at: stamp })
+      } else {
+        // The list could not be written (its function is not there yet): keep
+        // it as a refusal, so it is still remembered and shown.
+        failed.set(k, msg); failedKind.set(k, { kind: 'temporary', code: null })
+      }
+    }
     for (const [k, msg] of Array.from(failed.entries())) {
       await writeLeads(db, idsByKey[k] || [], { mailchimp_sync_error: msg.slice(0, 500), updated_at: stamp })
+      if (refusals.ok) await recordRefusal(locationUuid, k, { ...failedKind.get(k)!, text: msg }, stamp, refusedBefore.get(k), { db })
       if (report.errors.length < 25) report.errors.push({ email_key: k, error: msg })
     }
+    // Refused before, added now (Try again, or a temporary refusal that cleared).
+    if (refusals.ok) for (const k of Array.from(added)) if (refusedBefore.has(k)) await clearRefusal(locationUuid, k, { db })
     report.pushed += added.size
     report.alreadyThere += already.size
     report.failed += failed.size
@@ -449,7 +482,7 @@ export async function syncWebsiteLeadsToMailchimp(
     }
   }
   // The run's summary, for Vercel's logs (no addresses, no token).
-  console.info('[mailchimp-push]', JSON.stringify({ location: loc.location_id || locationUuid, first, complete: report.complete, added: report.pushed, already: report.alreadyThere, failed: report.failed, remaining: report.remaining, skipped, tags_held: tagsHeld, stop: report.stopReason || null }))
+  console.info('[mailchimp-push]', JSON.stringify({ location: loc.location_id || locationUuid, first, complete: report.complete, added: report.pushed, already: report.alreadyThere, failed: report.failed, said_no: report.saidNo, held_back: report.heldBack, remaining: report.remaining, skipped, tags_held: tagsHeld, stop: report.stopReason || null }))
   return report
 }
 

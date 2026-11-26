@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { sourceFiles } from '@/lib/db-select-scan'
 import { findWrites, parseObject, combos } from '@/lib/db-write-scan'
 import { realSchema } from '@/lib/db-columns-check'
-import { realRules, rowProblems, unreadableRules, enforceRealRules, PENDING_COLUMNS, RULED_TABLES } from '@/lib/db-rules-check'
+import { realRules, rowProblems, unreadableRules, enforceRealRules, PENDING_COLUMNS, PENDING_TABLES, RULED_TABLES, ruledColumns, ruledRequired } from '@/lib/db-rules-check'
 
 vi.mock('./supabase-service', () => ({ supabaseService: { from: () => { throw new Error('tests pass deps.db') } } }))
 vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: () => { throw new Error('tests pass deps.db') } } }))
@@ -39,7 +39,7 @@ const LOC = 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6'
 describe('the rules copy is the real one, and every rule in it can be read', () => {
   it('reads every rule — none is skipped in silence', () => {
     expect(unreadableRules()).toEqual([])
-    expect(RULED_TABLES().sort()).toEqual(['leads', 'locations', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
+    expect(RULED_TABLES().sort()).toEqual(['leads', 'locations', 'mailchimp_refusals', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
   })
 
   it('holds sync_log as it really is: only Jobber-era words', () => {
@@ -49,6 +49,23 @@ describe('the rules copy is the real one, and every rule in it can be read', () 
     expect(def('sync_log_status_check')).toBe("CHECK ((status = ANY (ARRAY['success'::text, 'error'::text, 'partial'::text])))")
     expect(def('sync_log_entity_type_check')).not.toMatch(/mailchimp/)
     expect(r.required.sync_log).toEqual(['direction', 'entity_type', 'status'])
+  })
+
+  it('a pending TABLE: every rule, column and required column is in the migration it names; the table is not real yet', () => {
+    for (const [table, p] of Object.entries(PENDING_TABLES)) {
+      const sql = readFileSync(join(process.cwd(), p.migration), 'utf8')
+      expect(sql, p.migration).toMatch(new RegExp(`CREATE TABLE public\\.${table} \\(`))
+      for (const c of p.columns) expect(sql, `${table}.${c}`).toMatch(new RegExp(`\\n  ${c}\\s+(uuid|text|integer|timestamptz|boolean)`))
+      for (const c of p.required) expect(sql, `${table}.${c} NOT NULL`).toMatch(new RegExp(`\\n  ${c}\\s+\\w+ NOT NULL(?! DEFAULT)`))
+      // each CHECK, as Postgres reports it, says what the migration says
+      expect(sql).toContain("CHECK (email_key = lower(btrim(email_key)) AND email_key <> '')")
+      expect(sql).toContain("CHECK (kind IN ('invalid', 'temporary'))")
+      expect(sql).toContain('CHECK (length(mailchimp_said) BETWEEN 1 AND 1000)')
+      expect(sql).toContain('CHECK (refused_count >= 1)')
+      expect(p.checks.map((c) => c.name).sort()).toEqual(['mailchimp_refusals_email_key_check', 'mailchimp_refusals_kind_check', 'mailchimp_refusals_mailchimp_said_check', 'mailchimp_refusals_refused_count_check'])
+      // Once the migration has run and the snapshots are refreshed, this fails: delete the entry.
+      expect(realSchema().has(table), `${table} is real now — refresh the snapshots and remove it from PENDING_TABLES`).toBe(false)
+    }
   })
 
   it('a pending column is really added by the migration it names, and is not in the real schema yet', () => {
@@ -134,11 +151,11 @@ describe('every Mailchimp write in the source names real columns and values the 
       if (w.arg === null) { problems.push(`${where}: its row could not be read from the source`); continue }
       const p = parseObject(w.arg)
       if (!p || p.spread) { runTime[where] = (runTime[where] || 0) + 1; continue }
-      const cols = realSchema().get(w.table)
+      const cols = ruledColumns(w.table)
       if (!cols) { problems.push(`${where}: table ${w.table} is not in the real schema`); continue }
       for (const k of p.keys) if (!cols.has(k) && !PENDING_COLUMNS[`${w.table}.${k}`]) problems.push(`${where}: no column ${k}`)
       if (w.op !== 'update') {
-        for (const c of realRules().required[w.table] || []) if (!p.keys.includes(c)) problems.push(`${where}: required column ${c} not written`)
+        for (const c of ruledRequired(w.table)) if (!p.keys.includes(c)) problems.push(`${where}: required column ${c} not written`)
       }
       for (const row of combos(p.fixed)) {
         for (const x of rowProblems(w.table, row, 'update')) problems.push(`${where}: ${x.rule} refuses ${JSON.stringify(row)}`)

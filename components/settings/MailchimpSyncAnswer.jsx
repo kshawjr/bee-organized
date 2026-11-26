@@ -43,15 +43,23 @@ export function syncResultWords(r, listName) {
     if (r.reason === 'not_connected' || r.reason === 'no_audience' || r.reason === 'location_not_found') return 'Nothing was sent — Mailchimp isn’t fully connected for your location.'
     return r.words || 'Nothing was sent. Please try again in a few minutes.'
   }
+  // Every number here is the server's own (2026-11-26: refused people are
+  // remembered, so they are not sent again silently — the line says so).
+  const saidNo = Number(r.said_no ?? r.saidNo ?? 0)
+  const held = Number(r.held_back ?? r.heldBack ?? 0)
   const tail = [
     r.already ? `${people(r.already)} ${r.already === 1 ? 'was' : 'were'} already there and left exactly as they were` : null,
-    r.failed ? `${people(r.failed)} couldn’t be added` : null,
+    r.failed ? `${people(r.failed)} couldn’t be added — Mailchimp refused them (see who on the Mailchimp screen)` : null,
+    saidNo ? `${people(saidNo)} had said no in Mailchimp (unsubscribed, bounced or removed), so they are now on your no-marketing list` : null,
+    held ? `${people(held)} Mailchimp refused before ${held === 1 ? 'wasn’t' : 'weren’t'} sent again` : null,
   ].filter(Boolean).join(' · ')
   if (r.complete === false) {
     const why = String(r.stopped || '').startsWith('flows_changed') ? ' A Mailchimp flow changed while sending, so Bee Hub stopped.' : ''
     return `Stopped partway: added ${people(r.pushed)} to ${list}, ${n(r.remaining)} still to go.${why} Nobody is added twice — press Sync now to carry on.${tail ? ' ' + tail + '.' : ''}`
   }
-  if (!r.pushed && !r.already && !r.failed) return `Nothing new to add — everyone ticked is already in ${list}.`
+  if (!r.pushed && !r.already && !r.failed && !saidNo) {
+    return held ? `Nothing new to add. ${tail}.` : `Nothing new to add — everyone ticked is already in ${list}.`
+  }
   return `Done: added ${people(r.pushed)} to ${list}.${tail ? ' ' + tail + '.' : ''}`
 }
 
