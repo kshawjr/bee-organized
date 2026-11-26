@@ -333,7 +333,12 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
     : state === 'blocked' ? { t: 'On hold', fg: T.warning, bg: T.warningSoft }
     : { t: 'Not syncing yet', fg: T.mutedFg, bg: T.muted }
   const list = (listName || '').trim() || 'your audience'
-  const partial = ov?.last_run && !ov.last_run.complete ? ov.last_run : null
+  // No "stopped partway last time" line after a reload (2026-11-26): the only
+  // trace a partial first sync leaves is people stamped as synced, and an older
+  // sync left the same stamps (Test Location has one from August), so the
+  // screen cannot tell the two apart. A run that stops partway says so, with
+  // its numbers, in its own answer (SyncResult); the next press asks again
+  // for the people still to go.
   const notLive = ov && ov.live !== true
   const frame = [list, (accountName || '').trim()].filter(Boolean).join(' · ')
 
@@ -393,7 +398,6 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
                     <h2 style={{ fontSize: '16px', lineHeight: '24px', fontWeight: 700, color: allowed ? T.primary : T.mutedFg }}>Start the first sync</h2>
                     <p style={{ ...muted, marginTop: '4px' }}>Adds the people you chose to your {list} audience.</p>
                     {!ov.reviewed && <p style={{ ...small, marginTop: '8px' }}>Finish your contact review first.</p>}
-                    {partial && <p data-testid="mc-partial" style={{ ...small, marginTop: '8px', color: T.warning }}>Stopped partway last time: {people(partial.added)} added, {n(partial.remaining)} still to go. Nobody is added twice.</p>}
                   </div>
                   <Btn variant="primary" data-testid="mc-start" disabled={!allowed || syncing} onClick={() => sync(null)}>{syncing ? 'Checking…' : 'Start the first sync'}</Btn>
                 </li>
@@ -407,8 +411,7 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
               <div data-mcc-tiles>
                 {[
                   { label: 'People in the audience', value: ov.audience_count == null ? '—' : n(ov.audience_count), Icon: IconUsers },
-                  { label: 'Last synced', value: lastSyncedWords(ov.last_run?.at), Icon: IconClock },
-                  ...(partial ? [{ label: 'Still to go from the last sync', value: n(partial.remaining), Icon: Refresh }] : []),
+                  { label: 'Last synced', value: lastSyncedWords(ov.last_synced_at), Icon: IconClock },
                 ].map(({ label, value, Icon }, i) => (
                   <div key={label} style={{ borderRadius: R.lg, border: `1px solid ${T.border}`, background: T.card, padding: '16px', ...(i === 2 ? { gridColumn: '1 / -1' } : {}) }}>
                     <span style={{ color: T.mutedFg }}><Icon size={16} /></span>

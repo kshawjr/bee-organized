@@ -6,7 +6,9 @@
 //   GET  — read only. Mailchimp is asked by GET only (the audience's size and
 //          the flows). Nothing is sent; the token never leaves the server.
 //   POST — { reviewed: true } records that the owner pressed Done on "Who goes
-//          to Mailchimp" (one sync_log row). Writes nothing else, sends nothing.
+//          to Mailchimp" (locations.mailchimp_review_done_at). Writes nothing
+//          else, sends nothing. If the date did not land it says so, in words
+//          the screen shows as they are.
 //
 // Neither decides anything about sending: the sending code reads the switch
 // and the flows again, itself, right before it sends.
@@ -16,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { resolveMailchimpTarget, targetFailureResponse } from '@/lib/mailchimp-oauth-guard'
-import { loadOverview, markReviewed } from '@/lib/mailchimp-overview'
+import { loadOverview, markReviewed, REVIEW_NOT_SAVED_WORDS } from '@/lib/mailchimp-overview'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest) {
   const o = r.overview
   return NextResponse.json({
     live: o.live, synced: o.synced, reviewed: o.reviewed, audience_count: o.audienceCount,
-    last_run: o.lastRun, flows: o.flows, how_to_pause: o.howToPause,
+    last_synced_at: o.lastSyncedAt, flows: o.flows, how_to_pause: o.howToPause,
   })
 }
 
@@ -53,5 +55,6 @@ export async function POST(request: NextRequest) {
   const t = await target(body?.location_id ?? null)
   if (!t.ok) return t.res
   const ok = await markReviewed(t.locationUuid)
-  return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: 'not_saved' }, { status: 500 })
+  return ok ? NextResponse.json({ ok: true })
+    : NextResponse.json({ error: 'not_saved', words: REVIEW_NOT_SAVED_WORDS }, { status: 500 })
 }

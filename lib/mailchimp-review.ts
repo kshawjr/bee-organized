@@ -160,6 +160,33 @@ export function countAdding(people: readonly ReviewPerson[], groups: readonly Re
   return n
 }
 
+// The line under the big number, as parts that ADD UP (Kevin, 2026-11-26:
+// "big 20, but 2 already · 21 new" read wrong — the 21 counted an unticked
+// archived person the 20 did not). Everyone the screen is about is in exactly
+// one part:
+//   adding            new to Mailchimp and ticked — the big number
+//   archivedUnticked  archived in Bee Hub, not ticked (shown on its own)
+//   otherUnticked     anyone else not ticked (a group or a person unticked)
+//   already           already in Mailchimp (by email, or matched by phone)
+//   total             the sum of the four
+export type ReviewTally = { adding: number; archivedUnticked: number; otherUnticked: number; already: number; total: number }
+export function reviewTally(
+  people: readonly ReviewPerson[], groups: readonly ReviewGroup[], sameSet: ReadonlySet<string>,
+  m: Pick<ReviewModel, 'mailchimpKnown' | 'alreadyInMailchimp' | 'alreadyByPhone'>,
+): ReviewTally {
+  const gc: Record<string, 'in' | 'out' | null> = {}
+  for (const g of groups) gc[g.key] = g.choice
+  let adding = 0, archivedUnticked = 0, otherUnticked = 0
+  for (const p of people) {
+    if (sameSet.has(p.k)) continue
+    if (isIncluded(p, gc)) adding++
+    else if (p.g === 'archived') archivedUnticked++
+    else otherUnticked++
+  }
+  const already = m.mailchimpKnown ? Math.max(0, m.alreadyInMailchimp - m.alreadyByPhone) + sameSet.size : 0
+  return { adding, archivedUnticked, otherUnticked, already, total: adding + archivedUnticked + otherUnticked + already }
+}
+
 // The addresses the owner has said are already in Mailchimp under another
 // email (phone answer "same").
 export function matchedByPhone(phone: readonly PhoneSuggestion[]): Set<string> {

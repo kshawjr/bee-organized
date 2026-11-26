@@ -21,8 +21,9 @@ import { join } from 'path'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import MailchimpConnectionScreen, { BeforeWeAdd, Hold, PAUSE_LINE, screenState, startAllowed, lastSyncedWords } from '@/components/settings/MailchimpConnectionScreen'
-import { loadOverview, markReviewed, connectionState, canStart, RUN_RECORD, REVIEW_ENTITY } from './mailchimp-overview'
-import { RUN_ENTITY } from './mailchimp-sync'
+import { loadOverview, markReviewed, connectionState, canStart, REVIEW_DONE_COLUMN, FIRST_SYNC_COLUMN } from './mailchimp-overview'
+import { FIRST_SYNC_DATE } from './mailchimp-sync'
+import { enforceRealRules } from './db-rules-check'
 import { readFlows, type Flow, type FlowsRead } from './mailchimp-flows'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -65,39 +66,43 @@ describe('state: never synced / syncing / on hold', () => {
       expect(startAllowed(s, o)).toBe(want)
     }
   })
-  it('the run record is the sending code’s own', () => {
-    expect(RUN_RECORD).toBe(RUN_ENTITY)
+  it('the first-sync date is the one the sending code sets (Kevin, option B, 2026-11-26)', () => {
+    expect(FIRST_SYNC_COLUMN).toBe(FIRST_SYNC_DATE)
+    expect([REVIEW_DONE_COLUMN, FIRST_SYNC_COLUMN]).toEqual(['mailchimp_review_done_at', 'mailchimp_first_sync_at'])
   })
 })
 
 // ═══ 2. the overview: read only ═══════════════════════════════════════════
-function overviewDb(o: { syncLog?: any[]; choices?: any[]; location?: any; runsBroken?: boolean } = {}) {
+function overviewDb(o: { location?: any; leads?: any[]; datesBroken?: boolean } = {}) {
   const writes: any[] = []
-  const location = { id: LOC, location_id: 'loc_t', mailchimp_connected: true, mailchimp_access_token: TOKEN, mailchimp_server_prefix: 'us8', mailchimp_list_id: 'list1', mailchimp_sync_live: true, ...(o.location || {}) }
-  const tables: Record<string, any[]> = { locations: [location], sync_log: o.syncLog || [], mailchimp_review_choices: o.choices || [] }
+  const location = { id: LOC, location_id: 'loc_t', mailchimp_connected: true, mailchimp_access_token: TOKEN, mailchimp_server_prefix: 'us8', mailchimp_list_id: 'list1', mailchimp_sync_live: true, mailchimp_review_done_at: null, mailchimp_first_sync_at: null, ...(o.location || {}) }
+  const tables: Record<string, any[]> = { locations: [location], leads: o.leads || [] }
   const from = (table: string) => {
     const f: Array<(r: any) => boolean> = []
-    let lim = Infinity
+    let lim = Infinity, cols = '', patch: any = null
     const run = () => {
-      if (table === 'sync_log' && o.runsBroken) return { data: null, error: { message: 'broken' } }
-      const rows = (tables[table] || []).filter((r) => f.every((fn) => fn(r))).slice(0, lim)
+      if (table === 'locations' && o.datesBroken && /mailchimp_review_done_at/.test(cols)) return { data: null, error: { code: '42703', message: 'column locations.mailchimp_review_done_at does not exist' } }
+      let rows = (tables[table] || []).filter((r) => f.every((fn) => fn(r)))
+      if (patch) { writes.push({ table, patch }); for (const r of rows) Object.assign(r, patch) }
+      rows = rows.slice().sort((a, b) => String(b.mailchimp_synced_at).localeCompare(String(a.mailchimp_synced_at))).slice(0, lim)
       return { data: rows, error: null }
     }
     const q: any = {
-      select: () => q,
+      select: (c?: string) => { if (c) cols = c; return q },
       eq: (c: string, v: any) => { f.push((r) => r[c] === v); return q },
+      not: (c: string, _op: string, v: any) => { f.push((r) => (r[c] ?? null) !== v); return q },
       order: () => q,
       limit: (n: number) => { lim = n; return q },
-      maybeSingle: async () => ({ data: run().data?.[0] || null, error: null }),
-      insert: async (row: any) => { writes.push({ table, row }); return { error: null } },
-      update: () => { throw new Error('the overview never updates') },
+      maybeSingle: async () => { const r = run(); return { data: r.data?.[0] || null, error: r.error } },
+      update: (p: any) => { if (table !== 'locations') throw new Error('only the review date is ever written'); patch = p; return q },
+      insert: () => { throw new Error('the overview never inserts (sync_log is not written — 2026-11-26)') },
       upsert: () => { throw new Error('the overview never upserts') },
       delete: () => { throw new Error('the overview never deletes') },
       then: (ok: any, bad: any) => Promise.resolve(run()).then(ok, bad),
     }
     return q
   }
-  return { db: { from }, writes }
+  return { db: { from }, writes, location }
 }
 const flowsAnswer = (over: Partial<Extract<FlowsRead, { ok: true }>> = {}): FlowsRead => ({ ok: true, flows: [], mustPause: [], tagFlows: [], signupFlows: [], fingerprint: 'fp', ...over })
 const flow = (over: Partial<Flow>): Flow => ({ kind: 'journey', id: '1', name: 'Welcome New Contacts', status: 'paused', live: false, start: 'signup', startWords: '', tag: null, subjects: ['Welcome!'], ...over })
@@ -140,24 +145,30 @@ describe('GET overview', () => {
     expect(connectionState(r.overview)).toBe('blocked')
   })
 
-  it('synced only once a run finished completely; a partial run is the last run, with what is left', async () => {
-    const partial = { entity_type: 'mailchimp_push', entity_id: LOC, status: 'partial', created_at: '2026-11-25T10:00:00Z', message: JSON.stringify({ added: 500, remaining: 700 }) }
-    const { db } = overviewDb({ syncLog: [partial] })
-    const r = await loadOverview(LOC, { db, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer() })
-    if (!r.ok) throw new Error('expected ok')
-    expect(r.overview.synced).toBe(false)
-    expect(r.overview.lastRun).toEqual({ at: '2026-11-25T10:00:00Z', complete: false, added: 500, remaining: 700 })
-    const { db: db2 } = overviewDb({ syncLog: [{ ...partial, status: 'complete' }] })
-    const r2 = await loadOverview(LOC, { db: db2, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer() })
-    if (r2.ok) expect(r2.overview.synced).toBe(true)
+  it('synced = the first-sync date is set; a sync that stopped partway (people stamped, no date) is not', async () => {
+    const base = { fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer() }
+    const stamped = [{ location_uuid: LOC, mailchimp_synced_at: '2026-11-25T10:00:00Z' }, { location_uuid: LOC, mailchimp_synced_at: '2026-11-24T09:00:00Z' }, { location_uuid: LOC, mailchimp_synced_at: null }]
+    const partial = await loadOverview(LOC, { ...base, db: overviewDb({ leads: stamped }).db })
+    if (!partial.ok) throw new Error('expected ok')
+    expect(partial.overview.synced).toBe(false)
+    expect(partial.overview.lastSyncedAt).toBe('2026-11-25T10:00:00Z')     // the newest stamp
+    const done = await loadOverview(LOC, { ...base, db: overviewDb({ leads: stamped, location: { mailchimp_first_sync_at: '2026-11-25T10:05:00Z' } }).db })
+    if (done.ok) expect(done.overview.synced).toBe(true)
+    const never = await loadOverview(LOC, { ...base, db: overviewDb().db })
+    if (never.ok) expect([never.overview.synced, never.overview.lastSyncedAt]).toEqual([false, null])
   })
 
-  it('reviewed: Done was pressed, or a choice was saved — and not otherwise', async () => {
+  it('reviewed = the review date is set — a saved tick alone does not tick step 1', async () => {
     const base = { fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer() }
     const none = await loadOverview(LOC, { ...base, db: overviewDb().db })
-    const done = await loadOverview(LOC, { ...base, db: overviewDb({ syncLog: [{ entity_type: REVIEW_ENTITY, entity_id: LOC, status: 'reviewed' }] }).db })
-    const chose = await loadOverview(LOC, { ...base, db: overviewDb({ choices: [{ location_id: LOC, key: 'archived' }] }).db })
-    expect([none, done, chose].map((r) => r.ok && r.overview.reviewed)).toEqual([false, true, true])
+    const done = await loadOverview(LOC, { ...base, db: overviewDb({ location: { mailchimp_review_done_at: '2026-11-26T15:00:00Z' } }).db })
+    expect([none, done].map((r) => r.ok && r.overview.reviewed)).toEqual([false, true])
+  })
+
+  it('the dates cannot be read (migration not run yet) → "not reviewed, never synced" — only ever MORE confirmation', async () => {
+    const r = await loadOverview(LOC, { db: overviewDb({ datesBroken: true, location: { mailchimp_review_done_at: 'x', mailchimp_first_sync_at: 'y' } }).db, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer() })
+    if (!r.ok) throw new Error('expected ok — the screen still loads')
+    expect([r.overview.reviewed, r.overview.synced]).toEqual([false, false])
   })
 
   it('the switch is passed through as it is', async () => {
@@ -165,10 +176,17 @@ describe('GET overview', () => {
     if (r.ok) expect(r.overview.live).toBe(false)
   })
 
-  it('markReviewed writes one sync_log row and nothing else', async () => {
-    const { db, writes } = overviewDb()
-    expect(await markReviewed(LOC, { db })).toBe(true)
-    expect(writes).toEqual([{ table: 'sync_log', row: expect.objectContaining({ entity_type: 'mailchimp_review', entity_id: LOC, status: 'reviewed' }) }])
+  it('markReviewed sets the review date on this location and writes nothing else — through the REAL rules', async () => {
+    const x = overviewDb()
+    const db = enforceRealRules(x.db)
+    expect(await markReviewed(LOC, { db, now: () => new Date('2026-11-26T15:00:00Z') })).toBe(true)
+    expect(db.refused).toEqual([])
+    expect(x.writes).toEqual([{ table: 'locations', patch: { mailchimp_review_done_at: '2026-11-26T15:00:00.000Z' } }])
+    expect(x.location.mailchimp_review_done_at).toBe('2026-11-26T15:00:00.000Z')
+  })
+  it('markReviewed says false when the date did not land (so Done can say so)', async () => {
+    const broken = { from: () => ({ update: () => ({ eq: () => ({ select: async () => ({ data: null, error: { message: 'column does not exist' } }) }) }) }) }
+    expect(await markReviewed(LOC, { db: broken })).toBe(false)
   })
 })
 
@@ -225,7 +243,7 @@ function api(o: { overview?: any; overviewFails?: boolean; sync?: any[] }) {
 const screen = (a: ReturnType<typeof api>, extra: any = {}) => (
   <MailchimpConnectionScreen locationId="loc_test" accountName="Test Bee Organized" listName="Bee Organized Friends" onReview={() => {}} onDisconnect={() => {}} fetchImpl={a.fetchImpl} {...extra} />
 )
-const NEVER = { live: true, synced: false, reviewed: true, audience_count: 2, last_run: null, flows: OK_PAUSED, how_to_pause: '' }
+const NEVER = { live: true, synced: false, reviewed: true, audience_count: 2, last_synced_at: null, flows: OK_PAUSED, how_to_pause: '' }
 
 describe('never synced', () => {
   it('three steps; the first sync stays off until the review is done', async () => {
@@ -243,6 +261,22 @@ describe('never synced', () => {
     await mount(screen(a))
     expect(byId('mc-start')!.disabled).toBe(true)
     expect(byId('mc-not-live')).toBeTruthy()
+  })
+  it('the review date ticks step 1; without it, step 1 is not ticked', async () => {
+    const a = api({ overview: NEVER })
+    await mount(screen(a))
+    expect(byId('mc-reviewed')!.textContent).toContain('Review complete')
+    expect(byId('mc-start')!.disabled).toBe(false)
+    const b = api({ overview: { ...NEVER, reviewed: false } })
+    await mount(screen(b))
+    expect(byId('mc-reviewed')).toBeNull()
+  })
+  it('people stamped as synced before (Test Location has one from August) do NOT make the screen claim a sync stopped partway', async () => {
+    const a = api({ overview: { ...NEVER, last_synced_at: '2026-08-20T02:39:26Z' } })
+    await mount(screen(a))
+    expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
+    expect(host.textContent).not.toMatch(/stopped partway/i)
+    expect(byId('mc-start')!.textContent).toBe('Start the first sync')
   })
   it('step 2 names the flows checked as paused just now', async () => {
     const a = api({ overview: NEVER })
@@ -433,7 +467,7 @@ describe('on hold', () => {
 })
 
 describe('syncing (synced before)', () => {
-  const RUNNING = { ...NEVER, synced: true, audience_count: 714, last_run: { at: new Date(Date.now() - 2 * 3600e3).toISOString(), complete: true, added: 3, remaining: 0 } }
+  const RUNNING = { ...NEVER, synced: true, audience_count: 714, last_synced_at: new Date(Date.now() - 2 * 3600e3).toISOString() }
   it('the numbers, and Sync now sends without a confirmation', async () => {
     const a = api({ overview: RUNNING, sync: [{ ran: true, complete: true, pushed: 3, already: 0, failed: 0, remaining: 0, tags_held: [] }] })
     await mount(screen(a))
@@ -444,10 +478,9 @@ describe('syncing (synced before)', () => {
     expect(a.syncCalls()[0].body.confirm).toBeUndefined()
     expect(host.textContent).toContain('Done: added 3 people to Bee Organized Friends.')
   })
-  it('a run that stopped partway says so, and what is left', async () => {
-    const a = api({ overview: { ...RUNNING, last_run: { ...RUNNING.last_run, complete: false, remaining: 700 } }, sync: [{ ran: true, complete: false, stopped: 'time', pushed: 500, remaining: 700 }] })
+  it('a run that stopped partway says so, and what is left (from the run’s own answer)', async () => {
+    const a = api({ overview: RUNNING, sync: [{ ran: true, complete: false, stopped: 'time', pushed: 500, remaining: 700 }] })
     await mount(screen(a))
-    expect(host.textContent).toContain('Still to go from the last sync')
     await click(byId('mc-sync-now'))
     expect(host.textContent).toContain('Stopped partway: added 500 people to Bee Organized Friends, 700 still to go.')
   })

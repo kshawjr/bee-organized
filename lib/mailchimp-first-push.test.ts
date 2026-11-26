@@ -13,7 +13,7 @@
 //   R2 Flows read live right before sending; a change between look and send → refuse
 //   R3 Mailchimp unreadable → refuse ("couldn't check" is never "nothing live")
 //   R4 A tag that starts a live flow is never carried without the owner's yes, one by one
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 // The engine takes its database as a dependency here; the real client must
 // never be reached (and cannot start without production settings).
 vi.mock('./supabase-service', () => ({ supabaseService: { from: () => { throw new Error('tests pass deps.db') } } }))
@@ -24,6 +24,7 @@ import { syncWebsiteLeadsToMailchimp, BATCH_SIZE } from './mailchimp-sync'
 import { readFlows, flowsFingerprint, type Flow, type FlowsRead } from './mailchimp-flows'
 import { buildReview, type ReviewLead, type StoredChoice } from './mailchimp-review'
 import { emailKey } from './mailchimp-rules'
+import { enforceRealRules } from './db-rules-check'
 
 const LOC = '11111111-1111-4111-8111-111111111111'
 const LIST = 'list1'
@@ -31,14 +32,14 @@ const TOKEN = 'tok-SECRET-123'
 const noSleep = async () => {}
 
 // ── A small stand-in for Supabase ─────────────────────────────
-function fakeDb(o: { leads: any[]; location?: any; syncLog?: any[]; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] } ) {
+function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] } ) {
   const tables: Record<string, any[]> = {
-    leads: o.leads, sync_log: o.syncLog || [], lookups: o.lookups || [], lead_tags: o.leadTags || [],
+    leads: o.leads, sync_log: [], lookups: o.lookups || [], lead_tags: o.leadTags || [],
     engagements: [], touchpoints: [], service_requests: [], quotes: [], jobs: [], partners: [], marketing_unsubscribes: [],
   }
   const location = {
     id: LOC, location_id: 'loc_t', mailchimp_connected: true, mailchimp_access_token: TOKEN, mailchimp_server_prefix: 'us9',
-    mailchimp_list_id: LIST, mailchimp_list_name: 'Bee Organized Friends', mailchimp_sync_live: true, ...(o.location || {}),
+    mailchimp_list_id: LIST, mailchimp_list_name: 'Bee Organized Friends', mailchimp_sync_live: true, mailchimp_first_sync_at: null, ...(o.location || {}),
   }
   const writes: { table: string; op: string; patch?: any; ids?: string[]; row?: any }[] = []
   const from = (table: string) => {
@@ -58,13 +59,25 @@ function fakeDb(o: { leads: any[]; location?: any; syncLog?: any[]; noListBroken
       limit: (n: number) => { limit = n; return q },
       maybeSingle: async () => { const r = run(); return { data: (r.data || [])[0] || null, error: r.error } },
       then: (ok: any, bad: any) => Promise.resolve(run()).then(ok, bad),
-      update: (patch: any) => ({
-        in: async (c: string, ids: string[]) => {
-          writes.push({ table, op: 'update', patch, ids })
-          for (const r of tables[table]) if (ids.includes(r[c])) Object.assign(r, patch)
-          return { error: null }
-        },
-      }),
+      // update(patch) then any of .eq / .is / .in / .select, awaited at the end.
+      update: (patch: any) => {
+        const uf: Array<(r: any) => boolean> = []
+        let ids: string[] | undefined
+        const u: any = {
+          eq: (c: string, v: any) => { uf.push((r) => r[c] === v); return u },
+          is: (c: string, v: any) => { uf.push((r) => (r[c] ?? null) === v); return u },
+          in: (c: string, v: string[]) => { ids = v; uf.push((r) => v.includes(r[c])); return u },
+          select: () => u,
+          then: (ok: any, bad: any) => {
+            const pool = table === 'locations' ? [location] : tables[table] || []
+            const hit = pool.filter((r) => uf.every((fn) => fn(r)))
+            writes.push({ table, op: 'update', patch, ...(ids ? { ids } : {}) })
+            for (const r of hit) Object.assign(r, patch)
+            return Promise.resolve({ data: hit, error: null }).then(ok, bad)
+          },
+        }
+        return u
+      },
       insert: async (row: any) => { writes.push({ table, op: 'insert', row }); tables[table].push(row); return { error: null } },
     }
     return q
@@ -145,13 +158,19 @@ function reviewFrom(dbx: ReturnType<typeof fakeDb>, mc: ReturnType<typeof fakeMa
   }
 }
 
-function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; syncLog?: any[]; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] }) {
-  const dbx = fakeDb({ leads: o.leads, location: o.location, syncLog: o.syncLog, noListBroken: o.noListBroken, lookups: o.lookups, leadTags: o.leadTags })
+function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[] }) {
+  const dbx = fakeDb({ leads: o.leads, location: o.location, noListBroken: o.noListBroken, lookups: o.lookups, leadTags: o.leadTags })
+  // EVERY sending test writes through the REAL database rules
+  // (lib/db-rules-check.ts): a row production would refuse is refused here
+  // too, and the afterEach below fails the test. A stand-in that accepts any
+  // row is how two never-saved records shipped (2026-11-26).
+  const ruled = enforceRealRules(dbx.db)
+  lastRuled = ruled
   const mc = fakeMailchimp({ members: o.members, archived: o.archived, fail: o.fail })
   const flowCalls = { n: 0 }
   const reviewCalls = { n: 0 }
   const deps = {
-    db: dbx.db, fetchImpl: mc.fetchImpl as any, sleep: noSleep,
+    db: ruled, fetchImpl: mc.fetchImpl as any, sleep: noSleep,
     readFlowsImpl: async () => { flowCalls.n++; return typeof o.flows === 'function' ? o.flows() : flowsAnswer(o.flows || PAUSED) },
     loadReviewImpl: reviewFrom(dbx, mc, { suppressed: o.suppressedAtReview, choices: o.choices, calls: reviewCalls }) as any,
     loadSuppressed: async () => new Set(o.suppressedAtSend || []),
@@ -160,6 +179,15 @@ function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => Fl
   const posts = () => mc.reqs.filter((r) => r.method === 'POST' && r.url.endsWith(`/lists/${LIST}`))
   return { dbx, mc, run, posts, flowCalls, reviewCalls }
 }
+let lastRuled: { refused: unknown[] } | null = null
+afterEach(() => {
+  const refused = lastRuled?.refused || []
+  lastRuled = null
+  expect(refused, 'a write the real database would refuse').toEqual([])
+})
+// The first-sync date as the sending code leaves it.
+const firstSyncAt = (s: { dbx: { location: any } }) => s.dbx.location.mailchimp_first_sync_at as string | null
+const SYNCED = { mailchimp_first_sync_at: '2026-11-20T12:00:00.000Z' }
 const confirmOf = (r: any, tagsOk?: string[]) => ({ count: r.confirm.count, listId: r.confirm.listId, flows: r.confirm.flows, ...(tagsOk ? { tagsOk } : {}) })
 const THREE = () => [lead('a', 'a@x.com'), lead('b', 'b@x.com'), lead('c', 'c@x.com')]
 
@@ -200,7 +228,7 @@ describe('R1 + R3. live sign-up flows, or flows that cannot be read: refuse', ()
   })
   it('even with a matching confirmation, and even after the first sync is done', async () => {
     const live = [flow({ status: 'sending', live: true })]
-    const s = setup({ leads: THREE(), flows: live, syncLog: [{ entity_type: 'mailchimp_push', entity_id: LOC, status: 'complete' }] })
+    const s = setup({ leads: THREE(), flows: live, location: SYNCED })
     const r = await s.run({ count: 3, listId: LIST, flows: flowsFingerprint(live) })
     expect(r.reason).toBe('signup_flows_live')
     expect(s.posts()).toEqual([])
@@ -264,30 +292,59 @@ describe('P2. a first sync refuses without a matching count, audience and flows'
     expect(body.update_existing).toBe(false)
     expect(body.members.map((m: any) => m.email_address).sort()).toEqual(['a@x.com', 'b@x.com', 'c@x.com'])
     for (const m of body.members) { expect(m.status).toBe('subscribed'); expect(m.merge_fields).toEqual({ FNAME: expect.any(String), LNAME: 'Doe' }) }
-    expect(s.dbx.tables.sync_log.at(-1)).toMatchObject({ entity_type: 'mailchimp_push', entity_id: LOC, status: 'complete', direction: 'outbound' })
+    // A finished first sync sets the location's first-sync date — and writes nothing to sync_log.
+    expect(firstSyncAt(s)).toEqual(expect.any(String))
+    expect(s.dbx.writes.filter((w) => w.table === 'locations')).toEqual([{ table: 'locations', op: 'update', patch: { mailchimp_first_sync_at: expect.any(String) } }])
+    expect(s.dbx.tables.sync_log).toEqual([])
   })
   it('once a run has completed, later runs need no confirm (and still check the flows)', async () => {
-    const s = setup({ leads: THREE(), syncLog: [{ entity_type: 'mailchimp_push', entity_id: LOC, status: 'complete' }] })
+    const s = setup({ leads: THREE(), location: SYNCED })
     const r = await s.run()
     expect(r).toMatchObject({ ran: true, complete: true, pushed: 3, first: false })
+    expect(firstSyncAt(s)).toBe(SYNCED.mailchimp_first_sync_at)   // set once, never moved
     expect(s.flowCalls.n).toBeGreaterThanOrEqual(2)
   })
   it('a partial run is NOT a finished first sync: carrying on asks again, for what is left', async () => {
-    const s = setup({ leads: THREE(), syncLog: [{ entity_type: 'mailchimp_push', entity_id: LOC, status: 'partial' }] })
+    // A run that stopped partway left the first-sync date empty.
+    const s = setup({ leads: THREE(), location: { mailchimp_first_sync_at: null } })
     expect((await s.run()).reason).toBe('needs_confirmation')
   })
-  it('the "first?" record cannot be read → throws, never guesses "not first"', async () => {
-    const s = setup({ leads: THREE() })
-    const db = { ...s.dbx.db, from: (t: string) => t === 'sync_log' ? { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ limit: async () => ({ data: null, error: { message: 'down' } }) }) }) }) }) } : s.dbx.db.from(t) }
-    await expect(syncWebsiteLeadsToMailchimp(LOC, {}, { db, fetchImpl: s.mc.fetchImpl as any, sleep: noSleep, readFlowsImpl: async () => flowsAnswer(PAUSED), loadReviewImpl: reviewFrom(s.dbx, s.mc) as any, loadSuppressed: async () => new Set() })).rejects.toThrow(/first-sync record/)
+  it('the first-sync date cannot be read (migration not run, say) → treated as a FIRST sync: asks, never guesses "not first"', async () => {
+    const s = setup({ leads: THREE(), location: SYNCED })
+    const base = s.dbx.db
+    const db = { ...base, from: (t: string) => {
+      const q = base.from(t)
+      if (t !== 'locations') return q
+      const sel = q.select
+      q.select = (cols: string, ...rest: any[]) => cols === 'mailchimp_first_sync_at'
+        ? { eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: '42703', message: 'column locations.mailchimp_first_sync_at does not exist' } }) }) }
+        : sel(cols, ...rest)
+      return q
+    } }
+    const r = await syncWebsiteLeadsToMailchimp(LOC, {}, { db, fetchImpl: s.mc.fetchImpl as any, sleep: noSleep, readFlowsImpl: async () => flowsAnswer(PAUSED), loadReviewImpl: reviewFrom(s.dbx, s.mc) as any, loadSuppressed: async () => new Set() })
+    expect(r).toMatchObject({ ran: false, reason: 'needs_confirmation' })
     expect(s.posts()).toEqual([])
+  })
+  it('the first-sync date does not land after everything went → the run says so (record_not_saved), and the next press asks again', async () => {
+    const s = setup({ leads: THREE() })
+    const base = s.dbx.db
+    const db = { ...base, from: (t: string) => {
+      const q = base.from(t)
+      if (t === 'locations') q.update = () => { const u: any = { eq: () => u, is: () => u, select: () => u, then: (ok: any) => Promise.resolve({ data: null, error: { message: 'down' } }).then(ok) }; return u }
+      return q
+    } }
+    const deps = { db, fetchImpl: s.mc.fetchImpl as any, sleep: noSleep, readFlowsImpl: async () => flowsAnswer(PAUSED), loadReviewImpl: reviewFrom(s.dbx, s.mc) as any, loadSuppressed: async () => new Set<string>() }
+    const ask = await syncWebsiteLeadsToMailchimp(LOC, {}, deps)
+    const r = await syncWebsiteLeadsToMailchimp(LOC, { confirm: confirmOf(ask) }, deps)
+    expect(r).toMatchObject({ ran: true, pushed: 3, complete: true, stopReason: 'record_not_saved: down' })
+    expect(firstSyncAt(s)).toBeNull()
   })
   it('nobody to send → an honest zero, no confirmation, nothing written', async () => {
     const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
     const r = await s.run()
     expect(r).toMatchObject({ ran: true, pushed: 0, complete: true })
     expect(s.posts()).toEqual([])
-    expect(s.dbx.tables.sync_log).toEqual([])
+    expect(firstSyncAt(s)).toBeNull()
   })
 })
 
@@ -299,7 +356,7 @@ describe('R2. the flows are read again right before every write', () => {
     const r = await s.run(confirmOf(ask))    // read 2 passes; read 3 (right before the batch) sees it on
     expect(r).toMatchObject({ ran: true, complete: false, pushed: 0, remaining: 3, stopReason: 'flows_changed' })
     expect(s.posts()).toEqual([])
-    expect(s.dbx.tables.sync_log.at(-1).status).toBe('partial')
+    expect(firstSyncAt(s)).toBeNull()            // stopped partway: no first-sync date
   })
   it('a flow switched on mid-run → stops before the next batch, says so', async () => {
     let n = 0
@@ -323,7 +380,7 @@ describe('R2. the flows are read again right before every write', () => {
     expect(s.mc.reqs.filter((q) => q.method === 'POST' && /segments/.test(q.url))).toEqual([])
     expect(r).toMatchObject({ complete: false, pushed: 2, remaining: 0, stopReason: 'flows_changed' })
     expect(s.dbx.tables.leads.map((l) => l.mailchimp_sync_error)).toEqual(['tags_pending: flows_changed', 'tags_pending: flows_changed'])
-    expect(s.dbx.tables.sync_log.at(-1).status).toBe('partial')
+    expect(firstSyncAt(s)).toBeNull()            // stopped partway: no first-sync date
     // The next press: the owed tags go on, except the one that now starts a live flow.
     const r2 = await s.run()
     expect(s.mc.tagged['CLOSEDJOB']).toBeUndefined()
@@ -467,7 +524,7 @@ describe('P6. a half-done sync says so', () => {
     expect(r).toMatchObject({ ran: true, complete: false, pushed: 500, remaining: 700 })
     expect(r.stopReason).toMatch(/batch_failed: http 429/)
     expect(batches).toBe(1 + 4)                                  // batch 2: first try + 3 retries
-    expect(s.dbx.tables.sync_log.map((x) => x.status)).toEqual(['partial'])
+    expect(firstSyncAt(s)).toBeNull()
   })
   it('…and carrying on asks again for the 700 left, sends only them, then records complete', async () => {
     const many = Array.from({ length: 1200 }, (_, i) => lead('p' + i, `p${String(i).padStart(4, '0')}@x.com`))
@@ -480,7 +537,7 @@ describe('P6. a half-done sync says so', () => {
     const r = await s.run(confirmOf(ask))
     expect(r).toMatchObject({ complete: true, pushed: 700, remaining: 0 })
     expect(s.mc.members).toHaveLength(1200)
-    expect(s.dbx.tables.sync_log.map((x) => x.status)).toEqual(['partial', 'complete'])
+    expect(firstSyncAt(s)).toEqual(expect.any(String))   // only now, when everything went
   })
   it('out of time → stops before the next batch, says how many are left', async () => {
     const many = Array.from({ length: 1200 }, (_, i) => lead('p' + i, `p${String(i).padStart(4, '0')}@x.com`))
@@ -501,7 +558,7 @@ describe('P6. a half-done sync says so', () => {
     const r = await s.run(confirmOf(ask), { db })
     expect(r.complete).toBe(false)
     expect(r.stopReason).toMatch(/disk full/)
-    expect(s.dbx.tables.sync_log.at(-1).status).toBe('partial')
+    expect(firstSyncAt(s)).toBeNull()            // stopped partway: no first-sync date
   })
   it('one refused address does not stop the rest; it is reported, the run still completes', async () => {
     const s = setup({ leads: [lead('a', 'a@x.com'), lead('f', 'fake@x.com'), lead('c', 'c@x.com')] })
@@ -554,7 +611,7 @@ describe('tags carry over; R4. a tag that starts a live flow needs the owner’s
     expect(r.tagsHeld).toEqual(['VIP'])
   })
   it('after the first sync there is no confirmation, so a held tag is never carried', async () => {
-    const s = setup({ leads: tagged(), flows: [...PAUSED, CLOSEDJOB_LIVE], syncLog: [{ entity_type: 'mailchimp_push', entity_id: LOC, status: 'complete' }], ...lt })
+    const s = setup({ leads: tagged(), flows: [...PAUSED, CLOSEDJOB_LIVE], location: SYNCED, ...lt })
     const r = await s.run({ count: 2, listId: LIST, flows: 'x', tagsOk: ['CLOSEDJOB'] })
     expect(s.mc.tagged['CLOSEDJOB']).toBeUndefined()
     expect(r.tagsHeld).toEqual(['CLOSEDJOB'])

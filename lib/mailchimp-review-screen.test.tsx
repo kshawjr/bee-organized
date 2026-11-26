@@ -64,13 +64,16 @@ const openList = async () => { const b = host.querySelector('[data-testid="mc-op
 afterEach(() => { act(() => root?.unmount()); host?.remove(); vi.unstubAllGlobals(); saved = [] })
 
 describe('the screen', () => {
-  it('shows the big number first, with already-there vs new', async () => {
+  it('shows the big number first, and the parts under it add up (Kevin, 2026-11-26)', async () => {
     installFetch(); await mount()
     // new: bob (worked), cat (no history), dee (archived, unticked) → 2 ticked
     expect(big()).toBe('2')
     expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to Friends')
     expect(host.querySelector('[data-testid="mc-audience"]')!.textContent).toBe('Friends')
-    expect(host.querySelector('[data-testid="mc-gap"]')!.textContent).toBe('1 already in your Mailchimp · 3 new to Mailchimp')
+    // Was "1 already in your Mailchimp · 3 new to Mailchimp" — the 3 counted
+    // Dee (archived, unticked), whom the big 2 did not. Now every part is named
+    // and they add up: 2 + 1 + 1 = 4.
+    expect(host.querySelector('[data-testid="mc-gap"]')!.textContent).toBe('2 to add · 1 archived, not ticked · 1 already in your Mailchimp — 4 in all')
     const first = host.querySelector('section')!
     expect(first.contains(host.querySelector('[data-testid="mc-big-number"]'))).toBe(true)
   })
@@ -164,7 +167,17 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     expect(box.checked).toBe(false)
     expect(box.disabled).toBe(true)
   })
-  it('sections come in the design’s order, and Done only goes back', async () => {
+  it('the parts still add up as ticks change: a group unticked is "not ticked", an archived person ticked joins "to add"', async () => {
+    installFetch(); await mount()
+    const tally = () => host.querySelector('[data-testid="mc-gap"]')!.textContent
+    await click(host.querySelector('[data-testid="mc-group-never_other"] input[type=checkbox]')!)
+    expect(big()).toBe('1')
+    expect(tally()).toBe('1 to add · 1 archived, not ticked · 1 not ticked · 1 already in your Mailchimp — 4 in all')
+    await click(host.querySelector('[data-testid="mc-group-archived"] input[type=checkbox]')!)
+    expect(big()).toBe('2')
+    expect(tally()).toBe('2 to add · 1 not ticked · 1 already in your Mailchimp — 4 in all')
+  })
+  it('sections come in the design’s order, and Done (with nothing to save it to) only goes back', async () => {
     installFetch()
     host = document.createElement('div'); document.body.appendChild(host)
     root = createRoot(host)
@@ -191,6 +204,62 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     await click(host.querySelector('[data-mcr-back]') as HTMLElement)
     expect([onDone.mock.calls.length, onClose.mock.calls.length]).toEqual([1, 1])
     expect(calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0)
+  })
+  it('2026-11-26: Done that could not save STAYS on the page and says so plainly — never a silent return', async () => {
+    installFetch()
+    host = document.createElement('div'); document.body.appendChild(host)
+    root = createRoot(host)
+    const onDone = vi.fn(async () => ({ ok: false, words: 'Your review couldn’t be saved, so step 1 isn’t ticked yet.' }))
+    await act(async () => { root.render(<MailchimpReviewScreen locationId={LOC} onClose={() => {}} onDone={onDone} />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(host.querySelector('[data-testid="mc-done-error"]')).toBeNull()
+    await click(host.querySelector('[data-testid="mc-done"]')!)
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('[data-testid="mc-done-error"]')!.textContent).toBe('Your review couldn’t be saved, so step 1 isn’t ticked yet.')
+    expect(host.querySelector('[data-testid="mc-title"]')).toBeTruthy()         // still on the page
+    expect((host.querySelector('[data-testid="mc-done"]') as HTMLButtonElement).disabled).toBe(false)  // can press again
+  })
+  it('…and a Done that throws gets the plain message too', async () => {
+    installFetch()
+    host = document.createElement('div'); document.body.appendChild(host)
+    root = createRoot(host)
+    await act(async () => { root.render(<MailchimpReviewScreen locationId={LOC} onClose={() => {}} onDone={async () => { throw new Error('network') }} />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    await click(host.querySelector('[data-testid="mc-done"]')!)
+    expect(host.querySelector('[data-testid="mc-done-error"]')!.textContent).toContain('Please press Done again')
+  })
+  it('"See this person" opens the group’s people RIGHT UNDER the group, with Hide — no jump to Exceptions', async () => {
+    installFetch(); await mount()
+    const scrolled = vi.fn()
+    ;(Element.prototype as any).scrollIntoView = scrolled
+    const g = host.querySelector('[data-testid="mc-group-archived"]')!
+    const see = g.querySelector('[data-testid="mc-group-see"]') as HTMLButtonElement
+    expect(see.textContent).toBe('See this person')
+    await click(see)
+    const inline = g.querySelector('[data-testid="mc-group-people"]')!
+    expect(inline).toBeTruthy()                                                // inside the group's own card
+    expect(Array.from(inline.querySelectorAll('[data-testid="mc-person"]')).map((el) => el.textContent)).toEqual([expect.stringContaining('Dee Doe')])
+    expect(host.querySelector('[data-testid="mc-people"]')).toBeNull()          // Exceptions did not open
+    expect(scrolled).not.toHaveBeenCalled()                                    // and nothing jumped
+    expect(see.textContent).toBe('Hide')
+    expect(see.getAttribute('aria-expanded')).toBe('true')
+    await click(see)
+    expect(g.querySelector('[data-testid="mc-group-people"]')).toBeNull()
+    expect(see.textContent).toBe('See this person')
+  })
+  it('a tick in the opened group overrides the group, exactly as in Exceptions, and is saved the same way', async () => {
+    installFetch(); await mount()
+    const g = host.querySelector('[data-testid="mc-group-archived"]')!
+    await click(g.querySelector('[data-testid="mc-group-see"]')!)
+    const dee = g.querySelector('[data-testid="mc-group-people"] [data-testid="mc-person"]')!
+    expect((dee.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false)
+    await click(dee.querySelector('input[type=checkbox]')!)
+    expect(big()).toBe('3')
+    expect(JSON.parse(calls.find((c) => c.init?.method === 'POST')!.init.body)).toEqual({ location_id: LOC, scope: 'person', key: 'dee@example.com', choice: 'in' })
+    expect((host.querySelector('[data-testid="mc-group-archived"] input[type=checkbox]') as HTMLInputElement).checked).toBe(false)  // the group stays unticked
+    expect(g.querySelector('[data-testid="mc-group-people"] [data-testid="mc-person"]')!.textContent).toContain('Changed')
+    await openList()
+    expect((person('Dee Doe')!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true)  // the same tick in Exceptions
   })
   it('the list does not move the big number when only opened', async () => {
     installFetch(); await mount()

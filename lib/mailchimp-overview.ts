@@ -14,28 +14,35 @@
 // the send would say anyway: "on hold" while a flow that emails new contacts
 // is live, or while the flows can't be read.
 //
-// The one write is markReviewed: when the owner presses Done on "Who goes to
-// Mailchimp", one sync_log row (entity_type 'mailchimp_review') records that
-// the review was finished, so step 1 stays ticked after a reload. It is a
-// record only; nothing reads it to decide who is sent.
+// WHAT IS DONE is read from two dates on the location (Kevin's ruling, option
+// B, 2026-11-26; migrations/mailchimp_progress_dates.sql):
+//   mailchimp_review_done_at — the owner pressed Done on "Who goes to Mailchimp"
+//   mailchimp_first_sync_at  — a first sync fully finished (set by the
+//                              sending code; a sync that stops partway never sets it)
+// They replace two sync_log rows that sync_log's own rules refused, so neither
+// was ever saved. The dates are read on their own: if they can't be read (the
+// migration not run yet), they read as "not yet" — which only ever asks for
+// MORE confirmation, never less.
+//
+// The one write here is markReviewed: Done sets mailchimp_review_done_at. It
+// is a record only; nothing reads it to decide who is sent.
 
 import { supabaseService } from './supabase-service'
 import { apiBase } from './mailchimp'
 import { scrub } from './mailchimp-audience-look'
 import { readFlows, HOW_TO_PAUSE, type FlowsRead, type Flow } from './mailchimp-flows'
 
-export const REVIEW_ENTITY = 'mailchimp_review'
-// The sending code's run record (its RUN_ENTITY). The same string, written
-// out here; a test pins that the two never drift apart.
-export const RUN_RECORD = 'mailchimp_push'
+// The two dates, by name, so the screen, the sending code and the tests share them.
+export const REVIEW_DONE_COLUMN = 'mailchimp_review_done_at'
+export const FIRST_SYNC_COLUMN = 'mailchimp_first_sync_at'
 
 export type OverviewFlow = { name: string; status: string; subjects: string[] }
 
 export type Overview = {
   live: boolean                       // Kevin's switch
-  synced: boolean                     // a run has finished completely
-  lastRun: { at: string; complete: boolean; added: number; remaining: number } | null
-  reviewed: boolean
+  synced: boolean                     // the first sync fully finished (mailchimp_first_sync_at)
+  lastSyncedAt: string | null         // the newest time a person was added or found in Mailchimp
+  reviewed: boolean                   // Done was pressed (mailchimp_review_done_at)
   audienceCount: number | null        // null = Mailchimp didn't say
   flows:
     | { ok: true; mustPause: OverviewFlow[]; paused: OverviewFlow[] }
@@ -70,27 +77,18 @@ export async function loadOverview(locationUuid: string, deps: Deps = {}): Promi
   const prefix = loc.mailchimp_server_prefix as string
   const listId = loc.mailchimp_list_id as string
 
-  // Runs, newest first. A failed read is "don't know", shown as never synced —
-  // which only ever asks for MORE confirmation, never less (the send decides
-  // "first" for itself).
-  const runs = await db.from('sync_log').select('status, message, created_at')
-    .eq('entity_type', RUN_RECORD).eq('entity_id', locationUuid)
-    .order('created_at', { ascending: false }).limit(20)
-  const runRows: any[] = runs?.error ? [] : (runs?.data || [])
-  const synced = runRows.some((r) => r.status === 'complete')
-  let lastRun: Overview['lastRun'] = null
-  if (runRows[0]) {
-    let m: any = {}
-    try { m = JSON.parse(String(runRows[0].message || '{}')) } catch { m = {} }
-    lastRun = { at: String(runRows[0].created_at), complete: runRows[0].status === 'complete', added: Number(m.added) || 0, remaining: Number(m.remaining) || 0 }
-  }
+  // The two dates, on their own read: a failure (the migration not run yet)
+  // is "not yet", never "done".
+  const dates = await db.from('locations').select('mailchimp_review_done_at, mailchimp_first_sync_at').eq('id', locationUuid).maybeSingle()
+  const d: any = dates?.error ? null : dates?.data
+  const reviewed = !!d?.mailchimp_review_done_at
+  const synced = !!d?.mailchimp_first_sync_at
 
-  // Reviewed: Done was pressed on the review screen, or a choice was saved there.
-  const [rev, ch] = await Promise.all([
-    db.from('sync_log').select('id').eq('entity_type', REVIEW_ENTITY).eq('entity_id', locationUuid).limit(1),
-    db.from('mailchimp_review_choices').select('key').eq('location_id', locationUuid).limit(1),
-  ])
-  const reviewed = (!rev?.error && (rev?.data || []).length > 0) || (!ch?.error && (ch?.data || []).length > 0)
+  // "Last synced": the newest write-back on a person at this location. Every
+  // run stamps each person it added or found already there.
+  const last = await db.from('leads').select('mailchimp_synced_at').eq('location_uuid', locationUuid)
+    .not('mailchimp_synced_at', 'is', null).order('mailchimp_synced_at', { ascending: false }).limit(1)
+  const lastSyncedAt: string | null = last?.error ? null : ((last?.data || [])[0]?.mailchimp_synced_at ?? null)
 
   // The audience's size, one GET. Anything wrong → null ("—" on screen).
   let audienceCount: number | null = null
@@ -113,22 +111,19 @@ export async function loadOverview(locationUuid: string, deps: Deps = {}): Promi
 
   return {
     ok: true,
-    overview: { live: loc.mailchimp_sync_live === true, synced, lastRun, reviewed, audienceCount, flows, howToPause: HOW_TO_PAUSE },
+    overview: { live: loc.mailchimp_sync_live === true, synced, lastSyncedAt, reviewed, audienceCount, flows, howToPause: HOW_TO_PAUSE },
   }
 }
 
-export async function markReviewed(locationUuid: string, deps: { db?: any } = {}): Promise<boolean> {
+export const REVIEW_NOT_SAVED_WORDS = 'Your review couldn’t be saved, so step 1 isn’t ticked yet. Your ticks are kept. Please press Done again. If it keeps happening, tell us through Help.'
+
+// Done on "Who goes to Mailchimp". True only when the date really landed on
+// this location's row — the caller says so plainly when it did not.
+export async function markReviewed(locationUuid: string, deps: { db?: any; now?: () => Date } = {}): Promise<boolean> {
   const db = deps.db || supabaseService
-  const { data: loc } = await db.from('locations').select('location_id').eq('id', locationUuid).maybeSingle()
-  const res = await db.from('sync_log').insert({
-    location_id: (loc?.location_id as string) || locationUuid,
-    direction: 'internal',
-    entity_type: REVIEW_ENTITY,
-    entity_id: locationUuid,
-    status: 'reviewed',
-    message: 'Done pressed on Who goes to Mailchimp',
-  })
-  return !res?.error
+  const at = (deps.now ? deps.now() : new Date()).toISOString()
+  const res = await db.from('locations').update({ mailchimp_review_done_at: at }).eq('id', locationUuid).select('id')
+  return !res?.error && (res?.data || []).length === 1
 }
 
 // The connection screen's state, from the overview. Kept here so the screen and

@@ -41,7 +41,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { estimateFollowUpDays } from "@/components/hive/shared/noticed"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
-import MailchimpReviewScreen from "@/components/settings/MailchimpReviewScreen"
+import MailchimpReviewScreen, { DONE_NOT_SAVED } from "@/components/settings/MailchimpReviewScreen"
 import MailchimpConnectionScreen from "@/components/settings/MailchimpConnectionScreen"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
@@ -19846,11 +19846,17 @@ export function MailchimpCard({ settings, updateLocation }) {
 
   // FL-75 slice 6: Done on the review records that it was finished (step 1 of
   // the first sync), then comes back; Back to Mailchimp only comes back.
+  // Done on "Who goes to Mailchimp": saves the review date. Only a saved date
+  // goes back; anything else stays on the review page, which shows the words
+  // (never a silent return with step 1 still unticked).
   async function reviewDone() {
     try {
-      await fetch('/api/mailchimp/overview', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ location_id: locationId, reviewed: true }) })
-    } catch { /* the step stays unticked; the owner can press Done again */ }
+      const r = await fetch('/api/mailchimp/overview', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ location_id: locationId, reviewed: true }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || j?.ok !== true) return { ok: false, words: j?.words || DONE_NOT_SAVED }
+    } catch { return { ok: false, words: DONE_NOT_SAVED } }
     setReviewing(false)
+    return { ok: true }
   }
   if (reviewing && state === 'ready') return <MailchimpReviewScreen locationId={locationId} onClose={()=>setReviewing(false)} onDone={reviewDone} />
   // FL-75 slice 6: once an account and audience are chosen, the screen is the

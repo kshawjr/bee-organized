@@ -1,0 +1,137 @@
+{
+ "_read_me": [
+  "The REAL production rules (CHECK constraints, and NOT NULL columns with no default) for every table the Mailchimp code writes. Read 2026-11-26 from Supabase project pcuycyelxxkxahlxdewl, read only. Used by lib/db-rules-check.ts and lib/beta-mailchimp-writes-real-rules.test.ts.",
+  "A COPY GOES STALE. After any migration that changes a check or a NOT NULL on these tables, regenerate (read only) and commit. Checks: select c.relname, con.conname, pg_get_constraintdef(con.oid) from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and con.contype = 'c' and c.relname in (<tables>) order by 1, 2;  Required: select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in (<tables>) and is_nullable = 'NO' and column_default is null order by table_name, ordinal_position;"
+ ],
+ "checks": {
+  "leads": [
+   {
+    "name": "leads_address_label_check",
+    "def": "CHECK (((address_label IS NULL) OR (address_label = ANY (ARRAY['home'::text, 'second_home'::text, 'office'::text, 'storage'::text, 'other'::text]))))"
+   },
+   {
+    "name": "leads_address_label_note_check",
+    "def": "CHECK (((address_label IS DISTINCT FROM 'other'::text) OR ((address_label_note IS NOT NULL) AND (btrim(address_label_note) <> ''::text))))"
+   },
+   {
+    "name": "leads_jobber_match_status_check",
+    "def": "CHECK (((jobber_match_status IS NULL) OR (jobber_match_status = ANY (ARRAY['matched_existing'::text, 'new_client'::text]))))"
+   },
+   {
+    "name": "leads_referred_by_kind_check",
+    "def": "CHECK (((referred_by_kind IS NULL) OR (referred_by_kind = ANY (ARRAY['partner'::text, 'lead'::text, 'company'::text]))))"
+   },
+   {
+    "name": "leads_stage_check",
+    "def": "CHECK ((stage = ANY (ARRAY['New'::text, 'Attempting'::text, 'Nurturing'::text, 'Request'::text, 'Estimate Sent'::text, 'Job in Progress'::text, 'Final Processing'::text, 'Closed Won'::text, 'Closed Lost'::text])))"
+   }
+  ],
+  "locations": [
+   {
+    "name": "locations_default_assessment_type_check",
+    "def": "CHECK ((default_assessment_type = ANY (ARRAY['in-person'::text, 'virtual'::text])))"
+   },
+   {
+    "name": "locations_default_paths_not_partner",
+    "def": "CHECK ((((default_drip_path IS NULL) OR (default_drip_path !~~ 'partner-%'::text)) AND ((default_move_drip_path IS NULL) OR (default_move_drip_path !~~ 'partner-%'::text))))"
+   },
+   {
+    "name": "locations_email_style_check",
+    "def": "CHECK (((email_style IS NULL) OR (email_style = ANY (ARRAY['soft'::text, 'outline'::text, 'bold'::text, 'rounded'::text, 'classic'::text]))))"
+   },
+   {
+    "name": "locations_lifecycle_status_check",
+    "def": "CHECK ((lifecycle_status = ANY (ARRAY['onboarding'::text, 'active'::text, 'paused'::text, 'inactive'::text, 'closed'::text])))"
+   },
+   {
+    "name": "locations_payment_source_check",
+    "def": "CHECK ((payment_source = ANY (ARRAY['none'::text, 'direct'::text, 'prepaid_corporate'::text, 'corporate_sponsored'::text])))"
+   },
+   {
+    "name": "locations_subscription_status_check",
+    "def": "CHECK ((subscription_status = ANY (ARRAY['deferred'::text, 'active'::text, 'past_due'::text, 'canceled'::text])))"
+   }
+  ],
+  "mailchimp_review_choices": [
+   {
+    "name": "mailchimp_review_choices_check",
+    "def": "CHECK ((((scope = ANY (ARRAY['group'::text, 'person'::text])) AND (choice = ANY (ARRAY['in'::text, 'out'::text]))) OR ((scope = 'phone'::text) AND (choice = ANY (ARRAY['same'::text, 'different'::text])))))"
+   },
+   {
+    "name": "mailchimp_review_choices_key_check",
+    "def": "CHECK (((length(key) >= 1) AND (length(key) <= 400)))"
+   },
+   {
+    "name": "mailchimp_review_choices_person_key",
+    "def": "CHECK (((scope <> 'person'::text) OR (key = lower(btrim(key)))))"
+   },
+   {
+    "name": "mailchimp_review_choices_scope_check",
+    "def": "CHECK ((scope = ANY (ARRAY['group'::text, 'person'::text, 'phone'::text])))"
+   }
+  ],
+  "marketing_unsubscribes": [
+   {
+    "name": "marketing_unsubscribes_email_normalized_check",
+    "def": "CHECK (((email_normalized = lower(btrim(email_normalized))) AND (email_normalized <> ''::text)))"
+   },
+   {
+    "name": "marketing_unsubscribes_mailchimp_check",
+    "def": "CHECK (((mailchimp_audience_id IS NULL) OR (source = 'mailchimp'::text)))"
+   },
+   {
+    "name": "marketing_unsubscribes_reversal_check",
+    "def": "CHECK ((((reversed_at IS NULL) AND (reversed_by IS NULL) AND (reversal_reason IS NULL)) OR ((reversed_at IS NOT NULL) AND (reversed_by IS NOT NULL) AND (NULLIF(btrim(reversal_reason), ''::text) IS NOT NULL))))"
+   },
+   {
+    "name": "marketing_unsubscribes_source_check",
+    "def": "CHECK ((source = ANY (ARRAY['link'::text, 'marked'::text, 'mailchimp'::text])))"
+   }
+  ],
+  "sync_log": [
+   {
+    "name": "sync_log_direction_check",
+    "def": "CHECK ((direction = ANY (ARRAY['outbound'::text, 'inbound'::text])))"
+   },
+   {
+    "name": "sync_log_entity_type_check",
+    "def": "CHECK ((entity_type = ANY (ARRAY['client'::text, 'request'::text, 'quote'::text, 'job'::text, 'invoice'::text, 'payment'::text, 'note'::text, 'location'::text, 'property'::text, 'assessment'::text, 'engagement'::text, 'feedback'::text])))"
+   },
+   {
+    "name": "sync_log_landed_status_check",
+    "def": "CHECK ((landed_status = ANY (ARRAY['landed'::text, 'not_landed'::text, 'na'::text])))"
+   },
+   {
+    "name": "sync_log_status_check",
+    "def": "CHECK ((status = ANY (ARRAY['success'::text, 'error'::text, 'partial'::text])))"
+   }
+  ]
+ },
+ "required": {
+  "leads": [
+   "location_id",
+   "location_uuid"
+  ],
+  "locations": [
+   "location_id",
+   "name",
+   "slug"
+  ],
+  "mailchimp_review_choices": [
+   "location_id",
+   "scope",
+   "key",
+   "choice"
+  ],
+  "marketing_unsubscribes": [
+   "email_normalized",
+   "source",
+   "unsubscribed_at"
+  ],
+  "sync_log": [
+   "direction",
+   "entity_type",
+   "status"
+  ]
+ }
+}

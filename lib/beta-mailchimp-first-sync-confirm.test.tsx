@@ -299,4 +299,33 @@ describe('the card hands the ready state to the connection screen', () => {
     expect(container.querySelector('[data-testid="mc-connection"]')).toBeTruthy()
     unmount()
   })
+  // 2026-11-26: Kevin pressed Done, the save never landed, and the card went
+  // back as if it had. A Done that did not save now stays, and says so.
+  for (const [what, reply] of [
+    ['the server says not_saved', { ok: false, status: 500, json: async () => ({ error: 'not_saved', words: 'Your review couldn’t be saved, so step 1 isn’t ticked yet. Words from the server.' }) }],
+    ['the server answers 200 without ok', { ok: true, status: 200, json: async () => ({}) }],
+    ['the request fails', null],
+  ] as const) {
+    it(`Done that did not save (${what}) stays on the review and says so — never a silent return`, async () => {
+      const REVIEW = { ok: true, choicesReady: true, mailchimpWords: null,
+        location: { id: 'x', name: 'Test', audienceName: 'Bee Organized Friends', timeZone: 'America/New_York' },
+        model: buildReview({ leads: [], contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'America/New_York' } as any) }
+      fetchMock = vi.fn(async (url: string, init: any = {}) => {
+        if (init.method === 'POST') { if (!reply) throw new Error('offline'); return reply }
+        if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+        if (String(url).startsWith('/api/mailchimp/review')) return { ok: true, status: 200, json: async () => REVIEW }
+        return { ok: true, status: 200, json: async () => ({ live: true }) }
+      }); vi.stubGlobal('fetch', fetchMock)
+      await mountCard(READY)
+      await click(container.querySelector('[data-testid="mc-open-review"]') as any)
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+      await click(container.querySelector('[data-testid="mc-done"]') as any)
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+      expect(container.querySelector('[data-testid="mc-connection"]')).toBeNull()       // still on the review
+      const msg = container.querySelector('[data-testid="mc-done-error"]')!.textContent
+      expect(msg).toContain('couldn’t be saved')
+      if (what === 'the server says not_saved') expect(msg).toContain('Words from the server.')
+      unmount()
+    })
+  }
 })

@@ -42,6 +42,18 @@ const filters = findFilters(files).filter(f => schema.has(f.table))
 const PENDING: Record<string, string> = {
   'lib/email-signature-resolve.ts hub_users.signature_linkedin_url':
     'migrations/signature_linkedin.sql not run; loadPersonLinkedin reads it alone and answers { value: null, ready: false } on the error',
+  'lib/mailchimp-overview.ts locations.mailchimp_review_done_at':
+    'migrations/mailchimp_progress_dates.sql not run; the two dates are read alone and an error reads as "not reviewed"',
+  'lib/mailchimp-overview.ts locations.mailchimp_first_sync_at':
+    'migrations/mailchimp_progress_dates.sql not run; read with the review date, an error reads as "never synced"',
+  'lib/mailchimp-sync.ts locations.mailchimp_first_sync_at':
+    'migrations/mailchimp_progress_dates.sql not run; read alone, an error means "this is a first sync" (asks for confirmation)',
+}
+
+// Filters on a column a migration has not added yet, on the same terms.
+const PENDING_FILTERS: Record<string, string> = {
+  'lib/mailchimp-sync.ts locations.mailchimp_first_sync_at (.is)':
+    'migrations/mailchimp_progress_dates.sql not run; the set-once write fails whole and the run says record_not_saved',
 }
 
 // ── Known faults, found by this test the day it was written ──────────────
@@ -114,7 +126,9 @@ describe('every filter and sort names only real columns', () => {
   })
 
   it('no .eq / .is / .not / .in / .order … names a column its table does not have', () => {
-    const bad = Array.from(new Set(filters.filter(f => !schema.get(f.table)!.has(f.column)).map(f => `${f.file} ${f.table}.${f.column} (.${f.method})`))).sort()
+    const all = Array.from(new Set(filters.filter(f => !schema.get(f.table)!.has(f.column)).map(f => `${f.file} ${f.table}.${f.column} (.${f.method})`))).sort()
+    const bad = all.filter(b => !PENDING_FILTERS[b])
+    expect(Object.keys(PENDING_FILTERS).filter(k => !all.includes(k)), 'PENDING_FILTERS: migrated or gone — delete these lines').toEqual([])
     expect(bad, `\nFilters on columns that do not exist:\n  ${bad.join('\n  ')}\n`).toEqual([])
   })
 })

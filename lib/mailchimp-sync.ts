@@ -33,7 +33,8 @@
 //    and left out.
 //
 // 4. THE FIRST-SYNC CONFIRMATION. Until a run has finished completely for this
-//    location (a 'complete' row in sync_log, entity_type 'mailchimp_push'),
+//    location (locations.mailchimp_first_sync_at is set — only by a run that
+//    finished everything; unreadable counts as not set),
 //    nothing is sent unless the caller's `confirm` names the exact count, the
 //    audience, and the state of the flows (a fingerprint) that the owner was
 //    shown. Anything else gets 'needs_confirmation' with the current numbers.
@@ -93,7 +94,11 @@ export const MD5_OF_LOWERCASED_EMAIL = (email: string): string =>
 export const BATCH_SIZE = 500
 export const MAX_RETRIES = 3
 export const TIME_BUDGET_MS = 45_000
-export const RUN_ENTITY = 'mailchimp_push'
+// The location's "first sync fully finished" date (migrations/
+// mailchimp_progress_dates.sql). It replaces a sync_log run record that
+// sync_log's own rules refused, so it never landed (Kevin's ruling, option B,
+// 2026-11-26: sync_log is not widened).
+export const FIRST_SYNC_DATE = 'mailchimp_first_sync_at'
 
 // ── Tags ──────────────────────────────────────────────────────
 // project_type + source + the LIVE derived client status + the lead's tag
@@ -297,10 +302,11 @@ export async function syncWebsiteLeadsToMailchimp(
   }
 
   // ── 5. First sync? Then the confirmation ────────────────────
-  const firstDone = await db.from('sync_log').select('id').eq('entity_type', RUN_ENTITY).eq('entity_id', locationUuid).eq('status', 'complete').limit(1)
-  // A failed read throws: guessing "not first" is the unconfirmed mass add this exists to stop.
-  if (firstDone?.error) throw new Error(`first-sync record read failed: ${firstDone.error.message}`)
-  const first = !(firstDone?.data || []).length
+  // Its own read. If it can't be read (the migration not run yet), this IS a
+  // first sync: guessing "not first" is the unconfirmed mass add this exists
+  // to stop.
+  const firstDone = await db.from('locations').select('mailchimp_first_sync_at').eq('id', locationUuid).maybeSingle()
+  const first = !!firstDone?.error || !firstDone?.data?.mailchimp_first_sync_at
 
   let tagsOk = new Set<string>()
   if (first && sendSet.length > 0) {
@@ -421,21 +427,20 @@ export async function syncWebsiteLeadsToMailchimp(
   report.complete = !stopReason && report.remaining === 0
   if (stopReason) report.stopReason = stopReason
 
-  // The run record. Only a run that finished everything is 'complete'; that
-  // is what ends the first-sync confirmation for this location.
-  const log = await db.from('sync_log').insert({
-    location_id: (loc.location_id as string) || locationUuid,
-    direction: 'outbound',
-    entity_type: RUN_ENTITY,
-    entity_id: locationUuid,
-    status: report.complete ? 'complete' : 'partial',
-    message: JSON.stringify({ first, list_id: listId, added: report.pushed, already: report.alreadyThere, failed: report.failed, remaining: report.remaining, skipped, tags_held: tagsHeld, stop: stopReason }).slice(0, 2000),
-  })
-  if (log?.error && report.complete) {
-    // Everything went, but the record did not land: say so; the next press
-    // will simply ask for confirmation again (with nothing left to send).
-    report.stopReason = `record_not_saved: ${log.error.message}`
+  // Only a run that finished EVERYTHING sets the first-sync date, and only
+  // once (never moved by a later run). A run that stopped partway sets
+  // nothing, so the next press asks again — for the people still to go.
+  if (first && report.complete) {
+    const set = await db.from('locations').update({ mailchimp_first_sync_at: stampNow() })
+      .eq('id', locationUuid).is('mailchimp_first_sync_at', null).select('id')
+    if (set?.error) {
+      // Everything went, but the date did not land: say so; the next press
+      // will simply ask for confirmation again (with nothing left to send).
+      report.stopReason = `record_not_saved: ${clean(set.error.message)}`
+    }
   }
+  // The run's summary, for Vercel's logs (no addresses, no token).
+  console.info('[mailchimp-push]', JSON.stringify({ location: loc.location_id || locationUuid, first, complete: report.complete, added: report.pushed, already: report.alreadyThere, failed: report.failed, remaining: report.remaining, skipped, tags_held: tagsHeld, stop: report.stopReason || null }))
   return report
 }
 

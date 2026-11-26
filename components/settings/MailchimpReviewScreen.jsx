@@ -20,7 +20,10 @@
 //   • people who said no are counted, never listed, never tickable
 //   • phone-only matches are asked one at a time; "same" only moves the count
 //   • every tick is saved as it is made (POST /api/mailchimp/review); "Done"
-//     at the bottom only goes back — there is nothing left unsaved by then
+//     saves the review date (step 1 ticked) and goes back — or, if that did
+//     not save, stays and says so
+//   • "See these people" opens the group's people right under the group, with
+//     Hide; the same ticks, the same rule (a person's tick overrides the group)
 //   • the big-number line names the audience (the location's own list name)
 //   • until migrations/mailchimp_review_choices.sql is run, nothing can change
 //
@@ -30,10 +33,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { T, R, FONT, alpha } from '@/components/design/tokens'
 import { IconUsers, IconSearch } from '@/components/ui/icons'
-import { countAdding, isIncluded, groupDefaultIn, matchedByPhone, prettyDay } from '@/lib/mailchimp-review'
+import { isIncluded, groupDefaultIn, matchedByPhone, prettyDay, reviewTally } from '@/lib/mailchimp-review'
 import { archivedLine } from '@/lib/mailchimp-rules'
 
 export const PAGE_SIZE = 50
+export const DONE_NOT_SAVED = 'Your review couldn’t be saved, so step 1 isn’t ticked yet. Your ticks are kept. Please press Done again. If it keeps happening, tell us through Help.'
 
 const n = (x) => Number(x || 0).toLocaleString('en-US')
 
@@ -118,6 +122,10 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
   const [groupFilter, setGroupFilter] = useState('')
   const [shown, setShown] = useState(PAGE_SIZE)
   const [listOpen, setListOpen] = useState(false)
+  // Groups opened in place by "See these people": key → how many are shown.
+  const [openGroups, setOpenGroups] = useState({})
+  const [doneErr, setDoneErr] = useState(null)
+  const [doneBusy, setDoneBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -212,18 +220,66 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
     save('phone', s.id, null, () => setPhone((cur) => cur.map((x) => x.id === s.id ? { ...x, answer: s.answer } : x)))
   }
 
-  function openList(key) {
-    setGroupFilter(key); setShown(PAGE_SIZE); setListOpen(true)
-    setTimeout(() => document.getElementById('mc-list')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 0)
+  // "See these people" opens the group's people right under the group (Kevin,
+  // 2026-11-26: jumping to Exceptions at the bottom was confusing). Hide closes
+  // it. The ticks are the same ticks, with the same rule: a person's own tick
+  // overrides their group.
+  function toggleGroup(key) {
+    setOpenGroups((cur) => {
+      const next = { ...cur }
+      if (next[key]) delete next[key]; else next[key] = PAGE_SIZE
+      return next
+    })
+  }
+  function showMoreInGroup(key) {
+    setOpenGroups((cur) => ({ ...cur, [key]: (cur[key] || PAGE_SIZE) + PAGE_SIZE }))
+  }
+
+  // Done saves the review. If it could not be saved, the page stays and says
+  // so — never a silent return with step 1 still unticked.
+  async function done() {
+    setDoneErr(null); setDoneBusy(true)
+    try {
+      const r = await onDone()
+      if (r && r.ok === false) setDoneErr(r.words || DONE_NOT_SAVED)
+    } catch {
+      setDoneErr(DONE_NOT_SAVED)
+    } finally {
+      setDoneBusy(false)
+    }
+  }
+
+  // One person's row — the same in a group opened in place and in Exceptions.
+  function personRow(p, i, showGroup) {
+    const matched = sameSet.has(p.k)
+    const on = !matched && isIncluded(p, groupChoice)
+    // Once ticked, the archived line keeps its date and drops "Tick to add…".
+    const line = p.a ? (on ? archivedLine(p.a, tz).replace(/ Tick to add them to Mailchimp\.$/, '') : archivedLine(p.a, tz)) : null
+    return (
+      <li key={p.k} data-testid="mc-person" style={{ borderTop: i ? `1px solid ${T.border}` : 'none' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '12px', minHeight: '56px', padding: '10px 16px', cursor: ready && !matched ? 'pointer' : 'default' }}>
+          <input type="checkbox" checked={on} disabled={!ready || matched} onChange={(e) => setPerson(p, e.target.checked)} aria-label={p.n || p.e} />
+          <span style={{ minWidth: 0, flex: 1 }}>
+            <span style={{ display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>{p.n || p.e}</span>
+            {p.n && <span style={{ ...small, display: 'block', wordBreak: 'break-all' }}>{p.e}</span>}
+            {matched && <span style={{ ...small, display: 'block' }}>Matched by phone, already in your Mailchimp</span>}
+            {line && <span data-testid="mc-archived-line" style={{ ...small, display: 'block', color: T.warning }}>{line}</span>}
+          </span>
+          {showGroup && <span data-mcr-rowgroup style={{ ...small, flexShrink: 0 }}>{groupLabel[p.g] || p.g}</span>}
+          {p.c && !matched && <span style={{ flexShrink: 0, borderRadius: R.full, background: T.goldSoft, padding: '2px 8px', fontSize: '11px', lineHeight: '16px', fontWeight: 700, color: T.foreground }}>Changed</span>}
+        </label>
+      </li>
+    )
   }
 
   const sameSet = matchedByPhone(phone)
   const nextPhone = phone.find((s) => !s.answer)
   const nextAt = phone.findIndex((s) => !s.answer)
   // A "same person" answer takes them out of the count (not out of the list).
-  const addingNow = countAdding(people, groups, sameSet)
-  const alreadyNow = m.alreadyInMailchimp - m.alreadyByPhone + sameSet.size
-  const newCount = people.filter((p) => !sameSet.has(p.k)).length
+  // Every number on this card comes from one tally whose parts add up.
+  const tally = reviewTally(people, groups, sameSet, m)
+  const addingNow = tally.adding
+  const alreadyNow = tally.already
 
   const statusRows = Object.entries(m.alreadyByStatus || {}).sort((a, b) => b[1] - a[1])
     .map(([s, c]) => [STATUS_WORDS[s] || s, c])
@@ -244,11 +300,17 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
           {addingNow === 1 ? 'person' : 'people'} {m.mailchimpKnown ? 'will be added to ' : (addingNow === 1 ? 'is ticked to go to ' : 'are ticked to go to ')}
           {audience ? <strong data-testid="mc-audience" style={{ fontWeight: 700 }}>{audience}</strong> : 'your Mailchimp audience'}
         </p>
-        {m.mailchimpKnown ? (
-          <p data-testid="mc-gap" style={{ ...small, marginTop: '8px', fontFamily: FONT.body }}>
-            {n(alreadyNow)} already in your Mailchimp · {n(newCount)} new to Mailchimp
-          </p>
-        ) : (
+        {/* The parts, adding up to the whole: the big number, the archived
+            people not ticked (on their own), anyone else not ticked, and those
+            already in Mailchimp. */}
+        <p data-testid="mc-gap" style={{ ...small, marginTop: '8px', fontFamily: FONT.body }}>
+          <span data-testid="mc-tally-adding">{n(tally.adding)} to add</span>
+          {tally.archivedUnticked > 0 && <> · <span data-testid="mc-tally-archived">{n(tally.archivedUnticked)} archived, not ticked</span></>}
+          {tally.otherUnticked > 0 && <> · <span data-testid="mc-tally-unticked">{n(tally.otherUnticked)} not ticked</span></>}
+          {m.mailchimpKnown && <> · <span data-testid="mc-tally-already">{n(tally.already)} already in your Mailchimp</span></>}
+          {' '}— <span data-testid="mc-tally-total">{n(tally.total)} in all</span>
+        </p>
+        {!m.mailchimpKnown && (
           <p role="status" style={{ marginTop: '12px', fontSize: '13px', lineHeight: 1.5, color: T.warning, background: T.warningSoft, borderRadius: R.md, padding: '8px 12px', textAlign: 'left' }}>
             {data.mailchimpWords} So we can’t tell who is already in your Mailchimp — this count includes everyone ticked.
           </p>
@@ -281,10 +343,31 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
                 <span data-testid="mc-group-count" style={{ flexShrink: 0, fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, fontVariantNumeric: 'tabular-nums' }}>{n(g.count)}</span>
               </label>
               {!empty && (
-                <button type="button" data-mcr-link onClick={() => openList(g.key)} style={{ marginLeft: '28px', marginTop: '4px', minHeight: '36px' }}>
-                  <span>See {g.count === 1 ? 'this person' : 'these people'}</span>
+                <button type="button" data-mcr-link data-testid="mc-group-see" aria-expanded={!!openGroups[g.key]} aria-controls={'mc-group-people-' + g.key}
+                  onClick={() => toggleGroup(g.key)} style={{ marginLeft: '28px', marginTop: '4px', minHeight: '36px' }}>
+                  <span>{openGroups[g.key] ? 'Hide' : `See ${g.count === 1 ? 'this person' : 'these people'}`}</span>
                 </button>
               )}
+              {!empty && openGroups[g.key] && (() => {
+                const inGroup = people.filter((p) => p.g === g.key)
+                const upTo = openGroups[g.key]
+                return (
+                  <div id={'mc-group-people-' + g.key} data-testid="mc-group-people" style={{ marginTop: '8px', borderRadius: R.lg, border: `1px solid ${T.border}`, background: T.card }}>
+                    <p style={{ ...small, padding: '12px 16px 0' }}>A tick here overrides the group.</p>
+                    <ul>{inGroup.slice(0, upTo).map((p, i) => personRow(p, i, false))}</ul>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px', borderTop: `1px solid ${T.border}`, ...small }}>
+                      <span>Showing {n(Math.min(upTo, inGroup.length))} of {n(inGroup.length)}</span>
+                      {upTo < inGroup.length ? (
+                        <button type="button" data-mcr-btn="outline" onClick={() => showMoreInGroup(g.key)} style={{ width: 'auto', minHeight: '36px', padding: '6px 20px' }}>
+                          <span>Show next {n(Math.min(PAGE_SIZE, inGroup.length - upTo))}</span>
+                        </button>
+                      ) : (
+                        <button type="button" data-mcr-link onClick={() => toggleGroup(g.key)} style={{ minHeight: '36px' }}><span>Hide</span></button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )
         })}
@@ -344,27 +427,7 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
             </div>
             <p style={{ ...small, padding: '12px 16px 0' }}>A tick here overrides the person’s group.</p>
             <ul data-testid="mc-people">
-              {filtered.slice(0, shown).map((p, i) => {
-                const matched = sameSet.has(p.k)
-                const on = !matched && isIncluded(p, groupChoice)
-                // Once ticked, the archived line keeps its date and drops "Tick to add…".
-                const line = p.a ? (on ? archivedLine(p.a, tz).replace(/ Tick to add them to Mailchimp\.$/, '') : archivedLine(p.a, tz)) : null
-                return (
-                  <li key={p.k} data-testid="mc-person" style={{ borderTop: i ? `1px solid ${T.border}` : 'none' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', minHeight: '56px', padding: '10px 16px', cursor: ready && !matched ? 'pointer' : 'default' }}>
-                      <input type="checkbox" checked={on} disabled={!ready || matched} onChange={(e) => setPerson(p, e.target.checked)} aria-label={p.n || p.e} />
-                      <span style={{ minWidth: 0, flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>{p.n || p.e}</span>
-                        {p.n && <span style={{ ...small, display: 'block', wordBreak: 'break-all' }}>{p.e}</span>}
-                        {matched && <span style={{ ...small, display: 'block' }}>Matched by phone, already in your Mailchimp</span>}
-                        {line && <span data-testid="mc-archived-line" style={{ ...small, display: 'block', color: T.warning }}>{line}</span>}
-                      </span>
-                      <span data-mcr-rowgroup style={{ ...small, flexShrink: 0 }}>{groupLabel[p.g] || p.g}</span>
-                      {p.c && !matched && <span style={{ flexShrink: 0, borderRadius: R.full, background: T.goldSoft, padding: '2px 8px', fontSize: '11px', lineHeight: '16px', fontWeight: 700, color: T.foreground }}>Changed</span>}
-                    </label>
-                  </li>
-                )
-              })}
+              {filtered.slice(0, shown).map((p, i) => personRow(p, i, true))}
               {!filtered.length && <li style={{ padding: '32px 0', textAlign: 'center', fontSize: '14px', color: T.mutedFg }}>No one matches your search.</li>}
             </ul>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px', borderTop: `1px solid ${T.border}`, ...small }}>
@@ -381,10 +444,11 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
 
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
         {/* "Done", not "Save" (Kevin, 2026-11-24): every tick is already saved
-            as it is made, so this button only goes back. */}
-        {/* FL-75 slice 6: Done also tells the Mailchimp screen the review is
-            finished (step 1 ticked); Back to Mailchimp does not. */}
-        <Btn variant="primary" onClick={onDone}><span>Done</span></Btn>
+            as it is made. FL-75 slice 6: Done saves the review date (step 1
+            ticked) and goes back; Back to Mailchimp does not. If the date did
+            not save, the page stays and says so (Kevin, 2026-11-26). */}
+        {doneErr && <p role="alert" data-testid="mc-done-error" style={{ marginBottom: '12px', fontSize: '13px', lineHeight: 1.5, color: T.destructive, background: T.destructiveSoft, borderRadius: R.md, padding: '8px 12px' }}>{doneErr}</p>}
+        <Btn variant="primary" data-testid="mc-done" disabled={doneBusy} onClick={done}><span>{doneBusy ? 'Saving…' : 'Done'}</span></Btn>
       </div>
     </Frame>
   )
