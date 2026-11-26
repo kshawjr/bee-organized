@@ -66,6 +66,12 @@ function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; looku
         const u: any = {
           eq: (c: string, v: any) => { uf.push((r) => r[c] === v); return u },
           is: (c: string, v: any) => { uf.push((r) => (r[c] ?? null) === v); return u },
+          // PostgREST's or: "col.is.null,col.neq.X" — the audience write's own filter.
+          or: (expr: string) => {
+            const parts = expr.split(',').map((x) => { const [c, op, ...v] = x.split('.'); return { c, op, v: v.join('.') } })
+            uf.push((r) => parts.some(({ c, op, v }) => op === 'is' && v === 'null' ? (r[c] ?? null) === null : op === 'neq' ? r[c] !== null && r[c] !== undefined && String(r[c]) !== v : op === 'eq' ? String(r[c]) === v : false))
+            return u
+          },
           in: (c: string, v: string[]) => { ids = v; uf.push((r) => v.includes(r[c])); return u },
           select: () => u,
           then: (ok: any, bad: any) => {
@@ -714,5 +720,28 @@ describe('slice 6 changed BeeHub.jsx in the Mailchimp card only', () => {
     // screens). Slice 6 touches none of their lines.
     const then = execSync('git show 36d0752:components/BeeHub.jsx', { cwd: process.cwd(), maxBuffer: 1 << 27 }).toString()
     expect(sha(withoutMailchimpSendSlice6(readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')))).toBe(sha(then))
+  })
+})
+
+// 2026-11-26 (Kevin): a stale first-sync date must never let a NEW audience
+// skip the first-sync question — the guard built after Chattanooga.
+describe('a cleared location asks the first-sync question again, with the count and the audience name', () => {
+  it('first sync done on an old audience → the owner picks this one → asked again: 3 people, “Bee Organized Friends”', async () => {
+    const s = setup({ leads: THREE(), location: { ...SYNCED, mailchimp_review_done_at: '2026-11-20T11:00:00.000Z', mailchimp_list_id: 'oldlist01', mailchimp_list_name: 'Old Audience' } })
+    const { saveAudience } = await import('./mailchimp-connection-write')
+    const saved = await saveAudience(LOC, { id: LIST, name: 'Bee Organized Friends' }, { db: enforceRealRules(s.dbx.db) })
+    expect(saved).toEqual({ ok: true, changed: true, progressReset: true, previousName: 'Old Audience' })
+    expect([s.dbx.location.mailchimp_first_sync_at, s.dbx.location.mailchimp_review_done_at]).toEqual([null, null])
+    const r = await s.run()
+    expect(r).toMatchObject({ ran: false, reason: 'needs_confirmation' })
+    expect(r.confirm).toMatchObject({ count: 3, listId: LIST, listName: 'Bee Organized Friends' })
+    expect(s.posts()).toEqual([])                       // nobody added without the yes
+  })
+  it('…while the SAME audience saved again keeps the first sync: no question, it just syncs', async () => {
+    const s = setup({ leads: THREE(), location: SYNCED })
+    const { saveAudience } = await import('./mailchimp-connection-write')
+    expect(await saveAudience(LOC, { id: LIST, name: 'Bee Organized Friends' }, { db: enforceRealRules(s.dbx.db) })).toMatchObject({ ok: true, changed: false })
+    expect(s.dbx.location.mailchimp_first_sync_at).toBe(SYNCED.mailchimp_first_sync_at)
+    expect(await s.run()).toMatchObject({ ran: true, first: false, pushed: 3 })
   })
 })

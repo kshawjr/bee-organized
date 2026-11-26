@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { resolveMailchimpTarget, targetFailureResponse } from '@/lib/mailchimp-oauth-guard'
+import { clearConnection } from '@/lib/mailchimp-connection-write'
 
 export const runtime = 'nodejs'
 
@@ -52,28 +53,18 @@ export async function POST(
     return NextResponse.json({ error: 'location not found' }, { status: 404 })
   }
 
-  const { error } = await supabaseService
-    .from('locations')
-    .update({
-      mailchimp_access_token: null,
-      mailchimp_server_prefix: null,
-      mailchimp_account_name: null,
-      mailchimp_list_id: null,
-      mailchimp_list_name: null,
-      mailchimp_connected: false,
-      mailchimp_connected_at: null,
-      mailchimp_sync_live: false,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', loc.id)
-
-  if (error) {
-    console.error('[mailchimp-disconnect] failed:', error)
-    return NextResponse.json({ error: `disconnect_failed: ${error.message}` }, { status: 500 })
+  // Through lib/mailchimp-connection-write.ts (the one place the connection
+  // is written): the account, the audience, sync_live, AND the review and
+  // first-sync dates, in one update.
+  const cleared = await clearConnection(loc.id)
+  if (!cleared.ok) {
+    console.error('[mailchimp-disconnect] failed:', cleared.error)
+    return NextResponse.json({ error: `disconnect_failed: ${cleared.error}` }, { status: 500 })
   }
 
   return NextResponse.json({
     success: true,
     message: `Disconnected ${loc.name || loc.location_id} from Mailchimp.`,
+    progress_reset: cleared.progressReset,
   })
 }

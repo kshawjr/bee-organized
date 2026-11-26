@@ -329,3 +329,75 @@ describe('the card hands the ready state to the connection screen', () => {
     })
   }
 })
+
+// 2026-11-26 (Kevin): when the audience or the connection changes after a
+// first sync, the screen goes back to the three-step set-up — and says why,
+// so the owner does not have to work it out.
+describe('after the audience or the connection changes, the owner is told why the set-up started again', () => {
+  const OV = { live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }
+  const mountAt = async (url: string, loc: Record<string, any>) => {
+    window.history.replaceState({}, '', url)
+    container = document.createElement('div'); document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => { root.render(<MailchimpCard settings={{ location: loc }} updateLocation={() => {}} />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  }
+
+  it('a different audience picked after a first sync → the three steps, with the reason above them', async () => {
+    const posts: any[] = []
+    fetchMock = vi.fn(async (url: string, init: any = {}) => {
+      if (init.method === 'POST' && url === '/api/mailchimp/audiences') { posts.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ list_id: 'list2', list_name: 'Spring Friends', changed: true, progress_reset: true, previous_list_name: 'Bee Organized Friends' }) } }
+      if (String(url).startsWith('/api/mailchimp/audiences?')) return { ok: true, status: 200, json: async () => ({ audiences: [{ id: 'list1', name: 'Bee Organized Friends', member_count: 4 }, { id: 'list2', name: 'Spring Friends', member_count: 0 }] }) }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => OV }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
+    await mountAt('/settings', { ...READY, mailchimpListId: '', mailchimpListName: '' })
+    const sel = container.querySelector('#mc-audience') as HTMLSelectElement
+    await act(async () => { sel.value = 'list2'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    await click(button('Save audience'))
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(posts).toEqual([{ location_id: 'loc_test', list_id: 'list2' }])
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('You chose a different audience, Spring Friends, so the set-up starts again: review who goes to it, then run the first sync, which asks before anyone is added. Nobody was taken out of Bee Organized Friends.')
+    unmount()
+  })
+
+  it('the same audience saved again (progress_reset false) → no note: nothing started again', async () => {
+    fetchMock = vi.fn(async (url: string, init: any = {}) => {
+      if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ list_id: 'list1', list_name: 'Bee Organized Friends', changed: false, progress_reset: false, previous_list_name: null }) }
+      if (String(url).startsWith('/api/mailchimp/audiences?')) return { ok: true, status: 200, json: async () => ({ audiences: [{ id: 'list1', name: 'Bee Organized Friends', member_count: 4 }] }) }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
+    await mountAt('/settings', { ...READY, mailchimpListId: '', mailchimpListName: '' })
+    const sel = container.querySelector('#mc-audience') as HTMLSelectElement
+    await act(async () => { sel.value = 'list1'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    await click(button('Save audience'))
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')).toBeNull()
+    unmount()
+  })
+
+  it('back from connecting again (reset=1) → the three steps, with the reason above them', async () => {
+    fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => OV }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
+    await mountAt('/?nav=settings&section=mailchimp&mailchimp=connected&reset=1', READY)
+    expect(container.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toContain('the set-up starts again from step 1')
+    unmount()
+  })
+
+  it('disconnect after a first sync → told that connecting again starts from step 1', async () => {
+    fetchMock = vi.fn(async (url: string, init: any = {}) => {
+      if (init.method === 'POST' && String(url).includes('/mailchimp-disconnect')) return { ok: true, status: 200, json: async () => ({ success: true, progress_reset: true }) }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ ...OV, synced: true, reviewed: true }) }
+      return { ok: true, status: 200, json: async () => ({ live: true }) }
+    }); vi.stubGlobal('fetch', fetchMock)
+    await mountAt('/settings', READY)
+    await click(container.querySelector('[data-testid="mc-disconnect-link"]') as any)
+    await click(container.querySelector('[data-testid="mc-disconnect-yes"]') as any)
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('Disconnected from Mailchimp. Your review and first sync belonged to that connection, so when you connect again you’ll start from step 1. Nobody was taken out of Mailchimp.')
+    unmount()
+  })
+})

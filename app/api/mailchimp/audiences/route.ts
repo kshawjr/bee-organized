@@ -26,6 +26,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { listAudiences } from '@/lib/mailchimp'
 import { resolveMailchimpTarget, targetFailureResponse } from '@/lib/mailchimp-oauth-guard'
+import { saveAudience } from '@/lib/mailchimp-connection-write'
 
 export const runtime = 'nodejs'
 
@@ -118,21 +119,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'unknown_audience' }, { status: 400 })
   }
 
-  const { error: writeErr } = await supabaseService
-    .from('locations')
-    .update({
-      mailchimp_list_id: chosen.id,
-      mailchimp_list_name: chosen.name,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', g.locationUuid)
-
-  if (writeErr) {
-    console.error('[mailchimp-audiences] save failed:', writeErr)
+  // Written through lib/mailchimp-connection-write.ts, the one place the
+  // audience is written: a DIFFERENT audience clears the review and first-sync
+  // dates in the same update (the first-sync question is asked again for the
+  // new audience); the SAME id saved again changes nothing but the name.
+  const saved = await saveAudience(g.locationUuid, { id: chosen.id, name: chosen.name })
+  if (!saved.ok) {
+    console.error('[mailchimp-audiences] save failed:', saved.error)
     return NextResponse.json({ error: 'save_failed' }, { status: 500 })
   }
 
   // Picking an audience does NOT start a sync and does not touch
   // mailchimp_sync_live — it records a choice and nothing else.
-  return NextResponse.json({ list_id: chosen.id, list_name: chosen.name })
+  return NextResponse.json({
+    list_id: chosen.id, list_name: chosen.name,
+    changed: saved.changed, progress_reset: saved.progressReset, previous_list_name: saved.previousName,
+  })
 }

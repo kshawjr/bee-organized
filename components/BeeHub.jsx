@@ -19697,6 +19697,15 @@ export function TextsComingSoon() {
 // sends nothing. The card shows those numbers, and only "Yes" re-sends with
 // them as `confirm`. If a lead arrived in between, the server asks again with
 // the new count — the number confirmed is always the number sent.
+// FL-75 slice 6 (2026-11-26): what the owner is told when the set-up starts
+// again because the audience or the connection changed (the review and the
+// first-sync dates were cleared — lib/mailchimp-connection-write.ts).
+export const MC_RESET_WORDS = {
+  audience: (name, prev) => `You chose a different audience${name ? `, ${name}` : ''}, so the set-up starts again: review who goes to it, then run the first sync, which asks before anyone is added. ${prev ? `Nobody was taken out of ${prev}.` : 'Nobody was taken out of your old audience.'}`,
+  disconnected: 'Disconnected from Mailchimp. Your review and first sync belonged to that connection, so when you connect again you’ll start from step 1. Nobody was taken out of Mailchimp.',
+  reconnected: 'Mailchimp is connected again. Your earlier review and first sync belonged to the old connection, so the set-up starts again from step 1: review who goes to Mailchimp, then run the first sync.',
+}
+
 export function MailchimpCard({ settings, updateLocation }) {
   const locationId  = settings.location.locId || null
   const connected   = !!settings.location.mailchimpConnected
@@ -19726,10 +19735,14 @@ export function MailchimpCard({ settings, updateLocation }) {
   // mount and say what happened, rather than returning the owner to a card that
   // looks exactly as it did before they pressed the button.
   const [returnErr, setReturnErr] = useState(null)
+  // FL-75 slice 6: why the set-up started again, when the audience or the
+  // connection changed and the review and first-sync dates were cleared.
+  const [resetNote, setResetNote] = useState(null)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const q = new URLSearchParams(window.location.search)
     if (q.get('mailchimp') === 'error') setReturnErr(q.get('reason') || 'failed')
+    if (q.get('mailchimp') === 'connected' && q.get('reset') === '1') setResetNote(MC_RESET_WORDS.reconnected)
   }, [])
 
   // null = not known (not asked yet, or the read failed) — shows nothing.
@@ -19796,6 +19809,7 @@ export function MailchimpCard({ settings, updateLocation }) {
       // card never labels an id with a name it guessed locally.
       updateLocation('mailchimpListId', j.list_id || choice)
       updateLocation('mailchimpListName', j.list_name || '')
+      if (j.progress_reset) setResetNote(MC_RESET_WORDS.audience(j.list_name || '', j.previous_list_name || ''))
       setToast({ kind:'success', msg:'Audience saved' })
       setTimeout(() => setToast(null), 3000)
     } catch (e) {
@@ -19819,6 +19833,8 @@ export function MailchimpCard({ settings, updateLocation }) {
         setSaveErr(detail); setBusy(false); return
       }
       setConfirming(false)
+      const dj = await r.json().catch(() => ({}))
+      setResetNote(dj?.progress_reset ? MC_RESET_WORDS.disconnected : null)
       // Optimistic local flip so the card matches the DB without a reload.
       updateLocation('mailchimpConnected', false)
       updateLocation('mailchimpAccountName', '')
@@ -19867,7 +19883,7 @@ export function MailchimpCard({ settings, updateLocation }) {
     <>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
       <MailchimpConnectionScreen locationId={locationId} accountName={accountName} listName={listName}
-        onReview={()=>setReviewing(true)} onDisconnect={doDisconnect} disconnectBusy={busy} />
+        onReview={()=>setReviewing(true)} onDisconnect={doDisconnect} disconnectBusy={busy} notice={resetNote} />
       {saveErr && <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'0 16px', lineHeight:1.5 }}>{saveErr}</p>}
     </>
   )
@@ -19875,6 +19891,7 @@ export function MailchimpCard({ settings, updateLocation }) {
   return (
     <div style={{ margin:'14px 12px 18px', maxWidth:'560px' }}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
+      {resetNote && <p role="status" data-testid="mc-reset-notice" style={{ fontSize:'13px', color:HT.ink.primary, background:HT.surface.sunken, borderRadius:HT.radius.control, padding:'10px 12px', margin:'0 0 10px', lineHeight:1.55 }}>{resetNote}</p>}
 
       <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'0 2px 8px', flexWrap:'wrap' }}>
         <p style={labelStyle}>📬 Mailchimp</p>

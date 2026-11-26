@@ -279,7 +279,7 @@ export function BeforeWeAdd({ kind, confirm, flows, listName, accountName, chang
 }
 
 // ─── The connection screen ─────────────────────────────────────────────────
-export default function MailchimpConnectionScreen({ locationId, accountName, listName, onReview, onDisconnect, disconnectBusy, fetchImpl }) {
+export default function MailchimpConnectionScreen({ locationId, accountName, listName, onReview, onDisconnect, disconnectBusy, fetchImpl, notice = null }) {
   const doFetch = fetchImpl || ((u, i) => fetch(u, i))
   const [ov, setOv] = useState(undefined)        // undefined = loading, null = couldn't load
   const [checking, setChecking] = useState(false)
@@ -365,6 +365,12 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
               <span style={{ width: '6px', height: '6px', borderRadius: R.full, background: 'currentColor' }} />{pill.t}
             </span>
           </div>
+
+          {/* Why the set-up started again, when the audience or the connection
+              changed and the review and first sync were cleared (2026-11-26). */}
+          {notice && (
+            <p role="status" data-testid="mc-reset-notice" style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground, background: T.sageSoft, borderRadius: R.lg, padding: '12px 16px' }}>{notice}</p>
+          )}
 
           {notLive && (
             <p data-testid="mc-not-live" style={{ ...muted }}>Sending to Mailchimp isn’t switched on for your location yet. We’ll let you know when it is.</p>

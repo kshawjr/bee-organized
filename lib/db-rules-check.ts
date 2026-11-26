@@ -261,10 +261,9 @@ export function unreadableRules(): string[] {
 // Code may write them only when the write is error-tolerant and said so.
 // Each names the migration that adds it; a test checks the migration really
 // adds it, and that the line goes once the column is in the snapshot.
-export const PENDING_COLUMNS: Record<string, string> = {
-  'locations.mailchimp_review_done_at': 'migrations/mailchimp_progress_dates.sql',
-  'locations.mailchimp_first_sync_at': 'migrations/mailchimp_progress_dates.sql',
-}
+// (mailchimp_progress_dates.sql was run by Kevin 2026-11-26 10:37; its two
+// columns are in the real schema now.)
+export const PENDING_COLUMNS: Record<string, string> = {}
 
 export type RuleProblem = { code: '23514' | '23502' | '42703'; table: string; rule: string; message: string }
 

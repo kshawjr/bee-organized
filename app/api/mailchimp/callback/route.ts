@@ -31,6 +31,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { exchangeCode, getMetadata } from '@/lib/mailchimp'
+import { saveConnection } from '@/lib/mailchimp-connection-write'
 import {
   MAILCHIMP_OAUTH_STATE_COOKIE,
   consumeMailchimpOAuthState,
@@ -129,29 +130,21 @@ export async function GET(request: NextRequest) {
       return backToConnections(request, { mailchimp: 'error', reason: 'metadata_failed' })
     }
 
-    // 6. ONE write, with the prefix and the token together. mailchimp_list_id
-    //    stays NULL (the owner picks an audience next) and mailchimp_sync_live
-    //    stays FALSE — neither is set here, and sync_live is never set by any
-    //    owner-reachable route.
-    const { error: writeErr } = await supabaseService
-      .from('locations')
-      .update({
-        mailchimp_access_token: token.accessToken,
-        mailchimp_server_prefix: meta.dc,
-        mailchimp_account_name: meta.accountName || null,
-        mailchimp_connected: true,
-        mailchimp_connected_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', loc.id)
-
-    if (writeErr) {
-      console.error('[mailchimp-callback] Supabase write failed:', writeErr)
+    // 6. ONE write, with the prefix and the token together, through
+    //    lib/mailchimp-connection-write.ts (the one place the connection is
+    //    written). mailchimp_sync_live is not set here — it is never set by any
+    //    owner-reachable route. A connect, even again to the same audience,
+    //    clears the review and first-sync dates in the same update: they belong
+    //    to the connection they were made under.
+    const saved = await saveConnection(loc.id, { accessToken: token.accessToken, serverPrefix: meta.dc, accountName: meta.accountName || null })
+    if (!saved.ok) {
+      console.error('[mailchimp-callback] Supabase write failed:', saved.error)
       return backToConnections(request, { mailchimp: 'error', reason: 'supabase_write_failed' })
     }
 
     console.log('✓ Mailchimp connected for', loc.location_id || loc.id, '→', meta.accountName, `(${meta.dc})`)
-    return backToConnections(request, { mailchimp: 'connected' })
+    // reset=1 tells the card the review and first sync were cleared, so it can say why.
+    return backToConnections(request, saved.progressReset ? { mailchimp: 'connected', reset: '1' } : { mailchimp: 'connected' })
   } catch (err) {
     console.error('[mailchimp-callback] error:', err)
     return backToConnections(request, { mailchimp: 'error', reason: 'callback_failed' })
