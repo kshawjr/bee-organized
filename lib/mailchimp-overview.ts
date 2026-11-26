@@ -47,7 +47,7 @@ export type Overview = {
   refusedCount: number                // people Mailchimp refused, still on a live record, not left out (0 if unknown)
   audienceCount: number | null        // null = Mailchimp didn't say
   flows:
-    | { ok: true; mustPause: OverviewFlow[]; paused: OverviewFlow[] }
+    | { ok: true; mustPause: OverviewFlow[]; paused: OverviewFlow[]; conditional?: Array<{ name: string; tag: string }> }
     | { ok: false }
   howToPause: string
 }
@@ -116,7 +116,11 @@ export async function loadOverview(locationUuid: string, deps: Deps = {}): Promi
 
   const fr = await flowsOf({ token, serverPrefix: prefix, listId, fetchImpl: deps.fetchImpl, sleep: deps.sleep })
   const flows: Overview['flows'] = fr.ok
-    ? { ok: true, mustPause: fr.mustPause.map(line), paused: fr.signupFlows.filter((f) => !f.live).map(line) }
+    ? {
+        ok: true, mustPause: fr.mustPause.map(line), paused: fr.signupFlows.filter((f) => !f.live).map(line),
+        // Live, but only emails one tag — Kevin's word, not Mailchimp's (lib/mailchimp-flows.ts).
+        conditional: (fr.kevinConditional || []).map((c) => ({ name: c.flow.name, tag: c.tag })),
+      }
     : { ok: false }
 
   return {

@@ -21,7 +21,7 @@ vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: () => { thro
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { syncWebsiteLeadsToMailchimp, BATCH_SIZE } from './mailchimp-sync'
-import { readFlows, flowsFingerprint, type Flow, type FlowsRead } from './mailchimp-flows'
+import { readFlows, flowsFingerprint, kevinKnownTag, KEVIN_KNOWN_FLOW_TAGS, type Flow, type FlowsRead } from './mailchimp-flows'
 import { buildReview, type ReviewLead, type StoredChoice } from './mailchimp-review'
 import { emailKey } from './mailchimp-rules'
 import { enforceRealRules } from './db-rules-check'
@@ -163,9 +163,11 @@ function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: 
 
 // ── Flows, as lib/mailchimp-flows.ts would report them ────────
 const flow = (over: Partial<Flow>): Flow => ({ kind: 'journey', id: '1', name: 'Welcome New Contacts', status: 'paused', live: false, start: 'signup', startWords: 'Contact signs up to Bee Organized Friends', tag: null, subjects: [], ...over })
+// As readFlows answers — including Kevin's one known condition (kevinKnownTag).
 const flowsAnswer = (flows: Flow[]): FlowsRead => ({
   ok: true, flows,
-  mustPause: flows.filter((f) => f.live && f.start !== 'tag'),
+  mustPause: flows.filter((f) => f.live && f.start !== 'tag' && !kevinKnownTag(f)),
+  kevinConditional: flows.filter((f) => f.live && f.start !== 'tag' && kevinKnownTag(f)).map((flow) => ({ flow, tag: kevinKnownTag(flow)! })),
   tagFlows: flows.filter((f) => f.live && f.start === 'tag'),
   signupFlows: flows.filter((f) => f.start !== 'tag'),
   fingerprint: flowsFingerprint(flows),
@@ -690,11 +692,13 @@ describe('reading the flows (GET only, fail closed)', () => {
   const TAG = [{ step_type: 'trigger-tag_added', trigger_settings: { tag_id: 16 }, display_text: 'Contact tagged ', display_subtext: 'CLOSEDJOB' }]
   const J = (id: number, name: string, status: string, list = LIST) => ({ id, journey_name: name, status, list_id: list })
 
-  it('Chattanooga today: two sign-up flows on → both must be paused; the tag flow is a tag flow', async () => {
+  it('Chattanooga today: Welcome New Contacts must be paused; the quiz flow is Kevin\'s conditional flow; the tag flow is a tag flow', async () => {
     const m = mcFlows({ journeys: [J(1, 'Profile Quiz - Welcome Flow', 'sending'), J(2, 'Closed Job Journey', 'sending'), J(3, 'Welcome New Contacts', 'sending')], steps: { 1: SIGNUP, 2: TAG, 3: SIGNUP }, segments: [{ id: 16, name: 'CLOSEDJOB' }] })
     const r = await m.read()
     if (!r.ok) throw new Error('should read')
-    expect(r.mustPause.map((f) => f.name).sort()).toEqual(['Profile Quiz - Welcome Flow', 'Welcome New Contacts'])
+    // 2026-11-26 (Kevin): the quiz flow only emails people tagged "Profile Quiz" — his word, not Mailchimp's.
+    expect(r.mustPause.map((f) => f.name).sort()).toEqual(['Welcome New Contacts'])
+    expect((r.kevinConditional || []).map((c) => [c.flow.name, c.tag])).toEqual([['Profile Quiz - Welcome Flow', 'Profile Quiz']])
     expect(r.tagFlows).toMatchObject([{ name: 'Closed Job Journey', tag: 'CLOSEDJOB' }])
     expect(m.reqs.every((q) => q.method === 'GET')).toBe(true)
   })
@@ -957,5 +961,60 @@ describe('bounces go on the refused list, never the no-marketing list', () => {
     }
     expect(await s.run()).toMatchObject({ failed: 0, heldBack: 1 })
     expect(s.dbx.rpcCalls).toEqual([])
+  })
+})
+
+// 2026-11-26 (Kevin): "Profile Quiz - Welcome Flow" only emails people tagged
+// "Profile Quiz" — Kevin's word (confirmed by hand); Mailchimp's API does not
+// show it. Safe for the first sync ONLY while nobody would get that tag.
+describe('the quiz flow: Kevin’s known condition, narrow', () => {
+  const QUIZ = flow({ id: '482', name: 'Profile Quiz - Welcome Flow', status: 'sending', live: true, start: 'signup' })
+  const WELCOME = flow({ id: '483', name: 'Welcome New Contacts', status: 'sending', live: true, start: 'signup' })
+  const quizTag = (lead: string, label = 'Profile Quiz') => ({ lookups: [{ id: 'q1', label }], leadTags: [{ lead_id: lead, tag_lookup_id: 'q1' }] })
+  it('live, and nobody would get the tag → it does not block: the first sync asks, then sends', async () => {
+    const s = setup({ leads: THREE(), flows: [QUIZ, { ...PAUSED[0] }] })
+    const ask = await s.run()
+    expect(ask).toMatchObject({ ran: false, reason: 'needs_confirmation' })
+    expect(await s.run(confirmOf(ask))).toMatchObject({ ran: true, complete: true, pushed: 3 })
+  })
+  it.each(['Profile Quiz', 'profile quiz', 'PROFILE QUIZ'])('someone would get the tag “%s” → refused like any live sign-up flow, the flow named, nothing sent or written', async (label) => {
+    const s = setup({ leads: THREE(), flows: [QUIZ], ...quizTag('b', label) })
+    const r = await s.run()
+    expect(r).toMatchObject({ ran: false, reason: 'signup_flows_live' })
+    expect(r.mustPause!.map((f) => f.name)).toEqual(['Profile Quiz - Welcome Flow'])
+    expect(r.words).toBe('“Profile Quiz - Welcome Flow” emails everyone tagged “Profile Quiz”, and Bee Hub would send that tag to 1 person. Pause it first.')
+    expect(s.posts()).toEqual([])
+    expect(s.dbx.writes).toEqual([])
+  })
+  it('…the same with a confirmation in hand, and after the first sync', async () => {
+    const s = setup({ leads: THREE(), flows: [QUIZ], location: SYNCED, ...quizTag('a') })
+    expect(await s.run({ count: 3, listId: LIST, flows: 'x' })).toMatchObject({ ran: false, reason: 'signup_flows_live' })
+    expect(s.posts()).toEqual([])
+  })
+  it('owed tags being finished count too: refused if they include it', async () => {
+    const s = setup({ leads: [lead('p', 'p@x.com', { mailchimp_sync_error: 'tags_pending: x' })], members: [{ email: 'p@x.com', status: 'subscribed' }], location: SYNCED, flows: [QUIZ], ...quizTag('p') })
+    expect(await s.run()).toMatchObject({ ran: false, reason: 'signup_flows_live' })
+    expect(Object.keys(s.mc.tagged)).toEqual([])
+  })
+  it('Welcome New Contacts still blocks, on its own — the quiz flow does not join it', async () => {
+    const s = setup({ leads: THREE(), flows: [QUIZ, WELCOME] })
+    const r = await s.run()
+    expect(r).toMatchObject({ ran: false, reason: 'signup_flows_live' })
+    expect(r.mustPause!.map((f) => f.name)).toEqual(['Welcome New Contacts'])
+  })
+  it('narrow: only that exact name (any capitals, trimmed), only a journey Mailchimp still reports as starting on sign-up', () => {
+    const k = (over: Partial<Flow>) => kevinKnownTag({ ...QUIZ, ...over })
+    expect(k({})).toBe('Profile Quiz')
+    expect(k({ name: '  profile quiz - welcome flow ' })).toBe('Profile Quiz')
+    expect(k({ name: 'Profile Quiz Welcome Flow' })).toBeNull()          // a different name blocks
+    expect(k({ name: 'Profile Quiz - Welcome Flow (copy)' })).toBeNull()
+    expect(k({ start: 'other' })).toBeNull()                              // Mailchimp reports another start: blocks
+    expect(k({ kind: 'classic' })).toBeNull()                             // a classic automation by that name: blocks
+    expect(kevinKnownTag(WELCOME)).toBeNull()
+  })
+  it('the code says the condition came from Kevin, not Mailchimp', () => {
+    expect(KEVIN_KNOWN_FLOW_TAGS).toEqual([{ name: 'Profile Quiz - Welcome Flow', tag: 'Profile Quiz', source: expect.stringMatching(/^Kevin, confirmed by hand.*Mailchimp’s API does not show this condition$/) }])
+    const src = readFileSync(join(process.cwd(), 'lib/mailchimp-flows.ts'), 'utf8')
+    expect(src).toContain('ONE EXCEPTION, FROM KEVIN — NOT FROM MAILCHIMP')
   })
 })

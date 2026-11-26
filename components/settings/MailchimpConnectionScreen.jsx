@@ -510,7 +510,12 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
                     <h2 style={{ fontSize: '16px', lineHeight: '24px', fontWeight: 700, color: T.primary }}>Pause your Mailchimp automations</h2>
                     <p style={{ ...muted, marginTop: '4px' }}>Anything that emails new contacts needs to be off first.</p>
                     {(ov.flows.paused || []).length > 0 && <p data-testid="mc-step2-paused" style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: T.success }}><IconCheck size={14} />Checked just now: {ov.flows.paused.map((f) => f.name).join(', ')} {ov.flows.paused.length === 1 ? 'is' : 'are'} paused</p>}
-                    {(ov.flows.paused || []).length === 0 && <p data-testid="mc-step2-none" style={{ marginTop: '8px', fontSize: '12px', color: T.mutedFg }}>Checked just now: nothing in your Mailchimp emails new contacts.</p>}
+                    {(ov.flows.conditional || []).map((c) => (
+                      <p key={c.name} data-testid="mc-step2-conditional" style={{ marginTop: '8px', fontSize: '12px', lineHeight: 1.5, color: T.mutedFg }}>
+                        {c.name} is on, but it only emails people tagged “{c.tag}” (Bee Organized checked this in Mailchimp by hand; Mailchimp doesn’t report it). Bee Hub won’t sync if it would send that tag.
+                      </p>
+                    ))}
+                    {(ov.flows.paused || []).length === 0 && (ov.flows.conditional || []).length === 0 && <p data-testid="mc-step2-none" style={{ marginTop: '8px', fontSize: '12px', color: T.mutedFg }}>Checked just now: nothing in your Mailchimp emails new contacts.</p>}
                   </div>
                   <button type="button" data-mcc-link data-testid="mc-how-to-pause" onClick={() => setWin('pause')}><span>How to pause them</span><IconExternalLink size={16} /></button>
                 </li>

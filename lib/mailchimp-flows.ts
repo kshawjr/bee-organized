@@ -20,6 +20,18 @@
 //   • A tag that starts a live flow is never carried without the owner's yes,
 //     one tag at a time.
 //
+// ONE EXCEPTION, FROM KEVIN — NOT FROM MAILCHIMP (2026-11-26):
+//   "Profile Quiz - Welcome Flow" only emails contacts tagged "Profile Quiz".
+//   Kevin confirmed that by hand in Mailchimp. Mailchimp's API does NOT show
+//   it: the flow reads as a plain "Contact signs up" start with no tag, filter
+//   or segment (read at Test Location and Chattanooga, 2026-11-26). So Bee Hub
+//   cannot see the condition; it relies on Kevin's word, written down here.
+//   That flow — matched by its exact name, only while Mailchimp still reports
+//   it as a sign-up journey — does not block the first sync by itself. It
+//   blocks (named, as now) the moment Bee Hub would send the tag
+//   "Profile Quiz", in any capitals, to anyone in that sync (the sending code checks it).
+//   Every other sign-up flow still blocks. Welcome New Contacts still blocks.
+//
 // FAIL CLOSED, in three places:
 //   • Status: a flow is "off" only when Mailchimp says paused or draft (classic
 //     automations: paused or save). Any other status, known or not, is live.
@@ -53,10 +65,23 @@ export type FlowsRead =
       ok: true
       flows: Flow[]             // every journey and classic automation on THIS audience
       mustPause: Flow[]         // live, and not a tag flow — the sync refuses while any is here
+      kevinConditional?: Array<{ flow: Flow; tag: string }>  // live, on KEVIN_KNOWN_FLOW_TAGS: refuses only if Bee Hub would send that tag
       tagFlows: Flow[]          // live, starting on a tag being added
       signupFlows: Flow[]       // every flow (live or not) that is not a tag flow — named on the confirmation
       fingerprint: string       // changes when any flow on the audience changes state
     }
+
+// Kevin's word, not Mailchimp's (see the header). Matched by exact name
+// (trimmed, any capitals) and only for a journey Mailchimp still reports as
+// starting on sign-up — anything else about it and it blocks as before.
+export const KEVIN_KNOWN_FLOW_TAGS: ReadonlyArray<{ name: string; tag: string; source: string }> = [
+  { name: 'Profile Quiz - Welcome Flow', tag: 'Profile Quiz', source: 'Kevin, confirmed by hand in Mailchimp, 2026-11-26 — Mailchimp’s API does not show this condition' },
+]
+export function kevinKnownTag(f: Pick<Flow, 'kind' | 'name' | 'start'>): string | null {
+  if (f.kind !== 'journey' || f.start !== 'signup') return null
+  const name = String(f.name || '').trim().toLowerCase()
+  return KEVIN_KNOWN_FLOW_TAGS.find((k) => k.name.toLowerCase() === name)?.tag ?? null
+}
 
 export type FlowFetch = (url: string, init: { method: 'GET'; headers: Record<string, string>; cache: 'no-store' }) =>
   Promise<{ status: number; headers: { get(name: string): string | null }; text(): Promise<string> }>
@@ -190,7 +215,8 @@ export async function readFlows(args: {
     return {
       ok: true,
       flows,
-      mustPause: flows.filter((f) => f.live && f.start !== 'tag'),
+      mustPause: flows.filter((f) => f.live && f.start !== 'tag' && !kevinKnownTag(f)),
+      kevinConditional: flows.filter((f) => f.live && f.start !== 'tag' && kevinKnownTag(f)).map((flow) => ({ flow, tag: kevinKnownTag(flow)! })),
       tagFlows: flows.filter((f) => f.live && f.start === 'tag'),
       signupFlows: flows.filter((f) => f.start !== 'tag'),
       fingerprint: flowsFingerprint(flows),

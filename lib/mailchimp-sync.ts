@@ -321,6 +321,22 @@ export async function syncWebsiteLeadsToMailchimp(
     heldTags.sort((a, b) => a.tag.localeCompare(b.tag))
   }
 
+  // Kevin's known condition (lib/mailchimp-flows.ts KEVIN_KNOWN_FLOW_TAGS — his
+  // word, not Mailchimp's): "Profile Quiz - Welcome Flow" only emails people
+  // tagged "Profile Quiz". It is safe ONLY while nobody in this sync would get
+  // that tag (any capitals). If anyone would, refuse exactly as for any live
+  // sign-up flow, and name it. Nothing has been sent at this point.
+  for (const c of flows.kevinConditional || []) {
+    const lc = c.tag.toLowerCase()
+    const wouldTag = [...sendSet, ...repair].filter((p) => (tagsByKey.get(p.k) || []).some((t) => t.toLowerCase() === lc)).length
+    if (wouldTag > 0) {
+      return refuse('signup_flows_live', {
+        mustPause: [flowLine(c.flow)], howToPause: HOW_TO_PAUSE,
+        words: `“${c.flow.name}” emails everyone tagged “${c.tag}”, and Bee Hub would send that tag to ${wouldTag === 1 ? '1 person' : `${wouldTag} people`}. Pause it first.`,
+      })
+    }
+  }
+
   // ── 5. First sync? Then the confirmation ────────────────────
   // Its own read. If it can't be read (the migration not run yet), this IS a
   // first sync: guessing "not first" is the unconfirmed mass add this exists

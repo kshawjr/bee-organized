@@ -133,10 +133,18 @@ describe('GET overview', () => {
     const live = flow({ status: 'sending', live: true, subjects: ['Welcome to the Bee Organized Hive!'] })
     const r = await loadOverview(LOC, { db, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer({ mustPause: [live], signupFlows: [live] }) })
     if (!r.ok) throw new Error('expected ok')
-    expect(r.overview.flows).toEqual({ ok: true, mustPause: [{ name: 'Welcome New Contacts', status: 'sending', subjects: ['Welcome to the Bee Organized Hive!'] }], paused: [] })
+    expect(r.overview.flows).toEqual({ ok: true, mustPause: [{ name: 'Welcome New Contacts', status: 'sending', subjects: ['Welcome to the Bee Organized Hive!'] }], paused: [], conditional: [] })
     expect(connectionState(r.overview)).toBe('blocked')
   })
 
+  it('the quiz flow (Kevin’s known condition) is passed on as conditional, not must-pause → not on hold by itself', async () => {
+    const { db } = overviewDb()
+    const quiz = flow({ name: 'Profile Quiz - Welcome Flow', status: 'sending', live: true })
+    const r = await loadOverview(LOC, { db, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => flowsAnswer({ signupFlows: [quiz], kevinConditional: [{ flow: quiz, tag: 'Profile Quiz' }] }) })
+    if (!r.ok) throw new Error('expected ok')
+    expect(r.overview.flows).toEqual({ ok: true, mustPause: [], paused: [], conditional: [{ name: 'Profile Quiz - Welcome Flow', tag: 'Profile Quiz' }] })
+    expect(connectionState(r.overview)).toBe('setup')
+  })
   it('flows that cannot be read → flows.ok false → on hold', async () => {
     const { db } = overviewDb()
     const r = await loadOverview(LOC, { db, fetchImpl: mc().fetchImpl as any, readFlowsImpl: async () => ({ ok: false, reason: 'rate_limited', detail: 'x' }) })
@@ -277,6 +285,13 @@ describe('never synced', () => {
     expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
     expect(host.textContent).not.toMatch(/stopped partway/i)
     expect(byId('mc-start')!.textContent).toBe('Start the first sync')
+  })
+  it('the quiz flow (Kevin’s known condition) is named as on but only for its tag — and “nothing emails new contacts” is not claimed', async () => {
+    const a = api({ overview: { ...NEVER, flows: { ok: true, mustPause: [], paused: [], conditional: [{ name: 'Profile Quiz - Welcome Flow', tag: 'Profile Quiz' }] } } })
+    await mount(screen(a))
+    expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
+    expect(byId('mc-step2-conditional')!.textContent).toBe('Profile Quiz - Welcome Flow is on, but it only emails people tagged “Profile Quiz” (Bee Organized checked this in Mailchimp by hand; Mailchimp doesn’t report it). Bee Hub won’t sync if it would send that tag.')
+    expect(byId('mc-step2-none')).toBeNull()
   })
   it('step 2 names the flows checked as paused just now', async () => {
     const a = api({ overview: NEVER })
