@@ -267,12 +267,14 @@ export async function syncWebsiteLeadsToMailchimp(
   sendSet.sort((a, b) => a.k.localeCompare(b.k))
 
   // ── 4. Tags, and which are held ─────────────────────────────
-  const idsByKey = review.leadIdsByKey || {}
+  // Live records only (lib/mailchimp-review-load.ts leaves the Recycle Bin out;
+  // the rows are checked again below, right before anything is sent).
+  const idsByKey: Record<string, string[]> = { ...(review.leadIdsByKey || {}) }
   // People an earlier run added whose tags did not land ('tags_pending'):
   // they are in Mailchimp now, so they are not in sendSet, but their tags are
   // still owed. They are finished first, and a run is never 'complete' while
   // any is left.
-  const pendingRes = await db.from('leads').select('id, email').eq('location_uuid', locationUuid).like('mailchimp_sync_error', 'tags_pending:%')
+  const pendingRes = await db.from('leads').select('id, email').eq('location_uuid', locationUuid).not('is_junk', 'is', true).like('mailchimp_sync_error', 'tags_pending:%')
   if (pendingRes?.error) throw new Error(`tags_pending read failed: ${pendingRes.error.message}`)
   const repair: Array<{ k: string; e: string }> = []
   {
@@ -281,6 +283,13 @@ export async function syncWebsiteLeadsToMailchimp(
   }
   const sendIds = [...sendSet, ...repair].flatMap((p) => idsByKey[p.k] || [])
   const { rowsById, tagsById } = await loadRowsAndTags(db, sendIds, now())
+  // THE RECYCLE BIN (2026-11-26): a record put in the bin since the read above,
+  // or gone, is dropped here — it gives no tags, is never stamped or written,
+  // and an address left with no live record is not sent at all.
+  for (const k of Object.keys(idsByKey)) idsByKey[k] = idsByKey[k].filter((id) => rowsById[id] && rowsById[id].is_junk !== true)
+  const hasLive = (p: { k: string }) => (idsByKey[p.k] || []).length > 0
+  sendSet = sendSet.filter(hasLive)
+  for (let j = repair.length - 1; j >= 0; j--) if (!hasLive(repair[j])) repair.splice(j, 1)
   const tagsByKey = new Map<string, string[]>()
   for (const p of [...sendSet, ...repair]) {
     const all: string[] = []

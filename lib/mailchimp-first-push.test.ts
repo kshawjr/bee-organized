@@ -55,6 +55,7 @@ function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; looku
       eq: (c: string, v: any) => { f.push((r) => r[c] === v); return q },
       in: (c: string, v: any[]) => { f.push((r) => v.includes(r[c])); return q },
       is: (c: string, v: any) => { f.push((r) => (r[c] ?? null) === v); return q },
+      not: (c: string, op: string, v: any) => { if (op !== 'is') throw new Error('fake: not.' + op); f.push((r) => (r[c] ?? null) !== v); return q },
       like: (c: string, pat: string) => { const pre = pat.replace(/%$/, ''); f.push((r) => typeof r[c] === 'string' && r[c].startsWith(pre)); return q },
       limit: (n: number) => { limit = n; return q },
       maybeSingle: async () => { const r = run(); return { data: (r.data || [])[0] || null, error: r.error } },
@@ -743,5 +744,68 @@ describe('a cleared location asks the first-sync question again, with the count 
     expect(await saveAudience(LOC, { id: LIST, name: 'Bee Organized Friends' }, { db: enforceRealRules(s.dbx.db) })).toMatchObject({ ok: true, changed: false })
     expect(s.dbx.location.mailchimp_first_sync_at).toBe(SYNCED.mailchimp_first_sync_at)
     expect(await s.run()).toMatchObject({ ran: true, first: false, pushed: 3 })
+  })
+})
+
+// 2026-11-26 (Kevin): a Mailchimp sync never reads, sends, tags, stamps or
+// writes to a record in the Recycle Bin. Tags come only from live records.
+// (This file's review helper hands the sync EVERY record id, bin included, as
+// the loader used to — so these prove the sending code's own check.)
+describe('the Recycle Bin: never read, sent, tagged, stamped or written', () => {
+  const BIN = { is_junk: true }
+  const touched = (s: any, id: string) => s.dbx.writes.filter((w: any) => (w.ids || []).includes(id))
+  it('an address on a live record and a binned one: sent once, tagged from the live record only, only the live record stamped', async () => {
+    const leads = [lead('a', 'a@x.com', { project_type: 'Moving' }), lead('abin', 'A@x.com', { ...BIN, project_type: 'Storage', source: 'Bin Source' })]
+    const lt = { lookups: [{ id: 't1', label: 'BINTAG' }, { id: 't2', label: 'LIVETAG' }], leadTags: [{ lead_id: 'abin', tag_lookup_id: 't1' }, { lead_id: 'a', tag_lookup_id: 't2' }] }
+    const s = setup({ leads, ...lt })
+    const before = JSON.stringify(s.dbx.tables.leads.find((l: any) => l.id === 'abin'))
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ complete: true, pushed: 1 })
+    expect(s.posts()[0].body.members.map((m: any) => m.email_address)).toEqual(['a@x.com'])
+    const tags = Object.keys(s.mc.tagged)
+    expect(tags).toEqual(expect.arrayContaining(['LIVETAG', 'Moving']))           // the live record's own tags
+    for (const t of ['BINTAG', 'Storage', 'Bin Source']) expect(tags, t).not.toContain(t)   // nothing from the bin record
+    expect(s.dbx.tables.leads.find((l: any) => l.id === 'a').mailchimp_synced_at).toEqual(expect.any(String))
+    expect(touched(s, 'abin')).toEqual([])
+    expect(JSON.stringify(s.dbx.tables.leads.find((l: any) => l.id === 'abin'))).toBe(before)
+  })
+  it('refused by Mailchimp: the refusal is written to the live record only, never the binned one (today’s dup.test.one)', async () => {
+    const leads = [lead('d', 'dup.fake@x.com'), lead('dbin', 'dup.fake@x.com', BIN)]
+    const s = setup({ leads })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ failed: 1 })
+    expect(s.dbx.tables.leads.find((l: any) => l.id === 'd').mailchimp_sync_error).toMatch(/fake/)
+    expect(touched(s, 'dbin')).toEqual([])
+    expect(s.dbx.tables.leads.find((l: any) => l.id === 'dbin').mailchimp_sync_error).toBeUndefined()
+  })
+  it('owed tags on a binned record are not finished: the record is never even read, no tag call, no write', async () => {
+    const leads = [lead('p', 'p@x.com', { ...BIN, project_type: 'Moving', mailchimp_sync_error: 'tags_pending: x' }), lead('q', 'q@x.com')]
+    const s = setup({ leads, members: [{ email: 'p@x.com', status: 'subscribed' }, { email: 'q@x.com', status: 'subscribed' }], location: SYNCED })
+    // every row the sending code reads from leads
+    const seen: string[] = []
+    const realFrom = s.dbx.db.from
+    s.dbx.db.from = (t: string) => {
+      const q = realFrom(t)
+      if (t !== 'leads') return q
+      const then = q.then
+      q.then = (ok: any, bad: any) => then((r: any) => { for (const row of r?.data || []) seen.push(row.id); return ok(r) }, bad)
+      return q
+    }
+    await s.run()
+    expect(seen).not.toContain('p')
+    expect(s.mc.reqs.filter((q) => q.method === 'POST')).toEqual([])
+    expect(touched(s, 'p')).toEqual([])
+  })
+  it('a record put in the bin after the screen was read is dropped right before sending (the check is in the sending code)', async () => {
+    const leads = [lead('a', 'a@x.com'), lead('b', 'b@x.com')]
+    const s = setup({ leads, location: SYNCED })
+    // the review (read first) still offers b; the row is binned by the time the sending code reads it
+    const realFrom = s.dbx.db.from
+    let reads = 0
+    s.dbx.db.from = (t: string) => { if (t === 'leads') { reads++; if (reads > 1) s.dbx.tables.leads.find((l: any) => l.id === 'b').is_junk = true } return realFrom(t) }
+    const r = await s.run()
+    expect(s.posts().flatMap((p) => p.body.members.map((m: any) => m.email_address))).toEqual(['a@x.com'])
+    expect(r).toMatchObject({ pushed: 1 })
+    expect(touched(s, 'b')).toEqual([])
   })
 })

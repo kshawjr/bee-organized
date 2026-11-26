@@ -391,3 +391,12 @@ function mailchimpFake(members: any[]) {
   }
   return { fetch, methods }
 }
+
+describe('the Recycle Bin is never handed to the sending code (2026-11-26)', () => {
+  it('withLeadIds lists live records only — a binned record sharing a live address is left out', async () => {
+    const db = fakeDb({ leads: [lead('a'), lead('a2', { email: 'a@example.com', is_junk: true } as any), lead('b', { is_junk: true } as any)] })
+    const r = await loadReview(LOC, { db, fetchImpl: mailchimpFake([]).fetch, loadSuppressed: async () => new Set(), withLeadIds: true })
+    if (!r.ok) throw new Error(r.words)
+    expect(r.leadIdsByKey).toEqual({ 'a@example.com': ['a'] })
+  })
+})

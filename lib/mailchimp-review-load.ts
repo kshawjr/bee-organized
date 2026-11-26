@@ -37,8 +37,9 @@ export type ReviewLoad =
       mailchimpWords: string | null    // why Mailchimp could not be read in full; null when it was
       choicesReady: boolean            // false until migrations/mailchimp_review_choices.sql is run
       model: ReviewModel
-      // Only with deps.withLeadIds (slice 6, the sending code): every Bee Hub
-      // record id at this location, by email address. Never sent to a browser.
+      // Only with deps.withLeadIds (slice 6, the sending code): every LIVE Bee
+      // Hub record id at this location, by email address — never a record in
+      // the Recycle Bin (2026-11-26). Never sent to a browser.
       leadIdsByKey?: Record<string, string[]>
     }
 
@@ -129,7 +130,9 @@ export async function loadReview(locationId: string, deps: {
   let leadIdsByKey: Record<string, string[]> | undefined
   if (deps.withLeadIds) {
     leadIdsByKey = {}
-    for (const l of leads) { const k = emailKey(l.email); if (k) (leadIdsByKey[k] ||= []).push(l.id) }
+    // The Recycle Bin is out: a sync never reads, sends, tags, stamps or writes
+    // to a binned record, even when a live record shares its address.
+    for (const l of leads) { if (l.is_junk) continue; const k = emailKey(l.email); if (k) (leadIdsByKey[k] ||= []).push(l.id) }
   }
 
   return {
