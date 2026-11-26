@@ -120,7 +120,7 @@ function fakeDb(o: { leads: any[]; location?: any; noListBroken?: boolean; looku
 
 // ── A small stand-in for Mailchimp ────────────────────────────
 type Member = { email: string; status: string }
-function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: { id: string; name: string }[]; fail?: (url: string, method: string, n: number) => number | null; accepts?: (email: string) => boolean }) {
+function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: { id: string; name: string }[]; fail?: (url: string, method: string, n: number) => number | null; accepts?: (email: string) => boolean; say?: (email: string) => string | null }) {
   const members: Member[] = [...(o.members || [])]
   const segments = [...(o.segments || [{ id: '16', name: 'CLOSEDJOB' }])]
   const tagged: Record<string, string[]> = {}
@@ -145,6 +145,7 @@ function fakeMailchimp(o: { members?: Member[]; archived?: string[]; segments?: 
       for (const m of body.members) {
         const k = emailKey(m.email_address)!
         if (members.some((x) => emailKey(x.email) === k)) errors.push({ email_address: m.email_address, error: `${m.email_address} is already a list member`, error_code: 'ERROR_CONTACT_EXISTS' })
+        else if (o.say?.(m.email_address)) errors.push({ email_address: m.email_address, error: o.say(m.email_address), error_code: 'ERROR_GENERIC' })
         else if (m.email_address.includes('fake') && !o.accepts?.(m.email_address)) errors.push({ email_address: m.email_address, error: `${m.email_address} looks fake or invalid, please enter a real email address.`, error_code: 'ERROR_GENERIC' })
         else if (m.email_address.includes('gone')) errors.push({ email_address: m.email_address, error: `${m.email_address} was permanently deleted and cannot be re-imported. The contact must re-subscribe to get back on the list.`, error_code: 'ERROR_GENERIC' })
         else if (m.email_address.includes('busy') && !o.accepts?.(m.email_address)) errors.push({ email_address: m.email_address, error: `${m.email_address} has signed up to a lot of lists very recently; we're not allowing more signups for now`, error_code: 'ERROR_GENERIC' })
@@ -193,7 +194,7 @@ function reviewFrom(dbx: ReturnType<typeof fakeDb>, mc: ReturnType<typeof fakeMa
   }
 }
 
-function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[]; refusals?: any[] | 'missing'; noListFnMissing?: boolean; accepts?: (email: string) => boolean }) {
+function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => FlowsRead); suppressedAtReview?: string[]; suppressedAtSend?: string[]; choices?: StoredChoice[]; location?: any; archived?: string[]; fail?: any; noListBroken?: boolean; lookups?: any[]; leadTags?: any[]; refusals?: any[] | 'missing'; noListFnMissing?: boolean; accepts?: (email: string) => boolean; say?: (email: string) => string | null }) {
   const dbx = fakeDb({ leads: o.leads, location: o.location, noListBroken: o.noListBroken, lookups: o.lookups, leadTags: o.leadTags, refusals: o.refusals, noListFnMissing: o.noListFnMissing })
   // EVERY sending test writes through the REAL database rules
   // (lib/db-rules-check.ts): a row production would refuse is refused here
@@ -201,7 +202,7 @@ function setup(o: { leads: any[]; members?: Member[]; flows?: Flow[] | (() => Fl
   // row is how two never-saved records shipped (2026-11-26).
   const ruled = enforceRealRules(dbx.db)
   lastRuled = ruled
-  const mc = fakeMailchimp({ members: o.members, archived: o.archived, fail: o.fail, accepts: o.accepts })
+  const mc = fakeMailchimp({ members: o.members, archived: o.archived, fail: o.fail, accepts: o.accepts, say: o.say })
   const flowCalls = { n: 0 }
   const reviewCalls = { n: 0 }
   const deps = {
@@ -901,7 +902,7 @@ describe('the people Mailchimp refused', () => {
     expect(s.dbx.rpcCalls).toEqual([{ fn: 'marketing_unsubscribe_from_mailchimp', args: { p_email: 'gone@x.com', p_location: LOC, p_audience: LIST, p_note: expect.stringContaining('Mailchimp said: gone@x.com was permanently deleted') } }])
     expect(refusal(s, 'gone@x.com')).toBeUndefined()
     // next sync: the no-marketing list keeps them out (loadSuppressed is this test's stand-in for it)
-    expect(syncResultWords(r, 'Bee Organized Friends')).toContain('1 person had said no in Mailchimp (unsubscribed, bounced or removed), so they are now on your no-marketing list')
+    expect(syncResultWords(r, 'Bee Organized Friends')).toContain('1 person had said no in Mailchimp (unsubscribed or asked to be removed), so they are now on your no-marketing list')
   })
 
   it('…if the no-marketing list can’t be written (its function not there yet), the "no" is kept as a refusal — never lost', async () => {
@@ -921,5 +922,40 @@ describe('the people Mailchimp refused', () => {
   it('the result line tells the truth: today’s 14 added and 6 refused', () => {
     expect(syncResultWords({ ran: true, complete: true, pushed: 14, already: 0, failed: 6, said_no: 0, held_back: 0, remaining: 0 }, 'Test Bee Organized'))
       .toBe('Done: added 14 people to Test Bee Organized. 6 people couldn’t be added — Mailchimp refused them (see who on the Mailchimp screen).')
+  })
+})
+
+// 2026-11-26, second ruling: a bounce is not a "no".
+describe('bounces go on the refused list, never the no-marketing list', () => {
+  const refusal = (s: any, key: string) => s.dbx.tables.mailchimp_refusals.find((r: any) => r.email_key === key)
+  const SAY: Record<string, string> = {
+    'unknown@x.com': 'unknown@x.com bounced.',
+    'hard@x.com': 'hard@x.com has a hard bounce and cannot be added.',
+    'soft@x.com': 'soft@x.com had a soft bounce: mailbox full.',
+    'mixed@x.com': 'mixed@x.com is in a compliance state due to unsubscribe, bounce, or compliance review and cannot be subscribed.',
+    'unsub@x.com': 'unsub@x.com has unsubscribed and cannot be re-added.',
+    'review@x.com': 'review@x.com is in a compliance state due to a compliance review and cannot be subscribed.',
+  }
+  it('a bounce never reaches the no-marketing list; unsubscribed and compliance blocks still do', async () => {
+    const s = setup({ leads: Object.keys(SAY).map((e, i) => lead('p' + i, e)), say: (e) => SAY[e] || null })
+    const r = await s.run(confirmOf(await s.run()))
+    expect(r).toMatchObject({ complete: true, pushed: 0, saidNo: 2, failed: 4 })
+    expect(s.dbx.rpcCalls.map((c: any) => c.args.p_email).sort()).toEqual(['review@x.com', 'unsub@x.com'])
+    expect(s.dbx.tables.marketing_unsubscribes.map((u: any) => u.email_normalized).sort()).toEqual(['review@x.com', 'unsub@x.com'])
+    expect(refusal(s, 'hard@x.com')).toMatchObject({ kind: 'invalid', held: true })
+    expect(refusal(s, 'soft@x.com')).toMatchObject({ kind: 'temporary', held: false })
+    expect(refusal(s, 'unknown@x.com')).toMatchObject({ kind: 'temporary', held: false, mailchimp_said: 'unknown@x.com bounced.' })
+    expect(refusal(s, 'mixed@x.com')).toMatchObject({ kind: 'temporary', held: false })
+    expect(refusal(s, 'unsub@x.com')).toBeUndefined()            // a no: never on the refused list, so no Try again
+    expect(refusal(s, 'review@x.com')).toBeUndefined()
+  })
+  it('a bounce of unknown kind is retried, never held on the first refusal, held after 3', async () => {
+    const s = setup({ leads: [lead('u', 'unknown@x.com')], location: SYNCED, say: (e) => SAY[e] || null })
+    for (let i = 1; i <= 3; i++) {
+      expect(await s.run(), `run ${i}`).toMatchObject({ failed: 1, heldBack: 0, saidNo: 0 })
+      expect(refusal(s, 'unknown@x.com')).toMatchObject({ kind: 'temporary', refused_count: i, held: i >= 3 })
+    }
+    expect(await s.run()).toMatchObject({ failed: 0, heldBack: 1 })
+    expect(s.dbx.rpcCalls).toEqual([])
   })
 })

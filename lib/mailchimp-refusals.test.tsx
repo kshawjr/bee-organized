@@ -6,8 +6,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { classifyRefusal, isHeld, listRefused, HOLD_AFTER } from './mailchimp-refusals'
-import { RefusedPeople, refusedStatus } from '@/components/settings/MailchimpConnectionScreen'
+import { classifyRefusal, isHeld, listRefused, HOLD_AFTER, bounceKind } from './mailchimp-refusals'
+import { RefusedPeople, refusedStatus, bounceWords } from '@/components/settings/MailchimpConnectionScreen'
 import { loadOverview } from './mailchimp-overview'
 
 vi.mock('./supabase-service', () => ({ supabaseService: { from: () => { throw new Error('tests pass deps.db') } } }))
@@ -19,11 +19,39 @@ describe('what Mailchimp said decides the kind', () => {
   it.each([
     ['dana.kirsch.test@example.com looks fake or invalid, please enter a real email address.', 'invalid'],
     ['x@y.com was permanently deleted and cannot be re-imported. The contact must re-subscribe to get back on the list.', 'said_no'],
-    ['x@y.com is in a compliance state due to unsubscribe, bounce, or compliance review and cannot be subscribed.', 'said_no'],
+    // names a bounce among its possible causes: not a no (2026-11-26) — a bounce of unknown kind
+    ['x@y.com is in a compliance state due to unsubscribe, bounce, or compliance review and cannot be subscribed.', 'temporary'],
+    ['x@y.com has unsubscribed and cannot be re-added.', 'said_no'],
+    ['x@y.com is in a compliance state due to a compliance review and cannot be subscribed.', 'said_no'],
+    ['Forgotten Email Not Subscribed', 'said_no'],
+    ['x@y.com has a hard bounce and cannot be added.', 'invalid'],
+    ['x@y.com had a soft bounce.', 'temporary'],
+    ['x@y.com bounced.', 'temporary'],
+    ['x@y.com was cleaned.', 'temporary'],
     ['x@y.com has signed up to a lot of lists very recently; we\'re not allowing more signups for now', 'temporary'],
     ['Something Mailchimp has never said before', 'temporary'],
   ] as const)('%s → %s', (said, kind) => expect(classifyRefusal('ERROR_GENERIC', said)).toBe(kind))
   it('"already a member" is not a refusal', () => expect(classifyRefusal('ERROR_CONTACT_EXISTS', 'is already a list member')).toBe('already'))
+  it('Mailchimp says hard or soft only in its own words; anything else is "unknown" — never guessed', () => {
+    expect(bounceKind('has a hard bounce')).toBe('hard')
+    expect(bounceKind('Hard-bounced address')).toBe('hard')
+    expect(bounceKind('soft bounce: mailbox full')).toBe('soft')
+    expect(bounceKind('this address bounced')).toBe('unknown')
+    expect(bounceKind('mailbox does not exist')).toBe(null)          // no bounce word: not read as one
+    expect(bounceKind('cleaned contact')).toBe('unknown')
+  })
+  // THE NO-MARKETING LIST IS NEVER WRITTEN FOR ANYTHING BUT A GENUINE NO
+  it('of every message Bee Hub knows, only consent is a "no"; no message that names a bounce ever is', () => {
+    const corpus = [
+      'looks fake or invalid, please enter a real email address.', 'was permanently deleted and cannot be re-imported.',
+      'is in a compliance state due to unsubscribe, bounce, or compliance review and cannot be subscribed.',
+      'has a hard bounce', 'soft bounce', 'bounced', 'was cleaned', 'has unsubscribed', 'Forgotten Email Not Subscribed',
+      "has signed up to a lot of lists very recently; we're not allowing more signups for now", 'Something new',
+    ]
+    const no = corpus.filter((t) => classifyRefusal('ERROR_GENERIC', t) === 'said_no')
+    expect(no).toEqual(['was permanently deleted and cannot be re-imported.', 'has unsubscribed', 'Forgotten Email Not Subscribed'])
+    for (const t of corpus) if (/bounc|cleaned/i.test(t)) expect(classifyRefusal('ERROR_GENERIC', t), t).not.toBe('said_no')
+  })
   it('held = held and no Try again pending', () => {
     expect(isHeld({ held: true, retry_requested_at: null })).toBe(true)
     expect(isHeld({ held: true, retry_requested_at: 'x' })).toBe(false)
@@ -73,6 +101,11 @@ describe('who the owner sees', () => {
     }) })
     if (!r.ok) throw new Error('read failed')
     expect(r.people.map((p) => p.email_key)).toEqual(['shown@x.com'])
+  })
+  it('a bounced address is on the list, with the kind of bounce Mailchimp said (or unknown)', async () => {
+    const r = await listRefused(LOC, { db: db({ refusals: [R('full@x.com', { kind: 'temporary', held: false, mailchimp_said: 'full@x.com bounced.' })], leads: [L('f', 'full@x.com')] }) })
+    if (!r.ok) throw new Error('read failed')
+    expect(r.people.map((p) => [p.email_key, p.bounce])).toEqual([['full@x.com', 'unknown']])
   })
   it('before the migration: nothing to show, and it says so (ready false) rather than guessing', async () => {
     expect(await listRefused(LOC, { db: db({ refusals: 'missing' }) })).toEqual({ ok: true, ready: false, people: [] })
@@ -161,6 +194,19 @@ describe('the owner can see who was refused, from the Mailchimp screen', () => {
     expect(refusedStatus(P('a', { retry_requested: true }))).toBe('Will be tried once more on the next sync.')
     expect(refusedStatus(P('a', { kind: 'temporary', held: true, refused_count: 3 }))).toBe('Not sent again: Mailchimp refused them 3 times.')
   })
+  it('a BOUNCED person is on the list with their address editable, and told what kind of bounce Mailchimp said it was', async () => {
+    const a = api([P('full.inbox@gmail.com', { kind: 'temporary', held: false, bounce: 'unknown', mailchimp_said: 'full.inbox@gmail.com bounced.' })])
+    await mount(<RefusedPeople locationId="loc" count={1} doFetch={a.fetchImpl} onChanged={() => {}} />)
+    await click(q('mc-refused-toggle'))
+    expect(q('mc-refused-said')!.textContent).toBe('Mailchimp said: “full.inbox@gmail.com bounced.”')
+    expect(q('mc-refused-bounce')!.textContent).toBe('Mailchimp didn’t say whether this bounce is for good, so Bee Hub tries again and stops after 3 tries.')
+    expect(q('mc-refused-edit')).toBeTruthy()
+    await click(q('mc-refused-edit'))
+    expect(q('mc-refused-email')).toBeTruthy()
+    expect(bounceWords({ bounce: 'hard' })).toContain('hard bounce')
+    expect(bounceWords({ bounce: 'soft' })).toContain('soft bounce')
+    expect(bounceWords({ bounce: null })).toBeNull()
+  })
   it('no Try again button when nothing is held', async () => {
     const a = api([P('a@x.com', { kind: 'temporary', held: false })])
     await mount(<RefusedPeople locationId="loc" count={1} doFetch={a.fetchImpl} onChanged={() => {}} />)
@@ -178,6 +224,7 @@ describe('the refused route', () => {
     const { readFileSync } = await import('node:fs')
     const src = readFileSync('app/api/mailchimp/refused/route.ts', 'utf8')
     expect(src).toContain("['retry', 'leave_out'].includes(body?.action)")
+    expect(src).toContain('bounce: p.bounce')                        // the screen is told what kind of bounce
     expect(src).toContain('resolveMailchimpTarget(supabase, user.id, requested)')
   })
 })

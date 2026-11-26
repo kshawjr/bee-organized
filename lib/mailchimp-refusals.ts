@@ -6,10 +6,11 @@
 //
 // Kevin's rulings:
 //   • A "no" — permanently deleted ("asked Mailchimp to forget them"),
-//     unsubscribed, bounced (cleaned), a compliance block — is a person saying
-//     no. It goes on the EXISTING no-marketing list (source 'mailchimp', through
+//     unsubscribed, a compliance block — is a person saying no. It goes on the
+//     EXISTING no-marketing list (source 'mailchimp', through
 //     marketing_unsubscribe_from_mailchimp), never here, and has no Try again.
-//   • Only an invalid address, or a refusal that may be temporary, is kept
+//   • A bounce is NOT a no (2026-11-26, second ruling): it is kept here.
+//   • Invalid addresses, bounces and refusals that may be temporary are kept
 //     here, with Edit address, Try again and Leave out on the Mailchimp screen.
 //
 // THE RETRY RULE
@@ -30,12 +31,40 @@ const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c)
 export type RefusalKind = 'already' | 'said_no' | 'invalid' | 'temporary'
 export const HOLD_AFTER = 3
 
-// Mailchimp's own words decide the kind. Anything not recognised is treated as
-// possibly temporary: tried again, and held after HOLD_AFTER refusals.
+// Mailchimp's own words decide the kind (Kevin's rulings, 2026-11-26).
+//
+// A BOUNCE IS NOT A "NO". It is a mailbox that did not take the mail (a full
+// inbox, a typo, someone who left a company). It goes on the refused list —
+// visible, address editable — NEVER on the no-marketing list, which is
+// permanent, covers all 54 locations and only a super admin can undo.
+//   says "hard bounce"           → invalid   (held until the address is edited or Try again)
+//   says "soft bounce"           → temporary (tried again, held after HOLD_AFTER)
+//   a bounce, not saying which   → temporary — Bee Hub does not guess from the
+//                                  rest of the wording; a dead address is held
+//                                  after HOLD_AFTER tries anyway
+// Any message that names a bounce or a cleaned contact is a bounce, even one
+// that also names other causes: Mailchimp's compliance message ("…due to
+// unsubscribe, bounce, or compliance review…") does not say it was a no, so
+// it is not treated as one.
+//
+// A "NO" — consent — goes on the no-marketing list, with no Try again:
+// permanently deleted / "forgotten", unsubscribed, a compliance block that
+// names no bounce. Nothing else ever does.
+export type BounceKind = 'hard' | 'soft' | 'unknown'
+export function bounceKind(said: unknown): BounceKind | null {
+  const t = String(said ?? '').toLowerCase()
+  if (!/bounc|cleaned/.test(t)) return null
+  if (/hard[\s-]?bounc/.test(t)) return 'hard'
+  if (/soft[\s-]?bounc/.test(t)) return 'soft'
+  return 'unknown'
+}
+
 export function classifyRefusal(code: unknown, said: unknown): RefusalKind {
   if (code === 'ERROR_CONTACT_EXISTS') return 'already'
   const t = String(said ?? '').toLowerCase()
-  if (/permanently deleted|cannot be re-?imported|compliance state|compliance review|unsubscribed|was cleaned|been cleaned|cleaned contact|bounced|has bounced|forgotten/.test(t)) return 'said_no'
+  const bounce = bounceKind(t)
+  if (bounce) return bounce === 'hard' ? 'invalid' : 'temporary'
+  if (/permanently deleted|cannot be re-?imported|forgotten|unsubscribed|compliance state|compliance review/.test(t)) return 'said_no'
   if (/looks fake or invalid|invalid email|not a valid email|enter a (real|valid) email|email address is invalid|domain.*(does not exist|invalid)/.test(t)) return 'invalid'
   return 'temporary'
 }
@@ -115,7 +144,7 @@ export async function requestRetry(locationUuid: string, key: string, at: string
   return !res?.error && (res?.data || []).length === 1
 }
 
-export type RefusedPerson = Refusal & { email: string; records: Array<{ id: string; name: string }> }
+export type RefusedPerson = Refusal & { email: string; records: Array<{ id: string; name: string }>; bounce: BounceKind | null }
 
 // Who the owner sees: refused addresses still on a LIVE record here (never the
 // Recycle Bin), and not left out of Mailchimp by the owner.
@@ -144,7 +173,8 @@ export async function listRefused(locationUuid: string, deps: { db?: any } = {})
   for (const k of keys) {
     const recs = records.get(k)
     if (!recs || !recs.length) continue
-    people.push({ ...refusals.byKey.get(k)!, email: recs[0].email, records: recs.map(({ id, name }) => ({ id, name })) })
+    const r = refusals.byKey.get(k)!
+    people.push({ ...r, email: recs[0].email, records: recs.map(({ id, name }) => ({ id, name })), bounce: bounceKind(r.mailchimp_said) })
   }
   people.sort((a, b) => (a.records[0].name || a.email).localeCompare(b.records[0].name || b.email))
   return { ok: true, ready: true, people }

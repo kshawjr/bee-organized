@@ -68,7 +68,8 @@ const READERS_ON_MAIN: [string, string][] = [
   // 2026-11-26 (Mailchimp slice 6): two Mailchimp tables added to the schema copy, then
   // locations' two new date columns (mailchimp_progress_dates.sql, run that day); the
   // client drip table's own line is unchanged (pinned by the test further down).
-  ['lib/db-columns.snapshot.txt', '0d923b1eb46ebfa3'],
+  // …and mailchimp_refusals (run 2026-11-26 12:33).
+  ['lib/db-columns.snapshot.txt', '96f43ddee9c1be49'],
   ['lib/drip-enrol-outcome.test.ts', '4a3454b8fc9e9c81'],
   ['lib/drip-followups.test.ts', '437d84a4ee31572c'], // was f3e4c818a89d1238 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/drip-followups.ts', '09b0d1b509bc7dcf'],

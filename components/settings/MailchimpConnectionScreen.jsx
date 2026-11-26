@@ -141,7 +141,16 @@ const ArrowLeft = () => (
 // send them again. Edit address saves through the client record's own route;
 // Try again sends a held address once more on the next sync; Leave out unticks
 // them for Mailchimp (undone on "Who goes to Mailchimp"). A person who said no
-// in Mailchimp is never here: they are on the no-marketing list.
+// in Mailchimp is never here: they are on the no-marketing list. A bounce is
+// here (not a no), with what kind of bounce Mailchimp said it was, if it did.
+// What a bounce means, in plain words. Mailchimp's own message is shown
+// above it; this only says whether it told us the bounce was for good.
+export function bounceWords(p) {
+  if (p.bounce === 'hard') return 'Mailchimp says this mailbox doesn’t exist (a hard bounce).'
+  if (p.bounce === 'soft') return 'Mailchimp says this mailbox didn’t take mail for now, like a full inbox (a soft bounce).'
+  if (p.bounce === 'unknown') return 'Mailchimp didn’t say whether this bounce is for good, so Bee Hub tries again and stops after 3 tries.'
+  return null
+}
 export function refusedStatus(p) {
   if (p.retry_requested) return 'Will be tried once more on the next sync.'
   if (p.held && p.kind === 'invalid') return 'Not sent again until the address is changed.'
@@ -215,6 +224,7 @@ export function RefusedPeople({ locationId, count, doFetch, onChanged }) {
               <p data-testid="mc-refused-said" style={{ marginTop: '6px', fontSize: '13px', lineHeight: '18px', color: T.foreground }}>
                 <span style={{ fontWeight: 700 }}>Mailchimp said:</span> <span style={{ fontStyle: 'italic' }}>“{p.mailchimp_said}”</span>
               </p>
+              {bounceWords(p) && <p data-testid="mc-refused-bounce" style={{ ...small, marginTop: '4px' }}>{bounceWords(p)}</p>}
               <p data-testid="mc-refused-status" style={{ ...small, marginTop: '4px', color: p.held && !p.retry_requested ? T.warning : T.mutedFg }}>{refusedStatus(p)}</p>
               {editing === p.email_key ? (
                 <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>

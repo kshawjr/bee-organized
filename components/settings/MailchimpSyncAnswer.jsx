@@ -50,7 +50,7 @@ export function syncResultWords(r, listName) {
   const tail = [
     r.already ? `${people(r.already)} ${r.already === 1 ? 'was' : 'were'} already there and left exactly as they were` : null,
     r.failed ? `${people(r.failed)} couldn’t be added — Mailchimp refused them (see who on the Mailchimp screen)` : null,
-    saidNo ? `${people(saidNo)} had said no in Mailchimp (unsubscribed, bounced or removed), so they are now on your no-marketing list` : null,
+    saidNo ? `${people(saidNo)} had said no in Mailchimp (unsubscribed or asked to be removed), so they are now on your no-marketing list` : null,
     held ? `${people(held)} Mailchimp refused before ${held === 1 ? 'wasn’t' : 'weren’t'} sent again` : null,
   ].filter(Boolean).join(' · ')
   if (r.complete === false) {

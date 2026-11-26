@@ -167,7 +167,7 @@ export type SyncReport = {
   alreadyThere: number        // Mailchimp said "already a member"; left exactly as they were
   skipped: number             // new to Mailchimp but unticked by the owner
   failed: number              // Mailchimp refused this address on this run (e.g. looks fake) — kept in mailchimp_refusals
-  saidNo: number              // Mailchimp said this person said no (unsubscribed, bounced, deleted, compliance) — now on the no-marketing list
+  saidNo: number              // Mailchimp said this person said no (unsubscribed, deleted, a compliance block) — now on the no-marketing list. Never a bounce.
   heldBack: number            // not sent: Mailchimp refused them before (lib/mailchimp-refusals.ts) and nothing has changed
   remaining: number           // ticked, not yet tried because the run stopped
   tagsHeld: string[]          // tags not carried: they start a live flow

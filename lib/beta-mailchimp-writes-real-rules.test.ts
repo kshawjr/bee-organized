@@ -57,12 +57,6 @@ describe('the rules copy is the real one, and every rule in it can be read', () 
       expect(sql, p.migration).toMatch(new RegExp(`CREATE TABLE public\\.${table} \\(`))
       for (const c of p.columns) expect(sql, `${table}.${c}`).toMatch(new RegExp(`\\n  ${c}\\s+(uuid|text|integer|timestamptz|boolean)`))
       for (const c of p.required) expect(sql, `${table}.${c} NOT NULL`).toMatch(new RegExp(`\\n  ${c}\\s+\\w+ NOT NULL(?! DEFAULT)`))
-      // each CHECK, as Postgres reports it, says what the migration says
-      expect(sql).toContain("CHECK (email_key = lower(btrim(email_key)) AND email_key <> '')")
-      expect(sql).toContain("CHECK (kind IN ('invalid', 'temporary'))")
-      expect(sql).toContain('CHECK (length(mailchimp_said) BETWEEN 1 AND 1000)')
-      expect(sql).toContain('CHECK (refused_count >= 1)')
-      expect(p.checks.map((c) => c.name).sort()).toEqual(['mailchimp_refusals_email_key_check', 'mailchimp_refusals_kind_check', 'mailchimp_refusals_mailchimp_said_check', 'mailchimp_refusals_refused_count_check'])
       // Once the migration has run and the snapshots are refreshed, this fails: delete the entry.
       expect(realSchema().has(table), `${table} is real now — refresh the snapshots and remove it from PENDING_TABLES`).toBe(false)
     }

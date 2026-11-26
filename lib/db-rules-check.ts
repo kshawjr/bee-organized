@@ -271,19 +271,9 @@ export const PENDING_COLUMNS: Record<string, string> = {}
 // the migration file and the table is not in the real schema yet; once it is,
 // refresh lib/db-rules.snapshot.json + lib/db-columns.snapshot.txt and delete
 // the entry (that test fails until you do).
-export const PENDING_TABLES: Record<string, { migration: string; columns: string[]; required: string[]; checks: Rule[] }> = {
-  mailchimp_refusals: {
-    migration: 'migrations/mailchimp_refusals.sql',
-    columns: ['id', 'location_id', 'email_key', 'kind', 'mailchimp_code', 'mailchimp_said', 'refused_count', 'first_refused_at', 'last_refused_at', 'held', 'retry_requested_at'],
-    required: ['location_id', 'email_key', 'kind', 'mailchimp_said'],
-    checks: [
-      { name: 'mailchimp_refusals_email_key_check', def: "CHECK (((email_key = lower(btrim(email_key))) AND (email_key <> ''::text)))" },
-      { name: 'mailchimp_refusals_kind_check', def: "CHECK ((kind = ANY (ARRAY['invalid'::text, 'temporary'::text])))" },
-      { name: 'mailchimp_refusals_mailchimp_said_check', def: 'CHECK (((length(mailchimp_said) >= 1) AND (length(mailchimp_said) <= 1000)))' },
-      { name: 'mailchimp_refusals_refused_count_check', def: 'CHECK ((refused_count >= 1))' },
-    ],
-  },
-}
+// (mailchimp_refusals.sql was run by Kevin 2026-11-26 12:33; its real rules
+// are in lib/db-rules.snapshot.json now and matched this copy word for word.)
+export const PENDING_TABLES: Record<string, { migration: string; columns: string[]; required: string[]; checks: Rule[] }> = {}
 
 const columnsOf = (table: string): Set<string> | undefined =>
   realSchema().get(table) || (PENDING_TABLES[table] ? new Set(PENDING_TABLES[table].columns) : undefined)

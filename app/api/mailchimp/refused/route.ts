@@ -14,8 +14,9 @@
 //          through the client record's own route (PATCH /api/leads/[id]), so
 //          Jobber and the no-marketing checks behave as for any edit.
 //
-// A "no" from Mailchimp (unsubscribed, bounced, deleted, compliance) is never
-// on this list and has no Try again: it is on the no-marketing list.
+// A "no" from Mailchimp (unsubscribed, deleted, a compliance block) is never on
+// this list and has no Try again: it is on the no-marketing list. A bounce is
+// not a no: it IS on this list, address editable (2026-11-26).
 //
 // Same resolveMailchimpTarget gate as every other Mailchimp route.
 
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     email_key: p.email_key, email: p.email, records: p.records,
     kind: p.kind, mailchimp_said: p.mailchimp_said, mailchimp_code: p.mailchimp_code,
     refused_count: p.refused_count, first_refused_at: p.first_refused_at, last_refused_at: p.last_refused_at,
-    held: p.held, retry_requested: !!p.retry_requested_at,
+    held: p.held, retry_requested: !!p.retry_requested_at, bounce: p.bounce,
   })) })
 }
 
