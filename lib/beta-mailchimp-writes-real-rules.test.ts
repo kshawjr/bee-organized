@@ -39,7 +39,7 @@ const LOC = 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6'
 describe('the rules copy is the real one, and every rule in it can be read', () => {
   it('reads every rule — none is skipped in silence', () => {
     expect(unreadableRules()).toEqual([])
-    expect(RULED_TABLES().sort()).toEqual(['leads', 'locations', 'mailchimp_refusals', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
+    expect(RULED_TABLES().sort()).toEqual(['leads', 'locations', 'mailchimp_import_choices', 'mailchimp_refusals', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
   })
 
   it('holds sync_log as it really is: only Jobber-era words', () => {
@@ -123,6 +123,7 @@ describe('every Mailchimp write in the source names real columns and values the 
       'lib/mailchimp-connection-write.ts locations update',
       'lib/mailchimp-overview.ts locations update',
       'lib/mailchimp-review-choices.ts mailchimp_review_choices upsert',
+      'lib/mailchimp-import-choices.ts mailchimp_import_choices upsert',
       'lib/mailchimp-sync.ts locations update',
       'lib/mailchimp-sync.ts leads update',
     ]) expect(sites.has(s), s).toBe(true)

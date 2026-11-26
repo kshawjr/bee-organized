@@ -113,30 +113,54 @@ describe('the new record', () => {
 
 // A tiny stand-in database that records every call in order.
 function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]; tables?: Record<string, any[]>; failTable?: string } = {}) {
+  // Each fake gets its own copy of the rows, so a test that writes can't leak into the next.
+  const tables: Record<string, any[]> = Object.fromEntries(Object.entries(opts.tables || {}).map(([k, v]) => [k, v.map((r) => ({ ...r }))]))
   const chain = (table: string, op: string, payload?: any) => {
     const filters: Array<[string, string, any]> = []
     const q: any = {
       select: () => q, order: () => q, range: () => q, limit: () => q,
       eq: (k: string, v: any) => { filters.push(['eq', k, v]); return q }, neq: (k: string, v: any) => { filters.push(['neq', k, v]); return q },
       ilike: (k: string, v: any) => { filters.push(['ilike', k, v]); return q },
+      in: (k: string, v: any) => { filters.push(['in', k, v]); return q },
       single: () => q, maybeSingle: () => q,
       then: (ok: any, bad: any) => {
         if (opts.failTable === table) return Promise.resolve({ data: null, error: { message: 'unreadable' } }).then(ok, bad)
-        if (op === 'insert') { calls.push(`insert ${table} ${payload.email}`); return Promise.resolve({ data: { id: 'new-' + payload.email }, error: null }).then(ok, bad) }
+        const match = (r: any) => filters.every(([o, k, v]) => (o === 'eq' ? r[k] === v : o === 'neq' ? r[k] !== v : o === 'in' ? v.includes(r[k]) : true))
+        if (op === 'insert') {
+          calls.push(`insert ${table} ${payload.email}`)
+          if (tables[table]) tables[table].push({ id: 'new-' + payload.email, is_junk: false, ...payload })
+          return Promise.resolve({ data: { id: 'new-' + payload.email }, error: null }).then(ok, bad)
+        }
+        if (op === 'upsert') {
+          if (!tables[table]) return Promise.resolve({ data: null, error: { code: '42P01', message: 'relation does not exist' } }).then(ok, bad)
+          calls.push(`upsert ${table} ${payload.scope}:${payload.key}=${payload.choice}`)
+          tables[table] = tables[table].filter((r) => !(r.location_id === payload.location_id && r.scope === payload.scope && r.key === payload.key)).concat([{ ...payload }])
+          return Promise.resolve({ data: null, error: null }).then(ok, bad)
+        }
+        if (op === 'delete') {
+          if (!tables[table]) return Promise.resolve({ data: null, error: { code: '42P01', message: 'relation does not exist' } }).then(ok, bad)
+          const gone = tables[table].filter(match)
+          calls.push(`delete ${table} ${gone.map((r) => r.scope + ':' + r.key).join(',')}`)
+          tables[table] = tables[table].filter((r) => !match(r))
+          return Promise.resolve({ data: null, error: null }).then(ok, bad)
+        }
         if (table === 'leads' && filters.some((f) => f[0] === 'ilike')) {
           const e = String(filters.find((f) => f[0] === 'ilike')![2]).replace(/\\/g, '')
           calls.push(`recheck ${e}`)
-          return Promise.resolve({ data: (opts.existing || []).includes(e) ? [{ id: 'old' }] : [], error: null }).then(ok, bad)
+          const found = (tables.leads || []).filter((r) => match(r) && String(r.email || '').trim().toLowerCase() === e.toLowerCase())
+          return Promise.resolve({ data: (opts.existing || []).includes(e) ? [{ id: 'old', email: e }] : found, error: null }).then(ok, bad)
         }
-        const rows = (opts.tables || {})[table] || []
-        const out = rows.filter((r) => filters.every(([o, k, v]) => (o === 'eq' ? r[k] === v : o === 'neq' ? r[k] !== v : true)))
+        if (!tables[table] && table === 'mailchimp_import_choices') return Promise.resolve({ data: null, error: { code: '42P01', message: 'relation does not exist' } }).then(ok, bad)
+        const rows = tables[table] || []
+        const out = rows.filter(match)
         return Promise.resolve({ data: op === 'one' || table === 'locations' ? out[0] ?? null : out, error: null }).then(ok, bad)
       },
     }
     return q
   }
   return {
-    from: (t: string) => ({ select: () => chain(t, 'select').select(), insert: (row: any) => chain(t, 'insert', row) }),
+    from: (t: string) => ({ select: () => chain(t, 'select').select(), insert: (row: any) => chain(t, 'insert', row), upsert: (row: any) => chain(t, 'upsert', row), delete: () => chain(t, 'delete') }),
+    tables,
     rpc: async (fn: string, args: any) => { calls.push(`rpc ${fn} ${args.p_email}`); return opts.rpcError ? { data: null, error: { message: 'boom' } } : { data: true, error: null } },
   }
 }
@@ -224,8 +248,8 @@ describe('nothing comes in without the owner ticking and confirming', () => {
     { id: 'L1', name: 'Pat Lee', email: 'pat@x.com', phone: '423-555-0100', location_uuid: LOC.id, is_junk: false },
     { id: 'L2', email: 'kept@example.org', location_uuid: LOC.id, is_junk: false },
   ]
-  const dbWith = (calls: string[]) => {
-    const d: any = fakeDb(calls, { tables: { locations: [locRow], hub_users: [], leads } })
+  const dbWith = (calls: string[], extra: Record<string, any[]> = {}) => {
+    const d: any = fakeDb(calls, { tables: { locations: [locRow], hub_users: [], leads, ...extra } })
     const from = d.from
     d.from = (t: string) => { const q = from(t); const sel = q.select; q.select = (...a: any[]) => { const c = sel(...a); c.in = () => c; return c }; return q }
     return d
@@ -247,7 +271,8 @@ describe('nothing comes in without the owner ticking and confirming', () => {
   })
   it('only the ticked people are created', async () => {
     const calls: string[] = []
-    const r: any = await importChosen(LOC.id, ['m2'], 1, 'u', { db: dbWith(calls), fetchImpl })
+    const out = [{ location_id: LOC.id, scope: 'person', key: 'one@example.org', choice: 'out' }]
+    const r: any = await importChosen(LOC.id, ['m2'], 1, 'u', { db: dbWith(calls, { mailchimp_import_choices: out }), fetchImpl })
     expect(r).toMatchObject({ ok: true, created: 1, createdUnsubscribed: 1 })
     expect(calls.filter((c) => c.startsWith('insert'))).toEqual(['insert leads two@example.org'])
   })
@@ -262,6 +287,113 @@ describe('nothing comes in without the owner ticking and confirming', () => {
     expect(await importChosen(LOC.id, ['m1', 'm2'], 1, 'u', { db: dbWith(calls), fetchImpl })).toMatchObject({ ok: false, reason: 'bad_request' })
     expect(await importChosen(LOC.id, [], 0, 'u', { db: dbWith(calls), fetchImpl })).toMatchObject({ ok: false, reason: 'bad_request' })
     expect(calls).toEqual([])
+  })
+})
+
+// ── The owner's ticks are saved, and a saved tick is never trusted on its own ──
+import { saveImportChoice, loadImportChoices, isTicked } from './mailchimp-import-choices'
+
+describe('saved ticks: kept, re-checked, spent', () => {
+  const locRow = { id: LOC.id, name: 'Test Location', location_id: 'loc_test', lifecycle_status: 'active', mailchimp_connected: true, mailchimp_list_id: 'aud1', mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1' }
+  const mc = (id: string, email: string, extra: any = {}) => ({ id, email_address: email, status: 'subscribed', timestamp_opt: '2024-07-01T10:00:00+00:00', merge_fields: {}, ...extra })
+  const members = [
+    mc('m1', 'one@example.org'),
+    mc('m2', 'two@example.org'),
+    mc('mS', 'kshawjr+x@gmail.com'),                                  // staff (plus-address of a user)
+    mc('mA', 'kept@example.org'),                                     // already in Bee Hub
+    mc('mH', 'three@example.org', { merge_fields: { PHONE: '4235550100' } }), // held: phone match
+    mc('mC', 'bounced@example.org', { status: 'cleaned' }),           // skipped: bounced
+    mc('mB', 'binned@example.org'),                                   // skipped: only in the Recycle Bin
+  ]
+  const fetchImpl = async () => ({ status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ total_items: members.length, members }) })
+  const leads = [
+    { id: 'L1', name: 'Pat Lee', email: 'pat@x.com', phone: '423-555-0100', location_uuid: LOC.id, is_junk: false },
+    { id: 'L2', email: 'kept@example.org', location_uuid: LOC.id, is_junk: false },
+    { id: 'L3', email: 'binned@example.org', location_uuid: LOC.id, is_junk: true },
+  ]
+  const newDb = (calls: string[], choices: any[] = []): any =>
+    fakeDb(calls, { tables: { locations: [locRow], hub_users: [{ email: 'kshawjr@gmail.com' }], leads, mailchimp_import_choices: choices } })
+  const row = (scope: string, key: string, choice: string) => ({ location_id: LOC.id, scope, key, choice })
+
+  it('choices survive leaving the review and coming back', async () => {
+    const calls: string[] = []
+    const db = newDb(calls)
+    expect(await saveImportChoice(LOC.id, 'u', { scope: 'group', key: 'new', choice: 'out' }, { db })).toEqual({ ok: true })
+    expect(await saveImportChoice(LOC.id, 'u', { scope: 'person', key: 'two@example.org', choice: 'in' }, { db })).toEqual({ ok: true })
+    // "Come back": a brand-new review read from the same database.
+    const r: any = await reviewModel(LOC.id, { db, fetchImpl })
+    expect(r.model.choicesReady).toBe(true)
+    expect(r.model.group).toBe('out')
+    expect(r.model.create).toEqual([expect.objectContaining({ k: 'm1' }), expect.objectContaining({ k: 'm2', c: 'in' })])
+    expect(r.model.create[0].c).toBeUndefined()
+  })
+  it('only differences from "ticked" are stored: ticking back to the default deletes the row', async () => {
+    const calls: string[] = []
+    const db = newDb(calls)
+    await saveImportChoice(LOC.id, 'u', { scope: 'person', key: 'one@example.org', choice: 'out' }, { db })
+    await saveImportChoice(LOC.id, 'u', { scope: 'person', key: 'one@example.org', choice: null }, { db })
+    expect(db.tables.mailchimp_import_choices).toEqual([])
+  })
+  it('the import follows the saved ticks, not just the page', async () => {
+    const calls: string[] = []
+    const db = newDb(calls, [row('person', 'one@example.org', 'out')])
+    // The page says both, but one@ was unticked and saved: nobody comes in.
+    expect(await importChosen(LOC.id, ['m1', 'm2'], 2, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    expect(calls.filter((c) => c.startsWith('insert') || c.startsWith('rpc'))).toEqual([])
+  })
+  it('a saved tick is re-checked against every rule at import time', async () => {
+    const calls: string[] = []
+    // Saved "in" for every kind of person who must never come in (written
+    // straight into the table, as if by any route, bypassing the save check).
+    const sneaky = ['kshawjr+x@gmail.com', 'kept@example.org', 'three@example.org', 'bounced@example.org', 'binned@example.org'].map((e) => row('person', e, 'in'))
+    const db = newDb(calls, [row('group', 'new', 'out'), ...sneaky])
+    const r: any = await reviewModel(LOC.id, { db, fetchImpl })
+    expect(r.model.create.map((p: any) => p.k)).toEqual(['m1', 'm2'])       // none of them offered
+    expect(r.model.held.map((p: any) => p.k)).toEqual(['mH'])
+    expect(r.model.skipped.byReason).toEqual({ staff: 1, cleaned: 1, recycle_bin_only: 1 })
+    expect(r.model.already).toBe(1)
+    // The page asks for all of them: refused, nothing written.
+    expect(await importChosen(LOC.id, ['mS', 'mA', 'mH', 'mC', 'mB'], 5, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    // Group unticked + those saved ticks = nobody ticked; asking for m1 is refused too.
+    expect(await importChosen(LOC.id, ['m1'], 1, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    expect(calls.filter((c) => c.startsWith('insert') || c.startsWith('rpc'))).toEqual([])
+  })
+  it('nothing about who is skipped or held changes when ticks are saved', async () => {
+    const plain: any = await reviewModel(LOC.id, { db: newDb([]), fetchImpl })
+    const ticked: any = await reviewModel(LOC.id, { db: newDb([], [row('group', 'new', 'out'), row('person', 'three@example.org', 'in'), row('person', 'one@example.org', 'out')]), fetchImpl })
+    const shape = (m: any) => ({ create: m.create.map((p: any) => p.k), held: m.held, skipped: m.skipped, already: m.already, read: m.read })
+    expect(shape(ticked.model)).toEqual(shape(plain.model))
+  })
+  it('someone already imported is not offered again, and their saved choice is spent', async () => {
+    const calls: string[] = []
+    const db = newDb(calls, [row('person', 'one@example.org', 'in'), row('person', 'two@example.org', 'out')])
+    const r: any = await importChosen(LOC.id, ['m1'], 1, 'u', { db, fetchImpl })
+    expect(r).toMatchObject({ ok: true, created: 1 })
+    expect(db.tables.mailchimp_import_choices).toEqual([row('person', 'two@example.org', 'out')])   // one@ spent
+    const again: any = await reviewModel(LOC.id, { db, fetchImpl })
+    expect(again.model.create.map((p: any) => p.k)).toEqual(['m2'])
+    expect(again.model.already).toBe(2)
+    expect(await saveImportChoice(LOC.id, 'u', { scope: 'person', key: 'one@example.org', choice: 'in' }, { db })).toMatchObject({ ok: false, error: 'already_here' })
+    expect(await importChosen(LOC.id, ['m1'], 1, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    expect(calls.filter((c) => c.startsWith('insert'))).toEqual(['insert leads one@example.org'])
+  })
+  it('before the table exists: nothing is saved, everyone new counts as ticked', async () => {
+    const d: any = fakeDb([], { tables: { locations: [locRow], hub_users: [], leads: [] } })
+    expect(await saveImportChoice(LOC.id, 'u', { scope: 'group', key: 'new', choice: 'out' }, { db: d })).toMatchObject({ ok: false, error: 'not_ready' })
+    const c = await loadImportChoices(LOC.id, d)
+    expect(c.ready).toBe(false)
+    expect(isTicked('anyone@example.org', c)).toBe(true)
+  })
+  it('Chattanooga: a tick cannot even be saved', async () => {
+    const boom: any = { from: () => { throw new Error('read') } }
+    expect(await saveImportChoice('e7b05e53-7bd7-48de-a13b-10018c8b1b08', 'u', { scope: 'group', key: 'new', choice: 'out' }, { db: boom })).toMatchObject({ ok: false, error: 'not_available' })
+  })
+  it('only the one group and real addresses can be saved', async () => {
+    const db = newDb([])
+    for (const bad of [{ scope: 'group', key: 'archived', choice: 'out' }, { scope: 'person', key: 'One@Example.org', choice: 'out' }, { scope: 'person', key: 'x', choice: 'in' }, { scope: 'phone', key: 'a|b@c.d', choice: 'same' }, { scope: 'person', key: 'a@b.co', choice: 'maybe' }]) {
+      expect(await saveImportChoice(LOC.id, 'u', bad, { db })).toMatchObject({ ok: false, error: 'bad_request' })
+    }
+    expect(db.tables.mailchimp_import_choices).toEqual([])
   })
 })
 
@@ -285,7 +417,7 @@ describe('no welcome email, drip, Slack, notification or Jobber send', () => {
     return seen
   }
   it('every file the importer loads is free of sender names', () => {
-    const files = Array.from(['lib/mailchimp-pull.ts', 'lib/mailchimp-pull-review.ts', 'app/api/mailchimp/import/route.ts']
+    const files = Array.from(['lib/mailchimp-pull.ts', 'lib/mailchimp-pull-review.ts', 'lib/mailchimp-import-choices.ts', 'app/api/mailchimp/import/route.ts', 'app/api/mailchimp/import/choice/route.ts']
       .reduce((seen, f) => walk(join(process.cwd(), f), seen), new Set<string>()))
     const named = files.map((f) => {
       const hitAt = stripComments(readFileSync(f, 'utf8')).match(SENDERS)
@@ -300,7 +432,7 @@ describe('no welcome email, drip, Slack, notification or Jobber send', () => {
     const src = readFileSync(join(process.cwd(), 'components/settings/MailchimpImportScreen.jsx'), 'utf8')
     expect(Array.from(src.matchAll(/from\s+'([^']+)'/g)).map((m) => m[1])).toEqual(['react', '@/components/design/tokens'])
     const urls = Array.from(src.matchAll(/doFetch\(\s*'([^']+)'/g)).map((m) => m[1])
-    expect(urls.length).toBe(2)
+    expect(urls.length).toBe(3)
     for (const u of urls) expect(u.startsWith('/api/mailchimp/import')).toBe(true)
   })
 })

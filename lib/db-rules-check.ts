@@ -273,7 +273,23 @@ export const PENDING_COLUMNS: Record<string, string> = {}
 // the entry (that test fails until you do).
 // (mailchimp_refusals.sql was run by Kevin 2026-11-26 12:33; its real rules
 // are in lib/db-rules.snapshot.json now and matched this copy word for word.)
-export const PENDING_TABLES: Record<string, { migration: string; columns: string[]; required: string[]; checks: Rule[] }> = {}
+export const PENDING_TABLES: Record<string, { migration: string; columns: string[]; required: string[]; checks: Rule[] }> = {
+  // 2026-11-26, FL-75 slice 7: the owner's ticks on "Who comes in from
+  // Mailchimp". Rules copied from the migration as Postgres prints them
+  // (read back from a scratch run). Remove once it is run and snapshots refreshed.
+  mailchimp_import_choices: {
+    migration: 'migrations/mailchimp_import_choices.sql',
+    columns: ['id', 'location_id', 'scope', 'key', 'choice', 'chosen_by', 'chosen_at'],
+    required: ['location_id', 'scope', 'key', 'choice'],
+    checks: [
+      { name: 'mailchimp_import_choices_choice_check', def: "CHECK ((choice = ANY (ARRAY['in'::text, 'out'::text])))" },
+      { name: 'mailchimp_import_choices_group_key', def: "CHECK (((scope <> 'group'::text) OR (key = 'new'::text)))" },
+      { name: 'mailchimp_import_choices_key_check', def: 'CHECK (((length(key) >= 1) AND (length(key) <= 400)))' },
+      { name: 'mailchimp_import_choices_person_key', def: "CHECK (((scope <> 'person'::text) OR (key = lower(btrim(key)))))" },
+      { name: 'mailchimp_import_choices_scope_check', def: "CHECK ((scope = ANY (ARRAY['group'::text, 'person'::text])))" },
+    ],
+  },
+}
 
 const columnsOf = (table: string): Set<string> | undefined =>
   realSchema().get(table) || (PENDING_TABLES[table] ? new Set(PENDING_TABLES[table].columns) : undefined)

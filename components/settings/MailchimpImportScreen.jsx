@@ -14,8 +14,11 @@
 //   • Same person? — a phone or name match. Shown beside the record it
 //     matches. Never tickable: Bee Hub never makes a second record for them.
 //   • Not coming in — counts only: skipped (with why) and already in Bee Hub.
-//   • Nothing is brought in until the owner confirms. Ticks live on this page
-//     only (nothing is saved until the confirmation).
+//   • Nothing is brought in until the owner confirms. Each tick is saved as it
+//     is made, as slice 6's are (POST /api/mailchimp/import/choice), only where
+//     it differs from "ticked", so leaving and coming back keeps them. If a
+//     save fails the tick goes back and the owner is told. Until
+//     migrations/mailchimp_import_choices.sql is run, ticks can't be changed.
 //
 // NOTHING IS SENT from this screen: no email, drip, alert, Jobber or Mailchimp.
 
@@ -103,7 +106,9 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
   const doFetch = fetchImpl || ((u, i) => fetch(u, i))
   const [model, setModel] = useState(null)
   const [err, setErr] = useState(null)
-  const [ticked, setTicked] = useState(new Set())
+  const [group, setGroup] = useState(null)        // 'out' = the group unticked; null = default (ticked)
+  const [cs, setCs] = useState({})                // member id → 'in' | 'out', a person's own tick
+  const [saveErr, setSaveErr] = useState(null)
   const [open, setOpen] = useState(0)            // how many of "Will be created" are shown; 0 = closed
   const [asking, setAsking] = useState(false)    // the confirmation page
   const [busy, setBusy] = useState(false)
@@ -111,7 +116,12 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
   const [doneErr, setDoneErr] = useState(null)
   const [result, setResult] = useState(null)
 
-  const take = (m) => { setModel(m); setTicked(new Set(m.create.map((p) => p.k))) }
+  const take = (m) => {
+    setModel(m); setGroup(m.group || null)
+    setCs(Object.fromEntries(m.create.filter((p) => p.c).map((p) => [p.k, p.c])))
+  }
+  const isOn = (p) => (cs[p.k] ? cs[p.k] === 'in' : group !== 'out')
+  const ticked = useMemo(() => new Set((model?.create || []).filter(isOn).map((p) => p.k)), [model, group, cs])
 
   useEffect(() => {
     let cancelled = false
@@ -130,6 +140,19 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
   }, [locationId])
 
   const tally = useMemo(() => (model ? importTally(model, ticked) : null), [model, ticked])
+
+  async function save(scope, key, choice, undo) {
+    setSaveErr(null)
+    try {
+      const r = await doFetch('/api/mailchimp/import/choice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: locationId, scope, key, choice }),
+      })
+      if (!r.ok) { const j = await r.json().catch(() => ({})); undo(); setSaveErr(j.words || 'Your choice could not be saved. Please try again.') }
+    } catch {
+      undo(); setSaveErr('Your choice could not be saved. Please try again.')
+    }
+  }
 
   if (err) return <Frame onClose={onClose}><p role="alert" style={notice('bad')}>{err}</p></Frame>
   if (!model) return <Frame onClose={onClose}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
@@ -192,9 +215,20 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
   )
 
   // ── The review ──
-  const setAll = (on) => setTicked(on ? new Set(model.create.map((p) => p.k)) : new Set())
-  const setOne = (k, on) => setTicked((cur) => { const next = new Set(cur); if (on) next.add(k); else next.delete(k); return next })
-  const allOn = model.create.length > 0 && tally.bringing === model.create.length
+  // Same as slice 6: the group's tick is the group's; a person's own tick
+  // overrides it and is kept only where it differs from the group.
+  const ready = model.choicesReady
+  const setAll = (on) => {
+    const before = group, choice = on ? null : 'out'
+    setGroup(choice); save('group', 'new', choice, () => setGroup(before))
+  }
+  const setOne = (p, on) => {
+    const before = cs, byGroup = group !== 'out'
+    const c = on === byGroup ? undefined : (on ? 'in' : 'out')
+    const next = { ...cs }; if (c) next[p.k] = c; else delete next[p.k]
+    setCs(next); save('person', String(p.e).trim().toLowerCase(), c || null, () => setCs(before))
+  }
+  const allOn = model.create.length > 0 && group !== 'out'
   const skippedRows = Object.entries(model.skipped.byReason).sort((a, b) => b[1] - a[1]).map(([r, c]) => [SKIP_WORDS[r] || r, c])
 
   return (
@@ -212,16 +246,18 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
           {' '}· {n(tally.already)} already in Bee Hub — {n(tally.total)} in your Mailchimp
         </p>
         {changed && <p role="status" data-testid="mci-changed" style={notice('warn')}>Something changed in Mailchimp or Bee Hub since you looked, so nobody was brought in. Here it is again.</p>}
+        {!ready && model.create.length > 0 && <p role="status" data-testid="mci-not-ready" style={notice('warn')}>Saving choices isn’t switched on yet, so the ticks below can’t be changed.</p>}
+        {saveErr && <p role="alert" data-testid="mci-save-err" style={notice('bad')}>{saveErr}</p>}
       </section>
 
       <Label>Will be created</Label>
       <div data-testid="mci-group-create" style={{ ...card, padding: '16px' }}>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: model.create.length ? 'pointer' : 'default' }}>
-          <input type="checkbox" checked={allOn} disabled={!model.create.length} onChange={(e) => setAll(e.target.checked)} aria-label="New to Bee Hub" style={{ marginTop: '2px' }} />
+          <input type="checkbox" checked={allOn} disabled={!model.create.length || !ready} onChange={(e) => setAll(e.target.checked)} aria-label="New to Bee Hub" style={{ marginTop: '2px' }} />
           <span style={{ minWidth: 0, flex: 1 }}>
             <span style={{ display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>New to Bee Hub</span>
             <span style={{ ...small, display: 'block' }}>{model.create.length ? 'In your Mailchimp, not in Bee Hub · they come in as Nurturing' : 'No one new — everyone in your Mailchimp is already here or listed below'}</span>
-            {tally.unticked > 0 && tally.bringing > 0 && <span style={{ ...small, display: 'block' }}>{n(tally.unticked)} changed one by one</span>}
+            {Object.keys(cs).length > 0 && <span data-testid="mci-one-by-one" style={{ ...small, display: 'block' }}>{n(Object.keys(cs).length)} changed one by one</span>}
           </span>
           <span style={{ flexShrink: 0, fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, fontVariantNumeric: 'tabular-nums' }}>{n(model.create.length)}</span>
         </label>
@@ -237,7 +273,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
               {model.create.slice(0, open).map((p, i) => (
                 <li key={p.k} data-testid="mci-person" style={{ borderTop: i ? `1px solid ${T.border}` : 'none' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', minHeight: '56px', padding: '10px 16px', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={ticked.has(p.k)} onChange={(e) => setOne(p.k, e.target.checked)} aria-label={p.n || p.e} />
+                    <input type="checkbox" checked={ticked.has(p.k)} disabled={!ready} onChange={(e) => setOne(p, e.target.checked)} aria-label={p.n || p.e} />
                     <span style={{ minWidth: 0, flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, wordBreak: 'break-all' }}>{p.n || p.e}</span>
                       {p.n && <span style={{ ...small, display: 'block', wordBreak: 'break-all' }}>{p.e}</span>}
