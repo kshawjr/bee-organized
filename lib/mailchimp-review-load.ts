@@ -24,8 +24,10 @@ import { supabaseService } from './supabase-service'
 import { readRefusal, REFUSAL_WORDS, readAudience, scrub, AUDIENCE_FAILURE_WORDS, PARTIAL_WORDS, type LocationFlags, type ReadRefusal, type MailchimpMember } from './mailchimp-audience-look'
 import { loadSaidNoSet } from './marketing-no-list'
 import { resolveTimezone } from './drip-time'
-import { buildReview, type ReviewLead, type ReviewModel, type StoredChoice } from './mailchimp-review'
+import { buildReview, markHeld, type ReviewLead, type ReviewModel, type StoredChoice } from './mailchimp-review'
 import { emailKey } from './mailchimp-rules'
+import { loadRefusals, isHeld } from './mailchimp-refusals'
+import { readArchivedAddresses } from './mailchimp-archived-read'
 
 type FetchLike = (url: string, init: any) => Promise<any>
 
@@ -41,6 +43,10 @@ export type ReviewLoad =
       // Hub record id at this location, by email address — never a record in
       // the Recycle Bin (2026-11-26). Never sent to a browser.
       leadIdsByKey?: Record<string, string[]>
+      // Only with deps.withHeld (the screens, 2026-11-26): whether who is held
+      // back could be read. false = the big number may still count someone
+      // Mailchimp refused or archived; the screen says so.
+      heldKnown?: boolean
     }
 
 const PAGE = 1000
@@ -64,6 +70,7 @@ export async function loadReview(locationId: string, deps: {
   sleep?: (ms: number) => Promise<void>
   loadSuppressed?: (emails: readonly unknown[]) => Promise<Set<string>>
   withLeadIds?: boolean
+  withHeld?: boolean
 } = {}): Promise<ReviewLoad> {
   const db = deps.db || supabaseService
 
@@ -135,12 +142,36 @@ export async function loadReview(locationId: string, deps: {
     for (const l of leads) { if (l.is_junk) continue; const k = emailKey(l.email); if (k) (leadIdsByKey[k] ||= []).push(l.id) }
   }
 
+  let model = buildReview({ leads, contacted, suppressed, members, choices, timeZone })
+
+  // 4. Who will be held back (2026-11-26, only for the screens). The sending
+  // code leaves out anyone Mailchimp refused and Bee Hub holds, and anyone
+  // archived in Mailchimp — so the screens' big number must too (Kevin: no
+  // headline number ever counts someone who will not be sent). Select only;
+  // Mailchimp by GET only.
+  let heldKnown: boolean | undefined
+  if (deps.withHeld) {
+    const refused = new Set<string>()
+    const mcArchived = new Set<string>()
+    heldKnown = true
+    const ref = await loadRefusals(locationId, { db })
+    if (ref.ok) { for (const [k, r] of Array.from(ref.byKey.entries())) if (isHeld(r)) refused.add(k) }
+    else heldKnown = false
+    if (members && token && prefix) {
+      const arch = await readArchivedAddresses({ token, serverPrefix: prefix, listId: (loc as any).mailchimp_list_id, fetchImpl: deps.fetchImpl, sleep: deps.sleep })
+      if (arch) for (const k of Array.from(arch)) mcArchived.add(k)
+      else heldKnown = false
+    }
+    model = markHeld(model, refused, mcArchived)
+  }
+
   return {
     ok: true,
     location: { id: locationId, name: (loc as any).name ?? null, audienceName: (loc as any).mailchimp_list_name ?? null, timeZone },
     mailchimpWords: mailchimpWords ? scrub(mailchimpWords, token || '') : null,
     choicesReady,
-    model: buildReview({ leads, contacted, suppressed, members, choices, timeZone }),
+    model,
     ...(leadIdsByKey ? { leadIdsByKey } : {}),
+    ...(heldKnown !== undefined ? { heldKnown } : {}),
   }
 }

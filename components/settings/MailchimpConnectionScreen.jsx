@@ -45,6 +45,7 @@ import { T, R, FONT, SHADOW, alpha } from '@/components/design/tokens'
 import { IconUsers, IconClock, IconExternalLink, IconCheck } from '@/components/ui/icons'
 import { SyncResult } from '@/components/settings/MailchimpSyncAnswer'
 import MailchimpImportScreen from '@/components/settings/MailchimpImportScreen'
+import MailchimpGuidedSetup from '@/components/settings/MailchimpGuidedSetup'
 
 const MC_LOGO = 'https://www.google.com/s2/favicons?domain=mailchimp.com&sz=128'
 const MAILCHIMP_URL = 'https://mailchimp.com'
@@ -404,7 +405,7 @@ export function BeforeWeAdd({ kind, confirm, flows, listName, accountName, chang
 }
 
 // ─── The connection screen ─────────────────────────────────────────────────
-export default function MailchimpConnectionScreen({ locationId, accountName, listName, onReview, onDisconnect, disconnectBusy, fetchImpl, notice = null }) {
+export default function MailchimpConnectionScreen({ locationId, accountName, listName, onReview, onDisconnect, disconnectBusy, fetchImpl, notice = null, onListChanged = null, storage }) {
   const doFetch = fetchImpl || ((u, i) => fetch(u, i))
   const [ov, setOv] = useState(undefined)        // undefined = loading, null = couldn't load
   const [checking, setChecking] = useState(false)
@@ -434,6 +435,11 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
     } catch { setOv(null) } finally { setChecking(false) }
   }, [locationId])
   useEffect(() => { load() }, [load])
+  // The guided set-up (2026-11-26) is the never-sent-yet page: decided once,
+  // when the first answer arrives, so finishing it (which records the first
+  // send) shows its own finish page before this screen moves on.
+  const [guided, setGuided] = useState(null)
+  useEffect(() => { if (guided === null && ov !== undefined) setGuided(!!ov && !ov.synced) }, [ov, guided])
 
   async function sync(confirm, again = false) {
     setSyncing(true); setErr(null); setResult(null)
@@ -479,6 +485,25 @@ export default function MailchimpConnectionScreen({ locationId, accountName, lis
   const frame = [list, (accountName || '').trim()].filter(Boolean).join(' · ')
 
   if (importing) return <MailchimpImportScreen locationId={locationId} fetchImpl={fetchImpl} onClose={() => setImporting(false)} />
+  if (ov === undefined) return <div data-settings-ui data-mcc data-testid="mc-connection" data-state="loading" style={{ margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.mutedFg, fontSize: '14px' }}>Opening Mailchimp…</div>
+  if (guided) return (
+    <>
+      <MailchimpGuidedSetup locationId={locationId} accountName={accountName} listName={listName} ov={ov} checking={checking}
+        onCheckAgain={load} fetchImpl={fetchImpl} storage={storage} notice={notice} onListChanged={onListChanged}
+        onDisconnectAsk={() => setWin('disconnect')}
+        onFinished={async () => { await load(); setGuided(null) }} />
+      {win === 'disconnect' && (
+        <div data-mcc>
+          <Window title="Disconnect Mailchimp?" sub="This stops Bee Hub adding people. Your Mailchimp list stays as it is." onClose={() => setWin(null)} closeDisabled={disconnectBusy} data-testid="mc-disconnect">
+            <div data-mcc-actions>
+              <Btn variant="outline" disabled={disconnectBusy} onClick={() => setWin(null)}>Keep connected</Btn>
+              <Btn variant="warn" data-testid="mc-disconnect-yes" disabled={disconnectBusy} onClick={onDisconnect}>{disconnectBusy ? 'Disconnecting…' : 'Disconnect'}</Btn>
+            </div>
+          </Window>
+        </div>
+      )}
+    </>
+  )
 
   return (
     <div data-settings-ui data-mcc data-testid="mc-connection" data-state={state} style={{ margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.foreground }}>

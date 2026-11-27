@@ -80,10 +80,12 @@ const CSS = `
 [data-mci] [data-mci-back]:hover{color:${T.foreground}}
 [data-mci] [data-mci-back]:disabled{opacity:.5;cursor:not-allowed}
 [data-mci-actions]{display:flex;flex-direction:column;gap:8px}
+[data-embedded] [data-mci-actions]{flex-direction:column-reverse}
 [data-mci-two]{display:grid;gap:8px;grid-template-columns:minmax(0,1fr)}
 @media (min-width:640px){
 [data-mci] [data-mci-btn]{width:auto}
 [data-mci-actions]{flex-direction:row}
+[data-embedded] [data-mci-actions]{flex-direction:row}
 [data-mci-two]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 }
 `
@@ -102,7 +104,11 @@ const ArrowLeft = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
 )
 
-export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }) {
+// embed (2026-11-26, the guided set-up): the screen sits inside the guided
+// path's frame (heading, step marker), drops its own back link and title, and
+// ends in Back / Next. Nobody is brought in here: the guided path's last step
+// brings them in, after it reads these same saved ticks again.
+export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, embed = null }) {
   const doFetch = fetchImpl || ((u, i) => fetch(u, i))
   const [model, setModel] = useState(null)
   const [err, setErr] = useState(null)
@@ -154,8 +160,8 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
     }
   }
 
-  if (err) return <Frame onClose={onClose}><p role="alert" style={notice('bad')}>{err}</p></Frame>
-  if (!model) return <Frame onClose={onClose}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
+  if (err) return <Frame onClose={onClose} embed={embed}><p role="alert" style={notice('bad')}>{err}</p></Frame>
+  if (!model) return <Frame onClose={onClose} embed={embed}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
 
   const chosen = model.create.filter((p) => ticked.has(p.k))
   const unsubChosen = chosen.filter((p) => p.s === 'unsubscribed').length
@@ -232,18 +238,20 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
   const skippedRows = Object.entries(model.skipped.byReason).sort((a, b) => b[1] - a[1]).map(([r, c]) => [SKIP_WORDS[r] || r, c])
 
   return (
-    <Frame onClose={onClose}>
+    <Frame onClose={onClose} embed={embed}>
       <section aria-label="How many people will be brought in" style={{ ...card, padding: '20px', textAlign: 'center' }}>
         <p aria-live="polite" data-testid="mci-big-number" style={{ fontSize: '48px', lineHeight: 1, fontWeight: 300, color: T.foreground, fontFamily: FONT.heading, fontVariantNumeric: 'tabular-nums' }}>{n(tally.bringing)}</p>
         <p data-testid="mci-big-words" style={{ marginTop: '4px', fontSize: '16px', lineHeight: '24px', color: T.foreground }}>
           {tally.bringing === 1 ? 'person' : 'people'} will be brought into <strong style={{ fontWeight: 700 }}>{place}</strong>
         </p>
         <p data-testid="mci-tally" style={{ ...small, marginTop: '8px', fontFamily: FONT.body }}>
-          {n(tally.bringing)} to bring in
-          {tally.unticked > 0 && <> · {n(tally.unticked)} not ticked</>}
-          {tally.held > 0 && <> · {n(tally.held)} to check</>}
-          {tally.skipped > 0 && <> · {n(tally.skipped)} skipped</>}
-          {' '}· {n(tally.already)} already in Bee Hub — {n(tally.total)} in your Mailchimp
+          {/* Inside the guided path the big number is not said twice (each
+              fact once per screen, Kevin 2026-11-26). */}
+          {[!embed && `${n(tally.bringing)} to bring in`,
+            tally.unticked > 0 && `${n(tally.unticked)} not ticked`,
+            tally.held > 0 && `${n(tally.held)} to check`,
+            tally.skipped > 0 && `${n(tally.skipped)} skipped`,
+            `${n(tally.already)} already in Bee Hub`].filter(Boolean).join(' · ')} — {n(tally.total)} in your Mailchimp
         </p>
         {changed && <p role="status" data-testid="mci-changed" style={notice('warn')}>Something changed in Mailchimp or Bee Hub since you looked, so nobody was brought in. Here it is again.</p>}
         {!ready && model.create.length > 0 && <p role="status" data-testid="mci-not-ready" style={notice('warn')}>Saving choices isn’t switched on yet, so the ticks below can’t be changed.</p>}
@@ -300,7 +308,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
           <p style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground }}>No one to check. Nobody in your Mailchimp shares only a phone number or a name with someone in Bee Hub.</p>
         ) : (
           <>
-            <p style={small}>These aren’t brought in, so Bee Hub never makes a second record for the same person. Check them in your clients list.</p>
+            <p style={small}>These aren’t brought in, so Bee Hub never adds the same person twice. Check them in your clients list.</p>
             <ul style={{ marginTop: '8px', display: 'grid', gap: '12px' }}>
               {model.held.map((h) => (
                 <li key={h.k} data-testid="mci-held-person">
@@ -324,9 +332,16 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
       <p style={{ ...small, marginTop: '12px' }}>Mailchimp tags aren’t copied into Bee Hub yet.</p>
 
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
-        <Btn variant="primary" data-testid="mci-continue" disabled={!tally.bringing} onClick={() => { setDoneErr(null); setAsking(true) }}>
-          {tally.bringing ? `Bring in ${people(tally.bringing)}` : (model.create.length ? 'Nobody ticked' : 'No one new to bring in')}
-        </Btn>
+        {embed ? (
+          <div data-mci-actions style={{ justifyContent: 'space-between' }}>
+            <Btn variant="outline" data-testid="mci-back" onClick={embed.onBack}>Back</Btn>
+            <Btn variant="primary" data-testid="mci-next" onClick={embed.onNext}>Next</Btn>
+          </div>
+        ) : (
+          <Btn variant="primary" data-testid="mci-continue" disabled={!tally.bringing} onClick={() => { setDoneErr(null); setAsking(true) }}>
+            {tally.bringing ? `Bring in ${people(tally.bringing)}` : (model.create.length ? 'Nobody ticked' : 'No one new to bring in')}
+          </Btn>
+        )}
       </div>
     </Frame>
   )
@@ -335,7 +350,13 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl }
 const frameStyle = { margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.foreground }
 const backStyle = { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '36px' }
 
-function Frame({ onClose, children, after = false }) {
+function Frame({ onClose, children, after = false, embed = null }) {
+  if (embed) return (
+    <div data-settings-ui data-mci data-embedded="1" data-testid="mci-review" style={{ fontFamily: FONT.ui, color: T.foreground }}>
+      <style>{CSS}</style>
+      {children}
+    </div>
+  )
   return (
     <div data-settings-ui data-mci data-testid="mci-review" style={frameStyle}>
       <style>{CSS}</style>

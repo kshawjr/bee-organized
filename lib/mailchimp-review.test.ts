@@ -400,3 +400,69 @@ describe('the Recycle Bin is never handed to the sending code (2026-11-26)', () 
     expect(r.leadIdsByKey).toEqual({ 'a@example.com': ['a'] })
   })
 })
+
+// 2026-11-26 (Kevin): no headline number ever counts someone who will not be
+// sent. The screens' loader (withHeld) marks who the sending code would hold
+// back — read only — and the big number leaves them out.
+describe('who is held back: read only, and out of the big number (2026-11-26)', () => {
+  const held = (key: string, over: any = {}) => ({ location_id: LOC, email_key: key, kind: 'invalid', held: true, retry_requested_at: null, refused_count: 1, ...over })
+  const mcWithArchived = (archived: string[]) => {
+    const methods: string[] = []
+    const urls: string[] = []
+    const fetch = async (url: string, init: any) => {
+      methods.push(init?.method); urls.push(url)
+      if (init?.method !== 'GET') throw new Error('not a GET')
+      const body = url.includes('status=archived') ? { members: archived.map((e) => ({ email_address: e })), total_items: archived.length } : { members: [], total_items: 0 }
+      return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify(body) }
+    }
+    return { fetch, methods, urls }
+  }
+  it('a held refusal and an archived-in-Mailchimp address are marked; the big number leaves both out; nothing is written', async () => {
+    const db = fakeDb({ leads: [lead('a'), lead('b'), lead('c'), lead('d')] })
+    db.tables.mailchimp_refusals = [held('b@example.com'), held('d@example.com', { held: false })]
+    const mc = mcWithArchived(['C@example.com'])
+    const r = await loadReview(LOC, { db, fetchImpl: mc.fetch, loadSuppressed: async () => new Set(), withHeld: true })
+    if (!r.ok) throw new Error(r.words)
+    expect(r.heldKnown).toBe(true)
+    expect(Object.fromEntries(r.model.people.map((p) => [p.k, p.h || null]))).toEqual({ 'a@example.com': null, 'b@example.com': 'refused', 'c@example.com': 'mc_archived', 'd@example.com': null })
+    expect(r.model.adding).toBe(2)                        // a and d — d was refused once, not held
+    expect(new Set(mc.methods)).toEqual(new Set(['GET']))
+    expect(mc.urls.some((u) => u.includes('status=archived'))).toBe(true)
+    expect(db.writes).toEqual([])
+    expect(JSON.stringify(r)).not.toContain(TOKEN)
+  })
+  it('Try again pressed: no longer held, so counted again', async () => {
+    const db = fakeDb({ leads: [lead('b')] })
+    db.tables.mailchimp_refusals = [held('b@example.com', { retry_requested_at: '2026-11-26T20:00:00Z' })]
+    const r = await loadReview(LOC, { db, fetchImpl: mcWithArchived([]).fetch, loadSuppressed: async () => new Set(), withHeld: true })
+    expect(r.ok && r.model.adding).toBe(1)
+  })
+  it('archived contacts can’t be read → heldKnown false, said on the screen (never a silent guess)', async () => {
+    const db = fakeDb({ leads: [lead('a')] })
+    const fetch = async (url: string, init: any) => url.includes('status=archived')
+      ? { status: 401, headers: { get: () => null }, text: async () => '{}' }
+      : { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ members: [], total_items: 0 }) }
+    const r = await loadReview(LOC, { db, fetchImpl: fetch as any, loadSuppressed: async () => new Set(), withHeld: true, sleep: async () => {} })
+    expect(r.ok && r.heldKnown).toBe(false)
+  })
+  it('without withHeld (the sending code’s own read) nothing changes: no extra reads, no marks', async () => {
+    const db = fakeDb({ leads: [lead('b')] })
+    db.tables.mailchimp_refusals = [held('b@example.com')]
+    const mc = mcWithArchived(['b@example.com'])
+    const r = await loadReview(LOC, { db, fetchImpl: mc.fetch, loadSuppressed: async () => new Set() })
+    if (!r.ok) throw new Error(r.words)
+    expect(r.heldKnown).toBeUndefined()
+    expect(r.model.people[0].h).toBeUndefined()
+    expect(r.model.adding).toBe(1)
+    expect(mc.urls.some((u) => u.includes('status=archived'))).toBe(false)
+    expect(db.reads.some((x) => x.startsWith('mailchimp_refusals'))).toBe(false)
+  })
+  it('the review route asks for it; the archived reader is GET only and never names the sending code', () => {
+    expect(read('app/api/mailchimp/review/route.ts')).toContain('loadReview(t.locationUuid, { withHeld: true })')
+    const src = read('lib/mailchimp-archived-read.ts')
+    expect(src).not.toMatch(/method: '(POST|PUT|PATCH|DELETE)'/)
+    expect(Array.from(src.matchAll(/method: '([A-Z]+)'/g)).map((m) => m[1]).every((m) => m === 'GET')).toBe(true)
+    expect(src).toMatch(/doFetch\(url, \{ method: 'GET'/)
+    expect(src).not.toMatch(new RegExp(['mailchimp', 'sync'].join('-')))
+  })
+})

@@ -19701,9 +19701,10 @@ export function TextsComingSoon() {
 // again because the audience or the connection changed (the review and the
 // first-sync dates were cleared — lib/mailchimp-connection-write.ts).
 export const MC_RESET_WORDS = {
-  audience: (name, prev) => `You chose a different audience${name ? `, ${name}` : ''}, so the set-up starts again: review who goes to it, then run the first sync, which asks before anyone is added. ${prev ? `Nobody was taken out of ${prev}.` : 'Nobody was taken out of your old audience.'}`,
-  disconnected: 'Disconnected from Mailchimp. Your review and first sync belonged to that connection, so when you connect again you’ll start from step 1. Nobody was taken out of Mailchimp.',
-  reconnected: 'Mailchimp is connected again. Your earlier review and first sync belonged to the old connection, so the set-up starts again from step 1: review who goes to Mailchimp, then run the first sync.',
+  // Plain words (2026-11-26): these show on the guided set-up's overview.
+  audience: (name, prev) => `You chose a different Mailchimp list${name ? `, ${name}` : ''}, so the set-up starts again from the beginning. Nobody is sent over until you say yes at the end. ${prev ? `Nobody was taken out of ${prev}.` : 'Nobody was taken out of your old list.'}`,
+  disconnected: 'Disconnected from Mailchimp. What you chose belonged to that connection, so when you connect again the set-up starts from the beginning. Nobody was taken out of Mailchimp.',
+  reconnected: 'Mailchimp is connected again. What you chose before belonged to the old connection, so the set-up starts again from the beginning.',
 }
 
 export function MailchimpCard({ settings, updateLocation }) {
@@ -19883,7 +19884,8 @@ export function MailchimpCard({ settings, updateLocation }) {
     <>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
       <MailchimpConnectionScreen locationId={locationId} accountName={accountName} listName={listName}
-        onReview={()=>setReviewing(true)} onDisconnect={doDisconnect} disconnectBusy={busy} notice={resetNote} />
+        onReview={()=>setReviewing(true)} onDisconnect={doDisconnect} disconnectBusy={busy} notice={resetNote}
+        onListChanged={(id, name)=>{ updateLocation('mailchimpListId', id); updateLocation('mailchimpListName', name) }} />
       {saveErr && <p style={{ fontSize:'12px', color:HT.state.danger.fg, margin:'0 16px', lineHeight:1.5 }}>{saveErr}</p>}
     </>
   )

@@ -67,6 +67,13 @@ export type ReviewPerson = {
   g: string            // group key
   a?: string           // archived_at, for archived people only
   c?: 'in' | 'out'     // the owner's own tick for this person, if they made one
+  // Held back (2026-11-26, the guided set-up): ticked or not, they will NOT be
+  // sent, so they are never in the big number. 'refused' = Mailchimp turned
+  // the address down and Bee Hub holds it (lib/mailchimp-refusals.ts isHeld);
+  // 'mc_archived' = archived in Mailchimp, which the sending code never re-adds.
+  // Set only by markHeld (the screen's loader); the sending code checks both
+  // again itself, right before it sends.
+  h?: 'refused' | 'mc_archived'
 }
 
 export type ReviewGroup = {
@@ -156,7 +163,7 @@ export function countAdding(people: readonly ReviewPerson[], groups: readonly Re
   const gc: Record<string, 'in' | 'out' | null> = {}
   for (const g of groups) gc[g.key] = g.choice
   let n = 0
-  for (const p of people) if (!matchedByPhone?.has(p.k) && isIncluded(p, gc)) n++
+  for (const p of people) if (!p.h && !matchedByPhone?.has(p.k) && isIncluded(p, gc)) n++
   return n
 }
 
@@ -167,24 +174,39 @@ export function countAdding(people: readonly ReviewPerson[], groups: readonly Re
 //   adding            new to Mailchimp and ticked — the big number
 //   archivedUnticked  archived in Bee Hub, not ticked (shown on its own)
 //   otherUnticked     anyone else not ticked (a group or a person unticked)
+//   heldBack          ticked, but will not be sent (p.h: Mailchimp refused
+//                     them and Bee Hub holds them, or archived in Mailchimp)
 //   already           already in Mailchimp (by email, or matched by phone)
-//   total             the sum of the four
-export type ReviewTally = { adding: number; archivedUnticked: number; otherUnticked: number; already: number; total: number }
+//   total             the sum of the five
+// THE RULE (Kevin, 2026-11-26): no headline number ever counts someone who
+// will not actually be sent. Held people go in the quiet line, never in adding.
+export type ReviewTally = { adding: number; archivedUnticked: number; otherUnticked: number; heldBack: number; already: number; total: number }
 export function reviewTally(
   people: readonly ReviewPerson[], groups: readonly ReviewGroup[], sameSet: ReadonlySet<string>,
   m: Pick<ReviewModel, 'mailchimpKnown' | 'alreadyInMailchimp' | 'alreadyByPhone'>,
 ): ReviewTally {
   const gc: Record<string, 'in' | 'out' | null> = {}
   for (const g of groups) gc[g.key] = g.choice
-  let adding = 0, archivedUnticked = 0, otherUnticked = 0
+  let adding = 0, archivedUnticked = 0, otherUnticked = 0, heldBack = 0
   for (const p of people) {
     if (sameSet.has(p.k)) continue
-    if (isIncluded(p, gc)) adding++
+    if (isIncluded(p, gc)) { if (p.h) heldBack++; else adding++ }
     else if (p.g === 'archived') archivedUnticked++
     else otherUnticked++
   }
   const already = m.mailchimpKnown ? Math.max(0, m.alreadyInMailchimp - m.alreadyByPhone) + sameSet.size : 0
-  return { adding, archivedUnticked, otherUnticked, already, total: adding + archivedUnticked + otherUnticked + already }
+  return { adding, archivedUnticked, otherUnticked, heldBack, already, total: adding + archivedUnticked + otherUnticked + heldBack + already }
+}
+
+// Marks who will be held back (see ReviewPerson.h) and works the big number
+// out again without them. Pure. A key in both sets is 'refused'.
+export function markHeld(model: ReviewModel, refused: ReadonlySet<string>, mcArchived: ReadonlySet<string>): ReviewModel {
+  const people = model.people.map((p) => {
+    const h = refused.has(p.k) ? 'refused' as const : mcArchived.has(p.k) ? 'mc_archived' as const : undefined
+    if (!h) { if (!p.h) return p; const { h: _drop, ...rest } = p; return rest }
+    return { ...p, h }
+  })
+  return { ...model, people, adding: countAdding(people, model.groups, matchedByPhone(model.phone)) }
 }
 
 // The addresses the owner has said are already in Mailchimp under another

@@ -208,10 +208,11 @@ describe('the "not switched on yet" line', () => {
   it('shows under a connected card when sending is off', async () => {
     fetchMock = cardFetch({ live: false }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    // 2026-11-25: with an audience chosen, the line is the connection screen's
-    // own (Lovable design), and the first sync stays off with it.
-    expect(container.querySelector('[data-testid="mc-not-live"]')?.textContent).toMatch(/isn.t switched on for your location yet/)
-    expect((container.querySelector('[data-testid="mc-start"]') as HTMLButtonElement).disabled).toBe(true)
+    // 2026-11-26: a never-sent location gets the guided set-up; its overview
+    // says so, and nothing is sent (the last step's button stays off — pinned
+    // in lib/mailchimp-guided-screen.test.tsx, "the switch off").
+    expect(container.querySelector('[data-testid="mcg-not-live"]')?.textContent).toMatch(/isn.t switched on for your location yet/)
+    expect(fetchMock.mock.calls.filter((c: any[]) => String(c[0]) === '/api/mailchimp/sync')).toHaveLength(0)
     unmount()
   })
 
@@ -262,7 +263,8 @@ describe('the card hands the ready state to the connection screen', () => {
       throw new Error('unexpected ' + url)
     }); vi.stubGlobal('fetch', fetchMock)
     await mountCard(READY)
-    expect(container.querySelector('[data-testid="mc-connection"]')).toBeTruthy()
+    // never sent anyone → the guided set-up (2026-11-26); nothing is sent by opening it
+    expect(container.querySelector('[data-testid="mcg"]')).toBeTruthy()
     expect(fetchMock.mock.calls.filter((c: any[]) => String(c[0]) === '/api/mailchimp/sync')).toHaveLength(0)
     unmount()
   })
@@ -270,7 +272,7 @@ describe('the card hands the ready state to the connection screen', () => {
     const posts: any[] = []
     fetchMock = vi.fn(async (url: string, init: any = {}) => {
       if (init.method === 'POST') { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
-      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: true, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
       if (String(url).startsWith('/api/mailchimp/review')) return { ok: false, status: 500, json: async () => ({ error: 'x' }) }
       return { ok: true, status: 200, json: async () => ({ live: true }) }
     }); vi.stubGlobal('fetch', fetchMock)
@@ -287,7 +289,7 @@ describe('the card hands the ready state to the connection screen', () => {
       model: buildReview({ leads: [], contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'America/New_York' } as any) }
     fetchMock = vi.fn(async (url: string, init: any = {}) => {
       if (init.method === 'POST') { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) } }
-      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+      if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: true, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
       if (String(url).startsWith('/api/mailchimp/review')) return { ok: true, status: 200, json: async () => REVIEW }
       return { ok: true, status: 200, json: async () => ({ live: true }) }
     }); vi.stubGlobal('fetch', fetchMock)
@@ -312,7 +314,7 @@ describe('the card hands the ready state to the connection screen', () => {
         model: buildReview({ leads: [], contacted: new Set(), suppressed: new Set(), members: [], choices: [], timeZone: 'America/New_York' } as any) }
       fetchMock = vi.fn(async (url: string, init: any = {}) => {
         if (init.method === 'POST') { if (!reply) throw new Error('offline'); return reply }
-        if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: false, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
+        if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => ({ live: true, synced: true, reviewed: false, flows: { ok: true, mustPause: [], paused: [] } }) }
         if (String(url).startsWith('/api/mailchimp/review')) return { ok: true, status: 200, json: async () => REVIEW }
         return { ok: true, status: 200, json: async () => ({ live: true }) }
       }); vi.stubGlobal('fetch', fetchMock)
@@ -357,7 +359,7 @@ describe('after the audience or the connection changes, the owner is told why th
     await click(button('Save audience'))
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     expect(posts).toEqual([{ location_id: 'loc_test', list_id: 'list2' }])
-    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('You chose a different audience, Spring Friends, so the set-up starts again: review who goes to it, then run the first sync, which asks before anyone is added. Nobody was taken out of Bee Organized Friends.')
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('You chose a different Mailchimp list, Spring Friends, so the set-up starts again from the beginning. Nobody is sent over until you say yes at the end. Nobody was taken out of Bee Organized Friends.')
     unmount()
   })
 
@@ -376,14 +378,14 @@ describe('after the audience or the connection changes, the owner is told why th
     unmount()
   })
 
-  it('back from connecting again (reset=1) → the three steps, with the reason above them', async () => {
+  it('back from connecting again (reset=1) → the guided set-up from the beginning, with the reason above it', async () => {
     fetchMock = vi.fn(async (url: string) => {
       if (String(url).startsWith('/api/mailchimp/overview?')) return { ok: true, status: 200, json: async () => OV }
       return { ok: true, status: 200, json: async () => ({ live: true }) }
     }); vi.stubGlobal('fetch', fetchMock)
     await mountAt('/?nav=settings&section=mailchimp&mailchimp=connected&reset=1', READY)
-    expect(container.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
-    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toContain('the set-up starts again from step 1')
+    expect(container.querySelector('[data-testid="mcg"]')!.getAttribute('data-step')).toBe('0')
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toContain('the set-up starts again from the beginning')
     unmount()
   })
 
@@ -397,7 +399,7 @@ describe('after the audience or the connection changes, the owner is told why th
     await click(container.querySelector('[data-testid="mc-disconnect-link"]') as any)
     await click(container.querySelector('[data-testid="mc-disconnect-yes"]') as any)
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
-    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('Disconnected from Mailchimp. Your review and first sync belonged to that connection, so when you connect again you’ll start from step 1. Nobody was taken out of Mailchimp.')
+    expect(container.querySelector('[data-testid="mc-reset-notice"]')!.textContent).toBe('Disconnected from Mailchimp. What you chose belonged to that connection, so when you connect again the set-up starts from the beginning. Nobody was taken out of Mailchimp.')
     unmount()
   })
 })

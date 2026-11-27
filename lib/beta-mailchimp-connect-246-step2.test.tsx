@@ -246,6 +246,9 @@ describe('the card renders the state it is in', () => {
   })
 
   it('connected with an audience — account, audience, and a Disconnect', async () => {
+    // A location that has sent people before: the screen with the account and
+    // list (2026-11-26: a never-sent location gets the guided set-up instead).
+    fetchMock.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => (String(url).startsWith('/api/mailchimp/overview?') ? { live: true, synced: true, reviewed: true, flows: { ok: true, mustPause: [], paused: [] } } : { audiences: [] }) }))
     await mountCard({
       mailchimpConnected: true,
       mailchimpAccountName: 'Bee Organized KC',
@@ -278,12 +281,16 @@ describe('the card renders the state it is in', () => {
       .find(b => b.textContent?.trim() === 'Disconnect Mailchimp')!
     await act(async () => { disconnect.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 
-    // The design's words (slice 6, 2026-11-25).
-    expect(container.textContent).toMatch(/Your Mailchimp audience stays as it is/i)
+    // The design's words (slice 6, 2026-11-25); "list", not "audience", on the
+    // guided set-up (2026-11-26).
+    expect(container.textContent).toMatch(/Your Mailchimp list stays as it is/i)
     // Asking is not doing: no disconnect call (the reads on mount are not one).
     const urls = fetchMock.mock.calls.map((c: any[]) => String(c[0]))
     expect(urls.filter((u: string) => u.includes('disconnect'))).toHaveLength(0)
-    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?') && !u.startsWith('/api/mailchimp/import?available=1&') /* slice 7 (2026-11-26): read-only "is the import on here?" */)).toHaveLength(0)
+    // The reads on mount: status, the overview, and (the guided set-up's rough
+    // numbers, 2026-11-26) the two review screens' read-only answers.
+    expect(urls.filter((u: string) => !u.startsWith('/api/mailchimp/status?') && !u.startsWith('/api/mailchimp/overview?') && !u.startsWith('/api/mailchimp/import?') && !u.startsWith('/api/mailchimp/review?'))).toHaveLength(0)
+    expect(fetchMock.mock.calls.filter((c: any[]) => c[1]?.method && c[1].method !== 'GET')).toHaveLength(0)
   })
 
   it('a failed connect return is surfaced, not swallowed', async () => {

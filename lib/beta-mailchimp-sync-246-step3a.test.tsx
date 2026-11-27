@@ -304,6 +304,9 @@ describe('the Sync now button', () => {
     expect(syncButton()).toBeUndefined()
     unmountCard()
 
+    // A location that has sent before (a never-sent one gets the guided
+    // set-up, whose last step sends — 2026-11-26).
+    fetchMock.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => (String(url).startsWith('/api/mailchimp/overview?') ? { live: true, synced: true, reviewed: true, flows: { ok: true, mustPause: [], paused: [] } } : {}) }))
     await mountCard(READY)
     expect(syncButton(), 'ready state has the button').toBeTruthy()
     unmountCard()

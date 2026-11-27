@@ -41,7 +41,9 @@ async function target(requested: string | null) {
 export async function GET(request: NextRequest) {
   const t = await target(new URL(request.url).searchParams.get('location_id'))
   if (!t.ok) return t.res
-  const r = await loadReview(t.locationUuid)
+  // withHeld: the big number leaves out anyone the sending code would hold
+  // back (Mailchimp refused them, or they are archived in Mailchimp).
+  const r = await loadReview(t.locationUuid, { withHeld: true })
   if (!r.ok) return NextResponse.json({ error: r.reason, words: r.words }, { status: r.reason === 'beehub_read_failed' ? 500 : 409 })
   return NextResponse.json(r, { headers: { 'Cache-Control': 'no-store' } })
 }

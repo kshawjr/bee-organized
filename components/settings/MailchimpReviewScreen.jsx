@@ -85,12 +85,14 @@ const CSS = `
 [data-mcr] [data-mcr-field]:focus{border-color:${T.gold}}
 [data-mcr] input[data-mcr-field]::placeholder{color:${T.mutedFg}}
 [data-mcr-actions]{display:flex;flex-direction:column;gap:8px}
+[data-embedded] [data-mcr-actions]{flex-direction:column-reverse}
 [data-mcr-filters]{display:flex;flex-direction:column;gap:8px}
 [data-mcr-notchanging]{display:grid;gap:8px;grid-template-columns:minmax(0,1fr)}
 [data-mcr-rowgroup]{display:none}
 @media (min-width:640px){
 [data-mcr] [data-mcr-btn]{width:auto}
 [data-mcr-actions]{flex-direction:row}
+[data-embedded] [data-mcr-actions]{flex-direction:row}
 [data-mcr-filters]{flex-direction:row}
 [data-mcr-notchanging]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 [data-mcr-rowgroup]{display:block}
@@ -111,7 +113,11 @@ const ArrowLeft = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
 )
 
-export default function MailchimpReviewScreen({ locationId, onClose, onDone = onClose }) {
+// embed (2026-11-26, the guided set-up): the screen sits inside the guided
+// path's own frame, which carries the heading and the step marker, so the
+// screen drops its own back link, title and line, and ends in Back / Next.
+// Next is Done: it saves the review date, and only moves on once that saved.
+export default function MailchimpReviewScreen({ locationId, onClose, onDone = onClose, embed = null }) {
   const [data, setData] = useState(null)       // the GET answer
   const [err, setErr] = useState(null)
   const [people, setPeople] = useState([])
@@ -163,11 +169,11 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
   }, [people, query, groupFilter])
 
   if (err) return (
-    <Frame onClose={onClose}>
+    <Frame onClose={onClose} embed={embed}>
       <p role="alert" style={{ fontSize: '13px', lineHeight: 1.5, color: T.destructive, background: T.destructiveSoft, borderRadius: R.md, padding: '8px 12px' }}>{err}</p>
     </Frame>
   )
-  if (!data) return <Frame onClose={onClose}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
+  if (!data) return <Frame onClose={onClose} embed={embed}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
 
   const m = data.model
   const ready = data.choicesReady
@@ -264,6 +270,7 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
             {p.n && <span style={{ ...small, display: 'block', wordBreak: 'break-all' }}>{p.e}</span>}
             {matched && <span style={{ ...small, display: 'block' }}>Matched by phone, already in your Mailchimp</span>}
             {line && <span data-testid="mc-archived-line" style={{ ...small, display: 'block', color: T.warning }}>{line}</span>}
+            {p.h && <span data-testid="mc-held-line" style={{ ...small, display: 'block', color: T.warning }}>{p.h === 'refused' ? 'Mailchimp turned this address down before, so it won’t be sent.' : 'Archived in your Mailchimp, so it won’t be sent.'}</span>}
           </span>
           {showGroup && <span data-mcr-rowgroup style={{ ...small, flexShrink: 0 }}>{groupLabel[p.g] || p.g}</span>}
           {p.c && !matched && <span style={{ flexShrink: 0, borderRadius: R.full, background: T.goldSoft, padding: '2px 8px', fontSize: '11px', lineHeight: '16px', fontWeight: 700, color: T.foreground }}>Changed</span>}
@@ -279,6 +286,9 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
   // Every number on this card comes from one tally whose parts add up.
   const tally = reviewTally(people, groups, sameSet, m)
   const addingNow = tally.adding
+  // Ticked but held back, by why (the parts of tally.heldBack).
+  const heldRefused = people.filter((p) => p.h === 'refused' && !sameSet.has(p.k) && isIncluded(p, groupChoice)).length
+  const heldArchived = tally.heldBack - heldRefused
   const alreadyNow = tally.already
 
   const statusRows = Object.entries(m.alreadyByStatus || {}).sort((a, b) => b[1] - a[1])
@@ -288,7 +298,7 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
     .map(([r, c]) => [REASON_WORDS[r] || r, c])
 
   return (
-    <Frame onClose={onClose}>
+    <Frame onClose={onClose} embed={embed}>
       {/* The big number */}
       <section aria-label="How many people will be added" style={{ ...card, padding: '20px', textAlign: 'center' }}>
         <p aria-live="polite" data-testid="mc-big-number" style={{ fontSize: '48px', lineHeight: 1, fontWeight: 300, color: T.foreground, fontFamily: FONT.heading, fontVariantNumeric: 'tabular-nums' }}>{n(addingNow)}</p>
@@ -298,21 +308,33 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
               location's own mailchimp_list_name, read by the server; only when
               it is missing does the line fall back to "your Mailchimp audience". */}
           {addingNow === 1 ? 'person' : 'people'} {m.mailchimpKnown ? 'will be added to ' : (addingNow === 1 ? 'is ticked to go to ' : 'are ticked to go to ')}
-          {audience ? <strong data-testid="mc-audience" style={{ fontWeight: 700 }}>{audience}</strong> : 'your Mailchimp audience'}
+          {audience ? <strong data-testid="mc-audience" style={{ fontWeight: 700 }}>{audience}</strong> : 'your Mailchimp list'}
         </p>
         {/* The parts, adding up to the whole: the big number, the archived
             people not ticked (on their own), anyone else not ticked, and those
             already in Mailchimp. */}
         <p data-testid="mc-gap" style={{ ...small, marginTop: '8px', fontFamily: FONT.body }}>
-          <span data-testid="mc-tally-adding">{n(tally.adding)} to add</span>
-          {tally.archivedUnticked > 0 && <> · <span data-testid="mc-tally-archived">{n(tally.archivedUnticked)} archived, not ticked</span></>}
-          {tally.otherUnticked > 0 && <> · <span data-testid="mc-tally-unticked">{n(tally.otherUnticked)} not ticked</span></>}
-          {m.mailchimpKnown && <> · <span data-testid="mc-tally-already">{n(tally.already)} already in your Mailchimp</span></>}
+          {/* Held back: ticked, but the sending code will not send them, so they
+              are never in the big number (Kevin, 2026-11-26). Inside the guided
+              path the big number is not said twice (each fact once per screen). */}
+          {[
+            !embed && <span key="a" data-testid="mc-tally-adding">{n(tally.adding)} to add</span>,
+            tally.archivedUnticked > 0 && <span key="b" data-testid="mc-tally-archived">{n(tally.archivedUnticked)} archived, not ticked</span>,
+            tally.otherUnticked > 0 && <span key="c" data-testid="mc-tally-unticked">{n(tally.otherUnticked)} not ticked</span>,
+            heldRefused > 0 && <span key="d" data-testid="mc-tally-held">{n(heldRefused)} Mailchimp turned down before</span>,
+            heldArchived > 0 && <span key="e" data-testid="mc-tally-mc-archived">{n(heldArchived)} archived in your Mailchimp</span>,
+            m.mailchimpKnown && <span key="f" data-testid="mc-tally-already">{n(tally.already)} already in your Mailchimp</span>,
+          ].filter(Boolean).flatMap((el, i) => (i ? [' · ', el] : [el]))}
           {' '}— <span data-testid="mc-tally-total">{n(tally.total)} in all</span>
         </p>
         {!m.mailchimpKnown && (
           <p role="status" style={{ marginTop: '12px', fontSize: '13px', lineHeight: 1.5, color: T.warning, background: T.warningSoft, borderRadius: R.md, padding: '8px 12px', textAlign: 'left' }}>
             {data.mailchimpWords} So we can’t tell who is already in your Mailchimp — this count includes everyone ticked.
+          </p>
+        )}
+        {data.heldKnown === false && (
+          <p role="status" data-testid="mc-held-unknown" style={{ marginTop: '12px', fontSize: '13px', lineHeight: 1.5, color: T.warning, background: T.warningSoft, borderRadius: R.md, padding: '8px 12px', textAlign: 'left' }}>
+            Bee Hub couldn’t check who Mailchimp turned down or archived, so this number may include a few people who won’t be sent.
           </p>
         )}
         {!ready && (
@@ -448,13 +470,26 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
             ticked) and goes back; Back to Mailchimp does not. If the date did
             not save, the page stays and says so (Kevin, 2026-11-26). */}
         {doneErr && <p role="alert" data-testid="mc-done-error" style={{ marginBottom: '12px', fontSize: '13px', lineHeight: 1.5, color: T.destructive, background: T.destructiveSoft, borderRadius: R.md, padding: '8px 12px' }}>{doneErr}</p>}
-        <Btn variant="primary" data-testid="mc-done" disabled={doneBusy} onClick={done}><span>{doneBusy ? 'Saving…' : 'Done'}</span></Btn>
+        {embed ? (
+          <div data-mcr-actions style={{ justifyContent: 'space-between' }}>
+            <Btn variant="outline" data-testid="mc-back" disabled={doneBusy} onClick={embed.onBack}><span>Back</span></Btn>
+            <Btn variant="primary" data-testid="mc-done" disabled={doneBusy} onClick={done}><span>{doneBusy ? 'Saving…' : 'Next'}</span></Btn>
+          </div>
+        ) : (
+          <Btn variant="primary" data-testid="mc-done" disabled={doneBusy} onClick={done}><span>{doneBusy ? 'Saving…' : 'Done'}</span></Btn>
+        )}
       </div>
     </Frame>
   )
 }
 
-function Frame({ onClose, children }) {
+function Frame({ onClose, children, embed = null }) {
+  if (embed) return (
+    <div data-settings-ui data-mcr data-embedded="1" style={{ fontFamily: FONT.ui, color: T.foreground }}>
+      <style>{CSS}</style>
+      {children}
+    </div>
+  )
   return (
     <div data-settings-ui data-mcr style={{ margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.foreground }}>
       <style>{CSS}</style>

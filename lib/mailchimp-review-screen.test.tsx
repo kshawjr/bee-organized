@@ -285,10 +285,10 @@ it('the Archived group is on screen with nobody in it, and cannot be ticked', as
     const title = host.querySelector('[data-testid="mc-title"]')!
     expect(title.compareDocumentPosition(host.querySelector('[data-testid="mc-big-number"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
-  it('names the audience from the location; with no name on file it says "your Mailchimp audience"', async () => {
+  it('names the list from the location; with no name on file it says "your Mailchimp list" (no "audience", Kevin 2026-11-26)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { const a = answer([]); return new Response(JSON.stringify({ ...a, location: { ...a.location, audienceName: null } }), { status: 200 }) }))
     await mount()
-    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to your Mailchimp audience')
+    expect(host.querySelector('[data-testid="mc-big-words"]')!.textContent).toBe('people will be added to your Mailchimp list')
     expect(host.querySelector('[data-testid="mc-audience"]')).toBeNull()
   })
   it('when Mailchimp could not be read, the line still names the audience', async () => {

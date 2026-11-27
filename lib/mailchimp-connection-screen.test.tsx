@@ -253,230 +253,42 @@ const screen = (a: ReturnType<typeof api>, extra: any = {}) => (
 )
 const NEVER = { live: true, synced: false, reviewed: true, audience_count: 2, last_synced_at: null, flows: OK_PAUSED, how_to_pause: '' }
 
-describe('never synced', () => {
-  it('three steps; the first sync stays off until the review is done', async () => {
-    const a = api({ overview: { ...NEVER, reviewed: false } })
-    await mount(screen(a))
-    expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
-    expect(byId('mc-pill')!.textContent).toBe('Not syncing yet')
-    expect(host.textContent).toContain('Review who goes to Mailchimp')
-    expect(host.textContent).toContain('Pause your Mailchimp automations')
-    expect(byId('mc-start')!.disabled).toBe(true)
-    expect(host.textContent).toContain('Finish your contact review first.')
-  })
-  it('the switch off keeps it off, even after the review, and says so', async () => {
-    const a = api({ overview: { ...NEVER, live: false } })
-    await mount(screen(a))
-    expect(byId('mc-start')!.disabled).toBe(true)
-    expect(byId('mc-not-live')).toBeTruthy()
-  })
-  it('the review date ticks step 1; without it, step 1 is not ticked', async () => {
+// 2026-11-26: the never-synced page of three cards (and the "Start the first
+// sync" → BeforeWeAdd page it opened) is now the guided set-up, one step at a
+// time (components/settings/MailchimpGuidedSetup.jsx). What these tests pinned
+// is pinned there, on the guided path, in lib/mailchimp-guided-screen.test.tsx:
+// the exact count and list from the sending code, a confirm only ever sent by
+// the button, Cancel/Back sends nothing, "something changed" asks again, each
+// held tag its own unticked box, refused (never warned) while a flow is live or
+// Mailchimp can't be read, no typed name and no "I understand", no welcome
+// email promised.
+describe('never synced → the guided set-up', () => {
+  it('a location that never sent anyone gets the guided path, not the three cards', async () => {
     const a = api({ overview: NEVER })
-    await mount(screen(a))
-    expect(byId('mc-reviewed')!.textContent).toContain('Review complete')
-    expect(byId('mc-start')!.disabled).toBe(false)
-    const b = api({ overview: { ...NEVER, reviewed: false } })
-    await mount(screen(b))
-    expect(byId('mc-reviewed')).toBeNull()
-  })
-  it('people stamped as synced before (Test Location has one from August) do NOT make the screen claim a sync stopped partway', async () => {
-    const a = api({ overview: { ...NEVER, last_synced_at: '2026-08-20T02:39:26Z' } })
-    await mount(screen(a))
-    expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
-    expect(host.textContent).not.toMatch(/stopped partway/i)
-    expect(byId('mc-start')!.textContent).toBe('Start the first sync')
-  })
-  it('the quiz flow (Kevin’s known condition) is named as on but only for its tag — and “nothing emails new contacts” is not claimed', async () => {
-    const a = api({ overview: { ...NEVER, flows: { ok: true, mustPause: [], paused: [], conditional: [{ name: 'Profile Quiz - Welcome Flow', tag: 'Profile Quiz' }] } } })
-    await mount(screen(a))
-    expect(host.querySelector('[data-testid="mc-connection"]')!.getAttribute('data-state')).toBe('setup')
-    expect(byId('mc-step2-conditional')!.textContent).toBe('Profile Quiz - Welcome Flow is on, but it only emails people tagged “Profile Quiz” (Bee Organized checked this in Mailchimp by hand; Mailchimp doesn’t report it). Bee Hub won’t sync if it would send that tag.')
-    expect(byId('mc-step2-none')).toBeNull()
-  })
-  it('step 2 names the flows checked as paused just now', async () => {
-    const a = api({ overview: NEVER })
-    await mount(screen(a))
-    expect(byId('mc-step2-paused')!.textContent).toContain('Welcome New Contacts is paused')
-  })
-  it('"How to pause them" opens the four steps in a window; it sends nothing and closes by its cross', async () => {
-    const a = api({ overview: NEVER })
-    await mount(screen(a))
-    expect(byId('mc-pause-window')).toBeNull()
-    await click(byId('mc-how-to-pause'))
-    expect(byId('mc-pause-window')!.getAttribute('aria-label')).toBe('How to pause your automations')
-    expect(Array.from(host.querySelectorAll('[data-testid="mc-pause-steps"] li')).map((l) => l.textContent)).toEqual([
-      '1.In Mailchimp, go to Automations.', '2.Find the flow in the list.', '3.Click the arrow on the right of its row.', '4.Choose Pause.'])
-    expect(byId('mc-pause-window')!.textContent).toContain('Bee Hub can’t pause them for you.')
-    await click(host.querySelector('[data-testid="mc-pause-window"] button[aria-label="Close"]'))
-    expect(byId('mc-pause-window')).toBeNull()
-    expect(a.calls.filter((c) => c.method !== 'GET')).toEqual([])
-  })
-  it('Disconnect is a quiet link; its window asks first, and Keep connected does nothing', async () => {
-    const a = api({ overview: NEVER })
-    const onDisconnect = vi.fn()
-    await mount(screen(a, { onDisconnect }))
-    await click(byId('mc-disconnect-link'))
-    expect(byId('mc-disconnect')!.textContent).toContain('This stops Bee Hub adding people. Your Mailchimp audience stays as it is.')
-    await click(Array.from(host.querySelectorAll('[data-testid="mc-disconnect"] button')).find((b) => b.textContent === 'Keep connected')!)
-    expect(byId('mc-disconnect')).toBeNull()
-    expect(onDisconnect).not.toHaveBeenCalled()
-    await click(byId('mc-disconnect-link'))
-    await click(byId('mc-disconnect-yes'))
-    expect(onDisconnect).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('the first-sync confirmation — nothing live', () => {
-  it('Start asks the server; the page shows the exact count and audience; nothing more is sent', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(a.syncCalls()).toHaveLength(1)
-    expect(a.syncCalls()[0].body.confirm).toBeUndefined()
-    expect(host.querySelector('[data-testid="mc-before-we-add"]')!.getAttribute('data-kind')).toBe('ask')
-    // Kevin's approved design (Control Hive, BeforeWeAdd, 2026-11-26): the count
-    // and the audience once, in the heading; one line on what happens.
-    expect(byId('mc-confirm-count')!.textContent).toBe('Add 143 people to Bee Organized Friends?')
-    expect(byId('mc-confirm-count')!.tagName).toBe('H2')
-    expect(byId('mc-confirm-what')!.textContent).toBe('They’re added to your Mailchimp audience. Nothing else is sent from Bee Hub.')
-    expect(byId('mc-add')!.textContent).toBe('Add them')
-    expect(byId('mc-add')!.disabled).toBe(false)
-    // no repeated facts: the audience's name and the count appear once on the page
-    const page = host.querySelector('[data-testid="mc-before-we-add"]')!.textContent!
-    expect(page.split('Bee Organized Friends').length - 1).toBe(1)
-    expect(page.split('143').length - 1).toBe(1)
-    expect(page).not.toMatch(/Mailchimp · First sync|About to add|Nothing in Mailchimp will email them|Paused, so they won/)
-    expect(byId('mc-confirm-left-out')).toBeNull()                  // nobody left out → no line
-    expect(Array.from(host.querySelectorAll('[data-testid="mc-before-we-add"] button')).map((b) => b.textContent)).toEqual(['Back to Mailchimp', 'Add them', 'Cancel'])
+    await mount(screen(a, { storage: null }))
+    expect(byId('mcg')).toBeTruthy()
+    expect(byId('mc-start')).toBeNull()
+    expect(host.textContent).not.toContain('Start the first sync')
+    expect(a.syncCalls()).toEqual([])
   })
   it('the route hands the left-out numbers to the screen', () => {
     expect(readFileSync(join(process.cwd(), 'app/api/mailchimp/sync/route.ts'), 'utf8')).toContain('left_out: report.confirm.leftOut,')
   })
-  it('one quiet line only when someone is left out: archived, refused, or both — in plain words', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: { ...ASK, count: 14, list_name: 'Test Bee Organized', left_out: { archived: 1, refused: 6 } } }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(byId('mc-confirm-count')!.textContent).toBe('Add 14 people to Test Bee Organized?')
-    expect(byId('mc-confirm-left-out')!.textContent).toBe('1 archived person and 6 people Mailchimp refused aren’t included.')
+  it('the left-out words, in plain words', () => {
+    expect(leftOutWords({ archived: 1, refused: 6 })).toBe('1 archived person and 6 people Mailchimp refused aren’t included.')
     expect(leftOutWords({ archived: 1, refused: 0 })).toBe('1 archived person isn’t included.')
     expect(leftOutWords({ archived: 3, refused: 0 })).toBe('3 archived people aren’t included.')
     expect(leftOutWords({ archived: 0, refused: 1 })).toBe('1 person Mailchimp refused isn’t included.')
     expect(leftOutWords({ archived: 0, refused: 0 })).toBeNull()
     expect(leftOutWords(undefined)).toBeNull()
   })
-  it('promises no Bee Hub welcome email: the sync sends none to people already in Bee Hub', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(host.textContent).not.toMatch(/They.ll get Bee Hub/)
-  })
-  it('no typed-name field, no "I understand" tick', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(host.querySelectorAll('input:not([type=checkbox])')).toHaveLength(0)
-    expect(host.querySelectorAll('input[type=checkbox]')).toHaveLength(0)
-    expect(host.textContent).not.toMatch(/type your|full name|I understand/i)
-  })
-  it('Add sends the count, audience and flows that were shown; the result is the server’s', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }, { ran: true, complete: true, pushed: 143, already: 0, failed: 0, remaining: 0, tags_held: [] }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    await click(byId('mc-add'))
-    expect(a.syncCalls()[1].body.confirm).toEqual({ count: 143, list_id: 'list1', flows: 'fp1', tags_ok: [] })
-    expect(host.textContent).toContain('Done: added 143 people to Bee Organized Friends.')
-  })
-  it('Cancel sends nothing', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    const cancel = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Cancel')!
-    await click(cancel)
-    expect(a.syncCalls()).toHaveLength(1)
-    expect(byId('mc-start')).toBeTruthy()
-  })
-  it('something changed between the look and the send: asked again, with the new numbers', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }, { ran: false, reason: 'needs_confirmation', confirm: { ...ASK, count: 144, flows: 'fp2' } }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    await click(byId('mc-add'))
-    expect(host.textContent).toContain('Something changed in Mailchimp since you looked, so nothing was added.')
-    expect(byId('mc-confirm-count')!.textContent).toBe('Add 144 people to Bee Organized Friends?')
-  })
-  it('a tag that starts a live flow: its own box, unticked; ticking one carries that one only', async () => {
-    const held = { ...ASK, held_tags: [{ tag: 'CLOSEDJOB', flows: ['Closed Job Journey'], people: 4 }, { tag: 'VIP', flows: ['VIP Thanks'], people: 1 }] }
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: held }, { ran: true, complete: true, pushed: 143, remaining: 0, tags_held: ['VIP'] }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    const boxes = Array.from(host.querySelectorAll('[data-testid="mc-held-tags"] input[type=checkbox]')) as HTMLInputElement[]
-    expect(boxes.map((b) => b.checked)).toEqual([false, false])
-    await click(host.querySelector('input[aria-label="Carry the tag CLOSEDJOB"]'))
-    await click(byId('mc-add'))
-    expect(a.syncCalls()[1].body.confirm.tags_ok).toEqual(['CLOSEDJOB'])
-  })
 })
 
-describe('the first-sync confirmation — something live: refused, never warned', () => {
-  const REFUSED = { ran: false, reason: 'signup_flows_live', must_pause: LIVE.mustPause, how_to_pause: 'x' }
-  it('names each flow, says how to pause each one, and Add is off', async () => {
-    const a = api({ overview: NEVER, sync: [REFUSED] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(host.querySelector('[data-testid="mc-before-we-add"]')!.getAttribute('data-kind')).toBe('live')
-    const names = Array.from(host.querySelectorAll('[data-testid="mc-live-flows"] [data-flow-name]')).map((e) => e.textContent)
-    expect(names).toEqual(['Welcome New Contacts', 'Profile Quiz - Welcome Flow'])
-    expect(Array.from(host.querySelectorAll('[data-testid="mc-live-flows"] [data-flow-pause]')).map((e) => e.textContent)).toEqual([PAUSE_LINE, PAUSE_LINE])
-    expect(byId('mc-hold-title')!.textContent).toBe('Can’t add people yet')
-    expect(host.textContent).toContain('These would send a second welcome email on top of Bee Hub’s.')
-    expect(byId('mc-add')!.textContent).toBe('Add them')
-    expect(byId('mc-add')!.disabled).toBe(true)
-    expect(host.textContent).not.toMatch(/Don.t want these emails/)
-  })
-  it('Check again asks the server again — still without a confirm', async () => {
-    const a = api({ overview: NEVER, sync: [REFUSED, { ran: false, reason: 'needs_confirmation', confirm: ASK }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    await click(byId('mc-check-again'))
-    expect(a.syncCalls()[1].body.confirm).toBeUndefined()
-    expect(byId('mc-confirm-count')!.textContent).toBe('Add 143 people to Bee Organized Friends?')
-    expect(byId('mc-add')!.disabled).toBe(false)
-  })
-  it('Check again while they are still on: says so, Add stays off, nothing is sent with a confirm', async () => {
-    const a = api({ overview: NEVER, sync: [REFUSED, REFUSED] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(byId('mc-hold-status')).toBeNull()
-    await click(byId('mc-check-again'))
-    expect(byId('mc-hold-status')!.textContent).toBe('Checked again. These are still on.')
-    expect(byId('mc-add')!.disabled).toBe(true)
-    expect(a.syncCalls().every((c) => c.body.confirm === undefined)).toBe(true)
-  })
-  it('a flow that went live after Add was shown: the answer is the refusal, not a send', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'needs_confirmation', confirm: ASK }, REFUSED] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    await click(byId('mc-add'))
-    expect(host.querySelector('[data-testid="mc-before-we-add"]')!.getAttribute('data-kind')).toBe('live')
-    expect(byId('mc-add')!.disabled).toBe(true)
-  })
-})
-
-describe('the first-sync confirmation — couldn’t check', () => {
-  it('says so, and Add is off', async () => {
-    const a = api({ overview: NEVER, sync: [{ ran: false, reason: 'mailchimp_unreadable' }] })
-    await mount(screen(a))
-    await click(byId('mc-start'))
-    expect(host.querySelector('[data-testid="mc-before-we-add"]')!.getAttribute('data-kind')).toBe('unreadable')
-    expect(byId('mc-hold-title')!.textContent).toBe('Can’t add people yet: we couldn’t check Mailchimp')
-    expect(host.textContent).toContain('Until we can check, nobody will be added.')
-    expect(host.querySelector('[data-testid="mc-live-flows"]')).toBeNull()
-    expect(byId('mc-add')!.disabled).toBe(true)
-  })
-})
-
+// On hold after the first send (a location that never sent anyone gets the
+// guided overview's warning instead — lib/mailchimp-guided-screen.test.tsx).
 describe('on hold', () => {
   it('live flows: each named with how to pause it, Sync now off; Check again only reads', async () => {
-    const a = api({ overview: { ...NEVER, flows: LIVE } })
+    const a = api({ overview: { ...NEVER, synced: true, flows: LIVE } })
     await mount(screen(a))
     expect(byId('mc-pill')!.textContent).toBe('On hold')
     expect(byId('mc-on-hold')!.getAttribute('data-reason')).toBe('flows')
@@ -490,7 +302,7 @@ describe('on hold', () => {
     expect(byId('mc-hold-status')!.textContent).toBe('Checked again. These are still on.')
   })
   it('flows unreadable → "we couldn’t check Mailchimp", Sync now off', async () => {
-    const a = api({ overview: { ...NEVER, flows: { ok: false } } })
+    const a = api({ overview: { ...NEVER, synced: true, flows: { ok: false } } })
     await mount(screen(a))
     expect(byId('mc-on-hold')!.getAttribute('data-reason')).toBe('unreadable')
     expect(byId('mc-hold-title')!.textContent).toBe('Can’t add people yet: we couldn’t check Mailchimp')
