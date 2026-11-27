@@ -4,7 +4,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import MailchimpImportScreen, { importTally } from '@/components/settings/MailchimpImportScreen'
+import MailchimpImportScreen, { importTally, HELD_WORDS, HELD_CHOICES, TAG_LINE } from '@/components/settings/MailchimpImportScreen'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const LOC = 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6'
@@ -14,7 +16,7 @@ const MODEL = {
     { k: 'm1', e: 'one@example.org', n: 'Ana Ruiz', s: 'subscribed', j: '2024-07-01T10:00:00+00:00' },
     { k: 'm2', e: 'two@example.org', n: null, s: 'unsubscribed', j: '2024-07-02T10:00:00+00:00' },
   ],
-  held: [{ k: 'm3', e: 'three@example.org', n: null, s: 'subscribed', j: null, reason: 'phone_match', match: { n: 'Pat Lee', e: 'pat@x.com' } }],
+  held: [{ k: 'm3', e: 'three@example.org', n: null, s: 'subscribed', j: null, reason: 'phone_match', p: '4235550100', match: { n: 'Pat Lee', e: 'pat@x.com', p: '423-555-0100' } }],
   skipped: { total: 2, byReason: { staff: 1, cleaned: 1 } },
   already: 4,
 }
@@ -43,8 +45,12 @@ async function mount(post: (body: any) => { status: number; json: any }, model: 
 
 describe('Who comes in from Mailchimp', () => {
   it('parts of the big number add up to everyone in Mailchimp', () => {
-    const t = importTally(MODEL, new Set(['m1']))
-    expect(t.bringing + t.unticked + t.held + t.skipped + t.already).toBe(t.total)
+    for (const hs of [{}, { m3: 'in' }, { m3: 'out' }]) {
+      const t = importTally(MODEL, new Set(['m1']), hs)
+      expect(t.bringing + t.unticked + t.heldSame + t.heldOpen + t.skipped + t.already).toBe(t.total)
+    }
+    expect(importTally(MODEL, new Set(['m1']), { m3: 'in' }).bringing).toBe(2)
+    expect(importTally(MODEL, new Set(['m1']), { m3: 'out' }).bringing).toBe(1)
   })
   it('opens with everyone new ticked, held people listed without a tick, skipped counted', async () => {
     await mount(() => ({ status: 200, json: {} }))
@@ -55,6 +61,7 @@ describe('Who comes in from Mailchimp', () => {
     const held = q('mci-held')!
     expect(held.textContent).toMatch(/Pat Lee/)
     expect(held.querySelector('input[type=checkbox]')).toBeNull()
+    expect(q('mci-held-person')!.getAttribute('data-answer')).toBe('none')
     expect(q('mci-skipped')!.textContent).toMatch(/Bee Organized team address/)
   })
   it('unticking one person lowers the number; confirming sends exactly the ticked people', async () => {
@@ -121,5 +128,60 @@ describe('Who comes in from Mailchimp', () => {
     await mount(() => ({ status: 200, json: {} }))
     await click(q('mci-group-create')!.querySelector('input[type=checkbox]'))
     expect((q('mci-continue') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // ── "Same person?" cut to one case (Kevin, 2026-11-27) ──
+  it('only phone matches can appear as "same person?"; name and other-location matches have no words at all', () => {
+    expect(Object.keys(HELD_WORDS).sort()).toEqual(['duplicate_in_mailchimp', 'phone_match'])
+    expect(HELD_WORDS.phone_match).toMatch(/phone/i)
+    expect(HELD_WORDS.duplicate_in_mailchimp).toMatch(/phone/i)
+    const src = readFileSync(join(process.cwd(), 'components/settings/MailchimpImportScreen.jsx'), 'utf8')
+    expect(src).not.toMatch(/name_match|other_location|another location|same name as/i)
+  })
+  it('each row says why, shows both sides with phones, and says what each answer does', async () => {
+    await mount(() => ({ status: 200, json: {} }))
+    const row = q('mci-held-person')!
+    expect(q('mci-held-why')!.textContent).toBe('Same phone number as someone already in Bee Hub, but a different email.')
+    expect(row.textContent).toMatch(/In Mailchimp.*three@example\.org.*Phone 4235550100.*Already in Bee Hub.*Pat Lee.*pat@x\.com.*Phone 423-555-0100/)
+    expect(HELD_CHOICES.map((o) => `${o.label}: ${o.does}`)).toEqual(['Same person: Not added again', 'Different people: Added as new', 'Leave out for now: Not added this time'])
+    for (const o of HELD_CHOICES) expect(row.textContent).toContain(o.does)
+    expect((q('mci-held-later')!.querySelector('input') as HTMLInputElement).checked).toBe(true)
+  })
+  it('"Different people" saves, raises the number, and the confirm sends them; "Same person" and "Leave out" keep them out', async () => {
+    let sent: any = null
+    const calls = await mount((b) => { sent = b; return { status: 200, json: { ok: true, created: 3, createdUnsubscribed: 1, alreadyThere: 0, failed: [] } } })
+    const saves = () => calls.filter((c) => c.url === '/api/mailchimp/import/choice').map((c) => JSON.parse(c.init.body))
+    await click(q('mci-held-in')!.querySelector('input'))
+    expect(q('mci-big-number')!.textContent).toBe('3')
+    expect(saves().at(-1)).toEqual({ location_id: LOC, scope: 'person', key: 'three@example.org', choice: 'in' })
+    await click(q('mci-held-out')!.querySelector('input'))
+    expect(q('mci-big-number')!.textContent).toBe('2')
+    expect(q('mci-tally')!.textContent).toMatch(/1 the same person/)
+    expect(saves().at(-1)).toMatchObject({ key: 'three@example.org', choice: 'out' })
+    await click(q('mci-held-later')!.querySelector('input'))
+    expect(saves().at(-1)).toMatchObject({ key: 'three@example.org', choice: null })
+    expect(q('mci-tally')!.textContent).toMatch(/1 left out for now/)
+    await click(q('mci-held-in')!.querySelector('input'))
+    await click(q('mci-continue'))
+    await click(q('mci-yes'))
+    expect(sent).toEqual({ location_id: LOC, member_ids: ['m1', 'm2', 'm3'], count: 3 })
+  })
+  it('unticking the whole group never touches a held person', async () => {
+    await mount(() => ({ status: 200, json: {} }), { ...MODEL, held: [{ ...MODEL.held[0], c: 'in' }] })
+    expect(q('mci-big-number')!.textContent).toBe('3')
+    await click(box.querySelector('[aria-label="New to Bee Hub"]'))
+    expect(q('mci-big-number')!.textContent).toBe('1')
+    expect(q('mci-held-person')!.getAttribute('data-answer')).toBe('in')
+  })
+  it('an empty section says so warmly, not a blank panel', async () => {
+    await mount(() => ({ status: 200, json: {} }), { ...MODEL, held: [] })
+    expect(q('mci-held-none')!.textContent).toMatch(/^Nobody to check.*You’re ready to move on\.$/)
+  })
+  it('the tag rule is said once, in plain words', async () => {
+    await mount(() => ({ status: 200, json: {} }))
+    expect(q('mci-tag-line')!.textContent).toBe(TAG_LINE)
+    expect(TAG_LINE).toMatch(/same name/)
+    expect(TAG_LINE).toMatch(/note/)
+    expect(TAG_LINE).toMatch(/Profile Quiz.*never copied/)
   })
 })

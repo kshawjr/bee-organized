@@ -168,6 +168,14 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
     return people.filter((p) => (!groupFilter || p.g === groupFilter) && (!q || p.n.toLowerCase().includes(q) || p.e.toLowerCase().includes(q)))
   }, [people, query, groupFilter])
 
+  // Inside the guided path, the direction picture shows this screen's own
+  // headline number, kept current as ticks and answers change.
+  const onCount = embed && embed.onCount
+  useEffect(() => {
+    if (!onCount || !data) return
+    onCount(reviewTally(people, groups, matchedByPhone(phone), data.model).adding)
+  }, [data, people, groups, phone])
+
   if (err) return (
     <Frame onClose={onClose} embed={embed}>
       <p role="alert" style={{ fontSize: '13px', lineHeight: 1.5, color: T.destructive, background: T.destructiveSoft, borderRadius: R.md, padding: '8px 12px' }}>{err}</p>
@@ -406,7 +414,10 @@ export default function MailchimpReviewScreen({ locationId, onClose, onDone = on
       <Label>Same person?</Label>
       <div style={{ ...card, padding: '16px' }}>
         {phone.length === 0 ? (
-          <p style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground }}>No one to check. Nobody here shares only a phone number with someone in your Mailchimp.</p>
+          <div data-testid="mc-phone-none">
+            <p style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>Nobody to check</p>
+            <p style={{ ...small, marginTop: '2px' }}>No one here shares a phone number with someone in your Mailchimp under a different email. You’re ready to move on.</p>
+          </div>
         ) : nextPhone ? (
           <div data-testid="mc-phone-next">
             <p style={small}>{nextAt + 1} of {phone.length}{nextPhone.phone ? ` · Same phone number ${nextPhone.phone}` : ''}</p>

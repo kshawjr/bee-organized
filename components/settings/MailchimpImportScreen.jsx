@@ -11,8 +11,13 @@
 // in the first-sync confirmation's words (BeforeWeAdd).
 //   • Will be created — ticked by default (slice 5's "everyone ticked"); the
 //     owner unticks anyone they don't want. A person's tick overrides the group.
-//   • Same person? — a phone or name match. Shown beside the record it
-//     matches. Never tickable: Bee Hub never makes a second record for them.
+//   • Same person? — ONLY same phone, different email (Kevin, 2026-11-27:
+//     name matches, other-location matches and two Mailchimp entries sharing
+//     a name come in as ordinary new people). Each row says why, shows
+//     Mailchimp's side and Bee Hub's side by side, and offers three answers,
+//     each saying what it does: Same person (not added again — Bee Hub never
+//     merges), Different people (added as new), Leave out for now (the
+//     default: not added this time). The group's tick never reaches them.
 //   • Not coming in — counts only: skipped (with why) and already in Bee Hub.
 //   • Nothing is brought in until the owner confirms. Each tick is saved as it
 //     is made, as slice 6's are (POST /api/mailchimp/import/choice), only where
@@ -44,16 +49,24 @@ export const SKIP_WORDS = {
   no_join_date: 'No join date in Mailchimp',
 }
 export const HELD_WORDS = {
-  phone_match: 'Same phone number as someone in Bee Hub',
-  name_match: 'Same name as someone in Bee Hub, different email',
-  other_location: 'Already in Bee Hub at another location',
-  duplicate_in_mailchimp: 'Shares a phone or name with someone else in your Mailchimp',
+  phone_match: 'Same phone number as someone already in Bee Hub, but a different email.',
+  duplicate_in_mailchimp: 'Two people in your Mailchimp share a phone number, but have different emails.',
 }
+// The three answers, and what each one does. null = Leave out for now.
+export const HELD_CHOICES = [
+  { c: 'out', label: 'Same person', does: 'Not added again' },
+  { c: 'in', label: 'Different people', does: 'Added as new' },
+  { c: null, label: 'Leave out for now', does: 'Not added this time' },
+]
+export const TAG_LINE = 'Their Mailchimp tags come too, when Bee Hub already has a tag with the same name. Any others are kept in a note on the person, so nothing is lost. “Profile Quiz” is never copied.'
 
 // The parts of the big number, adding up to everyone Mailchimp holds.
-export function importTally(model, ticked) {
-  const bringing = model.create.filter((p) => ticked.has(p.k)).length
-  return { bringing, unticked: model.create.length - bringing, held: model.held.length, skipped: model.skipped.total, already: model.already, total: model.read }
+// hs: a held person's answer (member id → 'in' | 'out'); only 'in' comes in.
+export function importTally(model, ticked, hs = {}) {
+  const ticks = model.create.filter((p) => ticked.has(p.k)).length
+  const heldIn = model.held.filter((h) => hs[h.k] === 'in').length
+  const heldSame = model.held.filter((h) => hs[h.k] === 'out').length
+  return { bringing: ticks + heldIn, unticked: model.create.length - ticks, heldSame, heldOpen: model.held.length - heldIn - heldSame, skipped: model.skipped.total, already: model.already, total: model.read }
 }
 
 const CSS = `
@@ -82,11 +95,14 @@ const CSS = `
 [data-mci-actions]{display:flex;flex-direction:column;gap:8px}
 [data-embedded] [data-mci-actions]{flex-direction:column-reverse}
 [data-mci-two]{display:grid;gap:8px;grid-template-columns:minmax(0,1fr)}
+[data-mci-choices]{display:grid;gap:4px;grid-template-columns:minmax(0,1fr)}
+[data-mci] input[type=radio]{margin:0;width:16px;height:16px;flex-shrink:0;accent-color:${T.primary}}
 @media (min-width:640px){
 [data-mci] [data-mci-btn]{width:auto}
 [data-mci-actions]{flex-direction:row}
 [data-embedded] [data-mci-actions]{flex-direction:row}
 [data-mci-two]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+[data-mci-choices]{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 }
 `
 const card = { borderRadius: R.xl, border: `1px solid ${T.border}`, background: T.card }
@@ -114,6 +130,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
   const [err, setErr] = useState(null)
   const [group, setGroup] = useState(null)        // 'out' = the group unticked; null = default (ticked)
   const [cs, setCs] = useState({})                // member id → 'in' | 'out', a person's own tick
+  const [hs, setHs] = useState({})                // held member id → 'in' (different) | 'out' (same)
   const [saveErr, setSaveErr] = useState(null)
   const [open, setOpen] = useState(0)            // how many of "Will be created" are shown; 0 = closed
   const [asking, setAsking] = useState(false)    // the confirmation page
@@ -125,6 +142,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
   const take = (m) => {
     setModel(m); setGroup(m.group || null)
     setCs(Object.fromEntries(m.create.filter((p) => p.c).map((p) => [p.k, p.c])))
+    setHs(Object.fromEntries((m.held || []).filter((h) => h.c).map((h) => [h.k, h.c])))
   }
   const isOn = (p) => (cs[p.k] ? cs[p.k] === 'in' : group !== 'out')
   const ticked = useMemo(() => new Set((model?.create || []).filter(isOn).map((p) => p.k)), [model, group, cs])
@@ -145,7 +163,10 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
     return () => { cancelled = true }
   }, [locationId])
 
-  const tally = useMemo(() => (model ? importTally(model, ticked) : null), [model, ticked])
+  const tally = useMemo(() => (model ? importTally(model, ticked, hs) : null), [model, ticked, hs])
+  // Inside the guided path, the direction picture shows this headline number.
+  const onCount = embed && embed.onCount
+  useEffect(() => { if (onCount && tally) onCount(tally.bringing) }, [tally])
 
   async function save(scope, key, choice, undo) {
     setSaveErr(null)
@@ -163,7 +184,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
   if (err) return <Frame onClose={onClose} embed={embed}><p role="alert" style={notice('bad')}>{err}</p></Frame>
   if (!model) return <Frame onClose={onClose} embed={embed}><p style={{ fontSize: '14px', color: T.mutedFg }}>Reading your Bee Hub and Mailchimp…</p></Frame>
 
-  const chosen = model.create.filter((p) => ticked.has(p.k))
+  const chosen = [...model.create.filter((p) => ticked.has(p.k)), ...model.held.filter((h) => hs[h.k] === 'in')]
   const unsubChosen = chosen.filter((p) => p.s === 'unsubscribed').length
   const place = model.location.name
 
@@ -234,6 +255,11 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
     const next = { ...cs }; if (c) next[p.k] = c; else delete next[p.k]
     setCs(next); save('person', String(p.e).trim().toLowerCase(), c || null, () => setCs(before))
   }
+  const setHeld = (h, c) => {
+    const before = hs
+    const next = { ...hs }; if (c) next[h.k] = c; else delete next[h.k]
+    setHs(next); save('person', String(h.e).trim().toLowerCase(), c || null, () => setHs(before))
+  }
   const allOn = model.create.length > 0 && group !== 'out'
   const skippedRows = Object.entries(model.skipped.byReason).sort((a, b) => b[1] - a[1]).map(([r, c]) => [SKIP_WORDS[r] || r, c])
 
@@ -249,7 +275,8 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
               fact once per screen, Kevin 2026-11-26). */}
           {[!embed && `${n(tally.bringing)} to bring in`,
             tally.unticked > 0 && `${n(tally.unticked)} not ticked`,
-            tally.held > 0 && `${n(tally.held)} to check`,
+            tally.heldSame > 0 && `${n(tally.heldSame)} the same person`,
+            tally.heldOpen > 0 && `${n(tally.heldOpen)} left out for now`,
             tally.skipped > 0 && `${n(tally.skipped)} skipped`,
             `${n(tally.already)} already in Bee Hub`].filter(Boolean).join(' · ')} — {n(tally.total)} in your Mailchimp
         </p>
@@ -305,20 +332,43 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
       <Label>Same person?</Label>
       <div data-testid="mci-held" style={{ ...card, padding: '16px' }}>
         {model.held.length === 0 ? (
-          <p style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground }}>No one to check. Nobody in your Mailchimp shares only a phone number or a name with someone in Bee Hub.</p>
+          <div data-testid="mci-held-none" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+            <span aria-hidden="true" style={{ color: T.success, flexShrink: 0, marginTop: '2px' }}><CheckCircle /></span>
+            <span>
+              <span style={{ display: 'block', fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground }}>Nobody to check</span>
+              <span style={{ ...small, display: 'block', marginTop: '2px' }}>No one in your Mailchimp shares a phone number with someone in Bee Hub under a different email. You’re ready to move on.</span>
+            </span>
+          </div>
         ) : (
           <>
-            <p style={small}>These aren’t brought in, so Bee Hub never adds the same person twice. Check them in your clients list.</p>
-            <ul style={{ marginTop: '8px', display: 'grid', gap: '12px' }}>
-              {model.held.map((h) => (
-                <li key={h.k} data-testid="mci-held-person">
-                  <p style={{ ...small, marginBottom: '6px' }}>{HELD_WORDS[h.reason] || h.reason}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '8px' }}>
-                    <Side where="Mailchimp" name={h.n || h.e} line={h.n ? h.e : null} />
-                    {h.match ? <Side where="Bee Hub" name={h.match.n || '(no name)'} line={h.match.e} /> : <Side where="Bee Hub" name={h.reason === 'other_location' ? 'At another location' : 'Someone else in your Mailchimp'} line={null} />}
-                  </div>
-                </li>
-              ))}
+            <p style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground }}>These might be one person with two email addresses. Tell Bee Hub which, or leave them for now.</p>
+            <p style={{ ...small, marginTop: '4px' }}>Nobody’s details are changed, whatever you pick.</p>
+            <ul style={{ marginTop: '12px', display: 'grid', gap: '16px' }}>
+              {model.held.map((h) => {
+                const picked = hs[h.k] || null
+                return (
+                  <li key={h.k} data-testid="mci-held-person" data-answer={picked || 'none'} style={{ borderTop: `1px solid ${T.border}`, paddingTop: '16px' }}>
+                    <p data-testid="mci-held-why" style={{ fontSize: '14px', lineHeight: '20px', color: T.foreground }}>{HELD_WORDS[h.reason] || 'Might be someone already in Bee Hub.'}</p>
+                    <div data-mci-two style={{ marginTop: '10px' }}>
+                      <Side where="In Mailchimp" name={h.n || h.e} lines={[h.n ? h.e : null, h.p ? `Phone ${h.p}` : null]} />
+                      <Side where={h.reason === 'duplicate_in_mailchimp' ? 'Also in Mailchimp' : 'Already in Bee Hub'}
+                        name={h.match ? (h.match.n || h.match.e || '(no name)') : 'Someone with the same phone'}
+                        lines={h.match ? [h.match.n ? h.match.e : null, h.match.p ? `Phone ${h.match.p}` : null] : []} />
+                    </div>
+                    <div role="radiogroup" aria-label={`Is ${h.n || h.e} the same person?`} data-mci-choices style={{ marginTop: '10px' }}>
+                      {HELD_CHOICES.map((o) => (
+                        <label key={o.label} data-testid={'mci-held-' + (o.c || 'later')} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minHeight: '44px', padding: '6px 0', cursor: ready ? 'pointer' : 'default' }}>
+                          <input type="radio" name={'held-' + h.k} checked={picked === o.c} disabled={!ready} onChange={() => setHeld(h, o.c)} style={{ marginTop: '2px' }} />
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: '13px', lineHeight: '18px', fontWeight: 700, color: picked === o.c ? T.primary : T.foreground }}>{o.label}</span>
+                            <span style={{ ...small, display: 'block' }}>{o.does}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           </>
         )}
@@ -329,7 +379,7 @@ export default function MailchimpImportScreen({ locationId, onClose, fetchImpl, 
         <Counts testid="mci-already" title="Already in Bee Hub" total={model.already} rows={[]} none="Matched by email address" />
         <Counts testid="mci-skipped" title="Skipped" total={model.skipped.total} rows={skippedRows} none="No one" />
       </div>
-      <p style={{ ...small, marginTop: '12px' }}>Mailchimp tags aren’t copied into Bee Hub yet.</p>
+      <p data-testid="mci-tag-line" style={{ ...small, marginTop: '12px' }}>{TAG_LINE}</p>
 
       <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: `1px solid ${T.border}` }}>
         {embed ? (
@@ -387,12 +437,13 @@ function Counts({ title, total, rows, testid, none }) {
   )
 }
 
-function Side({ where, name, line }) {
+function Side({ where, name, lines = [] }) {
   return (
     <div style={{ borderRadius: R.lg, background: T.muted, padding: '12px', minWidth: 0 }}>
       <p style={{ fontSize: '11px', lineHeight: '16px', color: T.mutedFg }}>{where}</p>
-      <p style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, wordBreak: 'break-all' }}>{name}</p>
-      {line && <p style={{ ...small, wordBreak: 'break-all' }}>{line}</p>}
+      <p style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 700, color: T.foreground, overflowWrap: 'anywhere' }}>{name}</p>
+      {lines.filter(Boolean).map((l) => <p key={l} style={{ ...small, overflowWrap: 'anywhere' }}>{l}</p>)}
     </div>
   )
 }
+const CheckCircle = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>

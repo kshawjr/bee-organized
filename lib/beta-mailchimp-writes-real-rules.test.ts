@@ -39,7 +39,7 @@ const LOC = 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6'
 describe('the rules copy is the real one, and every rule in it can be read', () => {
   it('reads every rule — none is skipped in silence', () => {
     expect(unreadableRules()).toEqual([])
-    expect(RULED_TABLES().sort()).toEqual(['leads', 'locations', 'mailchimp_import_choices', 'mailchimp_refusals', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
+    expect(RULED_TABLES().sort()).toEqual(['lead_notes', 'lead_tags', 'leads', 'locations', 'mailchimp_import_choices', 'mailchimp_refusals', 'mailchimp_review_choices', 'marketing_unsubscribes', 'sync_log'])
   })
 
   it('holds sync_log as it really is: only Jobber-era words', () => {
@@ -113,6 +113,8 @@ const RUN_TIME: Record<string, string> = {
   'lib/mailchimp-sync.ts leads update': 'lib/mailchimp-first-push.test.ts runs every sending test through enforceRealRules',
   // 2026-11-26, FL-75 slice 7: the import's one new-record write.
   'lib/mailchimp-pull.ts leads insert': 'lib/mailchimp-pull.test.ts runs newLeadRow through enforceRealRules',
+  // 2026-11-27: the import's tag links (one row per matching tag).
+  'lib/mailchimp-pull.ts lead_tags upsert': 'lib/mailchimp-pull.test.ts runs a tagged import through enforceRealRules',
 }
 
 describe('every Mailchimp write in the source names real columns and values the rules accept', () => {

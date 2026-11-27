@@ -2,8 +2,14 @@
 // into Bee Hub as Nurturing records, dated from when they joined Mailchimp.
 //
 // KEVIN'S RULES (2026-11-26)
-//   • Match on email or phone. A phone-only match, or a NAME match with a
-//     different email, is HELD for the owner to confirm. Never a second record.
+//   • Match on email or phone. A phone-only match (same phone, different
+//     email) is HELD for the owner to answer. Never a second record unless
+//     the owner says they are different people.
+//   • (2026-11-27) ONLY phone is a reason to stop and ask. A name match, a
+//     match at another Bee Organized location, and two Mailchimp entries
+//     sharing a name come in as ordinary new people. Kevin chose a handful of
+//     duplicates over hundreds of judgment calls across 54 locations (at
+//     Chattanooga, four people will arrive twice under different emails).
 //   • Skipped, and counted with the reason: cleaned contacts; anyone whose
 //     only match is in the Recycle Bin; staff or test addresses
 //     (@beeorganized.com, or any email on a Bee Hub user account).
@@ -13,19 +19,26 @@
 //     the database write a false "pressed Unsubscribe in a Bee Hub email" row.
 //   • New records: stage Nurturing, import_source 'mailchimp_import',
 //     created_at = the Mailchimp join date.
-//   • No side effects. This file writes two things only: one leads row per
-//     new person, and (for an unsubscribed person) one no-marketing-list row.
+//   • No side effects. This file writes four things only: one leads row per
+//     new person, (for an unsubscribed person) one no-marketing-list row, the
+//     person's tag links, and at most one note on them.
 //     It never calls anything that emails, enrols, posts or sends to Jobber;
 //     lib/mailchimp-pull.test.ts reads this file and fails if it names one.
 //   • Never into Other.
-//   • Mailchimp tags are NOT copied yet (Kevin to rule on the proposal).
+//   • TAGS (Kevin's ruling, 2026-11-27). A Mailchimp tag is attached only if
+//     the location already has a switched-on tag with exactly that name
+//     (corporate, or the location's own). No tag is ever created: each
+//     location has only 15 of its own and Mailchimp would eat them. The names
+//     with no match go into one note on the person, so nothing is lost.
+//     "Profile Quiz", in any capitals, is never copied — not as a tag, not in
+//     the note: slice 6 holds the first send while that quiz journey is live,
+//     and copying it in would make the import itself the trigger. Names are
+//     matched at the moment of import (the tag list is read fresh each time).
 //
 // MY CALLS, flagged to Kevin
-//   • A person whose email or phone matches a live record at ANOTHER location
-//     is held, not created (a second location's client is not obviously a
-//     prospect here, and the corporate team came in that way at Chattanooga).
-//   • Two Mailchimp people who would be created with the same phone or the
-//     same name are both held (they may be one person with two addresses).
+//   • Two Mailchimp people who would be created with the same phone are both
+//     held (they may be one person with two addresses). Sharing a name alone
+//     no longer holds anyone (Kevin, 2026-11-27).
 //   • Only subscribed and unsubscribed people come in. Pending (never
 //     confirmed), transactional and archived are skipped and counted.
 //   • No first and last name in Mailchimp → no name check, and the record is
@@ -40,6 +53,7 @@ import { readAudience, readRefusal, scrub, type MailchimpMember as AudienceMembe
 import { emailKey, matchPhoneKey } from './mailchimp-rules'
 import { recordSaidNo } from './mailchimp-refusals'
 import { phoneForWrite } from './phone'
+import { TAG_CATEGORIES } from './tags'
 
 // The audience reader is pinned byte for byte, so names are taken from the
 // same pages it reads (its merge_fields), through the fetch it is given.
@@ -79,7 +93,7 @@ export type PullLead = {
 }
 
 export type SkipReason = 'no_email' | 'cleaned' | 'other_status' | 'staff' | 'recycle_bin_only' | 'no_join_date'
-export type HoldReason = 'phone_match' | 'name_match' | 'other_location' | 'duplicate_in_mailchimp'
+export type HoldReason = 'phone_match' | 'duplicate_in_mailchimp'
 
 export type PullDecision =
   | { kind: 'create'; member: MailchimpMember; unsubscribed: boolean }
@@ -150,17 +164,15 @@ const hit = (m: Map<string, string[]>, k: string | null) => (k ? m.get(k) || [] 
 
 // ── The plan (pure) ─────────────────────────────────────────
 // leadsHere: EVERY record at this location, Recycle Bin included (is_junk
-// tells them apart; archived counts as live). leadsElsewhere: live records at
-// every other location. staffKeys: mailboxKey() of every Bee Hub user account.
+// tells them apart; archived counts as live). staffKeys: mailboxKey() of
+// every Bee Hub user account. Other locations are not looked at (2026-11-27).
 export function planPull(args: {
   members: readonly MailchimpMember[]
   leadsHere: readonly PullLead[]
-  leadsElsewhere: readonly PullLead[]
   staffKeys: ReadonlySet<string>
 }): PullPlan {
-  const live = indexOf(args.leadsHere.filter((l) => l.is_junk !== true), true)
+  const live = indexOf(args.leadsHere.filter((l) => l.is_junk !== true), false)
   const bin = indexOf(args.leadsHere.filter((l) => l.is_junk === true), true)
-  const elsewhere = indexOf(args.leadsElsewhere.filter((l) => l.is_junk !== true), false)
   const decisions: PullDecision[] = []
 
   for (const m of args.members) {
@@ -178,26 +190,25 @@ export function planPull(args: {
     const byEmail = hit(live.email, e)
     if (byEmail.length) { decisions.push({ kind: 'already', member: m, ids: byEmail }); continue }
     const byPhone = hit(live.phone, p)
-    if (byPhone.length) { hold('phone_match', byPhone); continue }
-    const byName = hit(live.name, n)
-    if (byName.length) { hold('name_match', byName); continue }
 
-    const inBin = [...hit(bin.email, e), ...hit(bin.phone, p), ...hit(bin.name, n)]
-    if (inBin.length) { skip('recycle_bin_only', Array.from(new Set(inBin))); continue }
+    if (!byPhone.length) {
+      const inBin = [...hit(bin.email, e), ...hit(bin.phone, p), ...hit(bin.name, n)]
+      if (inBin.length) { skip('recycle_bin_only', Array.from(new Set(inBin))); continue }
+    }
 
-    const away = Array.from(new Set([...hit(elsewhere.email, e), ...hit(elsewhere.phone, p)]))
-    if (away.length) { hold('other_location', away); continue }
-
+    // Checked before the hold: a held person the owner answers "Different
+    // people" comes in as a create, so they must pass every create rule.
     if (!m.joinedAt || !Number.isFinite(Date.parse(m.joinedAt))) { skip('no_join_date'); continue }
+    if (byPhone.length) { hold('phone_match', byPhone); continue }
     decisions.push({ kind: 'create', member: m, unsubscribed: m.status === 'unsubscribed' })
   }
 
-  // Two would-be records sharing a phone or a name: hold every one of them.
+  // Two would-be records sharing a phone: hold every one of them.
   const creates = decisions.filter((d): d is Extract<PullDecision, { kind: 'create' }> => d.kind === 'create')
   const groups = new Map<string, number[]>()
   creates.forEach((d) => {
     const i = decisions.indexOf(d)
-    for (const k of [matchPhoneKey(d.member.phone) && 'p:' + matchPhoneKey(d.member.phone), memberNameKey(d.member) && 'n:' + memberNameKey(d.member)]) {
+    for (const k of [matchPhoneKey(d.member.phone) && 'p:' + matchPhoneKey(d.member.phone)]) {
       if (!k) continue
       const g = groups.get(k); if (g) g.push(i); else groups.set(k, [i])
     }
@@ -206,13 +217,14 @@ export function planPull(args: {
   groups.forEach((g) => { if (g.length > 1) g.forEach((i) => dupIdx.add(i)) })
   dupIdx.forEach((i) => {
     const d = decisions[i]
-    const others = Array.from(dupIdx).filter((j) => j !== i).map((j) => decisions[j].member.id)
+    const pk = matchPhoneKey(d.member.phone)
+    const others = Array.from(dupIdx).filter((j) => j !== i && matchPhoneKey(decisions[j].member.phone) === pk).map((j) => decisions[j].member.id)
     decisions[i] = { kind: 'held', reason: 'duplicate_in_mailchimp', member: d.member, ids: others }
   })
 
   const counts: PullPlan['counts'] = {
     read: args.members.length, create: 0, createUnsubscribed: 0, already: 0,
-    held: { phone_match: 0, name_match: 0, other_location: 0, duplicate_in_mailchimp: 0 },
+    held: { phone_match: 0, duplicate_in_mailchimp: 0 },
     skipped: { no_email: 0, cleaned: 0, other_status: 0, staff: 0, recycle_bin_only: 0, no_join_date: 0 },
   }
   for (const d of decisions) {
@@ -222,6 +234,47 @@ export function planPull(args: {
     else counts.skipped[d.reason]++
   }
   return { decisions, counts }
+}
+
+// ── Tags (pure) ─────────────────────────────────────────────
+// A tag Bee Hub has, as read from lookups: switched on, and corporate
+// (location_id null) or this location's own.
+export type TagDef = { id: string; label: string; location_id: string | null }
+
+// Never copied, in any capitals (and however it is spaced).
+export const NEVER_COPY_TAGS = ['profile quiz'] as const
+export function isNeverCopied(name: unknown): boolean {
+  const k = String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  return (NEVER_COPY_TAGS as readonly string[]).includes(k)
+}
+
+// What happens to one person's Mailchimp tags. attach: the Bee Hub tags with
+// exactly the same name (a corporate tag wins over the location's own of the
+// same name). noted: the names Bee Hub has no tag for, in Mailchimp's order.
+// Nothing here ever makes a tag.
+export function tagsFor(mailchimpTags: readonly unknown[] | null | undefined, defs: readonly TagDef[]): { attach: TagDef[]; noted: string[] } {
+  const byName = new Map<string, TagDef>()
+  for (const d of defs) {
+    const k = String(d.label ?? '').trim()
+    if (!k) continue
+    const had = byName.get(k)
+    if (!had || (had.location_id && !d.location_id)) byName.set(k, d)
+  }
+  const attach: TagDef[] = [], noted: string[] = []
+  for (const raw of mailchimpTags || []) {
+    const name = String(raw ?? '').trim()
+    if (!name || isNeverCopied(name)) continue
+    const def = byName.get(name)
+    if (def) { if (!attach.some((a) => a.id === def.id)) attach.push(def) }
+    else if (!noted.includes(name)) noted.push(name)
+  }
+  return { attach, noted }
+}
+
+export const TAG_NOTE_LABEL = 'Mailchimp'
+export function tagNoteText(noted: readonly string[]): string | null {
+  if (!noted.length) return null
+  return `Tags from Mailchimp: ${noted.join(', ')}. Bee Hub has no tag with ${noted.length === 1 ? 'this name' : 'these names'}, so ${noted.length === 1 ? 'it is' : 'they are'} kept here.`
 }
 
 // ── The new record ──────────────────────────────────────────
@@ -257,7 +310,7 @@ export function newLeadRow(member: MailchimpMember, loc: PullLocation, runId: st
 }
 
 // ── Reading everything (read only) ──────────────────────────
-type LoadOk = { ok: true; location: PullLocation; plan: PullPlan; audienceTotal: number }
+type LoadOk = { ok: true; location: PullLocation; plan: PullPlan; audienceTotal: number; tags: TagDef[] }
 type LoadFail = { ok: false; reason: string; detail?: string }
 
 async function readAll(db: any, build: (q: any) => any, cols: string): Promise<{ rows: any[] } | { error: string }> {
@@ -290,8 +343,15 @@ export async function loadPull(locationUuid: string, deps: { db?: any; fetchImpl
   const cols = 'id, name, first_name, last_name, email, phone, is_junk'
   const here = await readAll(db, (q) => q.eq('location_uuid', loc.id), cols)
   if ('error' in here) return { ok: false, reason: 'records_unreadable', detail: here.error }
-  const away = await readAll(db, (q) => q.neq('location_uuid', loc.id).eq('is_junk', false), 'id, email, phone, is_junk')
-  if ('error' in away) return { ok: false, reason: 'records_unreadable', detail: away.error }
+
+  // The tags this location has, read fresh: matching is at the moment of
+  // import. Fail closed — a tag list that can't be read imports nobody.
+  const { data: tagRows, error: tagErr } = await db.from('lookups').select('id, label, location_id, is_active')
+    .in('category', TAG_CATEGORIES).eq('is_active', true).or(`location_id.is.null,location_id.eq.${loc.id}`)
+  if (tagErr || !Array.isArray(tagRows)) return { ok: false, reason: 'tags_unreadable', detail: tagErr?.message }
+  const tags: TagDef[] = tagRows
+    .filter((t: any) => t && t.is_active === true && (t.location_id == null || t.location_id === loc.id))
+    .map((t: any) => ({ id: t.id, label: String(t.label || ''), location_id: t.location_id ?? null }))
 
   const catcher = nameCatcher(deps.fetchImpl)
   const read = await readAudience({ token: loc.mailchimp_access_token, serverPrefix: loc.mailchimp_server_prefix, listId: loc.mailchimp_list_id, fetchImpl: catcher.fetchImpl })
@@ -302,8 +362,8 @@ export async function loadPull(locationUuid: string, deps: { db?: any; fetchImpl
     const n = catcher.names.get(m.id)
     return { ...m, firstName: n?.first ?? null, lastName: n?.last ?? null }
   })
-  const plan = planPull({ members, leadsHere: here.rows, leadsElsewhere: away.rows, staffKeys })
-  return { ok: true, location: { id: loc.id, name: loc.name, location_id: loc.location_id, audienceId: loc.mailchimp_list_id }, plan, audienceTotal: read.totalReported }
+  const plan = planPull({ members, leadsHere: here.rows, staffKeys })
+  return { ok: true, location: { id: loc.id, name: loc.name, location_id: loc.location_id, audienceId: loc.mailchimp_list_id }, plan, audienceTotal: read.totalReported, tags }
 }
 
 // ── Writing (the real run) ──────────────────────────────────
@@ -313,9 +373,16 @@ export type ApplyResult = {
   outcome: 'created' | 'created_unsubscribed' | 'already_there' | 'no_list_write_failed' | 'insert_failed'
   leadId?: string
   detail?: string
+  // Tags, for a person created here: the Bee Hub tags attached, the names
+  // kept in the note, and whether either write failed (the person is still in).
+  tagsAttached?: string[]
+  tagsNoted?: string[]
+  tagsFailed?: boolean
 }
 
-export async function applyPull(plan: PullPlan, location: PullLocation, deps: { db?: any; runId: string }): Promise<ApplyResult[]> {
+// deps.tags: the location's tags, read by loadPull for THIS import. deps.by:
+// the Bee Hub user who confirmed (recorded on each tag link).
+export async function applyPull(plan: PullPlan, location: PullLocation, deps: { db?: any; runId: string; tags?: readonly TagDef[]; by?: string | null }): Promise<ApplyResult[]> {
   const db = deps.db || supabaseService
   if (isOther(location)) throw new Error('Refused: never import into Other.')
   const out: ApplyResult[] = []
@@ -336,7 +403,23 @@ export async function applyPull(plan: PullPlan, location: PullLocation, deps: { 
     }
     const { data: ins, error: insErr } = await db.from('leads').insert(newLeadRow(m, location, deps.runId, d.unsubscribed)).select('id').single()
     if (insErr || !ins) { out.push({ ...base, outcome: 'insert_failed', detail: insErr?.message }); continue }
-    out.push({ ...base, outcome: d.unsubscribed ? 'created_unsubscribed' : 'created', leadId: ins.id })
+    const t = tagsFor(m.tags, deps.tags || [])
+    let tagsFailed = false
+    if (t.attach.length) {
+      const { error } = await db.from('lead_tags').upsert(
+        t.attach.map((def) => ({ lead_id: ins.id, tag_lookup_id: def.id, added_by: deps.by || null })),
+        { onConflict: 'lead_id,tag_lookup_id', ignoreDuplicates: true })
+      if (error) tagsFailed = true
+    }
+    const note = tagNoteText(t.noted)
+    if (note) {
+      const { error } = await db.from('lead_notes').insert({ lead_id: ins.id, location_uuid: location.id, kind: 'buzz', text: note, user_id: null, user_label: TAG_NOTE_LABEL })
+      if (error) tagsFailed = true
+    }
+    out.push({
+      ...base, outcome: d.unsubscribed ? 'created_unsubscribed' : 'created', leadId: ins.id,
+      tagsAttached: t.attach.map((a) => a.label), tagsNoted: t.noted, ...(tagsFailed ? { tagsFailed: true } : {}),
+    })
   }
   return out
 }

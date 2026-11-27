@@ -18,8 +18,8 @@ const mem = (id: string, over: Partial<MailchimpMember> = {}): MailchimpMember =
   return { id, email, emailKey: emailKey(email), status: 'subscribed', joinedAt: '2025-03-04T05:06:07+00:00', tags: [], phone: null, firstName: null, lastName: null, ...over }
 }
 const lead = (id: string, over: Partial<PullLead> = {}): PullLead => ({ id, email: null, phone: null, name: null, first_name: null, last_name: null, is_junk: false, ...over })
-const plan1 = (m: MailchimpMember, here: PullLead[] = [], away: PullLead[] = [], staff: string[] = []) =>
-  planPull({ members: [m], leadsHere: here, leadsElsewhere: away, staffKeys: new Set(staff) }).decisions[0]
+const plan1 = (m: MailchimpMember, here: PullLead[] = [], staff: string[] = []) =>
+  planPull({ members: [m], leadsHere: here, staffKeys: new Set(staff) }).decisions[0]
 
 describe('who is created, held, skipped', () => {
   it('nobody matching → created, as Nurturing', () => {
@@ -31,9 +31,21 @@ describe('who is created, held, skipped', () => {
   it('phone-only match → held for the owner, never a second record', () => {
     expect(plan1(mem('a', { phone: '(423) 555-0100' }), [lead('L1', { email: 'other@x.com', phone: '423-555-0100' })])).toMatchObject({ kind: 'held', reason: 'phone_match', ids: ['L1'] })
   })
-  it('name match with a different email → held', () => {
-    expect(plan1(mem('a', { firstName: 'Mariellen', lastName: 'Davis' }), [lead('L1', { name: 'Mariellen  Davis', email: 'dc@x.com' })])).toMatchObject({ kind: 'held', reason: 'name_match', ids: ['L1'] })
-    expect(plan1(mem('a', { firstName: 'Katie', lastName: 'Lambremont' }), [lead('L1', { first_name: 'katie', last_name: 'LAMBREMONT' })])).toMatchObject({ kind: 'held', reason: 'name_match' })
+  it('Kevin 2026-11-27: a name match with a different email is NOT a "same person?" — they come in as new', () => {
+    expect(plan1(mem('a', { firstName: 'Mariellen', lastName: 'Davis' }), [lead('L1', { name: 'Mariellen  Davis', email: 'dc@x.com' })])).toMatchObject({ kind: 'create' })
+    expect(plan1(mem('a', { firstName: 'Katie', lastName: 'Lambremont' }), [lead('L1', { first_name: 'katie', last_name: 'LAMBREMONT' })])).toMatchObject({ kind: 'create' })
+  })
+  it('same phone, different email is the ONLY "same person?" case', () => {
+    const p = planPull({ members: [
+      mem('ph', { phone: '4235550100' }),
+      mem('nm', { firstName: 'Jo', lastName: 'Ng' }),
+      mem('mc1', { firstName: 'Sam', lastName: 'Oak' }), mem('mc2', { firstName: 'Sam', lastName: 'Oak' }),
+    ], leadsHere: [lead('L1', { phone: '423 555 0100', email: 'z@x.com' }), lead('L2', { name: 'Jo Ng', email: 'jo@x.com' })], staffKeys: new Set() })
+    expect(p.decisions.map((d) => d.kind + ':' + ((d as any).reason || ''))).toEqual(['held:phone_match', 'create:', 'create:', 'create:'])
+    expect(Object.keys(p.counts.held).sort()).toEqual(['duplicate_in_mailchimp', 'phone_match'])
+  })
+  it('a held phone match must still pass every create rule (no join date → skipped, not asked)', () => {
+    expect(plan1(mem('a', { phone: '4235550100', joinedAt: null }), [lead('L1', { phone: '423 555 0100' })])).toMatchObject({ kind: 'skipped', reason: 'no_join_date' })
   })
   it('first name alone is never a name match', () => {
     expect(plan1(mem('a', { firstName: 'Katie' }), [lead('L1', { name: 'Katie Smith' })])).toMatchObject({ kind: 'create' })
@@ -59,8 +71,8 @@ describe('who is created, held, skipped', () => {
     expect(isStaffAddress('x@notbeeorganized.com', new Set())).toBe(false)
   })
   it('a plus-address of a Bee Hub user account is the same mailbox → staff', () => {
-    expect(plan1(mem('a', { email: 'KShawJr+LiveTest@gmail.com' }), [], [], ['kshawjr@gmail.com'])).toMatchObject({ kind: 'skipped', reason: 'staff' })
-    expect(plan1(mem('a', { email: 'kshawjr2@gmail.com' }), [], [], ['kshawjr@gmail.com'])).toMatchObject({ kind: 'create' })
+    expect(plan1(mem('a', { email: 'KShawJr+LiveTest@gmail.com' }), [], ['kshawjr@gmail.com'])).toMatchObject({ kind: 'skipped', reason: 'staff' })
+    expect(plan1(mem('a', { email: 'kshawjr2@gmail.com' }), [], ['kshawjr@gmail.com'])).toMatchObject({ kind: 'create' })
   })
   it('a plus-addressed user account covers its plain address too', async () => {
     const locRow = { id: LOC.id, name: 'Test Location', location_id: 'loc_test', lifecycle_status: 'active', mailchimp_connected: true, mailchimp_list_id: 'aud1', mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1' }
@@ -70,23 +82,30 @@ describe('who is created, held, skipped', () => {
     expect(r.plan.decisions[0]).toMatchObject({ kind: 'skipped', reason: 'staff' })
   })
   it('an email on a Bee Hub user account → skipped as staff', () => {
-    expect(plan1(mem('a', { email: 'zach@me.com' }), [], [], ['zach@me.com'])).toMatchObject({ kind: 'skipped', reason: 'staff' })
+    expect(plan1(mem('a', { email: 'zach@me.com' }), [], ['zach@me.com'])).toMatchObject({ kind: 'skipped', reason: 'staff' })
   })
-  it('a live record at ANOTHER location → held, not created', () => {
-    expect(plan1(mem('a'), [], [lead('X1', { email: 'a@example.org' })])).toMatchObject({ kind: 'held', reason: 'other_location', ids: ['X1'] })
+  it('Kevin 2026-11-27: someone at ANOTHER location comes in as new here — other locations are not even read', async () => {
+    const locRow = { id: LOC.id, name: 'Test Location', location_id: 'loc_test', lifecycle_status: 'active', mailchimp_connected: true, mailchimp_list_id: 'aud1', mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1' }
+    const page = { total_items: 1, members: [{ id: 'm1', email_address: 'away@example.org', status: 'subscribed', timestamp_opt: '2024-07-01T10:00:00+00:00', merge_fields: {} }] }
+    const fetchImpl = async () => ({ status: 200, headers: { get: () => null }, text: async () => JSON.stringify(page) })
+    const leadReads: any[] = []
+    const db: any = fakeDb([], { tables: { locations: [locRow], hub_users: [], leads: [{ id: 'X1', email: 'away@example.org', location_uuid: 'elsewhere', is_junk: false }] }, onRead: (t, f) => { if (t === 'leads') leadReads.push(f) } })
+    const r: any = await loadPull(LOC.id, { db, fetchImpl })
+    expect(r.plan.decisions[0]).toMatchObject({ kind: 'create' })
+    expect(leadReads.every((f) => f.some(([o, k, v]: any) => o === 'eq' && k === 'location_uuid' && v === LOC.id))).toBe(true)
   })
   it('no join date → skipped (created_at must be the join date)', () => {
     expect(plan1(mem('a', { joinedAt: null }))).toMatchObject({ kind: 'skipped', reason: 'no_join_date' })
   })
   it('two would-be records with the same phone → both held', () => {
-    const p = planPull({ members: [mem('a', { phone: '4235550100' }), mem('b', { phone: '423-555-0100' })], leadsHere: [], leadsElsewhere: [], staffKeys: new Set() })
+    const p = planPull({ members: [mem('a', { phone: '4235550100' }), mem('b', { phone: '423-555-0100' })], leadsHere: [], staffKeys: new Set() })
     expect(p.decisions.map((d) => d.kind + ':' + ((d as any).reason || ''))).toEqual(['held:duplicate_in_mailchimp', 'held:duplicate_in_mailchimp'])
   })
   it('unsubscribed with no match → created, flagged unsubscribed', () => {
     expect(plan1(mem('a', { status: 'unsubscribed' }))).toMatchObject({ kind: 'create', unsubscribed: true })
   })
   it('counts add up to everyone read', () => {
-    const p = planPull({ members: [mem('a'), mem('b', { status: 'cleaned' }), mem('c', { email: 'c@beeorganized.com' })], leadsHere: [], leadsElsewhere: [], staffKeys: new Set() })
+    const p = planPull({ members: [mem('a'), mem('b', { status: 'cleaned' }), mem('c', { email: 'c@beeorganized.com' })], leadsHere: [], staffKeys: new Set() })
     expect(p.counts).toMatchObject({ read: 3, create: 1, skipped: { cleaned: 1, staff: 1 } })
   })
 })
@@ -112,7 +131,7 @@ describe('the new record', () => {
 })
 
 // A tiny stand-in database that records every call in order.
-function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]; tables?: Record<string, any[]>; failTable?: string } = {}) {
+function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]; tables?: Record<string, any[]>; failTable?: string; failWrite?: string; onRead?: (table: string, filters: any[]) => void } = {}) {
   // Each fake gets its own copy of the rows, so a test that writes can't leak into the next.
   const tables: Record<string, any[]> = Object.fromEntries(Object.entries(opts.tables || {}).map(([k, v]) => [k, v.map((r) => ({ ...r }))]))
   const chain = (table: string, op: string, payload?: any) => {
@@ -122,10 +141,26 @@ function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]
       eq: (k: string, v: any) => { filters.push(['eq', k, v]); return q }, neq: (k: string, v: any) => { filters.push(['neq', k, v]); return q },
       ilike: (k: string, v: any) => { filters.push(['ilike', k, v]); return q },
       in: (k: string, v: any) => { filters.push(['in', k, v]); return q },
+      or: (expr: string) => { filters.push(['or', expr, null]); return q },
       single: () => q, maybeSingle: () => q,
       then: (ok: any, bad: any) => {
         if (opts.failTable === table) return Promise.resolve({ data: null, error: { message: 'unreadable' } }).then(ok, bad)
-        const match = (r: any) => filters.every(([o, k, v]) => (o === 'eq' ? r[k] === v : o === 'neq' ? r[k] !== v : o === 'in' ? v.includes(r[k]) : true))
+        const orOk = (r: any, expr: string) => expr.split(',').some((part) => {
+          const [col, how, ...rest] = part.split('.'); const val = rest.join('.')
+          return how === 'is' && val === 'null' ? r[col] == null : how === 'eq' ? String(r[col]) === val : false
+        })
+        const match = (r: any) => filters.every(([o, k, v]) => (o === 'eq' ? r[k] === v : o === 'neq' ? r[k] !== v : o === 'in' ? v.includes(r[k]) : o === 'or' ? orOk(r, k) : true))
+        if ((op === 'insert' || op === 'upsert') && opts.failWrite === table) return Promise.resolve({ data: null, error: { message: 'write refused' } }).then(ok, bad)
+        if (op === 'insert' && table === 'lead_notes') {
+          calls.push(`note ${payload.lead_id} ${payload.text}`)
+          ;(tables.lead_notes ||= []).push({ ...payload })
+          return Promise.resolve({ data: null, error: null }).then(ok, bad)
+        }
+        if (op === 'upsert' && table === 'lead_tags') {
+          calls.push(`tag ${payload.map((r: any) => r.lead_id + '+' + r.tag_lookup_id).join(',')}`)
+          ;(tables.lead_tags ||= []).push(...payload.map((r: any) => ({ ...r })))
+          return Promise.resolve({ data: null, error: null }).then(ok, bad)
+        }
         if (op === 'insert') {
           calls.push(`insert ${table} ${payload.email}`)
           if (tables[table]) tables[table].push({ id: 'new-' + payload.email, is_junk: false, ...payload })
@@ -144,6 +179,7 @@ function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]
           tables[table] = tables[table].filter((r) => !match(r))
           return Promise.resolve({ data: null, error: null }).then(ok, bad)
         }
+        if (op === 'select' && opts.onRead) opts.onRead(table, filters)
         if (table === 'leads' && filters.some((f) => f[0] === 'ilike')) {
           const e = String(filters.find((f) => f[0] === 'ilike')![2]).replace(/\\/g, '')
           calls.push(`recheck ${e}`)
@@ -166,7 +202,7 @@ function fakeDb(calls: string[], opts: { rpcError?: boolean; existing?: string[]
 }
 
 describe('the real run', () => {
-  const planOf = (...m: MailchimpMember[]) => planPull({ members: m, leadsHere: [], leadsElsewhere: [], staffKeys: new Set() })
+  const planOf = (...m: MailchimpMember[]) => planPull({ members: m, leadsHere: [], staffKeys: new Set() })
   it('unsubscribed: no-marketing list FIRST, then the record', async () => {
     const calls: string[] = []
     const res = await applyPull(planOf(mem('u', { status: 'unsubscribed' })), LOC, { db: fakeDb(calls), runId: 'r' })
@@ -192,7 +228,7 @@ describe('the real run', () => {
   })
   it('held and skipped people are never written', async () => {
     const calls: string[] = []
-    const p = planPull({ members: [mem('a', { status: 'cleaned' }), mem('b', { email: 'b@beeorganized.com' }), mem('c', { phone: '4235550100' }), mem('d', { email: 'd@x.com' })], leadsHere: [lead('L1', { phone: '423-555-0100' }), lead('L2', { email: 'd@x.com' })], leadsElsewhere: [], staffKeys: new Set() })
+    const p = planPull({ members: [mem('a', { status: 'cleaned' }), mem('b', { email: 'b@beeorganized.com' }), mem('c', { phone: '4235550100' }), mem('d', { email: 'd@x.com' })], leadsHere: [lead('L1', { phone: '423-555-0100' }), lead('L2', { email: 'd@x.com' })], staffKeys: new Set() })
     expect(p.decisions.map((d) => d.kind)).toEqual(['skipped', 'skipped', 'held', 'already'])
     await applyPull(p, LOC, { db: fakeDb(calls), runId: 'r' })
     expect(calls).toEqual([])
@@ -266,7 +302,7 @@ describe('nothing comes in without the owner ticking and confirming', () => {
   it('the review groups them: created, held with the record it matches, already', async () => {
     const r: any = await reviewModel(LOC.id, { db: dbWith([]), fetchImpl })
     expect(r.model.create.map((p: any) => p.k)).toEqual(['m1', 'm2'])
-    expect(r.model.held).toMatchObject([{ k: 'm3', reason: 'phone_match' }])
+    expect(r.model.held).toMatchObject([{ k: 'm3', reason: 'phone_match', p: '4235550100', match: { n: 'Pat Lee', e: 'pat@x.com', p: '423-555-0100' } }])
     expect(r.model.already).toBe(1)
   })
   it('only the ticked people are created', async () => {
@@ -276,11 +312,24 @@ describe('nothing comes in without the owner ticking and confirming', () => {
     expect(r).toMatchObject({ ok: true, created: 1, createdUnsubscribed: 1 })
     expect(calls.filter((c) => c.startsWith('insert'))).toEqual(['insert leads two@example.org'])
   })
-  it('a held person can never be brought in, even if the page sends them', async () => {
+  it('a held person is never brought in because the page sends them — only on a saved "Different people"', async () => {
     const calls: string[] = []
     const r: any = await importChosen(LOC.id, ['m1', 'm3'], 2, 'u', { db: dbWith(calls), fetchImpl })
     expect(r).toMatchObject({ ok: false, reason: 'changed' })
     expect(calls.filter((c) => c.startsWith('insert') || c.startsWith('rpc'))).toEqual([])
+    // "Same person" (saved 'out') keeps them out too.
+    const same = [{ location_id: LOC.id, scope: 'person', key: 'three@example.org', choice: 'out' }]
+    expect(await importChosen(LOC.id, ['m1', 'm3'], 2, 'u', { db: dbWith(calls, { mailchimp_import_choices: same }), fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    expect(calls.filter((c) => c.startsWith('insert'))).toEqual([])
+  })
+  it('"Different people" brings the held person in as new; the group tick never does', async () => {
+    const calls: string[] = []
+    const diff = [{ location_id: LOC.id, scope: 'person', key: 'three@example.org', choice: 'in' }, { location_id: LOC.id, scope: 'group', key: 'new', choice: 'out' }]
+    const r: any = await importChosen(LOC.id, ['m3'], 1, 'u', { db: dbWith(calls, { mailchimp_import_choices: diff }), fetchImpl })
+    expect(r).toMatchObject({ ok: true, created: 1 })
+    expect(calls.filter((c) => c.startsWith('insert'))).toEqual(['insert leads three@example.org'])
+    const model: any = await reviewModel(LOC.id, { db: dbWith([], { mailchimp_import_choices: [{ location_id: LOC.id, scope: 'group', key: 'new', choice: 'in' }] }), fetchImpl })
+    expect(model.model.held[0].c).toBeUndefined()
   })
   it('the count must match the ticks, or nothing happens', async () => {
     const calls: string[] = []
@@ -345,7 +394,7 @@ describe('saved ticks: kept, re-checked, spent', () => {
     const calls: string[] = []
     // Saved "in" for every kind of person who must never come in (written
     // straight into the table, as if by any route, bypassing the save check).
-    const sneaky = ['kshawjr+x@gmail.com', 'kept@example.org', 'three@example.org', 'bounced@example.org', 'binned@example.org'].map((e) => row('person', e, 'in'))
+    const sneaky = ['kshawjr+x@gmail.com', 'kept@example.org', 'bounced@example.org', 'binned@example.org'].map((e) => row('person', e, 'in'))
     const db = newDb(calls, [row('group', 'new', 'out'), ...sneaky])
     const r: any = await reviewModel(LOC.id, { db, fetchImpl })
     expect(r.model.create.map((p: any) => p.k)).toEqual(['m1', 'm2'])       // none of them offered
@@ -353,7 +402,7 @@ describe('saved ticks: kept, re-checked, spent', () => {
     expect(r.model.skipped.byReason).toEqual({ staff: 1, cleaned: 1, recycle_bin_only: 1 })
     expect(r.model.already).toBe(1)
     // The page asks for all of them: refused, nothing written.
-    expect(await importChosen(LOC.id, ['mS', 'mA', 'mH', 'mC', 'mB'], 5, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
+    expect(await importChosen(LOC.id, ['mS', 'mA', 'mC', 'mB'], 4, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
     // Group unticked + those saved ticks = nobody ticked; asking for m1 is refused too.
     expect(await importChosen(LOC.id, ['m1'], 1, 'u', { db, fetchImpl })).toMatchObject({ ok: false, reason: 'changed' })
     expect(calls.filter((c) => c.startsWith('insert') || c.startsWith('rpc'))).toEqual([])
@@ -361,7 +410,7 @@ describe('saved ticks: kept, re-checked, spent', () => {
   it('nothing about who is skipped or held changes when ticks are saved', async () => {
     const plain: any = await reviewModel(LOC.id, { db: newDb([]), fetchImpl })
     const ticked: any = await reviewModel(LOC.id, { db: newDb([], [row('group', 'new', 'out'), row('person', 'three@example.org', 'in'), row('person', 'one@example.org', 'out')]), fetchImpl })
-    const shape = (m: any) => ({ create: m.create.map((p: any) => p.k), held: m.held, skipped: m.skipped, already: m.already, read: m.read })
+    const shape = (m: any) => ({ create: m.create.map((p: any) => p.k), held: m.held.map((h: any) => h.k + ':' + h.reason), skipped: m.skipped, already: m.already, read: m.read })
     expect(shape(ticked.model)).toEqual(shape(plain.model))
   })
   it('someone already imported is not offered again, and their saved choice is spent', async () => {
@@ -434,5 +483,110 @@ describe('no welcome email, drip, Slack, notification or Jobber send', () => {
     const urls = Array.from(src.matchAll(/doFetch\(\s*'([^']+)'/g)).map((m) => m[1])
     expect(urls.length).toBe(3)
     for (const u of urls) expect(u.startsWith('/api/mailchimp/import')).toBe(true)
+  })
+})
+
+// ── Tags (Kevin's ruling, 2026-11-27) ──
+import { tagsFor, tagNoteText, isNeverCopied, type TagDef } from './mailchimp-pull'
+
+describe('Mailchimp tags: attach what exists, note the rest, never create, never Profile Quiz', () => {
+  const corp = (id: string, label: string): TagDef => ({ id, label, location_id: null })
+  const own = (id: string, label: string): TagDef => ({ id, label, location_id: LOC.id })
+  it('a tag is attached only when the location already has that exact name', () => {
+    const r = tagsFor(['VIP', 'Friend & Family', 'vip', 'Realtors'], [corp('t1', 'VIP'), corp('t2', 'Realtor')])
+    expect(r.attach.map((t) => t.id)).toEqual(['t1'])
+    expect(r.noted).toEqual(['Friend & Family', 'vip', 'Realtors'])   // exact name: no case or plural guessing
+  })
+  it('a corporate tag wins over the location’s own tag of the same name', () => {
+    expect(tagsFor(['Lead'], [own('o1', 'Lead'), corp('c1', 'Lead')]).attach.map((t) => t.id)).toEqual(['c1'])
+  })
+  it('"Profile Quiz" is never copied, in any capitals — not as a tag, not in the note — even if Bee Hub had one', () => {
+    for (const name of ['Profile Quiz', 'profile quiz', 'PROFILE QUIZ', ' Profile  Quiz ', 'pRoFiLe QuIz']) expect(isNeverCopied(name)).toBe(true)
+    const r = tagsFor(['Profile Quiz', 'PROFILE QUIZ', 'profile quiz', 'Spring 2024'], [corp('pq', 'Profile Quiz')])
+    expect(r.attach).toEqual([])
+    expect(r.noted).toEqual(['Spring 2024'])
+    expect(isNeverCopied('Profile Quizzes')).toBe(false)
+  })
+  it('the note names every leftover tag, once, in plain words; no leftovers → no note', () => {
+    expect(tagNoteText(['Friend & Family', 'Spring 2024'])).toBe('Tags from Mailchimp: Friend & Family, Spring 2024. Bee Hub has no tag with these names, so they are kept here.')
+    expect(tagNoteText(['Friend & Family'])).toBe('Tags from Mailchimp: Friend & Family. Bee Hub has no tag with this name, so it is kept here.')
+    expect(tagNoteText([])).toBeNull()
+    expect(tagsFor(['A', 'A', ' A '], []).noted).toEqual(['A'])
+  })
+
+  const locRow = { id: LOC.id, name: 'Test Location', location_id: 'loc_test', lifecycle_status: 'active', mailchimp_connected: true, mailchimp_list_id: 'aud1', mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1' }
+  const tagRows = [
+    { id: 'tVIP', category: 'tags', label: 'VIP', location_id: null, is_active: true },
+    { id: 'tOld', category: 'tags', label: 'Follow Up', location_id: null, is_active: false },            // switched off
+    { id: 'tAway', category: 'tags', label: 'Garden Club', location_id: 'another-loc', is_active: true }, // another location's own
+    { id: 'tOwn', category: 'tags', label: 'Book Club', location_id: LOC.id, is_active: true },
+    { id: 'tPQ', category: 'tags', label: 'Profile Quiz', location_id: null, is_active: true },
+  ]
+  const mcTags = (...names: string[]) => names.map((name) => ({ name }))
+  const page = { total_items: 2, members: [
+    { id: 'm1', email_address: 'ann@example.org', status: 'subscribed', timestamp_opt: '2024-07-01T10:00:00+00:00', merge_fields: { FNAME: 'Ann', LNAME: 'Lee' }, tags: mcTags('VIP', 'Follow Up', 'Garden Club', 'Book Club', 'Profile Quiz', 'Friend & Family') },
+    { id: 'm2', email_address: 'bo@example.org', status: 'subscribed', timestamp_opt: '2024-07-02T10:00:00+00:00', merge_fields: {}, tags: [] },
+  ] }
+  const fetchImpl = async () => ({ status: 200, headers: { get: () => null }, text: async () => JSON.stringify(page) })
+  const db = (calls: string[], extra: any = {}) => fakeDb(calls, { tables: { locations: [locRow], hub_users: [], leads: [], lookups: tagRows, mailchimp_import_choices: [] }, ...extra })
+
+  it('the tag list is read fresh with the plan: switched on, corporate or this location’s own only', async () => {
+    const r: any = await loadPull(LOC.id, { db: db([]), fetchImpl })
+    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tOwn', 'tPQ', 'tVIP'])
+  })
+  it('both guards hold on their own: the question asks only for switched-on tags here, and the answer is checked again', async () => {
+    const asked: any[] = []
+    const d: any = db([], { onRead: (t: string, f: any[]) => { if (t === 'lookups') asked.push(f) } })
+    await loadPull(LOC.id, { db: d, fetchImpl })
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toEqual(expect.arrayContaining([['eq', 'is_active', true], ['or', `location_id.is.null,location_id.eq.${LOC.id}`, null]]))
+    // A database that ignores every filter and hands back every tag: still only the right ones.
+    const loose: any = db([])
+    const from = loose.from
+    loose.from = (t: string) => t !== 'lookups' ? from(t) : { select: () => { const q: any = { in: () => q, eq: () => q, or: () => q, then: (ok: any) => Promise.resolve({ data: tagRows, error: null }).then(ok) }; return q } }
+    const r: any = await loadPull(LOC.id, { db: loose, fetchImpl })
+    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tOwn', 'tPQ', 'tVIP'])
+  })
+  it('the tag list can’t be read → nobody is brought in', async () => {
+    const calls: string[] = []
+    expect(await loadPull(LOC.id, { db: db(calls, { failTable: 'lookups' }), fetchImpl })).toMatchObject({ ok: false, reason: 'tags_unreadable' })
+    expect(await importChosen(LOC.id, ['m1', 'm2'], 2, 'u', { db: db(calls, { failTable: 'lookups' }), fetchImpl })).toMatchObject({ ok: false, reason: 'tags_unreadable' })
+    expect(calls.filter((c) => /^(insert|tag|note|rpc)/.test(c))).toEqual([])
+  })
+  it('after import: matching tags attached (by the owner who confirmed), the rest in one note, Profile Quiz nowhere, no tag made', async () => {
+    const calls: string[] = []
+    const d: any = db(calls)
+    const r: any = await importChosen(LOC.id, ['m1', 'm2'], 2, 'owner-1', { db: d, fetchImpl })
+    expect(r).toMatchObject({ ok: true, created: 2, taggedPeople: 1, notedPeople: 1, tagsFailed: 0 })
+    expect(d.tables.lead_tags).toEqual([
+      { lead_id: 'new-ann@example.org', tag_lookup_id: 'tVIP', added_by: 'owner-1' },
+      { lead_id: 'new-ann@example.org', tag_lookup_id: 'tOwn', added_by: 'owner-1' },
+    ])
+    expect(d.tables.lead_notes).toEqual([{ lead_id: 'new-ann@example.org', location_uuid: LOC.id, kind: 'buzz', user_id: null, user_label: 'Mailchimp',
+      text: 'Tags from Mailchimp: Follow Up, Garden Club, Friend & Family. Bee Hub has no tag with these names, so they are kept here.' }])
+    expect(JSON.stringify([d.tables.lead_tags, d.tables.lead_notes])).not.toMatch(/profile quiz|tPQ/i)
+    expect(d.tables.lookups).toEqual(tagRows)                                   // no tag created or changed
+    expect(calls.filter((c) => c.includes('lookups'))).toEqual([])
+    // Bo had no tags: no tag link, no note.
+    expect(calls.filter((c) => c.includes('new-bo@'))).toEqual([])
+  })
+  it('the tag links and the note pass the real database rules', async () => {
+    const d: any = enforceRealRules(db([]))
+    const r: any = await importChosen(LOC.id, ['m1', 'm2'], 2, 'owner-1', { db: d, fetchImpl })
+    expect(r).toMatchObject({ ok: true, created: 2, taggedPeople: 1, notedPeople: 1, tagsFailed: 0 })
+    expect(d.refused).toEqual([])
+  })
+  it('a tag or note write that fails never undoes the person, and is said out loud', async () => {
+    const calls: string[] = []
+    const r: any = await importChosen(LOC.id, ['m1', 'm2'], 2, 'u', { db: db(calls, { failWrite: 'lead_tags' }), fetchImpl })
+    expect(r).toMatchObject({ ok: true, created: 2, tagsFailed: 1 })
+  })
+  it('no file in the import path can write the tag list', () => {
+    for (const f of ['lib/mailchimp-pull.ts', 'lib/mailchimp-pull-review.ts', 'app/api/mailchimp/import/route.ts']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf8')
+      expect(src).not.toMatch(/from\(\s*['"]lookups['"]\s*\)\s*\.\s*(insert|upsert|update|delete)/)
+      const lookupsCalls = Array.from(src.matchAll(/from\(\s*['"]lookups['"]\s*\)\s*\.\s*(\w+)/g)).map((m) => m[1])
+      expect(lookupsCalls.every((m) => m === 'select')).toBe(true)
+    }
   })
 })

@@ -78,20 +78,25 @@ export function emailCheck(ov: any): EmailCheck {
 }
 
 // Coming in, from GET /api/mailchimp/import's model (slice 7). The headline is
-// the people ticked who will be created; everyone else Mailchimp holds that
-// isn't already in Bee Hub — unticked, held to check, skipped — is left out.
+// the people ticked who will be created, plus the "same person?" people the
+// owner answered "Different people" (c 'in'); everyone else Mailchimp holds
+// that isn't already in Bee Hub — unticked, unanswered, answered "same",
+// skipped — is left out. The group's tick never reaches a held person.
 export type ImportModelLike = {
   create: Array<{ k: string; c?: 'in' | 'out' }>
   group?: 'in' | 'out' | null
-  held: unknown[]
+  held: Array<{ k: string; c?: 'in' | 'out' }>
   skipped: { total: number }
 }
 export function tickedToBringIn(model: ImportModelLike): string[] {
-  return model.create.filter((p) => (p.c ? p.c === 'in' : model.group !== 'out')).map((p) => p.k)
+  return [
+    ...model.create.filter((p) => (p.c ? p.c === 'in' : model.group !== 'out')).map((p) => p.k),
+    ...model.held.filter((p) => p.c === 'in').map((p) => p.k),
+  ]
 }
 export function incomingNumbers(model: ImportModelLike): { bringing: number; leftOut: number } {
   const bringing = tickedToBringIn(model).length
-  return { bringing, leftOut: (model.create.length - bringing) + model.held.length + Number(model.skipped?.total || 0) }
+  return { bringing, leftOut: (model.create.length + model.held.length - bringing) + Number(model.skipped?.total || 0) }
 }
 
 // Going out, from GET /api/mailchimp/review's model (with who is held back
@@ -136,6 +141,8 @@ export function finishLines(inn: any, out: any, listName: string, flowsWords?: (
       incoming.push({ tone: 'big', text: `${peopleWords(inn.created)} brought into Bee Hub` })
       incoming.push({ tone: 'quiet', text: 'They’re in your clients list as Nurturing. No one was emailed.' })
       if (inn.createdUnsubscribed > 0) incoming.push({ tone: 'quiet', text: `${peopleWords(inn.createdUnsubscribed)} came in marked “No marketing emails”, because they unsubscribed in Mailchimp.` })
+      if (inn.taggedPeople > 0 || inn.notedPeople > 0) incoming.push({ tone: 'quiet', text: tagWords(inn.taggedPeople, inn.notedPeople) })
+      if (inn.tagsFailed > 0) { incoming.push({ tone: 'amber', text: `${peopleWords(inn.tagsFailed)} came in, but their Mailchimp tags couldn’t all be added. You can add them on their page.` }); allWell = false }
       if (inn.alreadyThere > 0) incoming.push({ tone: 'quiet', text: `${peopleWords(inn.alreadyThere)} had been added to Bee Hub in the meantime, so they weren’t added twice.` })
       if (Array.isArray(inn.failed) && inn.failed.length) { incoming.push({ tone: 'amber', text: `${peopleWords(inn.failed.length)} couldn’t be brought in: ${inn.failed.map((f: any) => f.e).join(', ')}. Nothing was made for them.` }); allWell = false }
     }
@@ -165,6 +172,31 @@ export function finishLines(inn: any, out: any, listName: string, flowsWords?: (
     }
   }
   return { incoming, outgoing, allWell }
+}
+
+// The finish's one tag line, in plain words.
+export function tagWords(tagged: number, noted: number): string {
+  const parts: string[] = []
+  if (tagged > 0) parts.push(`${peopleWords(tagged)} got the Bee Hub tags that match their Mailchimp tags`)
+  if (noted > 0) parts.push(`${peopleWords(noted)} had Mailchimp tags Bee Hub doesn’t have, so those are kept in a note on them`)
+  return parts.join('. ') + '.'
+}
+
+// The direction picture's two numbers and which way is lit. Only people who
+// will actually move: the same numbers as the headlines, never the quiet line.
+//   active 'in'  — step 2 (Mailchimp → Bee Hub lit)
+//   active 'out' — step 3 (Bee Hub → Mailchimp lit)
+//   active 'both' — the overview, step 1, the last step and the finish
+// null = not known yet (the arrow shows no number rather than a guess).
+export type Flow = { active: 'in' | 'out' | 'both'; incoming: number | null; outgoing: number | null }
+export function flowActive(step: number): Flow['active'] {
+  return step === 2 ? 'in' : step === 3 ? 'out' : 'both'
+}
+export function flowFinish(inn: any, out: any): { incoming: number; outgoing: number } {
+  return {
+    incoming: inn && !inn.error ? Number(inn.created || 0) : 0,
+    outgoing: out && !out.error && out.ran ? Number(out.pushed || 0) : 0,
+  }
 }
 
 // The finish only counts as the end of the set-up when the sending side really

@@ -20,9 +20,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import MailchimpConnectionScreen from '@/components/settings/MailchimpConnectionScreen'
 import MailchimpGuidedSetup, { HONEST_LINE, PAUSE_HOW } from '@/components/settings/MailchimpGuidedSetup'
+import MailchimpFlowDiagram, { flowWords } from '@/components/settings/MailchimpFlowDiagram'
 import MailchimpReviewScreen from '@/components/settings/MailchimpReviewScreen'
 import { buildReview, markHeld, reviewTally, matchedByPhone, countAdding, type ReviewLead } from './mailchimp-review'
-import { readPlace, nextPlace, backPlace, goTo, canGoTo, placeKey, START, emailCheck, incomingNumbers, outgoingNumbers, tickedToBringIn, leftOutLine, finishLabel, finishLines, sendFinished } from './mailchimp-guided'
+import { readPlace, nextPlace, backPlace, goTo, canGoTo, placeKey, START, emailCheck, incomingNumbers, outgoingNumbers, tickedToBringIn, leftOutLine, finishLabel, finishLines, sendFinished, flowActive, flowFinish, tagWords } from './mailchimp-guided'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const LOC = '33333333-3333-4333-8333-333333333333'
@@ -226,6 +227,14 @@ describe('the number rule', () => {
     expect(tickedToBringIn(IMPORT_MODEL as any)).toEqual(['m1', 'm2'])
     expect(incomingNumbers(IMPORT_MODEL as any)).toEqual({ bringing: 2, leftOut: 4 })
     expect(incomingNumbers({ ...IMPORT_MODEL, group: 'out' } as any)).toEqual({ bringing: 0, leftOut: 6 })
+  })
+  it('incoming: a "same person?" answered "Different people" comes in; "Same person" or no answer stays in the quiet line', () => {
+    const withAnswer = (c: any) => ({ ...IMPORT_MODEL, held: [{ ...IMPORT_MODEL.held[0], c }] }) as any
+    expect(tickedToBringIn(withAnswer('in'))).toEqual(['m1', 'm2', 'm3'])
+    expect(incomingNumbers(withAnswer('in'))).toEqual({ bringing: 3, leftOut: 3 })
+    expect(incomingNumbers(withAnswer('out'))).toEqual({ bringing: 2, leftOut: 4 })
+    // the group's tick never reaches them
+    expect(tickedToBringIn({ ...withAnswer(undefined), group: 'in' })).toEqual(['m1', 'm2'])
   })
   it('the overview’s rough numbers follow the same rule, both ways, with one quiet line', async () => {
     const a = api()
@@ -537,9 +546,115 @@ describe('each fact once: inside the path, the quiet line does not repeat the bi
     const a = api()
     await mount(a)
     await walkTo(2)
-    expect(q('mci-tally')!.textContent).toBe('1 not ticked · 1 to check · 2 skipped · 3 already in Bee Hub — 9 in your Mailchimp')
+    expect(q('mci-tally')!.textContent).toBe('1 not ticked · 1 left out for now · 2 skipped · 3 already in Bee Hub — 9 in your Mailchimp')
     await click(q('mci-next'))
     expect(q('mc-tally-adding')).toBeNull()
     expect(q('mc-gap')!.textContent).toBe('1 archived, not ticked · 2 Mailchimp turned down before · 1 archived in your Mailchimp · 0 already in your Mailchimp — 6 in all')
+  })
+})
+
+
+// ═══ The direction picture (Kevin, 2026-11-27) ════════════════════════════
+describe('the direction picture: the lit arrow matches the step', () => {
+  const flowOf = () => {
+    const f = host.querySelector('[data-testid="mcg-flow"]') as HTMLElement
+    const arrow = (d: string) => f.querySelector(`[data-testid="mcg-flow-${d}"]`) as HTMLElement
+    const count = (d: string) => f.querySelector(`[data-testid="mcg-flow-${d}-count"]`)?.textContent ?? null
+    return { active: f.getAttribute('data-flow'), inLit: arrow('in').getAttribute('data-lit'), outLit: arrow('out').getAttribute('data-lit'), inN: count('in'), outN: count('out'), all: host.querySelectorAll('[data-testid="mcg-flow"]').length }
+  }
+  it('one picture, in the same place, on every step — above the step', async () => {
+    const a = api({ sync: [{ json: { ran: false, reason: 'needs_confirmation', confirm: ASK } }, { json: { ran: true, complete: true, pushed: 2, already: 0, failed: 0, held_back: 0, remaining: 0, tags_held: [] } }],
+      importPost: [{ json: { ok: true, created: 2, createdUnsubscribed: 0, alreadyThere: 0, failed: [] } }] })
+    await mount(a)
+    const seen: any[] = []
+    const look = (stepId: string) => {
+      const f = host.querySelector('[data-testid="mcg-flow"]')!
+      const content = host.querySelector(`[data-testid="${stepId}"]`)!
+      expect(f.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()   // picture first, then the step
+      seen.push({ step: stepId, ...flowOf() })
+    }
+    look('mcg-overview'); await click(q('mcg-begin')); look('mcg-step-1'); await click(q('mcg-next')); look('mcg-step-2')
+    await click(q('mci-next')); look('mcg-step-3'); await click(q('mc-done')); look('mcg-step-4'); await click(q('mcg-finish')); look('mcg-finish-page')
+    expect(seen.map((x) => [x.step, x.active, x.inLit + x.outLit, x.inN, x.outN, x.all])).toEqual([
+      ['mcg-overview', 'both', '11', '2', '2', 1],
+      ['mcg-step-1', 'both', '11', '2', '2', 1],
+      ['mcg-step-2', 'in', '10', '2', null, 1],      // Mailchimp → Bee Hub lit; the other faint, no number
+      ['mcg-step-3', 'out', '01', null, '2', 1],     // Bee Hub → Mailchimp lit
+      ['mcg-step-4', 'both', '11', '2', '2', 1],     // the server's own numbers
+      ['mcg-finish-page', 'both', '11', '2', '2', 1], // what actually happened
+    ])
+  })
+  it('the arrow number is the step’s own headline number, and follows the ticks', async () => {
+    const a = api()
+    await mount(a)
+    await walkTo(2)
+    expect(flowOf().inN).toBe(q('mci-big-number')!.textContent)
+    await click(q('mci-see'))
+    await click(host.querySelector('[data-testid="mci-person"] input[type=checkbox]'))
+    expect(q('mci-big-number')!.textContent).toBe('1')
+    expect(flowOf().inN).toBe('1')
+    await click(q('mci-held-in')!.querySelector('input'))   // "Different people" → comes in
+    expect(flowOf().inN).toBe('2')
+    await click(q('mci-next'))
+    expect(flowOf().outN).toBe(host.querySelector('[data-testid="mc-big-number"]')?.textContent ?? '2')
+  })
+  it('no arrow number counts anyone who will not be sent: held, refused, unticked and archived are not in it', async () => {
+    // Six held refusals and nothing else (Test Location's own shape): the arrow says 0.
+    const a = api({ review: reviewAnswer({ held: ['ann@example.com', 'bob@example.com', 'cat@example.com', 'dee@example.com', 'eve@example.com'], mcArchived: [] }) })
+    await mount(a)
+    expect(flowOf().outN).toBe('0')
+    await walkTo(3)
+    expect(flowOf().outN).toBe('0')
+  })
+  it('the last step: held while a flow is live → nothing goes over, the arrow says 0', async () => {
+    const a = api({ overviewNow: { ...NEVER, flows: LIVE } })
+    await mount(a)
+    await walkTo(4)
+    expect(flowOf().outN).toBe('0')
+  })
+  it('the finish: the real numbers, not the planned ones', () => {
+    expect(flowFinish({ created: 3 }, { ran: true, pushed: 5 })).toEqual({ incoming: 3, outgoing: 5 })
+    expect(flowFinish({ error: true }, { ran: false, reason: 'signup_flows_live' })).toEqual({ incoming: 0, outgoing: 0 })
+    expect(flowFinish(null, null)).toEqual({ incoming: 0, outgoing: 0 })
+    expect([0, 1, 2, 3, 4, 5].map(flowActive)).toEqual(['both', 'both', 'in', 'out', 'both', 'both'])
+  })
+  it('direction reads without a word: Bee Hub on the left (top on a phone), Mailchimp on the right (bottom); "in" points at Bee Hub', async () => {
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+    await act(async () => { root.render(<MailchimpFlowDiagram flow={{ active: 'in', incoming: 4, outgoing: 9 }} />) })
+    const boxes = Array.from(host.querySelectorAll('[data-mcf-box]')).map((b) => b.getAttribute('data-side'))
+    expect(boxes).toEqual(['bee', 'mailchimp'])
+    const heads = (d: string) => Array.from(host.querySelectorAll(`[data-testid="mcg-flow-${d}"] path`)).map((p) => p.getAttribute('d'))
+    expect(heads('in')).toEqual(['M26 8 14 20l12 12', 'M8 26 20 14l12 12'])   // points left, and up
+    expect(heads('out')).toEqual(['M14 8l12 12-12 12', 'M8 14l12 12 12-12'])  // points right, and down
+    expect(host.querySelector('[data-testid="mcg-flow-out-count"]')).toBeNull()  // faint arrow, no number
+    expect(host.querySelector('[role="img"]')!.getAttribute('aria-label')).toBe(flowWords({ active: 'in', incoming: 4, outgoing: 9 }))
+    expect(flowWords({ active: 'in', incoming: 4, outgoing: 9 })).toBe('4 people coming from Mailchimp into Bee Hub. Nobody goes to Mailchimp in this step.')
+  })
+  it('small and calm: no looping animation; at phone width the boxes stack and the arrows run up and down', () => {
+    const src = readFileSync(join(process.cwd(), 'components/settings/MailchimpFlowDiagram.jsx'), 'utf8')
+    const code = src.replace(/^\s*\/\/.*$/gm, '')
+    expect(code).not.toMatch(/@keyframes|animation|infinite/)
+    expect(src).toMatch(/@media \(max-width:639\.98px\)\{\n\[data-mcf-body\]\{display:flex;flex-direction:column/)
+    expect(src).toMatch(/\[data-mcf-h\]\{display:none\}\n\[data-mcf-v\]\{display:block\}/)
+  })
+})
+
+describe('the finish says what happened to their tags', () => {
+  it('one quiet line for tags; a failed tag write is amber and the person still came in', () => {
+    const f = finishLines({ created: 3, createdUnsubscribed: 0, alreadyThere: 0, failed: [], taggedPeople: 2, notedPeople: 1, tagsFailed: 0 }, null, 'List')
+    expect(f.incoming.map((l) => l.text)).toContain(tagWords(2, 1))
+    expect(tagWords(2, 1)).toBe('2 people got the Bee Hub tags that match their Mailchimp tags. 1 person had Mailchimp tags Bee Hub doesn’t have, so those are kept in a note on them.')
+    const bad = finishLines({ created: 1, failed: [], taggedPeople: 0, notedPeople: 0, tagsFailed: 1 }, null, 'List')
+    expect(bad.incoming.find((l) => l.tone === 'amber')!.text).toMatch(/came in, but their Mailchimp tags/)
+    expect(bad.allWell).toBe(false)
+  })
+})
+
+describe('an empty "same person?" says so warmly, both ways', () => {
+  it('step 3 too', async () => {
+    const a = api()
+    await mount(a)
+    await walkTo(3)
+    expect(q('mc-phone-none')!.textContent).toBe('Nobody to checkNo one here shares a phone number with someone in your Mailchimp under a different email. You’re ready to move on.')
   })
 })

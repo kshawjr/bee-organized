@@ -16,6 +16,11 @@
 //             what it does
 //   Finish    what actually happened, from the server's answers
 //
+// THE DIRECTION PICTURE (2026-11-27) sits in the same place on every one of
+// these, above the content: both arrows on the overview, step 1, the last
+// step and the finish; only Mailchimp → Bee Hub lit on step 2, only Bee Hub →
+// Mailchimp on step 3. Its numbers are the headline numbers, nothing else.
+//
 // IT DECIDES NOTHING. Every number is a server answer (lib/mailchimp-guided.ts
 // shapes them). Bringing in and sending over are the slice 6 and 7 routes,
 // unchanged: they re-check every rule, refuse while a flow is live or
@@ -25,9 +30,9 @@
 // are finished. The ticks are kept on the server by the two review screens.
 //
 // WHERE THIS DIFFERS FROM THE DESIGN, ON PURPOSE:
-//   • "Is this the same person?" with Same / Different / Leave out is not
-//     built: Bee Hub's rule is that a possible match is never brought in or
-//     sent twice; the review screens show them as "Same person?" to check.
+//   • "Is this the same person?" (2026-11-27): phone matches only. Coming in,
+//     the design's Same / Different / Leave out are built on step 2; going
+//     over keeps slice 6's Yes / No, one at a time.
 //   • The design's "Sample options" pills are design-tool controls. Not built.
 //   • "Save and leave" is not built: every step is saved as you go, so the
 //     owner can simply leave; the line says the place is kept.
@@ -36,9 +41,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { T, R, FONT, alpha } from '@/components/design/tokens'
 import MailchimpImportScreen from '@/components/settings/MailchimpImportScreen'
 import MailchimpReviewScreen from '@/components/settings/MailchimpReviewScreen'
+import MailchimpFlowDiagram from '@/components/settings/MailchimpFlowDiagram'
 import {
   STEP_NAMES, STEP_COUNT, START, placeKey, readPlace, nextPlace, backPlace, canGoTo, goTo,
-  emailCheck, incomingNumbers, outgoingNumbers, tickedToBringIn, leftOutLine, finishLabel, finishLines, sendFinished, peopleWords,
+  emailCheck, incomingNumbers, outgoingNumbers, tickedToBringIn, leftOutLine, finishLabel, finishLines, sendFinished, peopleWords, flowActive, flowFinish,
 } from '@/lib/mailchimp-guided'
 
 const n = (x) => Number(x || 0).toLocaleString('en-US')
@@ -181,7 +187,8 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
   // The rough numbers, for the overview — the screens' own answers.
   const [rough, setRough] = useState(null)   // { incoming, outgoing } — each { bringing|sending, leftOut } | 'off' | 'failed'
   useEffect(() => {
-    if (place.step !== 0 || canImport === null) return
+    if ((place.step !== 0 && place.step !== 1) || canImport === null) return
+    if (place.step === 1 && rough) return
     let off = false
     ;(async () => {
       const loc = encodeURIComponent(locationId || '')
@@ -311,8 +318,25 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
     onFinished && onFinished({ sent: !!r?.out && sendFinished(r.out) })
   }
 
+  // ── The direction picture's numbers: the headline numbers only ──
+  const [liveIn, setLiveIn] = useState(null)    // step 2's own count, as ticks change
+  const [liveOut, setLiveOut] = useState(null)  // step 3's own count, as ticks change
+  const roughIn = !rough ? null : rough.incoming === 'off' ? 0 : typeof rough.incoming === 'object' ? rough.incoming.bringing : null
+  const roughOut = !rough ? null : typeof rough.outgoing === 'object' ? rough.outgoing.sending : null
+
   // ── The frame ──
   const step = result ? STEP_COUNT + 1 : place.step
+  const flow = (() => {
+    const active = flowActive(step)
+    if (result) return { active, ...flowFinish(result.inn, result.out) }
+    if (step === STEP_COUNT) {
+      if (!ask || ask.loading || ask.error) return { active, incoming: null, outgoing: null }
+      return { active, incoming: ask.incoming, outgoing: ask.hold || !live ? 0 : ask.outgoing }
+    }
+    if (step === 2) return { active, incoming: canImport === false ? 0 : liveIn, outgoing: roughOut }
+    if (step === 3) return { active, incoming: roughIn, outgoing: liveOut }
+    return { active, incoming: roughIn, outgoing: roughOut }
+  })()
   return (
     <div data-settings-ui data-mcg data-testid="mcg" data-step={step} style={{ margin: '0 auto', padding: '16px', maxWidth: '672px', fontFamily: FONT.ui, color: T.foreground, display: 'grid', gap: '28px' }}>
       <style>{CSS}</style>
@@ -342,6 +366,8 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
           </ol>
         </nav>
       )}
+
+      <MailchimpFlowDiagram flow={flow} />
 
       {/* ── Overview ── */}
       {step === 0 && (
@@ -402,7 +428,7 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
         <div data-testid="mcg-step-2" style={{ display: 'grid', gap: '20px' }}>
           <Head title="Who comes into Bee Hub?" line="These people are in your Mailchimp but not in Bee Hub. Untick anyone you want to leave out. Nobody is brought in until the last step." />
           {canImport === null ? <p style={muted}>Checking…</p>
-            : canImport ? <MailchimpImportScreen locationId={locationId} fetchImpl={fetchImpl} embed={{ onBack: () => move(backPlace(place)), onNext: () => move(nextPlace(place)) }} />
+            : canImport ? <MailchimpImportScreen locationId={locationId} fetchImpl={fetchImpl} embed={{ onBack: () => move(backPlace(place)), onNext: () => move(nextPlace(place)), onCount: setLiveIn }} />
             : <>
                 <p data-testid="mcg-import-off" style={muted}>Bringing people in from Mailchimp isn’t switched on for your location yet, so there’s nothing to choose here.</p>
                 <div data-mcg-actions>
@@ -417,7 +443,7 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
       {step === 3 && (
         <div data-testid="mcg-step-3" style={{ display: 'grid', gap: '20px' }}>
           <Head title="Who goes over to Mailchimp?" line="These people are in Bee Hub but not in your Mailchimp. Untick anyone you want to leave out. Nobody is sent until the last step." />
-          <MailchimpReviewScreen locationId={locationId} onClose={() => move(backPlace(place))} onDone={reviewDone} embed={{ onBack: () => move(backPlace(place)) }} />
+          <MailchimpReviewScreen locationId={locationId} onClose={() => move(backPlace(place))} onDone={reviewDone} embed={{ onBack: () => move(backPlace(place)), onCount: setLiveOut }} />
         </div>
       )}
 

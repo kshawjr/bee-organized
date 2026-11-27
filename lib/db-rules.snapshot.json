@@ -1,6 +1,6 @@
 {
  "_read_me": [
-  "The REAL production rules (CHECK constraints, and NOT NULL columns with no default) for every table the Mailchimp code writes. Read 2026-11-26 (mailchimp_refusals after Kevin ran it at 12:33) from Supabase project pcuycyelxxkxahlxdewl, read only. Used by lib/db-rules-check.ts and lib/beta-mailchimp-writes-real-rules.test.ts.",
+  "The REAL production rules (CHECK constraints, and NOT NULL columns with no default) for every table the Mailchimp code writes. Read 2026-11-26 (mailchimp_refusals after Kevin ran it at 12:33) from Supabase project pcuycyelxxkxahlxdewl, read only. Used by lib/db-rules-check.ts and lib/beta-mailchimp-writes-real-rules.test.ts; lead_tags and lead_notes read 2026-11-27 (no CHECK rules; lead_notes.kind is the enum note_kind: buzz, job, close, system).",
   "A COPY GOES STALE. After any migration that changes a check or a NOT NULL on these tables, regenerate (read only) and commit. Checks: select c.relname, con.conname, pg_get_constraintdef(con.oid) from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and con.contype = 'c' and c.relname in (<tables>) order by 1, 2;  Required: select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in (<tables>) and is_nullable = 'NO' and column_default is null order by table_name, ordinal_position;"
  ],
  "checks": {
@@ -123,7 +123,9 @@
     "name": "mailchimp_refusals_refused_count_check",
     "def": "CHECK ((refused_count >= 1))"
    }
-  ]
+  ],
+  "lead_tags": [],
+  "lead_notes": []
  },
  "required": {
   "leads": [
@@ -156,6 +158,16 @@
    "email_key",
    "kind",
    "mailchimp_said"
+  ],
+  "lead_tags": [
+   "lead_id",
+   "tag_lookup_id"
+  ],
+  "lead_notes": [
+   "lead_id",
+   "location_uuid",
+   "kind",
+   "text"
   ]
  }
 }
