@@ -141,7 +141,7 @@ export function finishLines(inn: any, out: any, listName: string, flowsWords?: (
       incoming.push({ tone: 'big', text: `${peopleWords(inn.created)} brought into Bee Hub` })
       incoming.push({ tone: 'quiet', text: 'They’re in your clients list as Nurturing. No one was emailed.' })
       if (inn.createdUnsubscribed > 0) incoming.push({ tone: 'quiet', text: `${peopleWords(inn.createdUnsubscribed)} came in marked “No marketing emails”, because they unsubscribed in Mailchimp.` })
-      if (inn.taggedPeople > 0 || inn.notedPeople > 0) incoming.push({ tone: 'quiet', text: tagWords(inn.taggedPeople, inn.notedPeople) })
+      if (inn.taggedPeople > 0 || inn.notedPeople > 0 || (inn.quizPeople || 0) > 0) incoming.push({ tone: 'quiet', text: tagWords(inn.taggedPeople, inn.notedPeople, inn.quizPeople || 0) })
       if (inn.tagsFailed > 0) { incoming.push({ tone: 'amber', text: `${peopleWords(inn.tagsFailed)} came in, but their Mailchimp tags couldn’t all be added. You can add them on their page.` }); allWell = false }
       if (inn.alreadyThere > 0) incoming.push({ tone: 'quiet', text: `${peopleWords(inn.alreadyThere)} had been added to Bee Hub in the meantime, so they weren’t added twice.` })
       if (Array.isArray(inn.failed) && inn.failed.length) { incoming.push({ tone: 'amber', text: `${peopleWords(inn.failed.length)} couldn’t be brought in: ${inn.failed.map((f: any) => f.e).join(', ')}. Nothing was made for them.` }); allWell = false }
@@ -175,10 +175,11 @@ export function finishLines(inn: any, out: any, listName: string, flowsWords?: (
 }
 
 // The finish's one tag line, in plain words.
-export function tagWords(tagged: number, noted: number): string {
+export function tagWords(tagged: number, noted: number, quiz = 0): string {
   const parts: string[] = []
   if (tagged > 0) parts.push(`${peopleWords(tagged)} got the Bee Hub tags that match their Mailchimp tags`)
   if (noted > 0) parts.push(`${peopleWords(noted)} had Mailchimp tags Bee Hub doesn’t have, so those are kept in a note on them`)
+  if (quiz > 0) parts.push(`${peopleWords(quiz)} joined your mailing list by taking the quiz on your website, and a note on them says so`)
   return parts.join('. ') + '.'
 }
 

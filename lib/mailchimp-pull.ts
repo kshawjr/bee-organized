@@ -11,7 +11,9 @@
 //     duplicates over hundreds of judgment calls across 54 locations (at
 //     Chattanooga, four people will arrive twice under different emails).
 //   • Skipped, and counted with the reason: cleaned contacts; anyone whose
-//     only match is in the Recycle Bin; staff or test addresses
+//     only match is in the Recycle Bin BY EMAIL OR PHONE (never by name —
+//     Kevin, 2026-11-27: a name is too weak to ask about, so it is far too
+//     weak to drop someone without a word); staff or test addresses
 //     (@beeorganized.com, or any email on a Bee Hub user account).
 //   • Unsubscribed in Mailchimp: the no-marketing list FIRST (through
 //     marketing_unsubscribe_from_mailchimp), then the record, with
@@ -30,10 +32,16 @@
 //     (corporate, or the location's own). No tag is ever created: each
 //     location has only 15 of its own and Mailchimp would eat them. The names
 //     with no match go into one note on the person, so nothing is lost.
-//     "Profile Quiz", in any capitals, is never copied — not as a tag, not in
-//     the note: slice 6 holds the first send while that quiz journey is live,
-//     and copying it in would make the import itself the trigger. Names are
-//     matched at the moment of import (the tag list is read fresh each time).
+//     "Profile Quiz", in any capitals, is NEVER attached as a tag, even if
+//     Bee Hub has one: it is what signs a person up to the quiz journey, so
+//     attaching it would sign up someone who never asked. (Kevin, 2026-11-27)
+//     It IS written into the note, in plain words, because taking the quiz
+//     is how that person joined the list: the note is the only record of it.
+//     A note is text on the person's page and never reaches Mailchimp.
+//     "CLOSEDJOB", in any capitals, is ignored completely (Kevin, option A):
+//     no tag, no note, not counted anywhere.
+//     Names are matched at the moment of import (the tag list is read fresh
+//     each time).
 //
 // MY CALLS, flagged to Kevin
 //   • Two Mailchimp people who would be created with the same phone are both
@@ -41,8 +49,8 @@
 //     no longer holds anyone (Kevin, 2026-11-27).
 //   • Only subscribed and unsubscribed people come in. Pending (never
 //     confirmed), transactional and archived are skipped and counted.
-//   • No first and last name in Mailchimp → no name check, and the record is
-//     saved with the name empty (nothing invented).
+//   • No first and last name in Mailchimp → the record is saved with the
+//     name empty (nothing invented). Names are never used to match.
 //
 // Reading follows the slice 4 read gate (connected + audience + lifecycle
 // 'active'); the send switch is not consulted. The whole audience must be read
@@ -127,7 +135,6 @@ export function leadNameKey(lead: PullLead): string | null {
   const parts = String(lead.name ?? '').trim().split(/\s+/).filter(Boolean)
   return parts.length >= 2 ? nameKey(parts[0], parts[parts.length - 1]) : null
 }
-const memberNameKey = (m: MailchimpMember) => nameKey(m.firstName, m.lastName)
 
 // The same mailbox: "kshawjr+x@gmail.com" is "kshawjr@gmail.com" (Kevin,
 // 2026-11-26). Only the plus part is dropped.
@@ -146,9 +153,10 @@ export function isStaffAddress(key: string | null, staffKeys: ReadonlySet<string
   return domain === STAFF_DOMAIN || domain.endsWith('.' + STAFF_DOMAIN)
 }
 
-type Index = { email: Map<string, string[]>; phone: Map<string, string[]>; name: Map<string, string[]> }
-function indexOf(leads: readonly PullLead[], withNames: boolean): Index {
-  const ix: Index = { email: new Map(), phone: new Map(), name: new Map() }
+// Email and phone only, live or in the Recycle Bin. Never a name.
+type Index = { email: Map<string, string[]>; phone: Map<string, string[]> }
+function indexOf(leads: readonly PullLead[]): Index {
+  const ix: Index = { email: new Map(), phone: new Map() }
   const add = (m: Map<string, string[]>, k: string | null, id: string) => {
     if (!k) return
     const list = m.get(k); if (!list) m.set(k, [id]); else if (!list.includes(id)) list.push(id)
@@ -156,7 +164,6 @@ function indexOf(leads: readonly PullLead[], withNames: boolean): Index {
   for (const l of leads) {
     add(ix.email, emailKey(l.email), l.id)
     add(ix.phone, matchPhoneKey(l.phone), l.id)
-    if (withNames) add(ix.name, leadNameKey(l), l.id)
   }
   return ix
 }
@@ -171,14 +178,13 @@ export function planPull(args: {
   leadsHere: readonly PullLead[]
   staffKeys: ReadonlySet<string>
 }): PullPlan {
-  const live = indexOf(args.leadsHere.filter((l) => l.is_junk !== true), false)
-  const bin = indexOf(args.leadsHere.filter((l) => l.is_junk === true), true)
+  const live = indexOf(args.leadsHere.filter((l) => l.is_junk !== true))
+  const bin = indexOf(args.leadsHere.filter((l) => l.is_junk === true))
   const decisions: PullDecision[] = []
 
   for (const m of args.members) {
     const e = m.emailKey || emailKey(m.email)
     const p = matchPhoneKey(m.phone)
-    const n = memberNameKey(m)
     const skip = (reason: SkipReason, ids: string[] = []) => decisions.push({ kind: 'skipped', reason, member: m, ids })
     const hold = (reason: HoldReason, ids: string[]) => decisions.push({ kind: 'held', reason, member: m, ids })
 
@@ -192,7 +198,7 @@ export function planPull(args: {
     const byPhone = hit(live.phone, p)
 
     if (!byPhone.length) {
-      const inBin = [...hit(bin.email, e), ...hit(bin.phone, p), ...hit(bin.name, n)]
+      const inBin = [...hit(bin.email, e), ...hit(bin.phone, p)]
       if (inBin.length) { skip('recycle_bin_only', Array.from(new Set(inBin))); continue }
     }
 
@@ -241,18 +247,27 @@ export function planPull(args: {
 // (location_id null) or this location's own.
 export type TagDef = { id: string; label: string; location_id: string | null }
 
-// Never copied, in any capitals (and however it is spaced).
+// Compared in any capitals, however it is spaced.
+const tagKey = (name: unknown) => String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+// Never attached as a Bee Hub tag, by any route. (The quiz is written into
+// the note instead, in plain words: see QUIZ_NOTE.)
 export const NEVER_COPY_TAGS = ['profile quiz'] as const
 export function isNeverCopied(name: unknown): boolean {
-  const k = String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
-  return (NEVER_COPY_TAGS as readonly string[]).includes(k)
+  return (NEVER_COPY_TAGS as readonly string[]).includes(tagKey(name))
+}
+export const isQuizTag = isNeverCopied
+// Ignored completely: no tag, no note, no count (Kevin, option A).
+export const IGNORED_TAGS = ['closedjob'] as const
+export function isIgnoredTag(name: unknown): boolean {
+  return (IGNORED_TAGS as readonly string[]).includes(tagKey(name))
 }
 
 // What happens to one person's Mailchimp tags. attach: the Bee Hub tags with
 // exactly the same name (a corporate tag wins over the location's own of the
 // same name). noted: the names Bee Hub has no tag for, in Mailchimp's order.
+// quiz: they carry "Profile Quiz" (never attached; said in the note).
 // Nothing here ever makes a tag.
-export function tagsFor(mailchimpTags: readonly unknown[] | null | undefined, defs: readonly TagDef[]): { attach: TagDef[]; noted: string[] } {
+export function tagsFor(mailchimpTags: readonly unknown[] | null | undefined, defs: readonly TagDef[]): { attach: TagDef[]; noted: string[]; quiz: boolean } {
   const byName = new Map<string, TagDef>()
   for (const d of defs) {
     const k = String(d.label ?? '').trim()
@@ -261,19 +276,27 @@ export function tagsFor(mailchimpTags: readonly unknown[] | null | undefined, de
     if (!had || (had.location_id && !d.location_id)) byName.set(k, d)
   }
   const attach: TagDef[] = [], noted: string[] = []
+  let quiz = false
   for (const raw of mailchimpTags || []) {
     const name = String(raw ?? '').trim()
-    if (!name || isNeverCopied(name)) continue
+    if (!name || isIgnoredTag(name)) continue
+    if (isQuizTag(name)) { quiz = true; continue }
     const def = byName.get(name)
     if (def) { if (!attach.some((a) => a.id === def.id)) attach.push(def) }
     else if (!noted.includes(name)) noted.push(name)
   }
-  return { attach, noted }
+  return { attach, noted, quiz }
 }
 
 export const TAG_NOTE_LABEL = 'Mailchimp'
-export function tagNoteText(noted: readonly string[]): string | null {
-  if (!noted.length) return null
+export const QUIZ_NOTE = 'Joined your mailing list by taking the quiz on your website.'
+export function tagNoteText(noted: readonly string[], quiz = false): string | null {
+  const lines: string[] = []
+  if (quiz) lines.push(QUIZ_NOTE)
+  if (noted.length) lines.push(leftoverWords(noted))
+  return lines.length ? lines.join(' ') : null
+}
+function leftoverWords(noted: readonly string[]): string {
   return `Tags from Mailchimp: ${noted.join(', ')}. Bee Hub has no tag with ${noted.length === 1 ? 'this name' : 'these names'}, so ${noted.length === 1 ? 'it is' : 'they are'} kept here.`
 }
 
@@ -377,6 +400,7 @@ export type ApplyResult = {
   // kept in the note, and whether either write failed (the person is still in).
   tagsAttached?: string[]
   tagsNoted?: string[]
+  joinedByQuiz?: boolean
   tagsFailed?: boolean
 }
 
@@ -411,14 +435,14 @@ export async function applyPull(plan: PullPlan, location: PullLocation, deps: { 
         { onConflict: 'lead_id,tag_lookup_id', ignoreDuplicates: true })
       if (error) tagsFailed = true
     }
-    const note = tagNoteText(t.noted)
+    const note = tagNoteText(t.noted, t.quiz)
     if (note) {
       const { error } = await db.from('lead_notes').insert({ lead_id: ins.id, location_uuid: location.id, kind: 'buzz', text: note, user_id: null, user_label: TAG_NOTE_LABEL })
       if (error) tagsFailed = true
     }
     out.push({
       ...base, outcome: d.unsubscribed ? 'created_unsubscribed' : 'created', leadId: ins.id,
-      tagsAttached: t.attach.map((a) => a.label), tagsNoted: t.noted, ...(tagsFailed ? { tagsFailed: true } : {}),
+      tagsAttached: t.attach.map((a) => a.label), tagsNoted: t.noted, ...(t.quiz ? { joinedByQuiz: true } : {}), ...(tagsFailed ? { tagsFailed: true } : {}),
     })
   }
   return out

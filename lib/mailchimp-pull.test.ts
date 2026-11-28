@@ -57,10 +57,17 @@ describe('who is created, held, skipped', () => {
     expect(plan1(mem('a', { status: 'pending' }))).toMatchObject({ kind: 'skipped', reason: 'other_status' })
     expect(plan1(mem('a', { status: 'transactional' }))).toMatchObject({ kind: 'skipped', reason: 'other_status' })
   })
-  it('only match is in the Recycle Bin (email, phone or name) → skipped', () => {
+  it('only match is in the Recycle Bin by email or phone → skipped', () => {
     expect(plan1(mem('a'), [lead('B1', { email: 'a@example.org', is_junk: true })])).toMatchObject({ kind: 'skipped', reason: 'recycle_bin_only', ids: ['B1'] })
     expect(plan1(mem('a', { phone: '4235550100' }), [lead('B1', { phone: '423 555 0100', is_junk: true })])).toMatchObject({ kind: 'skipped', reason: 'recycle_bin_only' })
-    expect(plan1(mem('a', { firstName: 'Jo', lastName: 'Ng' }), [lead('B1', { name: 'Jo Ng', is_junk: true })])).toMatchObject({ kind: 'skipped', reason: 'recycle_bin_only' })
+  })
+  // Kevin, 2026-11-27: a name is too weak to ask about, so it is far too weak to drop someone silently.
+  it('the Recycle Bin check never matches on a name: a shared name alone → brought in as an ordinary new person', () => {
+    const binned = [lead('B1', { name: 'Jo Ng', first_name: 'Jo', last_name: 'Ng', is_junk: true } as any)]
+    expect(plan1(mem('a', { firstName: 'Jo', lastName: 'Ng' }), binned)).toMatchObject({ kind: 'create' })
+    expect(plan1(mem('a', { firstName: 'JO', lastName: ' ng ' }), binned)).toMatchObject({ kind: 'create' })
+    // …and the same person by email or phone is still skipped.
+    expect(plan1(mem('a', { firstName: 'Jo', lastName: 'Ng' }), [lead('B1', { name: 'Jo Ng', email: 'a@example.org', is_junk: true })])).toMatchObject({ kind: 'skipped', reason: 'recycle_bin_only' })
   })
   it('a live match wins over a Recycle Bin match', () => {
     expect(plan1(mem('a'), [lead('B1', { email: 'a@example.org', is_junk: true }), lead('L1', { email: 'a@example.org' })])).toMatchObject({ kind: 'already', ids: ['L1'] })
@@ -487,7 +494,7 @@ describe('no welcome email, drip, Slack, notification or Jobber send', () => {
 })
 
 // ── Tags (Kevin's ruling, 2026-11-27) ──
-import { tagsFor, tagNoteText, isNeverCopied, type TagDef } from './mailchimp-pull'
+import { tagsFor, tagNoteText, isNeverCopied, isIgnoredTag, QUIZ_NOTE, type TagDef } from './mailchimp-pull'
 
 describe('Mailchimp tags: attach what exists, note the rest, never create, never Profile Quiz', () => {
   const corp = (id: string, label: string): TagDef => ({ id, label, location_id: null })
@@ -500,18 +507,35 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
   it('a corporate tag wins over the location’s own tag of the same name', () => {
     expect(tagsFor(['Lead'], [own('o1', 'Lead'), corp('c1', 'Lead')]).attach.map((t) => t.id)).toEqual(['c1'])
   })
-  it('"Profile Quiz" is never copied, in any capitals — not as a tag, not in the note — even if Bee Hub had one', () => {
+  it('"Profile Quiz" is never attached as a tag, in any capitals, even if Bee Hub had one', () => {
     for (const name of ['Profile Quiz', 'profile quiz', 'PROFILE QUIZ', ' Profile  Quiz ', 'pRoFiLe QuIz']) expect(isNeverCopied(name)).toBe(true)
     const r = tagsFor(['Profile Quiz', 'PROFILE QUIZ', 'profile quiz', 'Spring 2024'], [corp('pq', 'Profile Quiz')])
     expect(r.attach).toEqual([])
     expect(r.noted).toEqual(['Spring 2024'])
+    expect(r.quiz).toBe(true)
     expect(isNeverCopied('Profile Quizzes')).toBe(false)
+    expect(tagsFor(['Profile Quizzes'], []).quiz).toBe(false)
   })
   it('the note names every leftover tag, once, in plain words; no leftovers → no note', () => {
     expect(tagNoteText(['Friend & Family', 'Spring 2024'])).toBe('Tags from Mailchimp: Friend & Family, Spring 2024. Bee Hub has no tag with these names, so they are kept here.')
     expect(tagNoteText(['Friend & Family'])).toBe('Tags from Mailchimp: Friend & Family. Bee Hub has no tag with this name, so it is kept here.')
     expect(tagNoteText([])).toBeNull()
     expect(tagsFor(['A', 'A', ' A '], []).noted).toEqual(['A'])
+  })
+  it('"Profile Quiz" goes in the note in plain words, never as the raw tag name', () => {
+    expect(QUIZ_NOTE).toBe('Joined your mailing list by taking the quiz on your website.')
+    expect(tagNoteText([], true)).toBe(QUIZ_NOTE)
+    expect(tagNoteText(['Friend & Family'], true)).toBe('Joined your mailing list by taking the quiz on your website. Tags from Mailchimp: Friend & Family. Bee Hub has no tag with this name, so it is kept here.')
+    const t = tagsFor(['PROFILE QUIZ'], [])
+    expect(tagNoteText(t.noted, t.quiz)).not.toMatch(/profile quiz/i)
+  })
+  it('"CLOSEDJOB" appears nowhere: no tag, no note, not counted — in any capitals, even if Bee Hub had one', () => {
+    for (const name of ['CLOSEDJOB', 'closedjob', ' ClosedJob ']) expect(isIgnoredTag(name)).toBe(true)
+    const r = tagsFor(['CLOSEDJOB', 'closedjob', 'Friend & Family'], [corp('cj', 'CLOSEDJOB')])
+    expect(r).toEqual({ attach: [], noted: ['Friend & Family'], quiz: false })
+    expect(tagsFor(['CLOSEDJOB'], [])).toEqual({ attach: [], noted: [], quiz: false })
+    expect(tagNoteText(tagsFor(['CLOSEDJOB'], []).noted)).toBeNull()
+    expect(isIgnoredTag('CLOSED JOB 2')).toBe(false)
   })
 
   const locRow = { id: LOC.id, name: 'Test Location', location_id: 'loc_test', lifecycle_status: 'active', mailchimp_connected: true, mailchimp_list_id: 'aud1', mailchimp_access_token: 'tok', mailchimp_server_prefix: 'us1' }
@@ -521,10 +545,11 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
     { id: 'tAway', category: 'tags', label: 'Garden Club', location_id: 'another-loc', is_active: true }, // another location's own
     { id: 'tOwn', category: 'tags', label: 'Book Club', location_id: LOC.id, is_active: true },
     { id: 'tPQ', category: 'tags', label: 'Profile Quiz', location_id: null, is_active: true },
+    { id: 'tCJ', category: 'tags', label: 'CLOSEDJOB', location_id: null, is_active: true },
   ]
   const mcTags = (...names: string[]) => names.map((name) => ({ name }))
   const page = { total_items: 2, members: [
-    { id: 'm1', email_address: 'ann@example.org', status: 'subscribed', timestamp_opt: '2024-07-01T10:00:00+00:00', merge_fields: { FNAME: 'Ann', LNAME: 'Lee' }, tags: mcTags('VIP', 'Follow Up', 'Garden Club', 'Book Club', 'Profile Quiz', 'Friend & Family') },
+    { id: 'm1', email_address: 'ann@example.org', status: 'subscribed', timestamp_opt: '2024-07-01T10:00:00+00:00', merge_fields: { FNAME: 'Ann', LNAME: 'Lee' }, tags: mcTags('VIP', 'Follow Up', 'Garden Club', 'Book Club', 'Profile Quiz', 'CLOSEDJOB', 'Friend & Family') },
     { id: 'm2', email_address: 'bo@example.org', status: 'subscribed', timestamp_opt: '2024-07-02T10:00:00+00:00', merge_fields: {}, tags: [] },
   ] }
   const fetchImpl = async () => ({ status: 200, headers: { get: () => null }, text: async () => JSON.stringify(page) })
@@ -532,7 +557,7 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
 
   it('the tag list is read fresh with the plan: switched on, corporate or this location’s own only', async () => {
     const r: any = await loadPull(LOC.id, { db: db([]), fetchImpl })
-    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tOwn', 'tPQ', 'tVIP'])
+    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tCJ', 'tOwn', 'tPQ', 'tVIP'])
   })
   it('both guards hold on their own: the question asks only for switched-on tags here, and the answer is checked again', async () => {
     const asked: any[] = []
@@ -545,7 +570,7 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
     const from = loose.from
     loose.from = (t: string) => t !== 'lookups' ? from(t) : { select: () => { const q: any = { in: () => q, eq: () => q, or: () => q, then: (ok: any) => Promise.resolve({ data: tagRows, error: null }).then(ok) }; return q } }
     const r: any = await loadPull(LOC.id, { db: loose, fetchImpl })
-    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tOwn', 'tPQ', 'tVIP'])
+    expect(r.tags.map((t: TagDef) => t.id).sort()).toEqual(['tCJ', 'tOwn', 'tPQ', 'tVIP'])
   })
   it('the tag list can’t be read → nobody is brought in', async () => {
     const calls: string[] = []
@@ -553,7 +578,7 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
     expect(await importChosen(LOC.id, ['m1', 'm2'], 2, 'u', { db: db(calls, { failTable: 'lookups' }), fetchImpl })).toMatchObject({ ok: false, reason: 'tags_unreadable' })
     expect(calls.filter((c) => /^(insert|tag|note|rpc)/.test(c))).toEqual([])
   })
-  it('after import: matching tags attached (by the owner who confirmed), the rest in one note, Profile Quiz nowhere, no tag made', async () => {
+  it('after import: matching tags attached (by the owner who confirmed), the rest in one note with the quiz in plain words, CLOSEDJOB nowhere, no tag made', async () => {
     const calls: string[] = []
     const d: any = db(calls)
     const r: any = await importChosen(LOC.id, ['m1', 'm2'], 2, 'owner-1', { db: d, fetchImpl })
@@ -563,8 +588,10 @@ describe('Mailchimp tags: attach what exists, note the rest, never create, never
       { lead_id: 'new-ann@example.org', tag_lookup_id: 'tOwn', added_by: 'owner-1' },
     ])
     expect(d.tables.lead_notes).toEqual([{ lead_id: 'new-ann@example.org', location_uuid: LOC.id, kind: 'buzz', user_id: null, user_label: 'Mailchimp',
-      text: 'Tags from Mailchimp: Follow Up, Garden Club, Friend & Family. Bee Hub has no tag with these names, so they are kept here.' }])
-    expect(JSON.stringify([d.tables.lead_tags, d.tables.lead_notes])).not.toMatch(/profile quiz|tPQ/i)
+      text: 'Joined your mailing list by taking the quiz on your website. Tags from Mailchimp: Follow Up, Garden Club, Friend & Family. Bee Hub has no tag with these names, so they are kept here.' }])
+    expect(JSON.stringify([d.tables.lead_tags, d.tables.lead_notes])).not.toMatch(/profile quiz|tPQ|closedjob|tCJ/i)
+    expect(r.quizPeople).toBe(1)
+    expect(JSON.stringify(r)).not.toMatch(/closedjob/i)
     expect(d.tables.lookups).toEqual(tagRows)                                   // no tag created or changed
     expect(calls.filter((c) => c.includes('lookups'))).toEqual([])
     // Bo had no tags: no tag link, no note.

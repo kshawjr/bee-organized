@@ -644,6 +644,8 @@ describe('the finish says what happened to their tags', () => {
     const f = finishLines({ created: 3, createdUnsubscribed: 0, alreadyThere: 0, failed: [], taggedPeople: 2, notedPeople: 1, tagsFailed: 0 }, null, 'List')
     expect(f.incoming.map((l) => l.text)).toContain(tagWords(2, 1))
     expect(tagWords(2, 1)).toBe('2 people got the Bee Hub tags that match their Mailchimp tags. 1 person had Mailchimp tags Bee Hub doesn’t have, so those are kept in a note on them.')
+    const quiz = finishLines({ created: 40, failed: [], taggedPeople: 0, notedPeople: 0, quizPeople: 40, tagsFailed: 0 }, null, 'List')
+    expect(quiz.incoming.map((l) => l.text)).toContain('40 people joined your mailing list by taking the quiz on your website, and a note on them says so.')
     const bad = finishLines({ created: 1, failed: [], taggedPeople: 0, notedPeople: 0, tagsFailed: 1 }, null, 'List')
     expect(bad.incoming.find((l) => l.tone === 'amber')!.text).toMatch(/came in, but their Mailchimp tags/)
     expect(bad.allWell).toBe(false)

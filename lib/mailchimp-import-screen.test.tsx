@@ -182,6 +182,7 @@ describe('Who comes in from Mailchimp', () => {
     expect(q('mci-tag-line')!.textContent).toBe(TAG_LINE)
     expect(TAG_LINE).toMatch(/same name/)
     expect(TAG_LINE).toMatch(/note/)
-    expect(TAG_LINE).toMatch(/Profile Quiz.*never copied/)
+    expect(TAG_LINE).toMatch(/joined by taking the quiz on your website gets a note/)
+    expect(TAG_LINE).not.toMatch(/Profile Quiz|CLOSEDJOB/i)
   })
 })

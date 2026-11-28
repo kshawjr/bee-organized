@@ -58,7 +58,7 @@ export const HELD_CHOICES = [
   { c: 'in', label: 'Different people', does: 'Added as new' },
   { c: null, label: 'Leave out for now', does: 'Not added this time' },
 ]
-export const TAG_LINE = 'Their Mailchimp tags come too, when Bee Hub already has a tag with the same name. Any others are kept in a note on the person, so nothing is lost. “Profile Quiz” is never copied.'
+export const TAG_LINE = 'Their Mailchimp tags come too, when Bee Hub already has a tag with the same name. Any others are kept in a note on the person, so nothing is lost. Anyone who joined by taking the quiz on your website gets a note saying so.'
 
 // The parts of the big number, adding up to everyone Mailchimp holds.
 // hs: a held person's answer (member id → 'in' | 'out'); only 'in' comes in.

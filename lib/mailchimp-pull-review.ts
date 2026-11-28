@@ -130,7 +130,7 @@ export async function reviewModel(locationUuid: string, deps: { db?: any; fetchI
 }
 
 export type ImportAnswer =
-  | { ok: true; created: number; createdUnsubscribed: number; alreadyThere: number; failed: Array<{ e: string; why: string }>; taggedPeople: number; notedPeople: number; tagsFailed: number; runId: string }
+  | { ok: true; created: number; createdUnsubscribed: number; alreadyThere: number; failed: Array<{ e: string; why: string }>; taggedPeople: number; notedPeople: number; quizPeople?: number; tagsFailed: number; runId: string }
   | { ok: false; status: number; reason: 'changed'; words: string; model: ImportModel }
   | Fail
 
@@ -160,7 +160,7 @@ export async function importChosen(locationUuid: string, memberIds: unknown, cou
   }
   const runId = `mailchimp-import:${new Date((deps.now || Date.now)()).toISOString()}:${by}`
   const results: ApplyResult[] = await applyPull({ decisions: chosen, counts: loaded.plan.counts }, loaded.location, { db, runId, tags: loaded.tags, by })
-  const tally = { created: 0, createdUnsubscribed: 0, alreadyThere: 0, failed: [] as Array<{ e: string; why: string }>, taggedPeople: 0, notedPeople: 0, tagsFailed: 0 }
+  const tally = { created: 0, createdUnsubscribed: 0, alreadyThere: 0, failed: [] as Array<{ e: string; why: string }>, taggedPeople: 0, notedPeople: 0, quizPeople: 0, tagsFailed: 0 }
   for (const r of results) {
     if (r.outcome === 'created') tally.created++
     else if (r.outcome === 'created_unsubscribed') { tally.created++; tally.createdUnsubscribed++ }
@@ -168,6 +168,7 @@ export async function importChosen(locationUuid: string, memberIds: unknown, cou
     else tally.failed.push({ e: r.email, why: r.outcome })
     if (r.tagsAttached?.length) tally.taggedPeople++
     if (r.tagsNoted?.length) tally.notedPeople++
+    if (r.joinedByQuiz) tally.quizPeople++
     if (r.tagsFailed) tally.tagsFailed++
   }
   // Spent: whoever is now in Bee Hub has nothing left to choose.
