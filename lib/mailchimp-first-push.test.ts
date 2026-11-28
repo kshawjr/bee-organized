@@ -377,11 +377,73 @@ describe('P2. a first sync refuses without a matching count, audience and flows'
     expect(r).toMatchObject({ ran: true, pushed: 3, complete: true, stopReason: 'record_not_saved: down' })
     expect(firstSyncAt(s)).toBeNull()
   })
-  it('nobody to send → an honest zero, no confirmation, nothing written', async () => {
+  // 2026-11-27 (FL-131 bug): the first sync asks even with nobody to send.
+  // The owner's yes finishes the set-up — the date is saved, nothing is sent —
+  // and that date is what starts the ongoing sync. Asking never saves it.
+  it('nobody to send → still asks first (count 0); asking writes nothing and saves no date', async () => {
     const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
     const r = await s.run()
-    expect(r).toMatchObject({ ran: true, pushed: 0, complete: true })
+    expect(r).toMatchObject({ ran: false, reason: 'needs_confirmation', confirm: { count: 0 } })
     expect(s.posts()).toEqual([])
+    expect(firstSyncAt(s)).toBeNull()
+  })
+  it('nobody to send + the owner\'s yes (count 0) → nothing sent, the set-up is finished: the date is saved, once', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
+    const ask = await s.run()
+    const r = await s.run(confirmOf(ask))
+    expect(r).toMatchObject({ ran: true, pushed: 0, complete: true, first: true })
+    expect(s.posts()).toEqual([])
+    const at = firstSyncAt(s)
+    expect(at).toBeTruthy()
+    // A later run with nobody to send asks nothing and never moves the date.
+    const again = await s.run()
+    expect(again).toMatchObject({ ran: true, pushed: 0, complete: true, first: false })
+    expect(firstSyncAt(s)).toBe(at)
+  })
+  it('nobody to send, but a yes for a different count or list → asked again, no date', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
+    const ask: any = await s.run()
+    for (const c of [{ ...confirmOf(ask), count: 1 }, { ...confirmOf(ask), listId: 'other' }, { ...confirmOf(ask), flows: 'stale' }]) {
+      expect(await s.run(c)).toMatchObject({ ran: false, reason: 'needs_confirmation' })
+    }
+    expect(firstSyncAt(s)).toBeNull()
+  })
+  it('nobody to send + yes, but the date can\'t be saved → said so (not finished), nothing sent', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
+    const ask = await s.run()
+    const db = s.dbx.db
+    const broken = { ...db, from: (t: string) => {
+      const q = db.from(t)
+      if (t !== 'locations') return q
+      return { ...q, select: q.select.bind(q), update: () => { const u: any = { eq: () => u, is: () => u, select: async () => ({ data: null, error: { message: 'boom' } }) }; return u } }
+    } }
+    const r = await s.run(confirmOf(ask), { db: broken })
+    expect(r).toMatchObject({ ran: true, pushed: 0, complete: false })
+    expect(String((r as any).stopReason)).toMatch(/^record_not_saved/)
+    expect(firstSyncAt(s)).toBeNull()
+    expect(s.posts()).toEqual([])
+  })
+  it('two first runs racing at 0 → the date is saved by the first, and the second never moves it', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }] })
+    const ask = await s.run()
+    const db = s.dbx.db
+    // The second run read "no date yet" just before the first one saved it.
+    const stale = { ...db, from: (t: string) => {
+      const q = db.from(t)
+      if (t !== 'locations') return q
+      return { ...q, select: (cols: string) => cols === 'mailchimp_first_sync_at'
+        ? { eq: () => ({ maybeSingle: async () => ({ data: { mailchimp_first_sync_at: null }, error: null }) }) }
+        : q.select(cols) }
+    } }
+    await s.run(confirmOf(ask))
+    const at = firstSyncAt(s)
+    expect(at).toBeTruthy()
+    await s.run(confirmOf(ask), { db: stale, now: () => Date.parse('2030-01-01T00:00:00Z') })
+    expect(firstSyncAt(s)).toBe(at)
+  })
+  it('nobody to send while a welcome flow is live → refused as always, no date', async () => {
+    const s = setup({ leads: [lead('a', 'a@x.com')], members: [{ email: 'a@x.com', status: 'subscribed' }], flows: [flow({ status: 'sending', live: true })] })
+    expect(await s.run()).toMatchObject({ ran: false, reason: 'signup_flows_live' })
     expect(firstSyncAt(s)).toBeNull()
   })
 })

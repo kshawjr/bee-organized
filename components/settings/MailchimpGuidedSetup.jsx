@@ -264,15 +264,16 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
       const inc = im ? incomingNumbers(im.j.model) : { bringing: 0, leftOut: 0 }
       const ids = im ? tickedToBringIn(im.j.model) : []
       const outRough = outgoingNumbers(rv.j.model)
-      // Only ask the sending code when someone would go: with nobody to send,
-      // asking would itself count as the first send.
+      // Ask the sending code whenever sending is switched on — even with
+      // nobody to send: the first send always answers with a question (never
+      // a send) and the owner's yes is what finishes the set-up (2026-11-27).
       // The flow check again, fresh: while a flow is live, or Mailchimp can't
       // be read, nothing at all is done here — the design's one off button.
       let confirm = null, hold = null
       const now = emailCheck(fresh.ok ? fresh.j : null)
       if (now.kind === 'live') hold = { kind: 'live', flows: now.flows }
       else if (now.kind === 'unreadable') hold = { kind: 'unreadable' }
-      if (!hold && outRough.sending > 0 && live) {
+      if (!hold && live) {
         const s = await getJson(doFetch, '/api/mailchimp/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location_id: locationId }) })
         if (!s.ok) { setAsk({ error: 'Bee Hub couldn’t check just now. Nothing was sent. Please try again in a few minutes.' }); return }
         if (s.j.reason === 'needs_confirmation' && s.j.confirm) confirm = s.j.confirm
@@ -463,7 +464,7 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
             </>
           )}
           {ask && !ask.loading && !ask.error && (() => {
-            const label = finishLabel(ask.incoming, ask.outgoing)
+            const label = finishLabel(ask.incoming, ask.outgoing, !!ask.confirm)
             const outLeft = (ask.outRough?.leftOut || 0)
             const heldTags = ask.confirm?.held_tags || []
             return (
@@ -475,7 +476,7 @@ export default function MailchimpGuidedSetup({ locationId, accountName, listName
                   <p data-testid="mcg-out-count" style={{ padding: '20px 0', fontSize: '20px', lineHeight: 1.4, fontWeight: 700, color: T.primary }}>
                     {ask.hold ? 'Nobody can be sent over yet.'
                       : !live ? 'Nobody can be sent over yet: sending to Mailchimp isn’t switched on for your location.'
-                      : ask.outgoing > 0 ? `Send ${peopleWords(ask.outgoing)} over to ${list}.` : 'Nobody to send over.'}
+                      : ask.outgoing > 0 ? `Send ${peopleWords(ask.outgoing)} over to ${list}.` : `Nobody needs sending over to ${list}.`}
                   </p>
                 </div>
                 {(ask.leftIn > 0 || outLeft > 0) && (

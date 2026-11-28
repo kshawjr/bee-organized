@@ -119,11 +119,15 @@ export function leftOutLine(incoming: number | null, outgoing: number | null): s
 }
 
 // The last step's button says what it does.
-export function finishLabel(bringing: number, sending: number): string | null {
+// finishing: the set-up can be finished here (the first send has asked and
+// is waiting for a yes), so with nobody to bring in or send the button still
+// has a job — saving that the set-up is finished (2026-11-27).
+export const FINISH_AT_ZERO = 'Finish set-up'
+export function finishLabel(bringing: number, sending: number, finishing = false): string | null {
   if (bringing > 0 && sending > 0) return 'Bring them in & send them over'
   if (bringing > 0) return 'Bring them in'
   if (sending > 0) return 'Send them over'
-  return null
+  return finishing ? FINISH_AT_ZERO : null
 }
 
 // What actually happened, from the two server answers. `inn` = POST
@@ -161,6 +165,13 @@ export function finishLines(inn: any, out: any, listName: string, flowsWords?: (
       } else {
         outgoing.push({ tone: 'amber', text: out.words || 'Nobody was sent over.' })
       }
+    } else if (out.complete === false && String(out.stopped || '').startsWith('record_not_saved') && !(out.pushed > 0)) {
+      // Nobody needed sending, but the set-up's finish couldn't be saved.
+      outgoing.push({ tone: 'amber', text: 'Nobody needed sending, but Bee Hub couldn’t save that your set-up is finished. Please come back to the last step and press Finish set-up again.' }); allWell = false
+    } else if (!(out.pushed > 0) && !(out.failed > 0) && !(out.remaining > 0) && out.complete !== false) {
+      outgoing.push({ tone: 'big', text: `Nobody needed sending over to ${list}` })
+      outgoing.push({ tone: 'quiet', text: 'Everyone who can go is already there. No email was sent from Bee Hub.' })
+      if (out.already > 0) outgoing.push({ tone: 'quiet', text: `${peopleWords(out.already)} turned out to be in your Mailchimp already.` })
     } else {
       outgoing.push({ tone: 'big', text: `${peopleWords(out.pushed)} sent over to ${list}` })
       outgoing.push({ tone: 'quiet', text: 'No email was sent from Bee Hub.' })

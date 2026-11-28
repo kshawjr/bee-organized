@@ -348,7 +348,12 @@ export async function syncWebsiteLeadsToMailchimp(
   const first = !!firstDone?.error || !firstDone?.data?.mailchimp_first_sync_at
 
   let tagsOk = new Set<string>()
-  if (first && sendSet.length > 0) {
+  // The first sync always asks — even with nobody to send (2026-11-27,
+  // FL-131 bug): saying yes is how the owner finishes the set-up, and that
+  // date is what starts the ongoing sync. So an unconfirmed call never sets
+  // it, at any count; a confirmed 0 sets it below. (A run that only finishes
+  // tags owed from a first send that stopped partway goes on as before.)
+  if (first && (sendSet.length > 0 || repair.length === 0)) {
     const c = opts.confirm
     const confirmed = !!c && c.count === sendSet.length && c.listId === listId && c.flows === flows.fingerprint
     if (!confirmed) {
@@ -367,6 +372,13 @@ export async function syncWebsiteLeadsToMailchimp(
   const carry = (tags: string[]) => tags.filter((t) => !liveTagFlows.has(t.toLowerCase()) || tagsOk.has(t.toLowerCase()))
 
   if (sendSet.length === 0 && repair.length === 0) {
+    // Nobody needed sending. On the first sync (confirmed above) the set-up
+    // is finished all the same: the date is saved, once.
+    if (first) {
+      const set = await db.from('locations').update({ mailchimp_first_sync_at: new Date(now()).toISOString() })
+        .eq('id', locationUuid).is('mailchimp_first_sync_at', null).select('id')
+      if (set?.error) return { ran: true, first, complete: false, stopReason: `record_not_saved: ${clean(set.error.message)}`, ...emptyReport(), skipped, heldBack, tagsHeld }
+    }
     return { ran: true, first, complete: true, ...emptyReport(), skipped, heldBack, tagsHeld }
   }
 

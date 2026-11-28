@@ -44,6 +44,8 @@ const IMPORT_MODEL = {
   skipped: { total: 2, byReason: { staff: 1, cleaned: 1 } },
   already: 3,
 }
+// Nobody new in Mailchimp to bring in (everyone already in Bee Hub).
+const EMPTY_IMPORT = { ...IMPORT_MODEL, create: [], held: [], already: 9 }
 const lead = (id: string, over: Partial<ReviewLead> = {}): ReviewLead => ({ id, email: `${id}@example.com`, first_name: id, last_name: 'Doe', created_at: '2026-05-01T15:00:00Z', ...over })
 // Five new to Mailchimp; two of them Mailchimp turned down before (held),
 // one archived in Mailchimp; one more archived in Bee Hub (unticked).
@@ -446,14 +448,45 @@ describe('the last step: what slices 6 and 7 proved still holds', () => {
     await click(q('mcg-finish'))
     expect(a.of('/api/mailchimp/sync')[1].body.confirm.tags_ok).toEqual(['CLOSEDJOB'])
   })
-  it('nobody to send: the sending code is never asked (asking would itself count as the first send)', async () => {
+  // 2026-11-27 (FL-131 bug): with nobody to send the last step still asks —
+  // the first send answers with a question at count 0, never a send — and the
+  // owner's press saves that the set-up is finished.
+  const ZERO = { ...ASK, count: 0, left_out: { archived: 0, refused: 0 } }
+  it('nobody to send: it says so plainly, asks (count 0), and bringing people in also finishes the set-up', async () => {
     const r = reviewAnswer({ held: ['ann@example.com', 'bob@example.com', 'cat@example.com', 'eve@example.com'], mcArchived: ['dee@example.com'] })
-    const a = api({ review: r })
+    const a = api({ review: r, sync: [{ json: { ran: false, reason: 'needs_confirmation', confirm: ZERO } }, { json: { ran: true, first: true, complete: true, pushed: 0, already: 0, failed: 0, held_back: 0, remaining: 0, tags_held: [] } }] })
     await mount(a)
     await walkTo(4)
-    expect(q('mcg-out-count')!.textContent).toBe('Nobody to send over.')
-    expect(a.of('/api/mailchimp/sync')).toEqual([])
+    expect(q('mcg-out-count')!.textContent).toBe('Nobody needs sending over to Bee Organized Friends.')
+    expect(a.of('/api/mailchimp/sync').map((c: any) => c.body)).toEqual([{ location_id: LOC }])   // asked once: a question, never a send
     expect(q('mcg-finish')!.textContent).toBe('Bring them in')
+    await click(q('mcg-finish'))
+    expect(a.of('/api/mailchimp/sync')[1].body).toEqual({ location_id: LOC, confirm: { count: 0, list_id: 'list1', flows: 'fp1', tags_ok: [] } })
+  })
+  it('nobody to bring in and nobody to send: the button finishes the set-up (it is never a dead end)', async () => {
+    const a = api({ importModel: { ...EMPTY_IMPORT }, review: reviewAnswer({ held: ['ann@example.com', 'bob@example.com', 'cat@example.com', 'eve@example.com'] }),
+      sync: [{ json: { ran: false, reason: 'needs_confirmation', confirm: ZERO } }, { json: { ran: true, first: true, complete: true, pushed: 0, already: 0, failed: 0, held_back: 0, remaining: 0, tags_held: [] } }] })
+    await mount(a)
+    await walkTo(4)
+    expect(q('mcg-in-count')!.textContent).toBe('Nobody to bring into Bee Hub.')
+    expect(q('mcg-out-count')!.textContent).toBe('Nobody needs sending over to Bee Organized Friends.')
+    const btn = q('mcg-finish')! as HTMLButtonElement
+    expect(btn.textContent).toBe('Finish set-up')
+    expect(btn.disabled).toBe(false)
+    await click(btn)
+    expect(a.of('/api/mailchimp/import').filter((c: any) => c.body && c.body.member_ids)).toEqual([])   // nobody brought in
+    expect(a.of('/api/mailchimp/sync')[1].body).toEqual({ location_id: LOC, confirm: { count: 0, list_id: 'list1', flows: 'fp1', tags_ok: [] } })
+    expect(q('mcg-finish-out')!.textContent).toContain('Nobody needed sending over to Bee Organized Friends')
+  })
+  it('finish words at 0: plain when it worked; amber when the finish couldn\'t be saved', () => {
+    const ok = finishLines(null, { ran: true, complete: true, pushed: 0, already: 0, failed: 0, held_back: 0, remaining: 0, tags_held: [] }, 'Friends')
+    expect(ok.allWell).toBe(true)
+    expect(ok.outgoing.map((l) => l.text)).toEqual(['Nobody needed sending over to Friends', 'Everyone who can go is already there. No email was sent from Bee Hub.'])
+    const bad = finishLines(null, { ran: true, complete: false, stopped: 'record_not_saved: boom', pushed: 0, already: 0, failed: 0, held_back: 0, remaining: 0, tags_held: [] }, 'Friends')
+    expect(bad.allWell).toBe(false)
+    expect(bad.outgoing).toEqual([{ tone: 'amber', text: 'Nobody needed sending, but Bee Hub couldn’t save that your set-up is finished. Please come back to the last step and press Finish set-up again.' }])
+    expect(finishLabel(0, 0)).toBeNull()
+    expect(finishLabel(0, 0, true)).toBe('Finish set-up')
   })
   it('the switch off: nothing is sent and it says why', async () => {
     const a = api({ overview: { ...NEVER, live: false }, available: false })
