@@ -219,7 +219,16 @@ describe('6. a Mailchimp add is refused while a sign-up flow is live, one person
   it('the flows cannot be read → refused ("couldn\'t check" is never "nothing live")', async () => {
     world(); const m = mc()
     expect(await addOneLeadToMailchimp('L1', deps(m, flows({ unreadable: true })))).toMatchObject({ outcome: 'mailchimp_unreadable' })
-    expect(m.calls).toEqual([])
+    expect(m.posts()).toEqual([]) // (2026-11-28) the only call is the read asking if they are already there
+  })
+  it('(fix, 2026-11-28 — Sophie Stephens) already in Mailchimp while a journey is live → "already there", never "refused"', async () => {
+    world(); const m = mc()
+    const f = async (url: string, init: any) => { m.calls.push({ url, method: init.method }); return { status: 200, text: async () => '{"status":"subscribed"}', headers: { get: () => null } } }
+    let flowsRead = 0
+    const fl = async () => { flowsRead++; return (await flows({ live: ['Welcome new subscribers'] })()) }
+    expect(await addOneLeadToMailchimp('L1', { ...deps(m, fl as any), fetchImpl: f as any })).toMatchObject({ sent: false, outcome: 'already_there' })
+    expect(flowsRead).toBe(0)
+    expect(m.posts()).toEqual([])
   })
   it('the batch refuses for the same reason (its own pin, re-checked here)', () => {
     const src = readFileSync('lib/mailchimp-sync.ts', 'utf8')

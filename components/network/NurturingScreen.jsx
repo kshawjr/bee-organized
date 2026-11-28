@@ -186,7 +186,11 @@ function rowSide(r) {
  *   fetchImpl     tests hand in a fake fetch
  *   isMobile      picks the starting page size (10 on a phone, 25 otherwise)
  */
-export default function NurturingScreen({ locationId, locationName = null, fetchImpl = null, isMobile = false, nowMs = undefined, onOpenClient = null }) {
+// freshFirst (FL-135, 2026-11-28): the first read asks the server to read afresh
+// (fresh=1), not its copy from the last minute — set by NetworkTabs right after
+// an Add, so the person just added is on the list without a page refresh.
+export default function NurturingScreen({ locationId, locationName = null, fetchImpl = null, isMobile = false, nowMs = undefined, onOpenClient = null, freshFirst = false }) {
+  const freshNext = useRef(freshFirst)
   const [q, setQ] = useState('')
   const [askedQ, setAskedQ] = useState('')
   const [needsOnly, setNeedsOnly] = useState(false)
@@ -221,6 +225,7 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
     const params = new URLSearchParams({ location_id: locationId, page: String(page), size: String(size), sort })
     if (askedQ) params.set('q', askedQ)
     if (needsOnly) params.set('needs_contact', '1')
+    if (freshNext.current) { params.set('fresh', '1'); freshNext.current = false }
     ;(async () => {
       try {
         const res = await (fetchImpl || fetch)(`/api/network/nurturing?${params}`)

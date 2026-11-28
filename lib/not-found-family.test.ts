@@ -320,7 +320,7 @@ describe('nothing else changes, by fingerprint', () => {
     'app/api/companies/[id]/touchpoints/route.ts': 'e8730a7232464b52',
     'app/api/partners/[id]/referrals/route.ts': '8e591713660cc957',
     'app/api/network/list/route.ts': '0d855b5f6e791ba0',
-    'app/api/network/nurturing/route.ts': '1991346d299e0a2f',
+    'app/api/network/nurturing/route.ts': '8486a2e62115b0cc', // was 1991346d299e0a2f until FL-135 fix 3 (2026-11-28): fresh=1 reads the list afresh after an Add; nothing about who may read it
     'app/api/network/import/route.ts': 'de9a47efb7497db9',
     'app/api/network/summary/route.ts': '075d9fd79131455d',
     // untouched outright

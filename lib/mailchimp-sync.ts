@@ -791,6 +791,19 @@ export async function addOneLeadToMailchimp(leadId: string, deps: Deps = {}): Pr
     const listId = loc.mailchimp_list_id as string
     const clean = (t: unknown) => scrub(String(t ?? ''), token)
 
+    // Already in Mailchimp, in any state (archived and unsubscribed too)?
+    // Then there is nothing to send, so nothing to refuse: they are left
+    // exactly as they were. Asked FIRST (a read, never a write): on
+    // 2026-11-28 Sophie Stephens was told "not sent, pause your journey"
+    // when Bee Hub had already added her on 26 Nov.
+    const stamp = () => new Date(now()).toISOString()
+    const look = await mcGetStatus(doFetch, sleep, token, `${base}lists/${encodeURIComponent(listId)}/members/${MD5_OF_LOWERCASED_EMAIL(k)}?fields=status`)
+    if (look === 'unreadable') return out('mailchimp_unreadable')
+    if (look === 'there') {
+      await writeLeads(db, [leadId], { mailchimp_synced_at: stamp(), mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp() })
+      return out('already_there')
+    }
+
     // The flows, live. Any sign-up flow live → refuse, one person or many.
     const readNowFlows = () => flowsOf({ token, serverPrefix: prefix, listId, fetchImpl: doFetch, sleep })
     const flows = await readNowFlows()
@@ -815,14 +828,6 @@ export async function addOneLeadToMailchimp(leadId: string, deps: Deps = {}): Pr
     const before = refusals.ok ? refusals.byKey.get(k) : undefined
     if (isHeld(before)) return out('held')
 
-    // Already in Mailchimp, in any state (archived and unsubscribed too)? Leave them.
-    const look = await mcGetStatus(doFetch, sleep, token, `${base}lists/${encodeURIComponent(listId)}/members/${MD5_OF_LOWERCASED_EMAIL(k)}?fields=status`)
-    const stamp = () => new Date(now()).toISOString()
-    if (look === 'unreadable') return out('mailchimp_unreadable')
-    if (look === 'there') {
-      await writeLeads(db, [leadId], { mailchimp_synced_at: stamp(), mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp() })
-      return out('already_there')
-    }
 
     const flowsStillSame = async () => {
       const fresh = await readNowFlows()

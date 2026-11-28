@@ -29,7 +29,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { T, NET, FONT } from '@/components/design/tokens'
 import NetworkListScreen from './NetworkListScreen'
 import NurturingScreen from './NurturingScreen'
@@ -75,13 +75,17 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
   // The two tab counts, from the server. A failed read shows no numbers.
   const [counts, setCounts] = useState(null) // { network, nurturing } | null
   const [countsKey, setCountsKey] = useState(0)
+  // Right after a Nurturing Add the count is asked for afresh (fresh=1): the
+  // server keeps each count for a minute, and the Add ran on another server.
+  const freshCounts = useRef(false)
   const { refreshKey = 0 } = networkProps
   useEffect(() => {
     let alive = true
     setCounts(null)
     const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null)
     if (!doFetch) return undefined
-    const qs = locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''
+    const fresh = freshCounts.current; freshCounts.current = false
+    const qs = locationId ? `?location_id=${encodeURIComponent(locationId)}${fresh ? '&fresh=1' : ''}` : ''
     Promise.resolve(doFetch(`/api/network/counts${qs}`))
       .then(async (res) => {
         const json = res && res.ok ? await res.json().catch(() => null) : null
@@ -126,11 +130,11 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
         <NetworkListScreen locationId={locationId} locationName={locationName} {...(fetchImpl ? { fetchImpl } : {})} {...networkProps}
           actionsTarget={actionsSpot} onContactsChanged={onContactsChanged} />
       )}
-      {tab === 'nurture' && <NurturingScreen key={nurtureReload} locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
+      {tab === 'nurture' && <NurturingScreen key={nurtureReload} freshFirst={nurtureReload > 0} locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
       {adding && tab === 'nurture' && locationId && (
         <NurtureAddDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
           onClose={() => setAdding(false)}
-          onAdded={() => { setAdding(false); setNurtureReload((n) => n + 1); setCountsKey((n) => n + 1) }} />
+          onAdded={() => { setAdding(false); freshCounts.current = true; setNurtureReload((n) => n + 1); setCountsKey((n) => n + 1) }} />
       )}
     </div>
   )

@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
   try {
     const loc = await nurtureLocation(supabaseService, locationId)
     if (!loc) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
-    const [list, tags] = await Promise.all([loadNurturingList(supabaseService, loc), loadNurtureTags(supabaseService, loc.id)])
+    const [list, tags] = await Promise.all([loadNurturingList(supabaseService, loc, { refresh: p.get('fresh') === '1' }), loadNurtureTags(supabaseService, loc.id)])
     let rows = needsOnly ? list.rows.filter((r) => r.needsContactInfo) : list.rows
     rows = sortNurture(searchNurture(rows, q), sort)
     const page = clampPage(Math.floor(Number(p.get('page')) || 0), rows.length, size)

@@ -623,7 +623,7 @@ describe('nothing else in the files this touched changed, by fingerprint (agains
   // Lead and Duplicate have no box (lib/nurture-choice saves nothing for
   // them). Saved only when THIS request closed the card; the close has
   // already committed, so a failure here never unwinds it.
-  let box: (BoxSaved & { mailchimpResult?: { sent: boolean; outcome: string; words: string } | null }) | null = null
+  let box: (BoxSaved & { mailchimpResult?: { sent: boolean; outcome: string; words: string; flows?: string[] } | null; name?: string | null }) | null = null
   if (stageChanged && patch.stage === 'Closed Lost') {
     box = await saveCloseBox({
       leadId: engagement.client_id, locationUuid: engagement.location_uuid ?? null,
@@ -631,7 +631,12 @@ describe('nothing else in the files this touched changed, by fingerprint (agains
     })
     if (box && box.saved && box.mailchimp === 'in') {
       const r = await sendChosenToMailchimp(engagement.client_id, engagement.location_uuid ?? null)
-      box.mailchimpResult = r ? { sent: r.sent, outcome: r.outcome, words: r.words } : null
+      box.mailchimpResult = r ? { sent: r.sent, outcome: r.outcome, words: r.words, ...(r.flows ? { flows: r.flows } : {}) } : null
+      // The name, for the screen's "not sent" dialog (it says who).
+      if (r && !r.sent) {
+        const { data: who } = await supabaseService.from('leads').select('name').eq('id', engagement.client_id).maybeSingle()
+        box.name = who?.name ?? null
+      }
     }
   }
 

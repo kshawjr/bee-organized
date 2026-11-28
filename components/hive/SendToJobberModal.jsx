@@ -38,6 +38,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { mailchimpOpenFor } from '@/lib/mailchimp-rollout'
+import { showMailchimpRefused } from './shared/MailchimpRefusedDialog'
 import { isAssessmentType } from '@/lib/assessment-type'
 import { ASSESSMENT_TIME_OPTIONS, buildAssessmentIso } from './shared/assessmentTime'
 import { buildAddressChoices, CURRENT_CHOICE_KEY } from '@/lib/address-choice'
@@ -505,8 +506,10 @@ export default function SendToJobberModal({ person, engagementId = null, address
         })
         const mj = await r.json().catch(() => ({}))
         if (addToMailchimp) {
-          const words = mj?.mailchimp?.words || 'Not sent to Mailchimp: something went wrong.'
-          doneArgs[0].outreachTimeline = [...doneArgs[0].outreachTimeline, { id: `o${stamp + 9}`, type: 'system', method: 'system', label: words, ts: 'Just now', status: 'done' }]
+          const result = mj?.mailchimp || { sent: false, outcome: 'failed', words: 'Not sent to Mailchimp: something went wrong.' }
+          doneArgs[0].outreachTimeline = [...doneArgs[0].outreachTimeline, { id: `o${stamp + 9}`, type: 'system', method: 'system', label: result.words, ts: 'Just now', status: 'done' }]
+          // Refused: a centre dialog that stays until dismissed (never a fading line).
+          showMailchimpRefused({ name: person.name, did: 'was sent to Jobber', result })
         }
       } catch { /* the send to Jobber stands */ }
     }

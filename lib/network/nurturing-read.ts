@@ -121,11 +121,14 @@ const cache = new Map<string, { at: number; list: NurtureList }>()
 export function clearNurtureCache() { cache.clear() }
 
 /** Everyone Nurturing at one location, as list rows, plus the counts. */
-export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { now?: Date; quietDays?: number; useCache?: boolean } = {}): Promise<NurtureList> {
+// refresh (FL-135, 2026-11-28): read afresh now and keep the new answer for
+// the next minute. Asked right after an Add: each route runs on its own server
+// on Vercel, so the Add route clearing ITS copy never reached the list's.
+export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { now?: Date; quietDays?: number; useCache?: boolean; refresh?: boolean } = {}): Promise<NurtureList> {
   const now = opts.now ?? new Date()
   const quietDays = opts.quietDays ?? NURTURING_QUIET_DAYS
   const key = `${loc.id}|${quietDays}`
-  const hit = opts.useCache === false ? null : cache.get(key)
+  const hit = opts.useCache === false || opts.refresh ? null : cache.get(key)
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.list
 
   const started = Date.now()

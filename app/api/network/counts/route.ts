@@ -61,7 +61,8 @@ export async function GET(request: NextRequest) {
     if (locationId) {
       const loc = await nurtureLocation(supabaseService, locationId)
       if (!loc) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
-      nurturing = (await loadNurturingList(supabaseService, loc)).counts.nurturing
+      // fresh=1 right after an Add (see loadNurturingList's refresh).
+      nurturing = (await loadNurturingList(supabaseService, loc, { refresh: request.nextUrl.searchParams.get('fresh') === '1' })).counts.nurturing
     }
     return NextResponse.json({ network: net.count ?? 0, nurturing })
   } catch (err: any) {

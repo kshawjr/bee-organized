@@ -19,6 +19,7 @@
 import React, { useEffect, useState } from 'react'
 import { T, FONT } from '@/components/design/tokens'
 import { mailchimpOpenFor } from '@/lib/mailchimp-rollout'
+import { showMailchimpRefused } from '@/components/hive/shared/MailchimpRefusedDialog'
 
 const S = '[data-nurture-add]'
 const CSS = `
@@ -82,6 +83,9 @@ export default function NurtureAddDialog({ locationId, locationName = null, fetc
       if (res.status === 409 && json?.person) { setSame(json.person); return }
       if (!res.ok) { setProblem(json?.words || 'That did not save. Nothing was changed. Try again.'); return }
       onAdded(json)
+      // They are in Nurturing either way; a refused Mailchimp send gets the centre dialog.
+      const typed = [first, last].map((x) => x.trim()).filter(Boolean).join(' ')
+      showMailchimpRefused({ name: existingId && same ? same.name : typed, did: 'was added to Nurturing', result: json?.mailchimp })
     } catch {
       setProblem('That did not save. Check the connection and try again.')
     } finally {

@@ -49,6 +49,8 @@
 import React, { useState } from 'react'
 import { CLOSED_LOST } from './stageConfig'
 import { commitEngagementClose, writeEngagementMarker, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
+import { afterCloseMailchimp } from './closeEngagement'
+import { showMailchimpRefused } from './MailchimpRefusedDialog'
 import { WizardShell, wizPrimaryBtn, wizQuietBtn, wizSeg, wizInput, wizLabel } from './CloseWizardKit'
 import { T } from './tokens'
 import { ReminderFields, createReminder } from './Reminders'
@@ -118,6 +120,7 @@ export default function CloseLostWizard({ engagementId, leadId, locationUuid = n
           await createReminder({ lead_id: leadId, due_on: followUpDate, note: why })
         } catch (e) {
           setToast({ kind: 'error', msg: `Closed lost, but the reminder didn't save: ${e.message}` })
+          afterCloseMailchimp(j, showMailchimpRefused)
           onClosed(CLOSED_LOST, j)
           return
         }
@@ -131,8 +134,9 @@ export default function CloseLostWizard({ engagementId, leadId, locationUuid = n
           })
         } catch { /* history line only — the reminder already saved */ }
       }
-      const mcWords = j?.nurture?.mailchimpResult && !j.nurture.mailchimpResult.sent ? ` · ${j.nurture.mailchimpResult.words}` : ''
-      setToast({ kind: 'success', msg: (wantFollowUp ? 'Closed as lost · reminder set' : 'Closed as lost') + (j?.nurture?.nurture === 'in' ? ' · added to Nurturing' : '') + mcWords })
+      setToast({ kind: 'success', msg: (wantFollowUp ? 'Closed as lost · reminder set' : 'Closed as lost') + (j?.nurture?.nurture === 'in' ? ' · added to Nurturing' : '') })
+      // A refused Mailchimp send is an instruction, not a status: a centre dialog that stays.
+      afterCloseMailchimp(j, showMailchimpRefused)
       onClosed(CLOSED_LOST, j)
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })

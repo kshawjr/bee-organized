@@ -25,6 +25,8 @@
 import React, { useState } from 'react'
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
 import { commitEngagementClose, invoicesSettled, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
+import { afterCloseMailchimp } from './closeEngagement'
+import { showMailchimpRefused } from './MailchimpRefusedDialog'
 import { T } from './tokens'
 import NurtureBoxField from './NurtureBoxField'
 import { nurtureBoxShows } from './nurtureBox'
@@ -64,6 +66,7 @@ export default function CloseEngagementConfirm({
         closeAs, closedReason: closeReason, closedNote: closeNote, nurture: boxShows ? nurture : undefined,
       })
       setToast({ kind: 'success', msg: `Closed as ${closeAs === CLOSED_WON ? 'won' : 'lost'}` })
+      afterCloseMailchimp(j, showMailchimpRefused)
       onClosed(closeAs, j)
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })

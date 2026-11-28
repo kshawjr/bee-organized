@@ -16,6 +16,8 @@
 
 import React, { useState } from 'react'
 import { commitEngagementClose } from './closeEngagement'
+import { afterCloseMailchimp } from './closeEngagement'
+import { showMailchimpRefused } from './MailchimpRefusedDialog'
 import {
   WRITTEN_OFF, WRITE_OFF_TITLE, WRITE_OFF_REASON_LABEL, WRITE_OFF_REASON_PLACEHOLDER,
   WRITE_OFF_REASON_MISSING, writeOffSummary, writeOffConfirmLabel, writtenOffAmountFromInvoices,
@@ -41,6 +43,7 @@ export default function WriteOffWizard({ engagementId, locationUuid = null, invo
     try {
       const j = await commitEngagementClose(engagementId, { closeAs: WRITTEN_OFF, closedNote: note, nurture })
       setToast({ kind: 'success', msg: 'Written off' })
+      afterCloseMailchimp(j, showMailchimpRefused)
       onClosed('Closed Lost', { ...j, closed_reason: WRITTEN_OFF })
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })

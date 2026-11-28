@@ -155,3 +155,12 @@ export async function writeEngagementMarker({ leadId, engagementId, kind = 'syst
   if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
   return j?.touchpoint ?? null
 }
+
+// FL-137/135 fix 2: after a Lost close that asked for Mailchimp, a REFUSED send
+// opens the centre dialog (MailchimpRefusedDialog.jsx) — never a fading toast.
+// Returns true when it opened. j is the close route's answer.
+export function afterCloseMailchimp(j, show) {
+  const box = j && j.nurture
+  if (!box || !box.mailchimpResult) return false
+  return show({ name: box.name, did: box.nurture === 'in' ? 'is in Nurturing' : 'was closed as lost', result: box.mailchimpResult })
+}

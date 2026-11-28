@@ -35,7 +35,7 @@ const READERS_ON_MAIN: [string, string][] = [
   ['app/api/cron/send-drips/route.ts', '1aeb906c3c422f64'], // was 578c105a680e7a82 until FL-75 slice 2 (2026-11-23): 'unsubscribed_elsewhere' counted as an expected skip in the drip, welcome and stage loops (3 lines added; one line gained a trailing ||).
   ['app/api/drip-paths/[id]/active-lead-count/route.ts', '056cb018b12b8cb3'], // was da565643377fe6d4 until partner emails slice 4 (2026-11-22): on a PARTNER sequence the count adds its active partners; a client sequence counts exactly as before with no second read (lib/network/partner-drip-send.test.ts)
   ['app/api/drip-paths/[id]/steps/route.ts', 'c533d59d49988555'],
-  ['app/api/engagements/[id]/route.ts', '3420b0a2c26b4f35'], // FL-137/135 (2026-11-28): was 6c8e7223f7175b7f; the Closed Lost box is saved after the close (nurture choice + one-person Mailchimp add); nothing about drips
+  ['app/api/engagements/[id]/route.ts', 'a49a6a0d6bfd75be'], // FL-137 fix 2 (2026-11-28): was 3420b0a2c26b4f35; the box's answer carries the journey names and the person's name for the 'not sent' dialog. Before that: // FL-137/135 (2026-11-28): was 6c8e7223f7175b7f; the Closed Lost box is saved after the close (nurture choice + one-person Mailchimp add); nothing about drips
   ['app/api/leads/[id]/drip-pause/route.ts', '6dce28d9869a4fc3'],
   ['app/api/leads/[id]/drip-restart/route.ts', 'd53ed4377a2ad54a'],
   ['app/api/leads/[id]/drip/route.ts', '192be2a837e3f92b'],
