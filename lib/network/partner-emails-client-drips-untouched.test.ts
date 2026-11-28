@@ -35,7 +35,7 @@ const READERS_ON_MAIN: [string, string][] = [
   ['app/api/cron/send-drips/route.ts', '1aeb906c3c422f64'], // was 578c105a680e7a82 until FL-75 slice 2 (2026-11-23): 'unsubscribed_elsewhere' counted as an expected skip in the drip, welcome and stage loops (3 lines added; one line gained a trailing ||).
   ['app/api/drip-paths/[id]/active-lead-count/route.ts', '056cb018b12b8cb3'], // was da565643377fe6d4 until partner emails slice 4 (2026-11-22): on a PARTNER sequence the count adds its active partners; a client sequence counts exactly as before with no second read (lib/network/partner-drip-send.test.ts)
   ['app/api/drip-paths/[id]/steps/route.ts', 'c533d59d49988555'],
-  ['app/api/engagements/[id]/route.ts', '6c8e7223f7175b7f'],
+  ['app/api/engagements/[id]/route.ts', '3420b0a2c26b4f35'], // FL-137/135 (2026-11-28): was 6c8e7223f7175b7f; the Closed Lost box is saved after the close (nurture choice + one-person Mailchimp add); nothing about drips
   ['app/api/leads/[id]/drip-pause/route.ts', '6dce28d9869a4fc3'],
   ['app/api/leads/[id]/drip-restart/route.ts', 'd53ed4377a2ad54a'],
   ['app/api/leads/[id]/drip/route.ts', '192be2a837e3f92b'],
@@ -46,8 +46,8 @@ const READERS_ON_MAIN: [string, string][] = [
   ['components/BeeHub.jsx', '39fc9cf72668704c'],
   ['components/hive/shared/PreferencesBlock.jsx', '9b37e4477277bfbf'],
   ['lib/__fixtures__/founding-fingerprint.before.json', 'e27eaf6a2559b220'],
-  ['lib/auto-close.test.ts', '77779b689de3d00e'],
-  ['lib/auto-close.ts', 'd6db49cb8a497cc8'],
+  ['lib/auto-close.test.ts', '9f19e004c6997efd'], // FL-137/135 (2026-11-28): was 77779b689de3d00e; Test Location let in, the Nurturing choice pinned; the drip-stop tests unchanged
+  ['lib/auto-close.ts', 'd3c7b271c2b62bcd'], // FL-137/135 (2026-11-28): was d6db49cb8a497cc8; Test Location let in, saves the Nurturing choice after the close; the drip stop is unchanged
   ['lib/beta-card-layout.test.tsx', 'b10343901f8918e0'],
   ['lib/beta-drip-never-enrolled-243.test.ts', 'b086aaccbf163cd3'],
   ['lib/beta-drip-project-type-selection.test.ts', 'e3d9d00571caca11'],
@@ -69,12 +69,12 @@ const READERS_ON_MAIN: [string, string][] = [
   // locations' two new date columns (mailchimp_progress_dates.sql, run that day); the
   // client drip table's own line is unchanged (pinned by the test further down).
   // …and mailchimp_refusals (run 2026-11-26 12:33).
-  ['lib/db-columns.snapshot.txt', '96f43ddee9c1be49'],
+  ['lib/db-columns.snapshot.txt', '9980c0bd4fe39d1c'], // FL-137/135 (2026-11-28): was 96f43ddee9c1be49; eight choice columns on leads (lead_drip_progress line unchanged, pinned below)
   ['lib/drip-enrol-outcome.test.ts', '4a3454b8fc9e9c81'],
   ['lib/drip-followups.test.ts', '437d84a4ee31572c'], // was f3e4c818a89d1238 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/drip-followups.ts', '09b0d1b509bc7dcf'],
   ['lib/drip-interface-active-gate.test.ts', '80db3e20e61e53e1'], // was 0fae95ada939aa00 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
-  ['lib/drip-lifecycle.ts', '1ceec8af02a1e810'], // was 925f6146f4b30a72 until FL-131 (2026-11-27): pastClientCheck does not count import_source 'mailchimp_signup' as a past client (paid or won still does), one import; nothing about drips
+  ['lib/drip-lifecycle.ts', '240908cf11e88edd'], // FL-137/135 (2026-11-28): was 1ceec8af02a1e810; pastClientCheck also does not count 'nurturing_add' as a past client, one import; nothing about drips. Before that: // was 925f6146f4b30a72 until FL-131 (2026-11-27): pastClientCheck does not count import_source 'mailchimp_signup' as a past client (paid or won still does), one import; nothing about drips
   ['lib/drip-send-visibility.test.ts', 'c43058ced6311dce'], // was 14008bc553ba3726 until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.
   ['lib/drip-send.ts', 'dd1d4c5f505cef43'], // was abc8ee5ebb0319ef until FL-75 slice 2 (2026-11-23): one import and one block after the opted-out stop — the shared no-marketing list is asked; said no → stopped 'unsubscribed_elsewhere', unreadable → held. 17 lines added, none changed (git diff --numstat). With every address clear, lib/network/client-drip-send-bytes.test.ts (44 scenarios) is still byte for byte. Before that: was a8a833d4e2fae092 until partner emails slice 4 (2026-11-22): its shareable parts moved to lib/drip-send-shared.ts for the partner sender. What it does is pinned byte for byte by OUTPUT instead: lib/network/client-drip-send-bytes.test.ts (44 scenarios — Resend payloads, every database call incl. the tracking writes, results — equal to af902cb and f115e0e)
   ['lib/drip-terminal-failure.test.ts', '32ad3daf75b14fc1'], // was 49237effee21311e until FL-75 slice 2 (2026-11-23): one line — the fake database answers the shared no-marketing list question "clear" (rpc returns false), so these sends run exactly as before; nothing else in the file changed.

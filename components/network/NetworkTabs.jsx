@@ -16,11 +16,11 @@
 //     bar, ON THE NETWORK TAB ONLY. They are the Network list's own buttons,
 //     menus and boxes (NetworkListScreen.jsx), drawn into the spot below.
 //
-// NO ADD ON NURTURING (Kevin's ruling, 2026-11-25, option 1): Nurturing is
-// a question Bee Hub asks fresh each time (lib/network/nurturing.ts), not a
-// list anyone is filed into, so there is nothing to add to it. The Nurturing
-// tab shows neither Add nor the three dots, and the Network list is not
-// mounted (so not loaded) while the Nurturing tab is showing.
+// ADD ON NURTURING IS BACK (FL-135, Kevin 2026-11-28; it was taken off on
+// 2026-11-25). An owner can now put someone in Nurturing by hand, straight
+// away (NurtureAddDialog.jsx). It sits in the same top-right spot, on the
+// Nurturing tab, inside one location only. The three dots stay Network-only,
+// and the Network list is still not mounted while Nurturing is showing.
 //
 // Mounted by components/BeeHub.jsx only where the new Network list was
 // already mounted: for a viewer lib/network/access.ts says yes to (super
@@ -34,6 +34,7 @@ import { T, NET, FONT } from '@/components/design/tokens'
 import NetworkListScreen from './NetworkListScreen'
 import NurturingScreen from './NurturingScreen'
 import NetworkOverview from './NetworkOverview'
+import NurtureAddDialog from './NurtureAddDialog'
 
 const CSS = `
 [data-network-tabs]{background:${T.background};font-family:${FONT.ui}}
@@ -46,6 +47,9 @@ const CSS = `
 [data-network-tabs] .nt-tab:focus-visible{outline:2px solid ${NET.partner};outline-offset:2px}
 [data-network-tabs] .nt-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 [data-network-tabs] .nt-actions:empty{display:none}
+[data-network-tabs] .nt-add{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 16px;border:0;border-radius:10px;background:${T.primary};color:${T.primaryFg};font-family:inherit;font-size:14px!important;font-weight:700;white-space:nowrap;cursor:pointer}
+[data-network-tabs] .nt-add:hover{background:color-mix(in oklab,${T.primary} 88%,${T.card})}
+[data-network-tabs] .nt-add:focus-visible{outline:2px solid ${NET.partner};outline-offset:2px}
 @media (max-width:767px){ [data-network-tabs] .nt-bar{padding:12px 16px 0;gap:8px} [data-network-tabs] .nt-tabs{display:flex;flex:1 1 auto;max-width:100%} [data-network-tabs] .nt-tab{flex:1 1 0;min-width:0;padding:4px 8px;font-size:13px;line-height:1.2;white-space:normal;flex-direction:column;gap:1px} }
 /* Three tabs on a phone (All locations, slice 9) must never push the page sideways: they shrink and wrap their words. */
 `
@@ -89,6 +93,9 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
 
   // Something was added or imported: count again.
   const onContactsChanged = () => { setCountsKey((n) => n + 1) }
+  // FL-135: the Nurturing Add, and the list read again after one.
+  const [adding, setAdding] = useState(false)
+  const [nurtureReload, setNurtureReload] = useState(0)
 
   // The Network list, and its Add and three dots, live on the Network tab only.
   const listShown = tab === 'network' || (tab === 'overview' && !!locationId)
@@ -106,13 +113,25 @@ export default function NetworkTabs({ locationId, locationName, fetchImpl = null
           {!locationId && <button type="button" role="tab" className="nt-tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')} data-tab="overview">All locations</button>}
         </div>
         {listShown && <div className="nt-actions" ref={setActionsSpot} data-network-tab-actions />}
+        {tab === 'nurture' && locationId && (
+          <div className="nt-actions" data-nurture-tab-actions>
+            <button type="button" className="nt-add" onClick={() => setAdding(true)} data-act="nurture-add">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add
+            </button>
+          </div>
+        )}
       </div>
       {tab === 'overview' && !locationId && <NetworkOverview fetchImpl={fetchImpl} />}
       {listShown && (
         <NetworkListScreen locationId={locationId} locationName={locationName} {...(fetchImpl ? { fetchImpl } : {})} {...networkProps}
           actionsTarget={actionsSpot} onContactsChanged={onContactsChanged} />
       )}
-      {tab === 'nurture' && <NurturingScreen locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
+      {tab === 'nurture' && <NurturingScreen key={nurtureReload} locationId={locationId} locationName={locationName} fetchImpl={fetchImpl} isMobile={mobileNow()} onOpenClient={onOpenClient} />}
+      {adding && tab === 'nurture' && locationId && (
+        <NurtureAddDialog locationId={locationId} locationName={locationName} fetchImpl={fetchImpl}
+          onClose={() => setAdding(false)}
+          onAdded={() => { setAdding(false); setNurtureReload((n) => n + 1); setCountsKey((n) => n + 1) }} />
+      )}
     </div>
   )
 }

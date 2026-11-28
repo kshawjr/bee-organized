@@ -352,6 +352,8 @@ describe('nothing outside the Files tab changed, by fingerprint', () => {
   it('source — the client card: five named changes, nothing else', () => {
     const p = 'components/hive/ClientProfile.jsx'
     const back = undo(withoutLiveJobReopen(p, readFileSync(p, 'utf8')), [ // the live-job note (2026-11-21) out first
+      // FL-137/135 (2026-11-28): the Lost wizard is told the location, for the box's words. One line.
+      ['          locationUuid={c.location_uuid || null}\n', ''],
       ["import FilesTab, { useClientFiles } from './shared/FilesTab'\n", ''],
       ['IconCheck, IconX, IconMapPin,', 'IconCheck, IconX, IconPaperclip, IconMapPin,'],
       ['  const clientFiles = useClientFiles({ leadId: c?.id || null })\n', ''],
@@ -367,6 +369,9 @@ describe('nothing outside the Files tab changed, by fingerprint', () => {
   it('source — the job panel: five named changes (and the two-open-cards flag), nothing else', () => {
     const p = 'components/hive/EngagementPanel.jsx'
     const back = undo(readFileSync(p, 'utf8'), [
+      // FL-137/135 (2026-11-28): the Lost and write-off wizards are told the location, for the box's words. Two lines.
+      ['          leadId={client?.id}\n          locationUuid={eng?.location_uuid || null}\n', '          leadId={client?.id}\n'],
+      ['          engagementId={engagementId}\n          locationUuid={eng?.location_uuid || null}\n', '          engagementId={engagementId}\n'],
       ["import FilesTab, { useClientFiles } from './shared/FilesTab'\n", ''],
       ['IconCalendar, IconSend, IconMessage,', 'IconCalendar, IconSend, IconPaperclip, IconMessage,'],
       ['  const jobFiles = useClientFiles({ leadId: client?.id || null, engagementId })\n', ''],

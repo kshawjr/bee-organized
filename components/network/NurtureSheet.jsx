@@ -112,13 +112,15 @@ const money = (n) => (n == null || n === '' ? null : `$${Number(n).toLocaleStrin
 export const initials = (name) => String(name || '?').split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'
 
 const WHY_NOT = {
-  excluded_location: 'at Test Location or in the transfer queue',
+  excluded_location: 'in the transfer queue',
+  won: 'has a won card',
+  owner_said_no: 'was closed with “Add them to Nurturing” left unticked',
   open_card: 'has an open card on the board',
   archived: 'archived',
   junk: 'marked junk',
   too_new: 'added in the last 30 days',
   had_job: 'had a job',
-  paid_or_won: 'has paid, or has a won card',
+  paid_or_won: 'has paid',
   recent_activity: 'had an assessment or quote recently',
 }
 

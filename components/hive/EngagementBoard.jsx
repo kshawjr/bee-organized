@@ -331,6 +331,7 @@ export default function EngagementBoard({ tags = [], engagements = [], closedCou
         <EngagementCard e={{ ...pendingEng, stage: prevStage }} onOpen={() => {}} accent={zone.color} />
         <CloseEngagementConfirm
           engagementId={pendingEng.id}
+          locationUuid={pendingEng.location_uuid || null}
           invoices={pendingEng.invoices || []}
           reasons={lookupOptions?.closeLostReasons || []}
           initialCloseAs={target}

@@ -613,8 +613,30 @@ describe('nothing else in the files this touched changed, by fingerprint (agains
     expect(sha(back)).toBe('65770f75eea990a17266f6631df528d4aaf7dcd07d48e1132b8b19c2e3ed0b32')
   })
 
-  it('app/api/engagements/[id]/route.ts — the GET gained `twin`; PATCH is untouched', () => {
+  // FL-137/135 (2026-11-28): the PATCH now also saves the Closed Lost box
+  // after the close — two imports and one block, taken back out exactly here.
+  it('app/api/engagements/[id]/route.ts — the GET gained `twin`; the PATCH gained only the Closed Lost box', () => {
     const back = undo('app/api/engagements/[id]/route.ts', [
+      ["import { saveCloseBox, type BoxSaved } from '@/lib/nurture-choice'\nimport { sendChosenToMailchimp } from '@/lib/nurture-mailchimp'\n", ''],
+      [`  // FL-137/135 (Kevin, 2026-11-28): the Closed Lost box. One answer decides
+  // Nurturing and (where open) Mailchimp. Unticked is "no", for good. Junk
+  // Lead and Duplicate have no box (lib/nurture-choice saves nothing for
+  // them). Saved only when THIS request closed the card; the close has
+  // already committed, so a failure here never unwinds it.
+  let box: (BoxSaved & { mailchimpResult?: { sent: boolean; outcome: string; words: string } | null }) | null = null
+  if (stageChanged && patch.stage === 'Closed Lost') {
+    box = await saveCloseBox({
+      leadId: engagement.client_id, locationUuid: engagement.location_uuid ?? null,
+      reason: patch.closed_reason ?? null, ticked: body?.nurture, by: auth.hubUser.id,
+    })
+    if (box && box.saved && box.mailchimp === 'in') {
+      const r = await sendChosenToMailchimp(engagement.client_id, engagement.location_uuid ?? null)
+      box.mailchimpResult = r ? { sent: r.sent, outcome: r.outcome, words: r.words } : null
+    }
+  }
+
+`, ''],
+      ['    id,\n    ...(box ? { nurture: box } : {}),\n    stage:', '    id,\n    stage:'],
       ["import { loadTwinForEngagement } from '@/lib/engagement-twins'\n", ''],
       [`//   the panel's "Also on this client" block — all from ONE sibling query),
 //   + \`twin\`: the two-open-cards flag (lib/engagement-twins.ts), null on

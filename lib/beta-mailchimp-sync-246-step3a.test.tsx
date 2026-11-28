@@ -256,7 +256,10 @@ describe('manual trigger only, one guard, no second push path', () => {
       `grep -rl "mailchimp-sync" app lib components --include="*.ts" --include="*.tsx" --include="*.jsx" || true`,
       { cwd: process.cwd(), encoding: 'utf8' },
     ).trim().split('\n').filter(Boolean).filter((f: string) => !f.includes('.test.'))
-    expect(hits.sort()).toEqual(['app/api/mailchimp/sync/route.ts', 'lib/mailchimp-sync.ts'].sort())
+    // 2026-11-28, FL-137/135 (Kevin): ONE more door, on purpose — the
+    // one-person add after an owner's choice (lib/nurture-mailchimp.ts calls
+    // addOneLeadToMailchimp only, which holds every lock this file pins).
+    expect(hits.sort()).toEqual(['app/api/mailchimp/sync/route.ts', 'lib/mailchimp-sync.ts', 'lib/nurture-mailchimp.ts'].sort())
   })
 })
 

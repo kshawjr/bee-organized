@@ -25,9 +25,22 @@
 //        · leads.paid_amount greater than 0
 //        · leads.invoice_paid_at set
 //        · an engagement with stage 'Closed Won'
-//   6. They are not at Test Location (Kevin's sandbox) or in the transfer
-//      queue (loc_other: unrouted people belong to no owner yet). The same
-//      two slugs the auto-close cron never touches.
+//   6. They are not in the transfer queue (loc_other: unrouted people belong
+//      to no owner yet). Test Location was left out too until 2026-11-28,
+//      when Kevin let it in so FL-135/137 can be tried there.
+//
+// THE OWNER'S CHOICE (FL-135/137, Kevin 2026-11-28). leads.nurture_choice,
+// made by an owner closing someone Lost by hand (the box), by the 35-day
+// auto-close, or by adding someone on the Nurturing tab. It sits ON TOP of
+// the rules above, which are now the catch-all for everyone with no choice:
+//   · 'out' — never Nurturing. The catch-all can never pull them in later.
+//   · 'in'  — Nurturing now: no 30-day wait, no 90 quiet days, and a job or
+//             a payment does not keep them out (a write-off the owner chose
+//             to nurture). Only these still do: a WON card (Closed Won never
+//             reaches Nurturing by any route), an OPEN card (being worked
+//             again), the Recycle Bin, junk, and the transfer queue.
+// A newer choice replaces an older one. Old closes carry no choice: nobody
+// saw a box for them, so nobody answers it for them.
 //
 // Someone with no email and no phone STAYS IN. They are flagged "Needs
 // contact info" so an owner can find and fix them; they are never hidden.
@@ -52,7 +65,7 @@ export const NURTURING_QUIET_DAYS = 90
 /** Days since the person was created. */
 export const NURTURING_MIN_AGE_DAYS = 30
 /** Locations nobody is Nurturing at, by slug (leads.location_id). */
-export const NURTURING_EXCLUDED_LOCATIONS: readonly string[] = ['loc_test', 'loc_other']
+export const NURTURING_EXCLUDED_LOCATIONS: readonly string[] = ['loc_other']
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -67,6 +80,8 @@ export type NurtureLead = {
   location_id?: string | null
   paid_amount?: number | string | null
   invoice_paid_at?: string | null
+  /** the owner's choice (leads.nurture_choice): 'in' | 'out' | null */
+  nurture_choice?: string | null
 }
 export type NurtureAssessment = { lead_id: string | null; completed_at?: string | null; scheduled_at?: string | null; created_at?: string | null }
 export type NurtureQuote = { lead_id: string | null; status?: string | null; sent_at?: string | null; created_at?: string | null }
@@ -155,7 +170,9 @@ export type FoldedActivity = ReturnType<typeof foldActivity>
 export type NurtureVerdict = {
   nurturing: boolean
   /** Why not, in plain words, when nurturing is false. */
-  why: 'excluded_location' | 'archived' | 'junk' | 'too_new' | 'had_job' | 'paid_or_won' | 'open_card' | 'recent_activity' | null
+  why: 'excluded_location' | 'archived' | 'junk' | 'won' | 'owner_said_no' | 'too_new' | 'had_job' | 'paid_or_won' | 'open_card' | 'recent_activity' | null
+  /** true when the owner's 'in' put them here (not the catch-all) */
+  chosen?: boolean
   needsContactInfo: boolean
   lastActivity: LastActivity
 }
@@ -169,11 +186,18 @@ export function nurturingVerdict(lead: NurtureLead, activity: FoldedActivity, no
   if (lead.location_id && NURTURING_EXCLUDED_LOCATIONS.includes(lead.location_id)) return { nurturing: false, why: 'excluded_location', ...base }
   if (lead.archived_at) return { nurturing: false, why: 'archived', ...base }
   if (lead.is_junk === true) return { nurturing: false, why: 'junk', ...base }
+  // Closed Won never reaches Nurturing, by any route — the owner's 'in' included.
+  if (activity.wonCard.has(lead.id)) return { nurturing: false, why: 'won', ...base }
+  // The owner's 'out' is for good: the catch-all below never pulls them in.
+  if (lead.nurture_choice === 'out') return { nurturing: false, why: 'owner_said_no', ...base }
+  if (activity.openCard.has(lead.id)) return { nurturing: false, why: 'open_card', ...base }
+  // The owner's 'in': in now, whatever the catch-all would say.
+  if (lead.nurture_choice === 'in') return { nurturing: true, why: null, chosen: true, ...base }
+  // ── The catch-all (everyone with no choice) ──
   const created = t(lead.created_at)
   if (created === null || created >= t(createdBefore)!) return { nurturing: false, why: 'too_new', ...base }
   if (activity.hadJob.has(lead.id)) return { nurturing: false, why: 'had_job', ...base }
-  if (hasPaid(lead) || activity.wonCard.has(lead.id)) return { nurturing: false, why: 'paid_or_won', ...base }
-  if (activity.openCard.has(lead.id)) return { nurturing: false, why: 'open_card', ...base }
+  if (hasPaid(lead)) return { nurturing: false, why: 'paid_or_won', ...base }
   if (l && l.ms >= t(quietBefore)!) return { nurturing: false, why: 'recent_activity', ...base }
   return { nurturing: true, why: null, ...base }
 }
@@ -196,13 +220,15 @@ left join q on q.lead_id = l.id
 where l.archived_at is null
   and l.is_junk is not true
   and l.location_id not in (${NURTURING_EXCLUDED_LOCATIONS.map((x) => `'${x}'`).join(', ')})
-  and not exists (select 1 from engagements e where e.client_id = l.id and e.closed_at is null)
-  and coalesce(l.paid_amount, 0) <= 0
-  and l.invoice_paid_at is null
   and not exists (select 1 from engagements e where e.client_id = l.id and e.stage = 'Closed Won')
-  and l.created_at < ${nowSql} - interval '${NURTURING_MIN_AGE_DAYS} days'
-  and not exists (select 1 from j where j.lead_id = l.id)
-  and coalesce(greatest(a.t, q.t), '-infinity') < ${nowSql} - interval '${quietDays} days'`
+  and l.nurture_choice is distinct from 'out'
+  and not exists (select 1 from engagements e where e.client_id = l.id and e.closed_at is null)
+  and (l.nurture_choice = 'in' or (
+        coalesce(l.paid_amount, 0) <= 0
+    and l.invoice_paid_at is null
+    and l.created_at < ${nowSql} - interval '${NURTURING_MIN_AGE_DAYS} days'
+    and not exists (select 1 from j where j.lead_id = l.id)
+    and coalesce(greatest(a.t, q.t), '-infinity') < ${nowSql} - interval '${quietDays} days'))`
 }
 
 // ── The list: search, filter, sort, page. Pure. ──────────────

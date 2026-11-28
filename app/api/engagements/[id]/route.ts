@@ -40,6 +40,8 @@ import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, WON_OVER_BALANCE, t
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
 import { WRITTEN_OFF, writtenOffAmountFromInvoices } from '@/components/hive/shared/writtenOff'
 import { loadTwinForEngagement } from '@/lib/engagement-twins'
+import { saveCloseBox, type BoxSaved } from '@/lib/nurture-choice'
+import { sendChosenToMailchimp } from '@/lib/nurture-mailchimp'
 
 // Close-out vocabulary (doc §4). A WON close is always reason 'won'. LOST
 // reasons are admin-configured (lookups category 'closed_lost_reasons') and
@@ -550,8 +552,26 @@ export async function PATCH(
     })
   }
 
+  // FL-137/135 (Kevin, 2026-11-28): the Closed Lost box. One answer decides
+  // Nurturing and (where open) Mailchimp. Unticked is "no", for good. Junk
+  // Lead and Duplicate have no box (lib/nurture-choice saves nothing for
+  // them). Saved only when THIS request closed the card; the close has
+  // already committed, so a failure here never unwinds it.
+  let box: (BoxSaved & { mailchimpResult?: { sent: boolean; outcome: string; words: string } | null }) | null = null
+  if (stageChanged && patch.stage === 'Closed Lost') {
+    box = await saveCloseBox({
+      leadId: engagement.client_id, locationUuid: engagement.location_uuid ?? null,
+      reason: patch.closed_reason ?? null, ticked: body?.nurture, by: auth.hubUser.id,
+    })
+    if (box && box.saved && box.mailchimp === 'in') {
+      const r = await sendChosenToMailchimp(engagement.client_id, engagement.location_uuid ?? null)
+      box.mailchimpResult = r ? { sent: r.sent, outcome: r.outcome, words: r.words } : null
+    }
+  }
+
   return NextResponse.json({
     id,
+    ...(box ? { nurture: box } : {}),
     stage: stageChanged ? stage : engagement.stage,
     prev_stage: engagement.stage,
     title: patch.title ?? engagement.title,

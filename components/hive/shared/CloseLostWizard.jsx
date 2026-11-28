@@ -53,10 +53,12 @@ import { WizardShell, wizPrimaryBtn, wizQuietBtn, wizSeg, wizInput, wizLabel } f
 import { T } from './tokens'
 import { ReminderFields, createReminder } from './Reminders'
 import { fixedDateLabel } from '@/lib/reminders'
+import NurtureBoxField from './NurtureBoxField'
+import { nurtureBoxShows } from './nurtureBox'
 
 const STEPS = [{ key: 'reason', label: 'Reason' }, { key: 'followup', label: 'Follow-up' }]
 
-export default function CloseLostWizard({ engagementId, leadId, reasons = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false, stopLeadDrips = false }) {
+export default function CloseLostWizard({ engagementId, leadId, locationUuid = null, reasons = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false, stopLeadDrips = false }) {
   // Admin-configured labels (lookups → HiveShell lookupOptions), with the
   // canonical set as the code-level fallback when the picklist is empty.
   const reasonList = Array.isArray(reasons) && reasons.length > 0 ? reasons : DEFAULT_CLOSE_LOST_REASONS
@@ -67,6 +69,9 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
   const [followUpDate, setFollowUpDate] = useState('')
   const [followUpReason, setFollowUpReason] = useState('')
   const [busy, setBusy] = useState(false)
+  // FL-137/135: unticked by default; unticked is "no" (nurtureBox.js).
+  const [nurture, setNurture] = useState(false)
+  const boxShows = nurtureBoxShows(reason)
 
   const otherNeedsNote = reason === OTHER_LOST_REASON && !note.trim()
   const followUpReady = !wantFollowUp || (!!followUpDate && !!followUpReason.trim())
@@ -94,7 +99,7 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
         engId = jj?.engagement?.id
         if (!engId) throw new Error('could not open an engagement to close')
       }
-      const j = await commitEngagementClose(engId, { closeAs: CLOSED_LOST, closedReason: reason, closedNote: note })
+      const j = await commitEngagementClose(engId, { closeAs: CLOSED_LOST, closedReason: reason, closedNote: note, nurture: boxShows ? nurture : undefined })
       // issue 204 — the engagement close never touches leads.stage, so a
       // no-engagement lead's live drips/stage-emails keep running. Fire the
       // lead-side stop the close omits (mirrors markJunk, reason closed_lost).
@@ -126,7 +131,8 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
           })
         } catch { /* history line only — the reminder already saved */ }
       }
-      setToast({ kind: 'success', msg: wantFollowUp ? 'Closed as lost · reminder set' : 'Closed as lost' })
+      const mcWords = j?.nurture?.mailchimpResult && !j.nurture.mailchimpResult.sent ? ` · ${j.nurture.mailchimpResult.words}` : ''
+      setToast({ kind: 'success', msg: (wantFollowUp ? 'Closed as lost · reminder set' : 'Closed as lost') + (j?.nurture?.nurture === 'in' ? ' · added to Nurturing' : '') + mcWords })
       onClosed(CLOSED_LOST, j)
     } catch (e) {
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
@@ -157,6 +163,7 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
           <p style={{ fontSize: '11px', color: T.state.danger.fg }}>A note is required when the reason is “Other”.</p>
         )}
       </div>
+      {boxShows && <NurtureBoxField checked={nurture} onChange={setNurture} locationUuid={locationUuid} disabled={busy} />}
     </>
   )
 

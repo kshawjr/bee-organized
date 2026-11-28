@@ -37,6 +37,7 @@ import * as counts from '@/app/api/network/counts/route'
 import * as person from '@/app/api/network/nurturing/[id]/route'
 import * as followUp from '@/app/api/network/nurturing/[id]/follow-up/route'
 import * as nurtureBulk from '@/app/api/network/nurturing/bulk/route'
+import * as nurtureAdd from '@/app/api/network/nurturing/add/route'
 import * as overview from '@/app/api/network/overview/route'
 import * as add from '@/app/api/network/contacts/route'
 import * as contact from '@/app/api/network/contacts/[id]/route'
@@ -55,6 +56,7 @@ const HANDLERS: [string, () => Promise<Response>][] = [
   ['GET nurturing/[id]', () => person.GET(req('/x'), p)],
   ['POST follow-up', () => followUp.POST(req('/x', { due_on: '2026-12-01', note: 'x' }), p)],
   ['POST nurturing/bulk', () => nurtureBulk.POST(req('/x', { location_id: LOC, action: 'tag_add', tag_id: ID, selection: { ids: [ID] }, dry_run: true }))],
+  ['POST nurturing/add', () => nurtureAdd.POST(req('/x', { location_id: LOC, first_name: 'X', email: 'x@example.com' }))],
   ['GET overview', () => overview.GET()],
   ['POST contacts', () => add.POST(req('/x', { location_id: LOC, name: 'X' }))],
   ['GET contacts/[id]', () => contact.GET(req('/x'), p)],
@@ -93,10 +95,11 @@ describe('every Network route asks the gate first, then the location rule', () =
   walk(root)
   // Partner emails slice 5 added contacts/[id]/sequences (GET, POST, DELETE).
   // 2026-11-25: counts (GET), the two numbers on the tabs.
-  it('there are 13 route files, 17 handlers', () => {
-    expect(files.length).toBe(13)
+  // 2026-11-28: nurturing/add (POST), FL-135's Add on the Nurturing tab.
+  it('there are 14 route files, 18 handlers', () => {
+    expect(files.length).toBe(14)
     const handlers = files.flatMap((f) => readFileSync(f, 'utf8').match(/export async function (GET|POST|PATCH|PUT|DELETE)\b/g) || [])
-    expect(handlers.length).toBe(17)
+    expect(handlers.length).toBe(18)
   })
   for (const f of files) {
     const rel = f.slice(root.length + 1)

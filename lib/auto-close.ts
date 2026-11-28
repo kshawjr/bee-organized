@@ -27,8 +27,9 @@
 //
 // Never touched, by construction:
 //   · the corporate transfer queue (loc_other) — unrouted enquiries are
-//     Kevin's to route, not to close — and the test location (loc_test).
-//     Both are dropped by slug before anything else is read.
+//     Kevin's to route, not to close. Dropped by slug before anything else
+//     is read. (Test Location was skipped too until 2026-11-28, when Kevin
+//     let it in so FL-135/137 can be tried there.)
 //   · locations whose lifecycle is paused or subscription inactive (the same
 //     predicate lib/read-only-access uses): nobody there can act on a close.
 //   · a lead whose live drip row is unpaused — a send is due, so the drip
@@ -45,6 +46,11 @@
 //   · the same three cancels the wizard fires: stop live drips, cancel
 //     scheduled stage emails, cancel a pending welcome email.
 //   · one sync_log row per close, tagged [engagement:auto-close].
+//   · FL-137/135 (Kevin, 2026-11-28): the person goes into Nurturing and,
+//     where Mailchimp is open, their Mailchimp choice is 'in' — nobody is
+//     there to tick a box, and every lead consented at intake. Saved here
+//     (lib/nurture-choice.ts, writes only); the Mailchimp send itself is done
+//     afterwards by the cron route, never by this file.
 //
 // Nothing here can email anyone: no module that sends is imported, and the
 // three cancels only write cancelled_at / stopped_at. lib/auto-close.test.ts
@@ -59,11 +65,12 @@ import { stopActiveDripsForLead } from './drip-lifecycle'
 import { cancelStageEmails } from './stage-emails'
 import { cancelPendingWelcomeEmail } from './welcome-email'
 import { writeSyncLog } from './sync-log'
+import { saveAutoCloseChoice } from './nurture-choice'
 
 export const AUTO_CLOSE_DAYS = 35
 export const AUTO_CLOSE_REASON = 'No response'
 export const AUTO_CLOSE_TOUCHPOINT_LABEL = `Closed automatically: no response after ${AUTO_CLOSE_DAYS} days`
-export const EXCLUDED_LOCATION_SLUGS = ['loc_other', 'loc_test'] as const
+export const EXCLUDED_LOCATION_SLUGS = ['loc_other'] as const
 export const RESUBMISSION_LABEL = WEBFORM_RESUBMISSION_LABEL
 export const TRANSFER_LABEL = TRANSFER_IN_LABEL
 
@@ -374,6 +381,8 @@ export interface CloseResult {
   engagementIds: string[]
   /** true when no engagement existed and one was founded already closed. */
   founded: boolean
+  /** FL-137: their Mailchimp choice was saved as 'in' — the cron route sends them. */
+  mailchimpChosen?: boolean
 }
 
 /**
@@ -448,6 +457,14 @@ export async function closeStaleEnquiry(item: StaleEnquiry, opts: { now?: Date; 
     cancelPendingWelcomeEmail(item.leadId, 'closed_lost'),
   ])
 
+  // Nurturing (and Mailchimp's choice). Fail-safe: the close has committed.
+  let mailchimpChosen = false
+  try {
+    mailchimpChosen = (await saveAutoCloseChoice(item.leadId, item.locationUuid, { now: () => now.getTime() })).mailchimp
+  } catch (err) {
+    console.error('[auto-close] nurture choice not saved', { leadId: item.leadId, err })
+  }
+
   await writeSyncLog({
     location_id: item.locationId,
     entity_id: engagementIds[0],
@@ -459,5 +476,5 @@ export async function closeStaleEnquiry(item: StaleEnquiry, opts: { now?: Date; 
       ` (${item.ageDays}d)${founded ? ' — engagement founded closed' : ` — closed ${engagementIds.length} open`}`,
   })
 
-  return { leadId: item.leadId, engagementIds, founded }
+  return { leadId: item.leadId, engagementIds, founded, mailchimpChosen }
 }

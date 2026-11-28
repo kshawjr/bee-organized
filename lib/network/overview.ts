@@ -22,7 +22,9 @@
 
 import { normalizeTypes, type NetType } from './types'
 import { rollupReferredLeads, type ReferralEngagementRow } from '../referral-rollup'
-import { NURTURING_EXCLUDED_LOCATIONS } from './nurturing'
+// Its own list (2026-11-28): Test Location was let into NURTURING for FL-135/137,
+// but this is a report on real locations' Network, so it still leaves both out.
+const OVERVIEW_LEFT_OUT: readonly string[] = ['loc_test', 'loc_other']
 
 export type OverviewLocation = { id: string; name: string | null; slug: string | null }
 export type OverviewContact = { location_id: string | null; network_types: string[] | null; partner_stage: string | null }
@@ -43,7 +45,7 @@ export function buildOverview(args: {
 }) {
   const rows = new Map<string, OverviewRow>()
   for (const l of args.locations) {
-    if (l.slug && NURTURING_EXCLUDED_LOCATIONS.includes(l.slug)) continue
+    if (l.slug && OVERVIEW_LEFT_OUT.includes(l.slug)) continue
     rows.set(l.id, { id: l.id, name: l.name || 'Unnamed location', contacts: 0, partners: 0, notSure: 0, goneQuiet: 0, referred: 0, won: 0, revenue: 0, started: false })
   }
   for (const c of args.contacts) {

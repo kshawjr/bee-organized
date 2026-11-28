@@ -240,12 +240,14 @@ describe('rule 7: anyone who has ever paid, or has a won card, is never Nurturin
     expect(v(lead({ paid_amount: null, invoice_paid_at: '2026-08-12T00:00:00Z' }))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
   })
   it('a won card rules them out, open or closed, with no job and nothing paid', () => {
-    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: '2026-08-12T00:00:00Z', stage: 'Closed Won' }]))).toMatchObject({ nurturing: false, why: 'paid_or_won' })
+    // FL-135/137 (2026-11-28): a won card now has its own reason, checked before the owner's choice.
+    expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: '2026-08-12T00:00:00Z', stage: 'Closed Won' }]))).toMatchObject({ nurturing: false, why: 'won' })
     expect(v(lead(), fold([], [], [], [{ client_id: 'L1', closed_at: '2026-08-12T00:00:00Z', stage: 'Closed Lost' }]))).toMatchObject({ nurturing: true })
   })
   it('the SQL carries all three checks', () => {
     const s = nurturingSql()
-    expect(s).toContain('and coalesce(l.paid_amount, 0) <= 0')
+    // FL-135/137 (2026-11-28): the money checks sit in the catch-all (the owner's 'in' can pass them; a won card never).
+    expect(s).toContain('coalesce(l.paid_amount, 0) <= 0')
     expect(s).toContain('and l.invoice_paid_at is null')
     expect(s).toContain("and not exists (select 1 from engagements e where e.client_id = l.id and e.stage = 'Closed Won')")
   })
@@ -272,20 +274,21 @@ describe('Kevin\'s answers, 2026-11-20', () => {
     const j = await (await getList(`location_id=${PHILLY}&size=100`)).json()
     expect(j.rows.map((r: any) => r.name)).toContain('Closed Lost')
   })
-  it('3. nobody from Test Location or the transfer queue is listed, and nothing there is even read', async () => {
-    for (const loc of [TEST_LOC, QUEUE]) {
+  // FL-135/137 (Kevin, 2026-11-28): Test Location is let in, so this can be tried there. Only the transfer queue stays out.
+  it('3. nobody in the transfer queue is listed, and nothing there is even read', async () => {
+    for (const loc of [QUEUE]) {
       h.state.calls = []
       const j = await (await getList(`location_id=${loc}`)).json()
       expect(j).toMatchObject({ excluded: true, total: 0, rows: [], counts: { nurturing: 0 } })
       // slice 8 also reads the tag list; no person and no activity is read
       expect(h.state.calls.map((c) => c.table).sort()).toEqual(['hub_users', 'locations', 'lookups'])
     }
-    expect(v(lead({ location_id: 'loc_test' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
+    expect(v(lead({ location_id: 'loc_test' }))).toMatchObject({ nurturing: true })
     expect(v(lead({ location_id: 'loc_other' }))).toMatchObject({ nurturing: false, why: 'excluded_location' })
     expect(v(lead({ location_id: 'loc_tulsa' }))).toMatchObject({ nurturing: true })
   })
   it('the SQL carries both new clauses', () => {
-    expect(nurturingSql()).toContain("and l.location_id not in ('loc_test', 'loc_other')")
+    expect(nurturingSql()).toContain("and l.location_id not in ('loc_other')")
     expect(nurturingSql()).toContain('and not exists (select 1 from engagements e where e.client_id = l.id and e.closed_at is null)')
   })
   it('the person view knows about the open card too', async () => {
@@ -363,7 +366,7 @@ describe('18,826 people at one location', () => {
     expect(j.rows).toHaveLength(25)
     expect(j.rows[0].name).toBe('Person 00000')
     const leadReads = h.state.calls.filter((c) => c.table === 'leads' && !c.head)
-    expect(leadReads.length).toBe(20) // 19 full pages + the read that finds the end
+    expect(leadReads.length).toBe(21) // 19 full pages + the read that finds the end + (FL-135, 2026-11-28) the people an owner put in
     for (const c of leadReads) expect(c.range[1] - c.range[0] + 1).toBeLessThanOrEqual(1000)
     expect(JSON.stringify(j).length).toBeLessThan(20_000)
     expect(ms).toBeLessThan(5000)
@@ -372,7 +375,7 @@ describe('18,826 people at one location', () => {
     expect(last.rows).toHaveLength(1)
     expect(last.rows[0].name).toBe('Person 18825')
     // …and turning the page did not read 18,826 people again.
-    expect(h.state.calls.filter((c) => c.table === 'leads' && !c.head).length).toBe(20)
+    expect(h.state.calls.filter((c) => c.table === 'leads' && !c.head).length).toBe(21)
   })
   it('a person added between the count and the pages is still read', async () => {
     h.state.tables.leads = seedPhilly(1000)

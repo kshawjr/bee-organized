@@ -22,12 +22,16 @@ import {
 } from './writtenOff'
 import { WizardShell, wizPrimaryBtn, wizQuietBtn, wizInput, wizLabel } from './CloseWizardKit'
 import { T } from './tokens'
+import NurtureBoxField from './NurtureBoxField'
 
-export default function WriteOffWizard({ engagementId, invoices = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
+export default function WriteOffWizard({ engagementId, locationUuid = null, invoices = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
   const amount = writtenOffAmountFromInvoices(invoices)
   const [note, setNote] = useState('')
   const [tried, setTried] = useState(false)
   const [busy, setBusy] = useState(false)
+  // FL-137/135: a write-off gets the box too (Kevin: they owe money, but the
+  // owner may still want to keep in touch). Unticked by default; unticked is "no".
+  const [nurture, setNurture] = useState(false)
   const missing = !note.trim()
 
   async function confirm() {
@@ -35,7 +39,7 @@ export default function WriteOffWizard({ engagementId, invoices = [], isMobile =
     if (missing || readOnly) return
     setBusy(true)
     try {
-      const j = await commitEngagementClose(engagementId, { closeAs: WRITTEN_OFF, closedNote: note })
+      const j = await commitEngagementClose(engagementId, { closeAs: WRITTEN_OFF, closedNote: note, nurture })
       setToast({ kind: 'success', msg: 'Written off' })
       onClosed('Closed Lost', { ...j, closed_reason: WRITTEN_OFF })
     } catch (e) {
@@ -69,6 +73,7 @@ export default function WriteOffWizard({ engagementId, invoices = [], isMobile =
           <p style={{ fontSize: '11px', color: T.state.danger.fg }}>{WRITE_OFF_REASON_MISSING}</p>
         )}
       </div>
+      <NurtureBoxField checked={nurture} onChange={setNurture} locationUuid={locationUuid} disabled={busy} />
     </WizardShell>
   )
 }

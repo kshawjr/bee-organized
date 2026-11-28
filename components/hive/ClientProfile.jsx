@@ -1005,6 +1005,7 @@ export default function ClientProfile({ clientId, people = [], currentUserId = n
         <CloseLostWizard
           engagementId={open[0]?.id || null}
           leadId={c.id}
+          locationUuid={c.location_uuid || null}
           reasons={lookupOptions.closeLostReasons || []}
           isMobile={isMobile}
           stopLeadDrips

@@ -26,9 +26,12 @@ import React, { useState } from 'react'
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
 import { commitEngagementClose, invoicesSettled, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
 import { T } from './tokens'
+import NurtureBoxField from './NurtureBoxField'
+import { nurtureBoxShows } from './nurtureBox'
 
 export default function CloseEngagementConfirm({
   engagementId,
+  locationUuid = null,            // FL-137/135: the box's words depend on Mailchimp being open here
   invoices = [],
   reasons = [],                   // admin-configured close-lost LABELS (HiveShell lookupOptions.closeLostReasons)
   initialCloseAs = CLOSED_LOST,   // drag-to-close preselects its column
@@ -45,6 +48,9 @@ export default function CloseEngagementConfirm({
   const [closeReason, setCloseReason] = useState(reasonList[0])
   const [closeNote, setCloseNote] = useState('')
   const [busy, setBusy] = useState(false)
+  // FL-137/135: the Lost box, unticked by default; unticked is "no".
+  const [nurture, setNurture] = useState(false)
+  const boxShows = closeAs === CLOSED_LOST && nurtureBoxShows(closeReason)
 
   // Won gate: every invoice paid or zero balance (no invoices = clear).
   const settled = invoicesSettled(invoices)
@@ -55,7 +61,7 @@ export default function CloseEngagementConfirm({
     setBusy(true)
     try {
       const j = await commitEngagementClose(engagementId, {
-        closeAs, closedReason: closeReason, closedNote: closeNote,
+        closeAs, closedReason: closeReason, closedNote: closeNote, nurture: boxShows ? nurture : undefined,
       })
       setToast({ kind: 'success', msg: `Closed as ${closeAs === CLOSED_WON ? 'won' : 'lost'}` })
       onClosed(closeAs, j)
@@ -95,6 +101,7 @@ export default function CloseEngagementConfirm({
       <input value={closeNote} onChange={e => setCloseNote(e.target.value)}
         placeholder={otherNeedsNote ? 'Note (required for “Other”)…' : 'Note (optional)…'}
         style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised }} />
+      {boxShows && <NurtureBoxField checked={nurture} onChange={setNurture} locationUuid={locationUuid} disabled={busy} />}
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button onClick={onCancel} disabled={busy}
           style={{ padding: '7px 12px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>

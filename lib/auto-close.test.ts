@@ -243,7 +243,8 @@ describe('findStaleEnquiries — who closes', () => {
     expect(r.toClose.map(x => x.leadId).sort()).toEqual(['ADD', 'CID'])
   })
 
-  it('the transfer queue and the test location are dropped by slug before any exit is read', async () => {
+  // FL-135/137 (Kevin, 2026-11-28): Test Location is let into the auto-close so this can be tried there.
+  it('the transfer queue is dropped by slug before any exit is read; Test Location now closes like anywhere else', async () => {
     world({
       leads: [
         lead({ id: 'Q1', created_at: daysAgo(48), location_id: 'loc_other', location_uuid: 'uuid-other' }),
@@ -252,11 +253,11 @@ describe('findStaleEnquiries — who closes', () => {
       ],
     })
     const r = await scan()
-    expect(r.toClose.map(x => x.leadId)).toEqual(['L1'])
+    expect(r.toClose.map(x => x.leadId).sort()).toEqual(['L1', 'T1'])
     expect(r.spared).toEqual([])
-    // Their ids never reach the chunked reads.
+    // The queue's ids never reach the chunked reads.
     const asked = h.state.calls.filter(c => c.table === 'service_requests').flatMap(c => (h.opArg(c.ops, 'in') ?? ['', []])[1])
-    expect(asked).toEqual(['L1'])
+    expect(asked.sort()).toEqual(['L1', 'T1'])
   })
 
   it('a lead with no email and no phone still closes at 35 days (exit 4 keeps them out of the worklist, not out of the close)', async () => {
@@ -340,7 +341,7 @@ describe('closeStaleEnquiry — what a close writes', () => {
   it('with no engagement: founds one already Closed Lost, reason "No response", note and title from the ENQUIRY month', async () => {
     world({ leads: [] })
     const r = await closeStaleEnquiry(ITEM, { now: NOW })
-    expect(r).toEqual({ leadId: 'L1', engagementIds: ['eng-new'], founded: true })
+    expect(r).toEqual({ leadId: 'L1', engagementIds: ['eng-new'], founded: true, mailchimpChosen: false })
 
     const ins = h.state.calls.find(c => c.table === 'engagements' && h.hasOp(c.ops, 'insert'))!
     const row = h.opArg(ins.ops, 'insert')![0]
@@ -360,14 +361,14 @@ describe('closeStaleEnquiry — what a close writes', () => {
   it('with an open manual engagement: closes it in place, founds nothing', async () => {
     world({ leads: [] })
     const r = await closeStaleEnquiry({ ...ITEM, openEngagementIds: ['e-open'] }, { now: NOW })
-    expect(r).toEqual({ leadId: 'L1', engagementIds: ['e-open'], founded: false })
+    expect(r).toEqual({ leadId: 'L1', engagementIds: ['e-open'], founded: false, mailchimpChosen: false })
     const upd = h.state.calls.find(c => c.table === 'engagements' && h.hasOp(c.ops, 'update'))!
     expect(h.opArg(upd.ops, 'update')![0]).toMatchObject({ stage: 'Closed Lost', closed_reason: AUTO_CLOSE_REASON })
     expect(h.opArg(upd.ops, 'in')).toEqual(['id', ['e-open']])
     expect(h.state.calls.some(c => c.table === 'engagements' && h.hasOp(c.ops, 'insert'))).toBe(false)
   })
 
-  it('writes nothing on the lead row except the welcome-email cancel: no stage, no junk, no dismiss', async () => {
+  it('writes nothing on the lead row except the welcome-email cancel and (FL-137, 2026-11-28) the Nurturing choice: no stage, no junk, no dismiss', async () => {
     world({ leads: [] })
     await closeStaleEnquiry(ITEM, { now: NOW })
     const leadWrites = h.state.calls
@@ -376,7 +377,9 @@ describe('closeStaleEnquiry — what a close writes', () => {
     // cancelPendingWelcomeEmail is one of the wizard's three cancels and it
     // lives on the lead row. That is the ONLY lead write, and it only nulls
     // the schedule.
-    expect(leadWrites).toEqual([{ welcome_email_scheduled_at: null }])
+    expect(leadWrites).toContainEqual({ welcome_email_scheduled_at: null })
+    expect(leadWrites).toContainEqual({ nurture_choice: 'in', nurture_choice_at: NOW.toISOString(), nurture_choice_how: 'auto_close', nurture_choice_by: null })
+    expect(leadWrites).toHaveLength(2) // not at Test Location, so no Mailchimp choice
   })
 
   it('one stage_change touchpoint with no actor, pointing at the engagement', async () => {

@@ -270,7 +270,7 @@ export default function NurturingScreen({ locationId, locationName = null, fetch
         <p className="nn-eyebrow">Network &amp; Nurture</p>
         <h1 className="nn-title">Nurturing{locationId && locationName ? ` · ${locationName}` : ''}</h1>
         {/* The days come from the server, which reads the rule's one setting (lib/network/nurturing.ts). Never a number typed here. */}
-        <p className="nn-lede" data-lede>Clients who showed interest but never started a job{data ? <>, and haven&rsquo;t had an assessment or quote in {data.quietDays} days</> : null}.</p>
+        <p className="nn-lede" data-lede>Clients who showed interest but never started a job{data ? <>, and haven&rsquo;t had an assessment or quote in {data.quietDays} days</> : null}, plus anyone you chose to nurture.</p>
         <span className="nn-preview" data-preview-note>Preview. Only super admins can see this; owners still see Network closed.</span>
 
         {!locationId && <p className="nn-empty" data-pick-location style={{ marginTop: 20, border: `1px dashed ${T.border}`, borderRadius: 14 }}>Pick one location to see its Nurturing clients. A client belongs to one location, so this list is never built across all of them at once.</p>}

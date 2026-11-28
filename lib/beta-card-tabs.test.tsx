@@ -560,7 +560,8 @@ describe('write paths', () => {
     // Wizard: reason step → follow-up step → commit (default reason, skip follow-up).
     await click(buttonContaining(host, 'Next')!)
     await click(buttonContaining(host, 'Close as lost')!)
-    expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'No response' }])
+    // FL-137/135 (2026-11-28): the Lost box, left unticked, is sent as an answer — "no".
+    expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'No response', nurture: false }])
     await unmount()
   })
 

@@ -1,8 +1,10 @@
 // lib/mailchimp-sync.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // The ONE place Bee Hub adds people to a location's Mailchimp audience.
-// Called only by POST /api/mailchimp/sync (the "Sync now" button). No cron, no
-// webhook.
+// The batch (syncWebsiteLeadsToMailchimp) is called only by POST
+// /api/mailchimp/sync (the "Sync now" button). One person at a time
+// (addOneLeadToMailchimp, at the bottom, FL-137/135) is called only after an
+// owner's choice — or the 35-day auto-close's — is saved (lib/nurture-choice.ts).
 //
 // FL-75 SLICE 6 (2026-11-25) rebuilt this. It used to push "website leads",
 // one PUT at a time. It now sends the people the owner ticked on "Who goes to
@@ -78,6 +80,7 @@ import { loadReview, type ReviewLoad } from './mailchimp-review-load'
 import { isIncluded, matchedByPhone } from './mailchimp-review'
 import { emailKey } from './mailchimp-rules'
 import { scrub } from './mailchimp-audience-look'
+import { mailchimpOpenFor } from './mailchimp-rollout'
 // clientStatus.js is an untyped pure JS module — typed at the boundary, same
 // as lib/hub-all-overview.ts does, so the arguments stay checked.
 import { deriveClientStatus as deriveClientStatusUntyped } from '@/components/hive/shared/clientStatus'
@@ -621,9 +624,16 @@ async function writeLeads(db: any, ids: string[], patch: Record<string, unknown>
 // reach-out touchpoints, Jobber child rows and Network moves — the same inputs
 // the Hub ships, so the tag agrees with what the Hub shows. Chunked .in().
 async function loadRowsAndTags(db: any, ids: string[], nowMs: number): Promise<{ rowsById: Record<string, any>; tagsById: Record<string, string[]> }> {
+  const { rowsById, tagsById } = await loadRowsAndTagsWithStatus(db, ids, nowMs)
+  return { rowsById, tagsById }
+}
+// The same, plus each record's live client status (the one-person add reads
+// it to refuse anyone who is still a request).
+async function loadRowsAndTagsWithStatus(db: any, ids: string[], nowMs: number): Promise<{ rowsById: Record<string, any>; tagsById: Record<string, string[]>; statusById: Record<string, string> }> {
   const rowsById: Record<string, any> = {}
   const tagsById: Record<string, string[]> = {}
-  if (!ids.length) return { rowsById, tagsById }
+  const statusById: Record<string, string> = {}
+  if (!ids.length) return { rowsById, tagsById, statusById }
   const openIds = new Set<string>()
   const wonIds = new Set<string>()
   const engagementCounts: Record<string, number> = {}
@@ -687,7 +697,195 @@ async function loadRowsAndTags(db: any, ids: string[], nowMs: number): Promise<{
       network_moved: networkMoved.has(id),
     })
     const status = deriveClientStatus(person, openIds, nowMs, wonIds)
+    statusById[id] = status
     tagsById[id] = buildMemberTags({ projectType: row.project_type, source: row.source, clientStatus: status, leadTags: labelsByLead[id] || [] })
   }
-  return { rowsById, tagsById }
+  return { rowsById, tagsById, statusById }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// ONE PERSON, ADDED BECAUSE AN OWNER SAID SO (FL-137/135, Kevin 2026-11-28)
+// ═════════════════════════════════════════════════════════════════════════
+// Send to Jobber's "Add to Mailchimp" box, the Closed Lost box, the 35-day
+// auto-close and the Nurturing tab's "Send to Mailchimp" box all end here.
+// Every lock the batch above has, for one person, in the same order:
+//   · Test Location only before roll-out (lib/mailchimp-rollout.ts).
+//   · The owner chose them: leads.mailchimp_choice is 'in'. Nobody else, ever.
+//   · Never while they are still a request (an open enquiry in the Inbox).
+//   · Kevin's switch, the connection, the audience; and the set-up must be
+//     finished (before that, the set-up's own screen covers everyone).
+//   · REFUSED WHILE ANY SIGN-UP FLOW IS LIVE (Kevin, 2026-11-28: one person
+//     or many — Mailchimp would send its own welcome). Unreadable flows are
+//     a refusal too. Read again right before the add and before any tag.
+//   · Never the Recycle Bin, never anyone who said no (their record, the
+//     shared no-marketing list), never an address Mailchimp keeps refusing.
+//   · Never changes anyone already in Mailchimp: their address is looked up
+//     first, and the add is update_existing: false.
+//   · Tags that start a live flow are held back (nobody is here to say yes).
+// Nothing here emails anyone from Bee Hub.
+
+export type AddOneOutcome =
+  | 'added' | 'already_there'
+  | 'not_found' | 'not_open' | 'not_chosen' | 'still_an_enquiry' | 'recycle_bin' | 'no_email' | 'said_no'
+  | 'sync_not_enabled' | 'not_connected' | 'no_audience' | 'setup_not_finished'
+  | 'mailchimp_unreadable' | 'signup_flows_live' | 'no_list_unreadable' | 'held' | 'refused' | 'failed'
+
+export type AddOneResult = { sent: boolean; outcome: AddOneOutcome; words: string; flows?: string[] }
+
+export const ADD_ONE_WORDS: Record<AddOneOutcome, string> = {
+  added: 'Added to Mailchimp.',
+  already_there: 'Already in Mailchimp, so left exactly as they were.',
+  not_found: 'Not sent to Mailchimp: this person could not be found.',
+  not_open: 'Not sent to Mailchimp: Mailchimp is coming soon for this location.',
+  not_chosen: 'Not sent to Mailchimp: nobody chose to send them.',
+  still_an_enquiry: 'Not sent to Mailchimp: they are still a new enquiry in the Inbox.',
+  recycle_bin: 'Not sent to Mailchimp: this person is in the Recycle Bin.',
+  no_email: 'Not sent to Mailchimp: there is no email address for them.',
+  said_no: 'Not sent to Mailchimp: they have said no to marketing emails.',
+  sync_not_enabled: 'Not sent to Mailchimp: sending is not switched on for this location yet.',
+  not_connected: 'Not sent to Mailchimp: Mailchimp is not connected.',
+  no_audience: 'Not sent to Mailchimp: no Mailchimp audience is chosen.',
+  setup_not_finished: 'Not sent to Mailchimp yet: finish the Mailchimp set-up first. It covers this person.',
+  mailchimp_unreadable: 'Not sent to Mailchimp: Mailchimp could not be checked just now.',
+  signup_flows_live: 'Not sent to Mailchimp: a welcome journey is switched on in Mailchimp, and it would email them. Pause it first.',
+  no_list_unreadable: 'Not sent to Mailchimp: the no-marketing list could not be checked.',
+  held: 'Not sent to Mailchimp: Mailchimp has refused this address before.',
+  refused: 'Not sent to Mailchimp: Mailchimp refused this address.',
+  failed: 'Not sent to Mailchimp: something went wrong. Nothing was changed there.',
+}
+
+const STILL_AN_ENQUIRY = new Set(['New', 'Attempting'])
+
+export async function addOneLeadToMailchimp(leadId: string, deps: Deps = {}): Promise<AddOneResult> {
+  const db = deps.db || supabaseService
+  const doFetch = deps.fetchImpl || ((url: string, init: any) => fetch(url, init) as any)
+  const sleep = deps.sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const now = deps.now || (() => Date.now())
+  const flowsOf = deps.readFlowsImpl || readFlows
+  const saidNoOf = deps.loadSuppressed || loadSaidNoSet
+  const out = (outcome: AddOneOutcome, extra: Partial<AddOneResult> = {}): AddOneResult => ({ sent: outcome === 'added', outcome, words: ADD_ONE_WORDS[outcome], ...extra })
+
+  try {
+    const { data: lead, error: leadErr } = await db.from('leads')
+      .select('id, email, location_uuid, is_junk, archived_at, marketing_opt_out, marketing_unsubscribed_at, mailchimp_choice')
+      .eq('id', leadId).maybeSingle()
+    if (leadErr || !lead) return out('not_found')
+    if (!mailchimpOpenFor(lead.location_uuid)) return out('not_open')
+    if (lead.mailchimp_choice !== 'in') return out('not_chosen')
+    if (lead.is_junk === true || lead.archived_at) return out('recycle_bin')
+    const k = emailKey(lead.email)
+    if (!k) return out('no_email')
+    if (lead.marketing_opt_out === true || lead.marketing_unsubscribed_at) return out('said_no')
+
+    const { data: loc, error: locErr } = await db.from('locations')
+      .select('id, location_id, mailchimp_connected, mailchimp_access_token, mailchimp_server_prefix, mailchimp_list_id, mailchimp_sync_live, mailchimp_first_sync_at')
+      .eq('id', lead.location_uuid).maybeSingle()
+    if (locErr || !loc) return out('not_found')
+    if (!loc.mailchimp_connected || !loc.mailchimp_access_token || !loc.mailchimp_server_prefix) return out('not_connected')
+    if (!loc.mailchimp_list_id) return out('no_audience')
+    if (!loc.mailchimp_sync_live) return out('sync_not_enabled')
+    if (!loc.mailchimp_first_sync_at) return out('setup_not_finished')
+    const token = loc.mailchimp_access_token as string
+    const prefix = loc.mailchimp_server_prefix as string
+    const base = apiBase(prefix)
+    const listId = loc.mailchimp_list_id as string
+    const clean = (t: unknown) => scrub(String(t ?? ''), token)
+
+    // The flows, live. Any sign-up flow live → refuse, one person or many.
+    const readNowFlows = () => flowsOf({ token, serverPrefix: prefix, listId, fetchImpl: doFetch, sleep })
+    const flows = await readNowFlows()
+    if (!flows.ok) return out('mailchimp_unreadable')
+    if (flows.mustPause.length) return out('signup_flows_live', { flows: flows.mustPause.map((f) => f.name) })
+
+    // Who they are now: their tags, and whether they are still a request.
+    const { rowsById, tagsById, statusById } = await loadRowsAndTagsWithStatus(db, [leadId], now())
+    const row = rowsById[leadId]
+    if (!row || row.is_junk === true) return out('recycle_bin')
+    if (STILL_AN_ENQUIRY.has(statusById[leadId])) return out('still_an_enquiry')
+    const tags = tagsById[leadId] || []
+    for (const c of flows.kevinConditional || []) {
+      if (tags.some((t) => t.toLowerCase() === c.tag.toLowerCase())) return out('signup_flows_live', { flows: [c.flow.name] })
+    }
+
+    // The no-marketing list must be readable, then must not have them.
+    const probe = await db.from('marketing_unsubscribes').select('email_normalized', { count: 'exact', head: true })
+    if (probe?.error) return out('no_list_unreadable')
+    if ((await saidNoOf([lead.email])).has(k)) return out('said_no')
+    const refusals = await loadRefusals(lead.location_uuid, { db })
+    const before = refusals.ok ? refusals.byKey.get(k) : undefined
+    if (isHeld(before)) return out('held')
+
+    // Already in Mailchimp, in any state (archived and unsubscribed too)? Leave them.
+    const look = await mcGetStatus(doFetch, sleep, token, `${base}lists/${encodeURIComponent(listId)}/members/${MD5_OF_LOWERCASED_EMAIL(k)}?fields=status`)
+    const stamp = () => new Date(now()).toISOString()
+    if (look === 'unreadable') return out('mailchimp_unreadable')
+    if (look === 'there') {
+      await writeLeads(db, [leadId], { mailchimp_synced_at: stamp(), mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp() })
+      return out('already_there')
+    }
+
+    const flowsStillSame = async () => {
+      const fresh = await readNowFlows()
+      return fresh.ok && fresh.fingerprint === flows.fingerprint && fresh.mustPause.length === 0
+    }
+    if (!(await flowsStillSame())) return out('signup_flows_live')
+    const res = await mcWrite(doFetch, sleep, token, 'POST', `${base}lists/${encodeURIComponent(listId)}`, {
+      members: [{ email_address: String(lead.email).trim(), status: 'subscribed', merge_fields: { FNAME: String(row.first_name || '').trim(), LNAME: String(row.last_name || '').trim() } }],
+      update_existing: false,
+    })
+    if (!res.ok) { console.info('[mailchimp-add-one]', JSON.stringify({ outcome: 'failed', detail: clean(res.detail) })); return out('failed') }
+    if (Number(res.body?.total_updated || 0) > 0 || (res.body?.updated_members || []).length) return out('failed')
+    const added = (res.body?.new_members || []).some((m: any) => emailKey(m?.email_address) === k)
+    const err = (res.body?.errors || []).find((e: any) => emailKey(e?.email_address) === k)
+    if (!added) {
+      if (err?.error_code === 'ERROR_CONTACT_EXISTS') {
+        await writeLeads(db, [leadId], { mailchimp_synced_at: stamp(), mailchimp_status: 'already_in_mailchimp', mailchimp_sync_error: null, updated_at: stamp() })
+        return out(res.attempts > 1 ? 'added' : 'already_there')
+      }
+      const text = clean(err?.error || err?.error_code || 'refused')
+      const kind = classifyRefusal(err?.error_code, err?.error)
+      if (kind === 'said_no') {
+        await recordSaidNo(lead.location_uuid, listId, String(lead.email).trim(), text, { db })
+        await writeLeads(db, [leadId], { mailchimp_sync_error: `said_no_in_mailchimp: ${text}`.slice(0, 500), updated_at: stamp() })
+        return out('said_no')
+      }
+      await writeLeads(db, [leadId], { mailchimp_sync_error: text.slice(0, 500), updated_at: stamp() })
+      if (refusals.ok) await recordRefusal(lead.location_uuid, k, { kind: kind === 'invalid' ? 'invalid' : 'temporary', code: err?.error_code ? String(err.error_code) : null, text }, stamp(), before, { db })
+      return out('refused')
+    }
+    if (refusals.ok && before) await clearRefusal(lead.location_uuid, k, { db })
+
+    // Tags: never one that starts a live flow; flows read again first.
+    const liveTag = new Set(flows.tagFlows.map((f) => String(f.tag || '').toLowerCase()).filter(Boolean))
+    const carry = tags.filter((t) => !liveTag.has(t.toLowerCase()))
+    let tagFail: string | null = null
+    if (carry.length) {
+      if (!(await flowsStillSame())) tagFail = 'flows_changed'
+      else {
+        const segments = new SegmentCache({ base, listId, token, doFetch, sleep })
+        for (const t of carry) { const r = await segments.addMembers(t, [String(lead.email).trim()]); if (!r.ok) { tagFail = `tags_failed (${t}): ${clean(r.detail)}`; break } }
+      }
+    }
+    await writeLeads(db, [leadId], tagFail
+      ? { mailchimp_status: 'subscribed', mailchimp_sync_error: `tags_pending: ${tagFail}`.slice(0, 500), updated_at: stamp() }
+      : { mailchimp_synced_at: stamp(), mailchimp_status: 'subscribed', mailchimp_sync_error: null, updated_at: stamp() })
+    console.info('[mailchimp-add-one]', JSON.stringify({ location: loc.location_id || lead.location_uuid, outcome: 'added', tags_held: tags.length - carry.length, tag_fail: tagFail }))
+    return out('added')
+  } catch (e: any) {
+    console.error('[mailchimp-add-one] failed', String(e?.message || e).slice(0, 300))
+    return out('failed')
+  }
+}
+
+// GET one member: 200 → there; 404 → not there; anything else → unreadable.
+async function mcGetStatus(doFetch: any, sleep: (ms: number) => Promise<void>, token: string, url: string): Promise<'there' | 'absent' | 'unreadable'> {
+  for (let attempt = 0; ; attempt++) {
+    let res: any
+    try { res = await doFetch(url, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }) }
+    catch { if (attempt < MAX_RETRIES) { await sleep(1000 * 2 ** attempt); continue } return 'unreadable' }
+    if (res.status === 200) return 'there'
+    if (res.status === 404) return 'absent'
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) { await sleep(1000 * 2 ** attempt); continue }
+    return 'unreadable'
+  }
 }

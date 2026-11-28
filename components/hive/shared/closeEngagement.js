@@ -88,7 +88,11 @@ export const WON_OVER_BALANCE = 'won_balance_owing'
 // Closed Lost + 'written_off'; the note is REQUIRED (the route refuses an
 // empty one) and the amount is computed by the route from the invoices —
 // never sent from here.
-export async function commitEngagementClose(engagementId, { closeAs, closedReason, closedNote, overBalance = false }) {
+// nurture (FL-137/135): the Closed Lost box's answer, true or false. Sent on
+// every Lost close that shows the box (nurtureBox.js) — unticked is "no",
+// and the server stores it. Never sent on Won. Omitted (undefined) when the
+// close had no box: Junk Lead or Duplicate.
+export async function commitEngagementClose(engagementId, { closeAs, closedReason, closedNote, overBalance = false, nurture }) {
   const note = (closedNote || '').trim()
   const wonOverBalance = closeAs === CLOSED_WON && overBalance
   if (wonOverBalance && !note) throw new Error('A reason is required to close this with a balance showing')
@@ -98,6 +102,7 @@ export async function commitEngagementClose(engagementId, { closeAs, closedReaso
     : closeAs === WRITTEN_OFF
       ? { stage: CLOSED_LOST, closed_reason: WRITTEN_OFF, closed_note: note }
       : { stage: CLOSED_LOST, closed_reason: closedReason, ...(note ? { closed_note: note } : {}) }
+  if (closeAs !== CLOSED_WON && typeof nurture === 'boolean') body.nurture = nurture
   const res = await fetch(`/api/engagements/${engagementId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

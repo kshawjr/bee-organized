@@ -37,7 +37,7 @@ const PAGE = 1000
 const PARALLEL = 6
 const CACHE_MS = 60_000
 
-export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, paid_amount, invoice_paid_at'
+export const NURTURE_LEAD_COLS = 'id, location_id, name, first_name, last_name, email, phone, city, zip, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, paid_amount, invoice_paid_at, nurture_choice'
 
 export type NurtureLocation = { id: string; slug: string; name: string | null }
 export type NurtureList = { excluded?: boolean; rows: NurtureRow[]; counts: { nurturing: number; needsContactInfo: number; hadQuoteOrAssessment: number }; readMs: number; peopleRead: number }
@@ -92,6 +92,13 @@ async function readCandidates(db: Db, loc: NurtureLocation, createdBefore: strin
     rows = rows.concat(data || [])
     if ((data || []).length < PAGE) break
   }
+  // People an owner put in Nurturing (nurture_choice 'in') skip the 30-day
+  // wait, so they are read too, whatever their age (few: one row per choice;
+  // anyone read twice is kept once, below).
+  const chosen = await pageAll(() => db.from('leads').select(NURTURE_LEAD_COLS)
+    .eq('location_uuid', loc.id).is('archived_at', null).not('is_junk', 'is', true)
+    .eq('nurture_choice', 'in').order('id', { ascending: true }), 'chosen leads')
+  rows = rows.concat(chosen)
   const seen = new Set<string>()
   return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
 }
@@ -122,7 +129,7 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.list
 
   const started = Date.now()
-  // Test Location and the transfer queue: nobody is Nurturing there, so nothing is read.
+  // The transfer queue: nobody is Nurturing there, so nothing is read.
   if (NURTURING_EXCLUDED_LOCATIONS.includes(loc.slug)) {
     return { excluded: true, rows: [], counts: { nurturing: 0, needsContactInfo: 0, hadQuoteOrAssessment: 0 }, readMs: 0, peopleRead: 0 }
   }
@@ -154,7 +161,7 @@ export async function loadNurturingList(db: Db, loc: NurtureLocation, opts: { no
 export const NURTURE_PERSON_COLS =
   'id, location_id, location_uuid, name, first_name, last_name, company, email, phone, address, street2, city, state, zip, ' +
   'source, project_type, request_details, notes, created_at, archived_at, is_junk, marketing_opt_out, marketing_unsubscribed_at, paid_amount, invoice_paid_at, ' +
-  'preferred_contact, referred_by_kind'
+  'preferred_contact, referred_by_kind, nurture_choice'
 
 /**
  * The tags a Nurturing person can be given at this location: THE one tag list,

@@ -1479,6 +1479,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         <CloseLostWizard
           engagementId={engagementId}
           leadId={client?.id}
+          locationUuid={eng?.location_uuid || null}
           reasons={lookupOptions?.closeLostReasons || []}
           isMobile={isMobile}
           onCancel={() => setWizard(null)}
@@ -1516,6 +1517,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {wizard === 'write-off' && eng && (
         <WriteOffWizard
           engagementId={engagementId}
+          locationUuid={eng?.location_uuid || null}
           invoices={children.invoices || []}
           isMobile={isMobile}
           onCancel={() => setWizard(null)}

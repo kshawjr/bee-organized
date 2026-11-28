@@ -37,6 +37,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import { mailchimpOpenFor } from '@/lib/mailchimp-rollout'
 import { isAssessmentType } from '@/lib/assessment-type'
 import { ASSESSMENT_TIME_OPTIONS, buildAssessmentIso } from './shared/assessmentTime'
 import { buildAddressChoices, CURRENT_CHOICE_KEY } from '@/lib/address-choice'
@@ -241,6 +242,12 @@ export default function SendToJobberModal({ person, engagementId = null, address
   // open to say so, and closes (with the usual patch) on Done.
   const [visitRefused, setVisitRefused] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  // FL-137 (Kevin, 2026-11-28): "Add to Mailchimp", ticked — the owner can
+  // untick it. Only where Mailchimp is open (Test Location before roll-out).
+  // Saved after the send works; while someone is still a request they are
+  // never sent to Mailchimp.
+  const mailchimpOpen = mailchimpOpenFor(person.locationId)
+  const [addToMailchimp, setAddToMailchimp] = useState(true)
   const [errorMsg, setErrorMsg] = useState(null)
 
   // Which address this send is for. A client who has moved keeps the address
@@ -488,6 +495,21 @@ export default function SendToJobberModal({ person, engagementId = null, address
         match_status: json.match_status || null,
       },
     ]
+    // FL-137: the Mailchimp box, saved now the send has worked. Never holds
+    // the send up: a failure is a line on the record's timeline, nothing more.
+    if (mailchimpOpen) {
+      try {
+        const r = await fetch(`/api/leads/${person.id}/mailchimp-choice`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice: addToMailchimp ? 'in' : 'out' }),
+        })
+        const mj = await r.json().catch(() => ({}))
+        if (addToMailchimp) {
+          const words = mj?.mailchimp?.words || 'Not sent to Mailchimp: something went wrong.'
+          doneArgs[0].outreachTimeline = [...doneArgs[0].outreachTimeline, { id: `o${stamp + 9}`, type: 'system', method: 'system', label: words, ts: 'Just now', status: 'done' }]
+        }
+      } catch { /* the send to Jobber stands */ }
+    }
     // The job is in Jobber but the visit time did not book: say so before
     // closing. Every other send closes exactly as it always did.
     if (json.visit && json.visit.booked === false) {
@@ -917,6 +939,16 @@ export default function SendToJobberModal({ person, engagementId = null, address
                     : `${action === 'job' ? 'A job' : 'An in-person assessment'} needs a street, city and state, and this address has no ${describeMissing(missingVisitAddressParts(visitAddress))}. Fix it on the client record, or go back and send to another address.`}
                 </p>
               </div>
+            )}
+
+            {mailchimpOpen && (
+              <label data-testid="add-to-mailchimp" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '10px 12px', border: `0.5px solid ${T.hairline.line}`, borderRadius: T.radius.control, cursor: submitting ? 'default' : 'pointer' }}>
+                <input type="checkbox" checked={addToMailchimp} disabled={submitting} onChange={e => setAddToMailchimp(e.target.checked)} style={{ marginTop: '2px', width: '16px', height: '16px', flex: 'none' }} />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary }}>Add to Mailchimp</span>
+                  <span style={{ fontSize: '11px', color: T.ink.muted }}>They go on your Mailchimp list once this is sent. Untick to leave them off.</span>
+                </span>
+              </label>
             )}
 
             {errorMsg && (

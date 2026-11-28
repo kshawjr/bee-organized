@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { AUTO_CLOSE_DAYS, closeStaleEnquiry, findStaleEnquiries } from '@/lib/auto-close'
+import { sendChosenToMailchimp } from '@/lib/nurture-mailchimp'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -73,12 +74,20 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const closed: { lead_id: string; name: string | null; location_id: string; engagement_ids: string[]; founded: boolean }[] = []
+  const closed: { lead_id: string; name: string | null; location_id: string; engagement_ids: string[]; founded: boolean; mailchimp?: string }[] = []
   const failed: { lead_id: string; name: string | null; location_id: string; error: string }[] = []
   for (const item of batch) {
     try {
       const r = await closeStaleEnquiry(item, { now })
-      closed.push({ lead_id: item.leadId, name: item.name, location_id: item.locationId, engagement_ids: r.engagementIds, founded: r.founded })
+      // FL-137 rule 4: auto-closed → Mailchimp too, where Mailchimp is open.
+      // Every lock (live sign-up flows refuse it, one person or many) is in
+      // addOneLeadToMailchimp. Never on a dry run (that returned above).
+      let mailchimp: string | undefined
+      if (r.mailchimpChosen) {
+        const m = await sendChosenToMailchimp(item.leadId, item.locationUuid)
+        mailchimp = m?.outcome
+      }
+      closed.push({ lead_id: item.leadId, name: item.name, location_id: item.locationId, engagement_ids: r.engagementIds, founded: r.founded, ...(mailchimp ? { mailchimp } : {}) })
     } catch (err: any) {
       console.error('[cron:auto-close] close failed', { leadId: item.leadId, err })
       failed.push({ lead_id: item.leadId, name: item.name, location_id: item.locationId, error: err?.message ?? String(err) })

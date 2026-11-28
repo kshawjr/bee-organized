@@ -2056,6 +2056,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <CloseLostWizard
           engagementId={(engagements.find(e => e.client_id === closeLostFor.id && !isTerminal(e.stage)) || {}).id || null}
           leadId={closeLostFor.id}
+          locationUuid={closeLostFor.locationId || null}
           reasons={closeLostReasons}
           isMobile={isMobile}
           stopLeadDrips
