@@ -307,7 +307,7 @@ export function isOther(loc: { name?: string | null; location_id?: string | null
   return loc.location_id === OTHER_CODE || String(loc.name ?? '').trim().toLowerCase() === 'other'
 }
 
-export function newLeadRow(member: MailchimpMember, loc: PullLocation, runId: string, unsubscribed: boolean): Record<string, unknown> {
+export function newLeadRow(member: MailchimpMember, loc: PullLocation, runId: string, unsubscribed: boolean, importSource: string = PULL_IMPORT_SOURCE): Record<string, unknown> {
   const first = member.firstName || null, last = member.lastName || null
   const phone = phoneForWrite(member.phone)
   const row: Record<string, unknown> = {
@@ -319,7 +319,7 @@ export function newLeadRow(member: MailchimpMember, loc: PullLocation, runId: st
     email: member.email.trim(),
     phone: phone.value,
     stage: 'Nurturing',
-    import_source: PULL_IMPORT_SOURCE,
+    import_source: importSource,
     source: PULL_SOURCE_LABEL,
     created_at: member.joinedAt,
     metadata: { mailchimp_import: { run_id: runId, member_id: member.id, audience_id: loc.audienceId, joined_at: member.joinedAt, status: member.status } },
@@ -406,7 +406,12 @@ export type ApplyResult = {
 
 // deps.tags: the location's tags, read by loadPull for THIS import. deps.by:
 // the Bee Hub user who confirmed (recorded on each tag link).
-export async function applyPull(plan: PullPlan, location: PullLocation, deps: { db?: any; runId: string; tags?: readonly TagDef[]; by?: string | null }): Promise<ApplyResult[]> {
+// FL-131 (the ongoing sync, its own files) also writes through here, with
+// three extras the set-up import never passes: leadIdFor (a fixed record id,
+// so two runs racing can never both make the person — the database refuses
+// the second, which is reported as already there), importSource, and the
+// words saved with an unsubscribe.
+export async function applyPull(plan: PullPlan, location: PullLocation, deps: { db?: any; runId: string; tags?: readonly TagDef[]; by?: string | null; leadIdFor?: (m: MailchimpMember) => string; importSource?: string; saidNoWords?: string }): Promise<ApplyResult[]> {
   const db = deps.db || supabaseService
   if (isOther(location)) throw new Error('Refused: never import into Other.')
   const out: ApplyResult[] = []
@@ -421,11 +426,15 @@ export async function applyPull(plan: PullPlan, location: PullLocation, deps: { 
     if (exists && exists.length) { out.push({ ...base, outcome: 'already_there', leadId: exists[0].id }); continue }
 
     if (d.unsubscribed) {
-      const listed = await recordSaidNo(location.id, location.audienceId, m.email, 'unsubscribed in Mailchimp (found by the slice 7 import)', { db })
+      const listed = await recordSaidNo(location.id, location.audienceId, m.email, deps.saidNoWords || 'unsubscribed in Mailchimp (found by the slice 7 import)', { db })
       // Not on the list → no record. A record without it would be mailable.
       if (!listed) { out.push({ ...base, outcome: 'no_list_write_failed' }); continue }
     }
-    const { data: ins, error: insErr } = await db.from('leads').insert(newLeadRow(m, location, deps.runId, d.unsubscribed)).select('id').single()
+    const fixedId = deps.leadIdFor ? deps.leadIdFor(m) : null
+    const row = newLeadRow(m, location, deps.runId, d.unsubscribed, deps.importSource || PULL_IMPORT_SOURCE)
+    const { data: ins, error: insErr } = await db.from('leads').insert(fixedId ? { id: fixedId, ...row } : row).select('id').single()
+    // A fixed id already taken: another run made this person first. First one wins.
+    if (fixedId && insErr && (insErr as any).code === '23505') { out.push({ ...base, outcome: 'already_there', leadId: fixedId }); continue }
     if (insErr || !ins) { out.push({ ...base, outcome: 'insert_failed', detail: insErr?.message }); continue }
     const t = tagsFor(m.tags, deps.tags || [])
     let tagsFailed = false

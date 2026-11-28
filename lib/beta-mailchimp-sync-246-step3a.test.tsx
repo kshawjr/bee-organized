@@ -233,9 +233,18 @@ describe('manual trigger only, one guard, no second push path', () => {
     expect(src).not.toMatch(/export async function GET/)
   })
 
+  // FL-131 (2026-11-27, Kevin): an hourly sweep now READS Mailchimp (the
+  // ongoing sync, people in). The point of this pin is unchanged: no timer
+  // ever PUSHES to Mailchimp. So: the only Mailchimp cron is the sweep, no
+  // cron is the push route, and the sweep never loads the push engine (the
+  // next test: only the sync route imports it).
   it('no cron entry points at the sync', () => {
-    const vercel = readFileSync(join(process.cwd(), 'vercel.json'), 'utf8')
-    expect(vercel).not.toMatch(/mailchimp/i)
+    const vercel = JSON.parse(readFileSync(join(process.cwd(), 'vercel.json'), 'utf8'))
+    const paths: string[] = vercel.crons.map((c: any) => c.path)
+    expect(paths.filter((p) => /mailchimp/i.test(p))).toEqual(['/api/cron/mailchimp-sweep'])
+    expect(paths.some((p) => /\/api\/mailchimp\/sync/.test(p))).toBe(false)
+    const sweep = readFileSync(join(process.cwd(), 'app/api/cron/mailchimp-sweep/route.ts'), 'utf8')
+    expect(sweep).not.toMatch(/mailchimp-sync|\/api\/mailchimp\/sync|method:\s*'POST'/)
   })
 
   it('the engine is imported by the sync route and nothing else', () => {

@@ -4,6 +4,7 @@
 // fire-and-forget — they log errors and never throw, so PATCH responses
 // are never blocked by drip bookkeeping.
 
+import { isMailchimpSignup } from './mailchimp-signup-rules'
 import { supabaseService } from './supabase-service'
 import { nextSendAt } from './drip-time'
 import { recordDripEnrolOutcome, type DripEnrolReason, type DripEnrolResult } from './drip-enrol-outcome'
@@ -374,7 +375,10 @@ export async function pastClientCheck(
         .select('import_source, paid_amount')
         .eq('id', leadId)
         .maybeSingle()
-  if (lead?.import_source && lead.import_source !== 'manual') return { past: true, failed: false }
+  // FL-131: a person the ongoing Mailchimp sync brought in is a new sign-up,
+  // not a past client: their record did not come from Jobber or an import.
+  // They are still a past client the moment they pay or are won (below).
+  if (lead?.import_source && lead.import_source !== 'manual' && !isMailchimpSignup(lead.import_source)) return { past: true, failed: false }
   if ((Number(lead?.paid_amount) || 0) > 0) return { past: true, failed: false }
 
   const { data: won, error: wonErr } = await supabaseService

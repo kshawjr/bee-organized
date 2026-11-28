@@ -46,6 +46,7 @@ import { resolveLocationTemplateFork } from './template-fork'
 // Type-only: erased at build, so it adds no runtime cycle (drip-lifecycle
 // imports this file; the value import below stays dynamic for that reason).
 import type { PastClientFacts } from './drip-lifecycle'
+import { isMailchimpSignup, signupTooLate, SIGNUP_GREETING_DELAY_MS } from './mailchimp-signup-rules'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
@@ -101,6 +102,10 @@ export async function scheduleWelcomeEmail(
   leadId: string,
   // The caller's already-loaded lead facts, when it has them (drip-send does).
   known: PastClientFacts | null = null,
+  // FL-131: the ongoing Mailchimp sync sets the 24 hours from the person's
+  // Mailchimp join time, not from now (Kevin, 2026-11-27). A due time already
+  // passed is sent at the next hourly run. Every other caller leaves it out.
+  opts: { from?: string | null } = {},
 ): Promise<ScheduleWelcomeResult> {
   try {
     const { pastClientCheck } = await import('./drip-lifecycle')
@@ -111,7 +116,9 @@ export async function scheduleWelcomeEmail(
       return 'check_failed'
     }
 
-    const scheduledAt = new Date(Date.now() + WELCOME_DELAY_MS).toISOString()
+    const fromMs = opts.from != null ? Date.parse(opts.from) : NaN
+    if (opts.from != null && !Number.isFinite(fromMs)) return 'error'
+    const scheduledAt = new Date(opts.from != null ? fromMs + SIGNUP_GREETING_DELAY_MS : Date.now() + WELCOME_DELAY_MS).toISOString()
 
     const { error } = await supabaseService
       .from('leads')
@@ -128,6 +135,30 @@ export async function scheduleWelcomeEmail(
   } catch (err) {
     console.error('[welcome] scheduleWelcomeEmail: unexpected error', { leadId, err })
     return 'error'
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Skip, with the reason saved (FL-131)
+// ──────────────────────────────────────────────────────────────────────
+// A person the ongoing Mailchimp sync brought in who will never be greeted:
+// too late (more than 72 hours after joining), unsubscribed, or added to
+// Mailchimp by Jobber. The reason goes on the record (the columns
+// welcome_skip_overdue.sql added), and any pending time is cleared. Only a
+// greeting not yet sent is touched.
+export type WelcomeSkipReason = 'too_late' | 'unsubscribed' | 'added_by_jobber' | 'source_unreadable' | 'returning_client'
+export async function skipWelcomeEmail(leadId: string, reason: WelcomeSkipReason, dueAt: string | null = null): Promise<boolean> {
+  try {
+    const { error } = await supabaseService
+      .from('leads')
+      .update({ welcome_email_scheduled_at: null, welcome_email_skipped_at: new Date().toISOString(), welcome_email_skip_reason: reason, welcome_email_skipped_due_at: dueAt })
+      .eq('id', leadId)
+      .is('welcome_email_sent_at', null)
+    if (error) { console.error('[welcome] skipWelcomeEmail: update failed', { leadId, reason, error }); return false }
+    return true
+  } catch (err) {
+    console.error('[welcome] skipWelcomeEmail: unexpected error', { leadId, reason, err })
+    return false
   }
 }
 
@@ -205,7 +236,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at, is_junk, paused, marketing_opt_out, import_source, paid_amount')
+    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at, welcome_email_scheduled_at, is_junk, paused, marketing_opt_out, import_source, paid_amount, created_at')
     .eq('id', leadId)
     .maybeSingle()
 
@@ -215,6 +246,14 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
 
   // Already sent (cron raced itself, or this was called twice). No-op.
   if (lead.welcome_email_sent_at) return { sent: false, error: 'already_sent' }
+
+  // FL-131: someone the ongoing Mailchimp sync brought in is greeted only up
+  // to 72 hours after they joined Mailchimp (their record's created_at).
+  // Checked again here, at send time: the hourly run may itself be late.
+  if (isMailchimpSignup(lead.import_source) && signupTooLate(lead.created_at, Date.now())) {
+    await skipWelcomeEmail(leadId, 'too_late', lead.welcome_email_scheduled_at ?? null)
+    return { sent: false, error: 'too_late' }
+  }
 
   // Junked → cancel the pending welcome (the lifecycle hook already
   // tries this on the is_junk PATCH; this is the authoritative backstop).
