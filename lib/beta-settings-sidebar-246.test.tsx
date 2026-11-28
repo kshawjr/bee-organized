@@ -67,11 +67,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const mount = async (initialSection: string | null = 'profile') => {
+// Test Location: the one place Mailchimp is open before roll-out (lib/mailchimp-rollout.ts).
+const TEST_LOCATION = { id: 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6', name: 'Test Location' }
+const mount = async (initialSection: string | null = 'profile', selectedLoc: any = null) => {
   await act(async () => {
     root.render(
       <CurrentUserContext.Provider value={currentUser}>
-        <SettingsScreen {...(initialSection ? { initialSection } : {})} franchiseRole="owner" />
+        <SettingsScreen {...(initialSection ? { initialSection } : {})} franchiseRole="owner" {...(selectedLoc ? { selectedLoc } : {})} />
       </CurrentUserContext.Provider>,
     )
   })
@@ -319,9 +321,10 @@ describe('Connections › Mailchimp is a live row', () => {
   // 2026-11-13 (Settings slice 4): Slack, Jobber and Mailchimp are no longer
   // nav rows — they are cards on one Connections page. The point of this test
   // is unchanged and is made on the cards: Mailchimp reads like the other two
-  // (a live connection you can open), never muted or "coming soon".
+  // (a live connection you can open), never muted or "coming soon" — at Test
+  // Location, the one place it is open before roll-out (2026-11-27).
   it('the card is on Connections, and is not muted against its neighbours', async () => {
-    await mount('connections')
+    await mount('connections', TEST_LOCATION)
     const card = (k: string) => container.querySelector(`[data-connection="${k}"]`) as HTMLButtonElement
     for (const k of ['slack', 'jobber', 'mailchimp']) expect(card(k), `a ${k} card`).toBeTruthy()
     expect(card('mailchimp').tagName).toBe('BUTTON')
@@ -333,7 +336,7 @@ describe('Connections › Mailchimp is a live row', () => {
   })
 
   it('selecting it opens the real card, not the placeholder', async () => {
-    await mount('mailchimp')
+    await mount('mailchimp', TEST_LOCATION)
     expect(container.textContent).toContain('Connect Mailchimp')
     // The placeholder's copy is gone, in full.
     expect(container.textContent).not.toContain('Not connected yet.')
@@ -341,7 +344,7 @@ describe('Connections › Mailchimp is a live row', () => {
   })
 
   it('there IS a button now, and it starts the connect flow', async () => {
-    await mount('mailchimp')
+    await mount('mailchimp', TEST_LOCATION)
     const btn = Array.from(container.querySelectorAll('button'))
       .find(b => b.textContent?.trim() === 'Connect Mailchimp')
     expect(btn, 'a Connect Mailchimp button').toBeTruthy()

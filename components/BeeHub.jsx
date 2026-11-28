@@ -43,6 +43,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from "@/lib/mailchimp-connection-state"
 import MailchimpReviewScreen, { DONE_NOT_SAVED } from "@/components/settings/MailchimpReviewScreen"
 import MailchimpConnectionScreen from "@/components/settings/MailchimpConnectionScreen"
+import { mailchimpOpenFor } from "@/lib/mailchimp-rollout"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { SignaturePreview } from "@/components/settings/EmailSignatureSettings"
 import {
@@ -17247,6 +17248,7 @@ const DEFAULT_SETTINGS = {
   },
   location: {
     locId:          '',
+    locUuid:        '',
     name:           '',
     address:        '',
     city:           '',
@@ -22148,6 +22150,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     return {
       ...DEFAULT_SETTINGS.location,
       locId:           currentLocationCtx.id,
+      locUuid:         currentLocationCtx.id || '',
       name:            currentLocationCtx.name || '',
       address:         currentLocationCtx.address || '',
       city:            currentLocationCtx.city || '',
@@ -22193,6 +22196,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // Falls back to the UUID for older initialLocations rows that predate the
     // locationId mapping in _hub-page.tsx.
     locId:          selectedLoc.locationId || selectedLoc.id,
+    locUuid:        selectedLoc.id || '',
     name:           selectedLoc.name,
     // Structured parts (street/city/state/zip) each edit + persist to their
     // own column (#93). selectedLoc.address stays the combined display string
@@ -23808,6 +23812,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // ?section=jobber or ?section=mailchimp link still lands on it. Owner-only,
   // by the same predicate that gates Connections itself.
   const CONNECTION_SECTIONS = ownerConfig ? ['slack', 'jobber', 'mailchimp'] : []
+  // Mailchimp is open only where lib/mailchimp-rollout.ts says (Test Location,
+  // until roll-out). Anywhere else ?section=mailchimp shows the Connections
+  // page, where Mailchimp is the greyed "Coming soon" card — never the
+  // Mailchimp screen, and never the no-access notice (which says the owner
+  // manages it).
+  const mailchimpOpen = mailchimpOpenFor(settings.location.locUuid)
+  const mailchimpShut = activeSection === 'mailchimp' && !mailchimpOpen
   // Deep-link / stale-state safety: if activeSection isn't one this role can
   // see (e.g. manager hits ?section=billing), show a polite no-access notice
   // instead of leaking the hidden section's UI.
@@ -23819,7 +23830,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // from SettingsShell.jsx (they carry data-settings-ui). The page colour
     // follows the section on screen, so a short rebuilt page has no band of
     // the old cream under it and an old section keeps the cream it was drawn on.
-    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:(sectionAllowed && SUI.REBUILT_SECTIONS.includes(activeSection)) ? SUI.PAGE_BG : '#f7f5f0', minHeight:'100vh', width:'100%', position:'relative' }}>
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:(sectionAllowed && (mailchimpShut || SUI.REBUILT_SECTIONS.includes(activeSection))) ? SUI.PAGE_BG : '#f7f5f0', minHeight:'100vh', width:'100%', position:'relative' }}>
       <SUI.SettingsFonts />
 
       {/* The dark "Settings" band is gone (slice 1): the title now sits at the
@@ -24302,13 +24313,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             The landing page: one card per connection, in this location's own
             state. A card opens the screen that connection always had, below,
             unchanged but for the "All connections" link above it. */}
-        {activeSection==='connections'&&(
+        {(activeSection==='connections' || mailchimpShut)&&(
           <SUI.SettingsPage>
             <SUI.PageHeader title="Connections" intro="Plug Bee Hub into the tools you already use." />
             <CUI.ConnectionsPage location={settings.location} locationId={realLocId} onOpen={key=>openSection(key, { push:true })} />
           </SUI.SettingsPage>
         )}
-        {CONNECTION_SECTIONS.includes(activeSection)&&(
+        {CONNECTION_SECTIONS.includes(activeSection) && !mailchimpShut &&(
           <CUI.ConnectionsBack onBack={()=>openSection('connections', { push:false })} />
         )}
 
@@ -24334,7 +24345,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         )}
 
         {/* ── Connections › Mailchimp (issue 246 step 2) — a real connect */}
-        {activeSection==='mailchimp'&&(
+        {activeSection==='mailchimp' && mailchimpOpen &&(
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>

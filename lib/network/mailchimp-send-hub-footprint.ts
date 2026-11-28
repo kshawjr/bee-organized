@@ -21,6 +21,8 @@
 // [what is there now, what main had].
 // ─────────────────────────────────────────────────────────────
 
+import { withoutMailchimpComingSoon } from '@/lib/mailchimp-coming-soon-hub-footprint'
+
 export const MAILCHIMP_SEND_HUB_PIECES: [string, string][] = [
   ["import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from \"@/lib/mailchimp-connection-state\"\nimport MailchimpReviewScreen, { DONE_NOT_SAVED } from \"@/components/settings/MailchimpReviewScreen\"\nimport MailchimpConnectionScreen from \"@/components/settings/MailchimpConnectionScreen\"\nimport { buildPreviewVars, applyPreviewVars } from \"@/lib/preview-vars\"\n", "import { deriveMailchimpState, mailchimpCopy, NO_AUDIENCES_COPY, NOT_LIVE_COPY, firstSyncConfirmCopy } from \"@/lib/mailchimp-connection-state\"\nimport MailchimpReviewScreen from \"@/components/settings/MailchimpReviewScreen\"\nimport { buildPreviewVars, applyPreviewVars } from \"@/lib/preview-vars\"\n"],
   ["// the new count — the number confirmed is always the number sent.\n// FL-75 slice 6 (2026-11-26): what the owner is told when the set-up starts\n// again because the audience or the connection changed (the review and the\n// first-sync dates were cleared — lib/mailchimp-connection-write.ts).\nexport const MC_RESET_WORDS = {\n  // Plain words (2026-11-26): these show on the guided set-up's overview.\n  audience: (name, prev) => `You chose a different Mailchimp list${name ? `, ${name}` : ''}, so the set-up starts again from the beginning. Nobody is sent over until you say yes at the end. ${prev ? `Nobody was taken out of ${prev}.` : 'Nobody was taken out of your old list.'}`,\n  disconnected: 'Disconnected from Mailchimp. What you chose belonged to that connection, so when you connect again the set-up starts from the beginning. Nobody was taken out of Mailchimp.',\n  reconnected: 'Mailchimp is connected again. What you chose before belonged to the old connection, so the set-up starts again from the beginning.',\n}\n\nexport function MailchimpCard({ settings, updateLocation }) {\n", "// the new count — the number confirmed is always the number sent.\nexport function MailchimpCard({ settings, updateLocation }) {\n"],
@@ -34,7 +36,9 @@ export const MAILCHIMP_SEND_HUB_PIECES: [string, string][] = [
 
 /** BeeHub.jsx with Mailchimp slice 6 taken back out. Throws if a piece is missing or doubled. */
 export function withoutMailchimpSendSlice6(src: string): string {
-  let s = src
+  // 2026-11-27: the Mailchimp "Coming soon" change is taken out first
+  // (lib/mailchimp-coming-soon-hub-footprint.ts), the same way.
+  let s = withoutMailchimpComingSoon(src)
   for (const [piece, back] of MAILCHIMP_SEND_HUB_PIECES) {
     const n = s.split(piece).length - 1
     if (n !== 1) throw new Error(`BeeHub.jsx: a Mailchimp slice 6 piece ${JSON.stringify(piece.slice(0, 60))} appears ${n} times, expected 1`)

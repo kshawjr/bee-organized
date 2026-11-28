@@ -38,7 +38,10 @@ const PAGE = read('components/settings/ConnectionsPage.jsx')
 const PAGE_CODE = PAGE.split('\n').filter(l => !l.trimStart().startsWith('//')).join('\n')
 const SETTINGS = HUB.slice(HUB.indexOf('export function SettingsScreen('))
 
-const LOC = '2b3c4d5e-1111-4222-8333-444455556666'
+// Test Location's real id: the one place Mailchimp is open before roll-out
+// (lib/mailchimp-rollout.ts), so these tests are the open card's. The greyed
+// card everywhere else has its own describe at the end.
+const LOC = 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6'
 const user = { id: 'u-owner', email: 'riley@bee.test', name: 'Riley Park', role: 'franchise', locationId: LOC, first_name: 'Riley', last_name: 'Park', phone: '', booking_link: null }
 // What a location row looks like to SettingsScreen (its selectedLoc shape).
 const loc = (over: Record<string, any> = {}) => ({
@@ -109,16 +112,16 @@ const NO_ACCESS = "You don't have access to this section"
 // ═══════════════════════════════════════════════════════════════════════════
 describe('each card says what is true for this location', () => {
   it('the rules, on their own: three cards, each in one of three states', () => {
-    const none = connectionCards({})
+    const none = connectionCards({ locUuid: LOC })
     expect(none.map(c => [c.id, c.state, c.chip])).toEqual([['slack', 'off', 'Not connected'], ['jobber', 'off', 'Not connected'], ['mailchimp', 'off', 'Not connected']])
-    const every = connectionCards({ slackConnected: true, slackChannelName: '#leads', slackTeamName: 'Bee Seattle', jobberStatus: 'connected', jobberAccountName: 'Acct', mailchimpConnected: true, mailchimpListId: 'L1', mailchimpListName: 'Friends' })
+    const every = connectionCards({ locUuid: LOC, slackConnected: true, slackChannelName: '#leads', slackTeamName: 'Bee Seattle', jobberStatus: 'connected', jobberAccountName: 'Acct', mailchimpConnected: true, mailchimpListId: 'L1', mailchimpListName: 'Friends' })
     expect(every.map(c => [c.id, c.state, c.chip, c.detail])).toEqual([
       ['slack', 'connected', 'Connected', '#leads · Bee Seattle'],
       ['jobber', 'connected', 'Connected', 'Acct'],
       ['mailchimp', 'connected', 'Connected', 'Friends'],
     ])
     // Linked but something is owed: not counted as connected.
-    const owed = connectionCards({ jobberStatus: 'reconnect_required', jobberAccountName: 'Acct', mailchimpConnected: true, mailchimpAccountName: 'MC', mailchimpListId: '' })
+    const owed = connectionCards({ locUuid: LOC, jobberStatus: 'reconnect_required', jobberAccountName: 'Acct', mailchimpConnected: true, mailchimpAccountName: 'MC', mailchimpListId: '' })
     expect(owed.map(c => [c.id, c.state, c.chip, c.detail])).toEqual([
       ['slack', 'off', 'Not connected', ''],
       ['jobber', 'finish', 'Reconnect required', 'Acct'],
@@ -340,11 +343,11 @@ describe('Gmail and Dialpad are roadmap cards: greyed, "Coming soon", and nothin
     // No location data can turn one on: they are not read from the location at all.
     await mount({}, loc({ ...ALL, gmailConnected: true, dialpadConnected: true, gmail_connected: true }))
     expect(summary()).toBe('3 connected · 2 coming soon')
-    expect(connectionCards({ gmailConnected: true, dialpadConnected: true }).map(c => c.id)).toEqual(['slack', 'jobber', 'mailchimp'])
+    expect(connectionCards({ locUuid: LOC, gmailConnected: true, dialpadConnected: true }).map(c => c.id)).toEqual(['slack', 'jobber', 'mailchimp'])
     // …even handed straight to the page, past everything Settings filters out.
     await act(async () => root.unmount()); container.remove()
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
-    await act(async () => { root.render(<ConnectionsPage {...({ location: { gmailConnected: true, dialpadConnected: true, gmail: true, dialpad: true, gmailStatus: 'connected' }, locationId: null, onOpen: () => {} } as any)} />) })
+    await act(async () => { root.render(<ConnectionsPage {...({ location: { locUuid: LOC, gmailConnected: true, dialpadConnected: true, gmail: true, dialpad: true, gmailStatus: 'connected' }, locationId: null, onOpen: () => {} } as any)} />) })
     expect(summary()).toBe('Nothing connected yet · 2 coming soon')
     expect(card('gmail').getAttribute('data-state')).toBe('soon'); expect(card('dialpad').getAttribute('data-state')).toBe('soon')
   })
@@ -711,5 +714,77 @@ describe('Call scripts is its own section', () => {
     expect(pane().querySelector('[data-call-scripts]')).toBeTruthy()
     expect(pane().textContent).not.toContain('Text messages')
     expect(pane().textContent).not.toContain('Email Templates')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mailchimp before roll-out (Kevin, 2026-11-27): greyed, "Coming soon", for
+// every location but Test Location. Owners can't connect, choose a list, or
+// start the set-up. A half-finished or finished connection underneath is left
+// alone — greying is on screen only.
+// ═══════════════════════════════════════════════════════════════════════════
+import { MAILCHIMP_OPEN_LOCATIONS, mailchimpOpenFor } from '@/lib/mailchimp-rollout'
+
+describe('Mailchimp is "Coming soon" everywhere but Test Location', () => {
+  const CHATT = 'e7b05e53-7bd7-48de-a13b-10018c8b1b08'
+  const HALF = '3c4d5e6f-2222-4333-8444-555566667777'   // like Orlando / Southwest Austin: linked, no list
+  const NEVER = '4d5e6f70-3333-4444-8555-666677778888'
+  const where = (id: string, over: Record<string, any> = {}) => ({ ...loc(over), id, name: 'Somewhere' })
+
+  it('only Test Location is open, by its id', () => {
+    expect(MAILCHIMP_OPEN_LOCATIONS).toEqual({ 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6': 'Test Location' })
+    expect(mailchimpOpenFor(LOC)).toBe(true)
+    for (const x of [CHATT, HALF, NEVER, '', null, undefined, 'loc_test', 'Test Location', 'A8FE17F6-FD16-4ED3-8730-550A65D69AD6']) expect(mailchimpOpenFor(x), String(x)).toBe(false)
+  })
+
+  it.each([
+    ['Chattanooga (connected, list chosen)', CHATT, { mailchimpConnected: true, mailchimpAccountName: 'Chatt MC', mailchimpListId: 'L9', mailchimpListName: 'Bee Organized Friends' }],
+    ['half-finished (connected, no list)', HALF, { mailchimpConnected: true, mailchimpAccountName: 'Orlando MC' }],
+    ['never connected', NEVER, {}],
+  ])('%s → one greyed card: "Coming soon", no button, no Connect or Manage, nothing asked of Mailchimp', async (_n, id, over) => {
+    expect(connectionCards({ ...over, locUuid: id }).find(c => c.id === 'mailchimp')).toEqual({ id: 'mailchimp', name: 'Mailchimp', category: 'Marketing', desc: 'Keep your Mailchimp audience and your clients in step.', state: 'soon', chip: 'Coming soon', detail: '' })
+    await mount({}, where(id, over))
+    const c = card('mailchimp')
+    expect(c.tagName).toBe('DIV')
+    expect(c.getAttribute('data-state')).toBe('soon')
+    expect(c.getAttribute('aria-disabled')).toBe('true')
+    expect(chip('mailchimp')).toBe('Coming soon')
+    expect(c.querySelector('button, a, [data-connection-action], [data-connection-detail], [data-connection-note]')).toBeNull()
+    expect(c.textContent).not.toMatch(/\bConnect\b|Manage|Finish setting up|Bee Organized Friends|Chatt MC|Orlando MC/)
+    await click(c)
+    expect(card('mailchimp')).toBeTruthy()                  // still on Connections
+    expect(pane().textContent).not.toContain('the audience your clients belong to')
+    expect(calls.filter(x => x.url.includes('mailchimp'))).toEqual([])
+    expect(calls.filter(x => x.method !== 'GET')).toEqual([])  // nothing about the connection is changed
+    expect(summary()).toMatch(/3 coming soon$/)
+    expect(summary()).not.toMatch(/to finish/)
+  })
+
+  it('an old ?section=mailchimp link shows Connections with the greyed card — not the Mailchimp screen, not the no-access notice', async () => {
+    for (const [id, over] of [[CHATT, { mailchimpConnected: true, mailchimpListId: 'L9' }], [HALF, { mailchimpConnected: true }], [NEVER, {}]] as const) {
+      await mount({ initialSection: 'mailchimp' }, where(id, over))
+      expect(q('[data-connections-summary]'), id).toBeTruthy()
+      expect(card('mailchimp').getAttribute('data-state'), id).toBe('soon')
+      expect(pane().textContent, id).not.toContain('the audience your clients belong to')
+      expect(pane().textContent, id).not.toContain(NO_ACCESS)
+      expect(q('[data-connections-back]'), id).toBeNull()
+      expect(calls.filter(x => x.url.includes('mailchimp')), id).toEqual([])
+    }
+  })
+
+  it('Test Location keeps its Mailchimp card and screen exactly as before', async () => {
+    await mount({}, loc({ mailchimpConnected: true, mailchimpAccountName: 'MC' }))
+    expect(card('mailchimp').tagName).toBe('BUTTON')
+    expect(chip('mailchimp')).toBe('Finish setting up')
+    await mount({ initialSection: 'mailchimp' }, loc({ mailchimpConnected: true, mailchimpAccountName: 'MC' }))
+    expect(pane().textContent).toContain('the audience your clients belong to')
+    expect(q('[data-connections-back]')).toBeTruthy()
+  })
+
+  it('an owner signed in to their own location gets the same answer (their id comes from the sign-in, not the picker)', () => {
+    expect(HUB).toContain('locUuid:         currentLocationCtx.id || \'\',')
+    expect(HUB).toContain('locUuid:        selectedLoc.id || \'\',')
+    expect(HUB).toContain('const mailchimpOpen = mailchimpOpenFor(settings.location.locUuid)')
+    expect(HUB).toMatch(/\{activeSection==='mailchimp' && mailchimpOpen &&\(/)
   })
 })

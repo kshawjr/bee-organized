@@ -57,6 +57,7 @@ import React from 'react'
 import { T, R, FONT, HONEYCOMB, SHADOW } from '@/components/design/tokens'
 import SlackMark from '@/components/hive/shared/SlackMark'
 import { deriveMailchimpState, mailchimpCopy, NOT_LIVE_COPY } from '@/lib/mailchimp-connection-state'
+import { mailchimpOpenFor, MAILCHIMP_SOON_DESC } from '@/lib/mailchimp-rollout'
 import { Pill, IconCircleCheck, IconChevronRight, IconChevronLeft } from '@/components/settings/SettingsShell'
 
 // ── What each connection is, in this location's own state ─────────────────
@@ -91,7 +92,13 @@ export function connectionCards(location = {}) {
       chip: jobber === 'connected' ? 'Connected' : jobber === 'reconnect_required' ? 'Reconnect required' : 'Not connected',
       detail: jobber === 'disconnected' ? '' : (location.jobberAccountName || ''),
     },
-    {
+    // Until roll-out (Kevin, 2026-11-27) Mailchimp is a roadmap card — greyed,
+    // "Coming soon", nothing to open — everywhere but Test Location
+    // (lib/mailchimp-rollout.ts). A half-finished or finished connection
+    // underneath is left as it is and simply not shown.
+    !mailchimpOpenFor(location.locUuid)
+      ? { id: 'mailchimp', name: 'Mailchimp', category: 'Marketing', desc: MAILCHIMP_SOON_DESC, state: 'soon', chip: 'Coming soon', detail: '' }
+      : {
       id: 'mailchimp', name: 'Mailchimp', category: 'Marketing',
       desc: 'Choose which Mailchimp audience your clients belong to.',
       state: mcState === 'ready' ? 'connected' : mcState === 'needs_audience' ? 'finish' : 'off',

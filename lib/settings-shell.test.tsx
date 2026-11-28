@@ -48,6 +48,9 @@ const currentUser = {
   booking_link: null,
 }
 
+// Test Location, the one place Mailchimp is open before roll-out.
+const TEST_LOCATION = { id: 'a8fe17f6-fd16-4ed3-8730-550a65d69ad6', name: 'Test Location' }
+
 let container: HTMLElement
 let root: ReturnType<typeof createRoot>
 let fetchMock: ReturnType<typeof vi.fn>
@@ -591,7 +594,7 @@ describe('Lato and Arvo cannot leak', () => {
   // with Slack's to the Lovable design). Mailchimp's screen, behind its
   // Connections card, is still in the old look.
   it('an unrebuilt section (Mailchimp) carries no new font and sits outside every data-settings-ui', async () => {
-    await mount({ franchiseRole: 'owner', initialSection: 'mailchimp' })
+    await mount({ franchiseRole: 'owner', initialSection: 'mailchimp', selectedLoc: TEST_LOCATION })   // the one place it is open (lib/mailchimp-rollout.ts)
     const body = pane().lastElementChild as HTMLElement
     expect(body.textContent).toContain('the audience your clients belong to')
     // The one rebuilt piece on this screen is the "All connections" link
@@ -746,7 +749,7 @@ describe('the new pieces are used by Settings and by nothing else', () => {
     // Emails paints its own background; Mailchimp's screen, behind its
     // Connections card, is not rebuilt.
     for (const section of ['emails', 'mailchimp']) {
-      await mount({ franchiseRole: 'owner', initialSection: section })
+      await mount({ franchiseRole: 'owner', initialSection: section, ...(section === 'mailchimp' ? { selectedLoc: TEST_LOCATION } : {}) })
       expect(is(bg(), '#f7f5f0'), `${section}: ${bg()}`).toBe(true)
     }
     // The no-access notice is old-look too.
